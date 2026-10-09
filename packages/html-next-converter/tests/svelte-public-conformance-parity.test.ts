@@ -45,6 +45,7 @@ const selected = new Set([
   "$each $where filters and reindexes the loop",
   "$sort with multiple keys and descending (a,-b)",
   "$match/$when/$else renders only the winning arm",
+  "bindings and bound controls write no attribute when a change leaves their result as it was",
   "$if, $with and $match keep their content while the decision holds, and rebuild it when it changes",
   "$match selects a row inside <table><tbody>, falling back to $else",
   "a structural <template> produces no wrapper element",
@@ -81,6 +82,15 @@ const formatCases = [
 ] as const;
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
+  {
+    name: "SVG class rules stay inside owned scope while explicit slot styles and inheritance survive",
+    source: `<template component="x-svg-boundary" status="early" summary="SVG scope boundaries.">
+      <div><svg><rect class="shape" width="10" height="10"></rect></svg><slot></slot></div>
+      <style>:host { fill: green; } .shape { fill: red; } :slotted(.styled) { fill: blue; }</style>
+    </template><x-svg-boundary><svg><rect class="shape" width="10" height="10"></rect><rect class="shape styled" x="20" width="10" height="10"></rect></svg></x-svg-boundary>`,
+    expect: { probe: `return [...document.querySelectorAll('rect')].map(node => getComputedStyle(node).fill);`,
+      result: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'] },
+  },
   {
     name: "one-way native controls preserve authored defaults without duplicate attributes",
     source: `<template component="x-oneway-defaults" status="early" summary="One-way control defaults."><defs>

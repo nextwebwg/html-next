@@ -232,7 +232,17 @@ const props: { amount?: number; tone?: string } = {};
             await Promise.all([live, react].map((page) => page.waitForFunction(() =>
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
             const unchanged = (await snapshot(live)).behavior.trace;
-            assert.deepEqual([unchanged.flatEffects, unchanged.nestedEffects], [1, 1], "an equal computed or written-back value must not rerun effects");
+            assert.deepEqual([unchanged.flatEffects, unchanged.nestedEffects, unchanged.nanEffects, unchanged.firstEffects], [1, 1, 1, 1],
+              "an equal computed, a written-back value or a push must not rerun effects");
+            await compare();
+            // A write to items.1.name changes only that path; one to items.0.name reaches its reader.
+            await Promise.all([live, react].map((page) => page.locator("#case button.rename-second").click()));
+            await Promise.all([live, react].map((page) => page.waitForTimeout(50)));
+            assert.equal((await snapshot(live)).behavior.trace.firstEffects, 1, "a write elsewhere in the list must not rerun the items.0.name effect");
+            await compare();
+            await Promise.all([live, react].map((page) => page.locator("#case button.rename-first").click()));
+            await Promise.all([live, react].map((page) => page.waitForFunction(() =>
+              (window as unknown as { trace: Record<string, number> }).trace.firstEffects === 2)));
             await compare();
             const results = await Promise.all([live, react].map((page) => page.evaluate(() =>
               new Promise<number>((resolve) => {
@@ -326,7 +336,7 @@ const props: { amount?: number; tone?: string } = {};
             const traces = await Promise.all(pages.map((page) => page.evaluate(() =>
               ({ ...(window as unknown as { trace: Record<string, number> }).trace }))));
             assert.deepEqual(traces[1], traces[0]);
-            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, flatEffects: 1, amountEffects: 1, effectCleanups: 1, disconnects: 1 });
+            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, flatEffects: 1, amountEffects: 1, nanEffects: 1, firstEffects: 1, effectCleanups: 1, disconnects: 1 });
           } finally {
             await Promise.all(pages.map((page) => page.close()));
             await browser.close();

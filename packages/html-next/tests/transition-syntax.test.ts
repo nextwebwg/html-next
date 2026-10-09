@@ -6,6 +6,7 @@ import { parseComponent, parseComponentResourceForCheck } from "../src/source-pa
 import type { ElementNode } from "../src/template.js";
 import { generateComponent } from "../src/generate.js";
 import { parseTransitionValue, transitionCss, transitionElements } from "../src/transition-syntax.js";
+import { transitionName } from "../src/generated-transitions.js";
 
 const component = (body: string, defs = "") =>
   `<template component="x-demo" status="early" summary="Transitions."><defs>` +
@@ -67,12 +68,24 @@ describe("$transition values", () => {
     assert.deepEqual(parseTransitionValue("0.3s pop 50ms", "s"), { keyframes: "pop", duration: 300, delay: 50 });
     assert.deepEqual(parseTransitionValue("200ms cubic-bezier(0.2, 0, 0, 1)", "s"), { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" });
     assert.deepEqual(parseTransitionValue("my-slide steps(4, jump-end)", "s"), { keyframes: "my-slide", easing: "steps(4, jump-end)" });
+    // CSS keywords ignore case; keyframes names do not.
+    assert.deepEqual(parseTransitionValue("Fly EASE-OUT", "s"), { keyframes: "Fly", easing: "EASE-OUT" });
+    assert.deepEqual(parseTransitionValue("Steps(2)", "s"), { easing: "Steps(2)" });
   });
 
   it("rejects what the shorthand cannot mean", () => {
-    for (const value of ["fly pop", "fly 1s 2s 3s", "ease ease-in", "none", "fly 200", "fly #fff"]) {
+    for (const value of ["fly pop", "fly 1s 2s 3s", "ease ease-in", "none", "None", "INHERIT", "fly 200", "fly #fff"]) {
       assert.equal(code(() => parseTransitionValue(value, "s")), "HT025", value);
     }
+  });
+});
+
+describe("$transition-name values", () => {
+  it("keeps a name that spells a keyword in any case from reading as the keyword", () => {
+    assert.equal(transitionName("card"), "card");
+    assert.equal(transitionName("none"), "hn-none");
+    assert.equal(transitionName("None"), "hn-None");
+    assert.equal(transitionName("Match-Element"), "hn-Match-Element");
   });
 });
 

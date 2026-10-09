@@ -21,9 +21,9 @@ export interface TransitionTiming {
 }
 
 const EASING_KEYWORDS = new Set(["linear", "ease", "ease-in", "ease-out", "ease-in-out", "step-start", "step-end"]);
-const EASING_FUNCTION_RE = /^(?:cubic-bezier|steps|linear)\([^()]*\)$/;
+const EASING_FUNCTION_RE = /^(?:cubic-bezier|steps|linear)\([^()]*\)$/i;
 const IDENT_RE = /^-?[A-Za-z_][\w-]*$/;
-// CSS-wide keywords and `none` cannot name keyframes.
+// CSS-wide keywords and `none` cannot name keyframes. Keywords ignore case; names do not.
 const RESERVED_NAMES = new Set(["none", "initial", "inherit", "unset", "revert", "revert-layer", "default"]);
 
 /**
@@ -41,10 +41,10 @@ export function parseTransitionValue(value: string, source: string, location?: D
       if (result.duration === undefined) result.duration = time;
       else if (result.delay === undefined) result.delay = time;
       else invalid("has more than two times");
-    } else if (EASING_KEYWORDS.has(token) || EASING_FUNCTION_RE.test(token)) {
+    } else if (EASING_KEYWORDS.has(token.toLowerCase()) || EASING_FUNCTION_RE.test(token)) {
       if (result.easing !== undefined) invalid("has more than one easing");
       result.easing = token;
-    } else if (IDENT_RE.test(token) && !RESERVED_NAMES.has(token)) {
+    } else if (IDENT_RE.test(token) && !RESERVED_NAMES.has(token.toLowerCase())) {
       if (result.keyframes !== undefined) invalid("has more than one keyframes name");
       result.keyframes = token;
     } else {

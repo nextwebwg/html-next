@@ -39,6 +39,11 @@ import type { Invoked } from "../generate.js";
 const NESTED = 1 << 30;
 /** Roots from index 29 on share this bit; which of them changed is in the written map (`d`). */
 const OVERFLOW = 1 << 29;
+/** A row's position changed: what reads an index or `loop` re-runs (keyed.ts `POSITION`). */
+const POSITION = 1 << 31;
+
+/** A loop's bit in a position mask, by its rows' level; levels past 30 share one bit, which only over-approximates. */
+const levelBit = (level: number): number => 1 << Math.min(level, 30);
 
 /** A root's change bit. */
 const rootBit = (index: number): number => index < 29 ? 1 << index : OVERFLOW;
@@ -94,8 +99,12 @@ interface Lowered {
   readonly contents: boolean;
   /** May evaluate to NONCONFORMING, which a binding then does not write. */
   readonly fails: boolean;
-  /** Reads the row's index or `loop` record. */
-  readonly positional?: boolean;
+  /** The loops whose index or `loop` record it reads, one `levelBit` each. */
+  readonly positional?: number;
+  /** The loops whose row count it reads (through `loop`, except `loop.index` and `loop.first`). */
+  readonly counted?: number;
+  /** The blocks whose item or alias value it reads, one `levelBit` each: rows below an outer one follow its item. */
+  readonly items?: number;
   /** Roots from index 29 on that it reads, whose changes share the overflow bit. */
   readonly overflow?: readonly number[];
   /** Structural identity, so equal expressions in one update share an evaluation. */
@@ -145,8 +154,10 @@ interface Region {
   /** Keyed rows' key, or undefined for rows that follow positions. */
   readonly key?: Lowered | undefined;
   readonly alias?: string;
-  /** Rows read their index or `loop`. */
+  /** Something in the rows, below them, or their key reads their index or `loop`. */
   readonly positional?: boolean;
+  /** Rows (or their key) read the row count. */
+  readonly counted?: boolean;
   /** A slot's name: a literal, or an expression evaluated when the slot renders. */
   readonly slot?: string | Lowered;
   /** A slot has fallback content, which renders when nothing is projected into it. */
@@ -175,7 +186,7 @@ interface Block {
   readonly refs: { readonly site: number; readonly name: string; readonly iterated: boolean }[];
   /** A row, or a `$with` or `$match` body: its record holds the item or alias value in `i`. */
   readonly alias: boolean;
-  /** A row that reads its position: its record keeps its index and the row count. */
+  /** A row whose position something reads, in it or below it: its record keeps its index and the row count. */
   positional?: boolean;
   readonly level: number;
   readonly parent: Block | undefined;
@@ -500,8 +511,9 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       }
       if (entry !== undefined) {
         const source = read(scope, aliasSource(scope, entry));
-        return entry.kind === "index" ? { ...none(key, source), item: true, positional: true }
-          : { ...none(key, source), item: true, deep: true, positional: entry.kind === "loop" };
+        return entry.kind === "index" ? { ...none(key, source), item: true, positional: levelBit(entry.level) }
+          : { ...none(key, source), item: true, deep: true,
+            ...entry.kind === "loop" ? { positional: levelBit(entry.level), counted: levelBit(entry.level) } : { items: levelBit(entry.level) } };
       }
       if (node.name === "$$event" && scope.event === true) return { ...none(key, "e"), deep: true };
       const index = scope.roots.findIndex((root) => root.name === node.name);
@@ -522,9 +534,11 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       };
     }
     case "member": {
-      const object = lower(node.object, scope);
+      const { counted, ...object } = lower(node.object, scope);
+      // `loop.index` and `loop.first` follow the row's index only, not the count.
+      const indexOnly = node.object.kind === "id" && (node.key === "index" || node.key === "first");
       return {
-        ...object, key, boolean: false, deep: true,
+        ...object, ...counted === undefined || indexOnly ? {} : { counted }, key, boolean: false, deep: true,
         source: read(scope, `${object.fails ? "readFailing" : "readMember"}(${object.source}, ${JSON.stringify(node.key)})`),
         // A read below a root follows that root's data; a read below the item is item data.
         nested: object.nested || !object.item && object.bits !== 0,
@@ -641,7 +655,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   }
 }
 
-type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "overflow">;
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "counted" | "items" | "overflow">;
 
 /** What reads nothing: the seed of reads merged over a literal's or call's parts, which may be none. */
 const NO_READS: Reads = { bits: 0, nested: false, item: false, contents: false, fails: false };
@@ -650,7 +664,8 @@ function merge(left: Reads, right: Reads): Reads {
   return {
     bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item,
     contents: left.contents || right.contents, fails: left.fails || right.fails,
-    positional: left.positional === true || right.positional === true,
+    positional: (left.positional ?? 0) | (right.positional ?? 0), counted: (left.counted ?? 0) | (right.counted ?? 0),
+    items: (left.items ?? 0) | (right.items ?? 0),
     ...left.overflow === undefined && right.overflow === undefined ? {}
       : { overflow: [...new Set([...left.overflow ?? [], ...right.overflow ?? []])] },
   };
@@ -666,15 +681,20 @@ function listOwned(region: Region): boolean {
   return region.block.needsParent === true || region.key !== undefined && /\br\b/.test(region.key.source);
 }
 
-/** Whether a row's bindings, or the regions below it (not nested rows), read its position. */
-function readsPosition(block: Block): boolean {
-  return block.bindings.some((binding) => binding.expression.positional === true ||
-      binding.parts?.some((part) => typeof part !== "string" && part.positional === true) === true) ||
-    block.invocations.some((invocation) => invocation.props.some((prop) => prop.expression.positional === true) ||
-      invocation.projection !== undefined && readsPosition(invocation.projection)) ||
-    block.regions.some((region) => region.test?.positional === true || region.list?.positional === true ||
-      region.props?.some((prop) => prop.positional === true) === true ||
-      region.kind !== "each" && [region.block, ...region.arms ?? []].some(readsPosition));
+/** Every expression a block, or anything below it (nested rows included), evaluates. */
+function* expressionsBelow(block: Block): Generator<Lowered> {
+  for (const binding of block.bindings) {
+    yield binding.expression;
+    for (const part of binding.parts ?? []) if (typeof part !== "string") yield part;
+  }
+  for (const invocation of block.invocations) {
+    for (const prop of invocation.props) yield prop.expression;
+    if (invocation.projection !== undefined) yield* expressionsBelow(invocation.projection);
+  }
+  for (const region of block.regions) {
+    for (const value of [region.test, region.list, region.key, ...region.props ?? []]) if (value !== undefined) yield value;
+    for (const body of [region.block, ...region.arms ?? []]) yield* expressionsBelow(body);
+  }
 }
 
 /** Whether converting the value may read the contents of a list or object the row's item reached. */
@@ -702,12 +722,13 @@ function converted(value: Lowered): Lowered {
 }
 
 function maskOf(value: Lowered): number {
-  return value.bits | (value.nested || value.item ? NESTED : 0);
+  return value.bits | (value.nested || value.item ? NESTED : 0) | (value.positional ? POSITION : 0);
 }
 
-/** The mask of an outer-state sweep: what a row reads that is not its own item. */
-function outerOf(value: Lowered): number {
-  return value.bits | (value.nested ? NESTED : 0);
+/** The mask of an outer-state sweep: what a row at `level` reads that is not its own item or position. */
+function outerOf(value: Lowered, level: number): number {
+  const outer = levelBit(level) - 1;
+  return value.bits | (value.nested || (value.items ?? 0) & outer ? NESTED : 0) | ((value.positional ?? 0) & outer ? POSITION : 0);
 }
 
 /** The value of a literal initializer, or undefined for one that needs evaluating. */
@@ -952,15 +973,24 @@ class Planner {
    * outer local's object, or a root's name, then each key; an index that is not a string or number
    * writes nothing. It runs in the control's listener, where the block's own item is `r.i`.
    */
-  writable(path: WritablePath, scope: Scope): string {
+  /** A two-way path's resolver, and the loops whose positions it reads (`rows[$i]`), which their lists must then keep. */
+  writable(path: WritablePath, scope: Scope): { source: string; positional: number } {
     const closure: Scope = { ...scope, closure: true };
-    const [root, ...steps] = path;
-    const local = scope.aliases.findLast((alias) => alias.name === root);
+    // A field of a loop item is written through the item itself, so the row needs no live position.
+    const at = path.findLastIndex((step, index) => index < path.length - 1 && typeof step === "object" && step.item !== undefined &&
+      scope.aliases.some((alias) => alias.kind === "item" && alias.name === step.item));
+    const through = at < 0 ? undefined : scope.aliases.findLast((alias) => alias.kind === "item" && alias.name === (path[at] as { item: string }).item);
+    const [root, ...steps] = through === undefined ? path : [undefined, ...path.slice(at + 1)];
+    const local = through ?? scope.aliases.findLast((alias) => alias.name === root);
     const first = local === undefined ? JSON.stringify(root) : aliasSource(closure, local);
-    const keys = steps.map((step) => typeof step === "object" ? lower(step.expression, closure).source : JSON.stringify(step));
+    const lowered = steps.map((step) => typeof step === "object" ? lower(step.expression, closure) : undefined);
+    const keys = steps.map((step, index) => lowered[index]?.source ?? JSON.stringify(step));
     const dynamic = steps.some((step) => typeof step === "object");
-    return `() => { const p = [${[first, ...keys].join(", ")}]; return ${dynamic
-      ? 'p.every((k, i) => i === 0 || typeof k === "string" || typeof k === "number") ? p : undefined' : "p"}; }`;
+    return {
+      source: `() => { const p = [${[first, ...keys].join(", ")}]; return ${dynamic
+        ? 'p.every((k, i) => i === 0 || typeof k === "string" || typeof k === "number") ? p : undefined' : "p"}; }`,
+      positional: lowered.reduce((mask, key) => mask | (key?.positional ?? 0), 0),
+    };
   }
 
   /** A fresh reads array name for an exact binding. */
@@ -1080,9 +1110,11 @@ class Planner {
       }
       if (attribute.twoWay === true) {
         if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) unreachable("a two-way binding writes a state-rooted path");
+        const writable = this.writable(attribute.writablePath, scope);
         block.bindings.push({
-          site, kind: "control", name: svg ? svgAttributeName(attribute.name) : attribute.name, expression, initial: "undefined",
-          exact: bindingScope.record, select: selectValue(attribute.name), path: this.writable(attribute.writablePath, scope),
+          site, kind: "control", name: svg ? svgAttributeName(attribute.name) : attribute.name,
+          expression: writable.positional ? { ...expression, positional: (expression.positional ?? 0) | writable.positional } : expression, initial: "undefined",
+          exact: bindingScope.record, select: selectValue(attribute.name), path: writable.source,
           ...selectValue(attribute.name) ? { apply: this.checked(plan, { ...scope, closure: true }) } : {},
         });
         continue;
@@ -1148,14 +1180,18 @@ class Planner {
         content = { kind: attribute.name === "html" ? "html" : "value", expression: this.checked(attribute.expressionPlan!, scope) };
       } else if (prop !== undefined && attribute.kind === "attribute") {
         // A two-way prop applies as a value, and its control on the component's root writes back.
+        let positional = 0;
         if (attribute.twoWay === true) {
           if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) unreachable("a two-way binding writes a state-rooted path");
-          controls.push(this.writable(attribute.writablePath, scope));
+          const writable = this.writable(attribute.writablePath, scope);
+          controls.push(writable.source);
+          positional = writable.positional;
         }
         // Re-applied exactly when what it read changes, as its live effect re-runs.
         const recording = this.recording(scope);
         const contract = invoked.definition.contract.props[prop]!;
-        props.push({ name: prop, attribute: attribute.name, expression: this.checked(attribute.expressionPlan!, recording), record: recording.record!,
+        const expression = this.checked(attribute.expressionPlan!, recording);
+        props.push({ name: prop, attribute: attribute.name, expression: positional ? { ...expression, positional: (expression.positional ?? 0) | positional } : expression, record: recording.record!,
           type: contract.select === undefined ? compactSource(compactType(normalizeType(contract.type))) : "0" });
       } else rest.push(attribute);
     }
@@ -1343,14 +1379,15 @@ class Planner {
     const listType = declaredExpressionType(listPlan, scope.types);
     const itemType = listType?.kind === "list" ? listType.item : undefined;
     // A row holds its item, its index alias and its `loop` record.
+    // The index and `loop` are the rows' level in a key too, so a position mask tells them from an outer loop's.
     const positions = (base: Scope, item?: string, index?: string, loop?: string): Scope => {
       const layered = this.layer(base, flow.item, itemType, "item", item);
       return {
         ...layered,
         aliases: [
           ...layered.aliases,
-          ...flow.index === undefined ? [] : [{ name: flow.index, level: base.level, kind: "index" as const, ...index === undefined ? {} : { source: index } }],
-          { name: "loop", level: base.level, kind: "loop" as const, ...loop === undefined ? {} : { source: loop } },
+          ...flow.index === undefined ? [] : [{ name: flow.index, level: inner.level, kind: "index" as const, ...index === undefined ? {} : { source: index } }],
+          { name: "loop", level: inner.level, kind: "loop" as const, ...loop === undefined ? {} : { source: loop } },
         ],
       };
     };
@@ -1360,9 +1397,13 @@ class Planner {
     const key = flow.key === undefined ? undefined : lower(plan(flow.keyPlan, flow.key).ast, keyScope);
     const shaped = this.shape(flow, scope, list, itemType);
     const rows = this.block(body, true, rowScope, false, svg);
-    const positional = readsPosition(rows) || key?.positional === true;
+    // Rows keep their position when something in them, below them, or their key reads it.
+    const own = levelBit(rows.level);
+    const reads = [...expressionsBelow(rows), ...key === undefined ? [] : [key]];
+    const positional = reads.some((value) => ((value.positional ?? 0) & own) !== 0);
     rows.positional = positional;
-    block.regions.push({ kind: "each", site, block: rows, list: shaped.list, key, alias: flow.item, positional });
+    block.regions.push({ kind: "each", site, block: rows, list: shaped.list, key, alias: flow.item, positional,
+      counted: reads.some((value) => ((value.counted ?? 0) & own) !== 0) });
     return 2;
   }
 
@@ -1588,28 +1629,28 @@ function rootsWritten(reads: Reads): string {
 }
 
 /** What the regions inside a row read besides the row's own item: those changes patch every row. */
-function regionOuter(block: Block): number {
+function regionOuter(block: Block, level: number): number {
   let mask = 0;
   for (const region of block.regions) {
-    if (region.test !== undefined) mask |= outerOf(region.test);
-    for (const prop of region.props ?? []) mask |= outerOf(prop);
-    if (region.list !== undefined) mask |= outerOf(region.list) | (region.list.nested ? NESTED : 0);
-    if (region.kind !== "each") for (const body of [region.block, ...region.arms ?? []]) {
-      mask |= body.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | invocationOuter(body) | regionOuter(body);
-    }
+    for (const value of [region.test, region.list, region.key, ...region.props ?? []]) if (value !== undefined) mask |= outerOf(value, level);
+    // Rows below follow the same outer changes: a sweep reaches them through each row between.
+    for (const body of [region.block, ...region.arms ?? []]) mask |= blockOuter(body, level);
   }
   return mask;
 }
 
+/** What a block (the rows of a list at `level`, or a block below them) reads besides those rows' items and positions. */
+function blockOuter(block: Block, level: number): number {
+  return block.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding), level), 0) |
+    invocationOuter(block, level) | regionOuter(block, level);
+}
+
 /** What a block's invocations read besides its item: their bound props and projected content. */
-function invocationOuter(block: Block): number {
+function invocationOuter(block: Block, level: number): number {
   let mask = 0;
   for (const invocation of block.invocations) {
-    for (const prop of invocation.props) mask |= outerOf(prop.expression);
-    const projection = invocation.projection;
-    if (projection !== undefined) {
-      mask |= projection.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | invocationOuter(projection) | regionOuter(projection);
-    }
+    for (const prop of invocation.props) mask |= outerOf(prop.expression, level);
+    if (invocation.projection !== undefined) mask |= blockOuter(invocation.projection, level);
   }
   return mask;
 }
@@ -1640,6 +1681,8 @@ export function emitBlocks(
     block.sites[site]!.length === 0 ? "r.n" : `r.a${site}`;
   const participates = (block: Block): boolean => block.transitions === true ||
     block.regions.some((region) => region.kind !== "slot" && [region.block, ...region.arms ?? []].some(participates));
+  const transitioned = (block: Block, site: number): boolean =>
+    block.bindings.some((binding) => binding.site === site && binding.kind === "style" && binding.name === "view-transition-name");
   const participating = (region: Region): boolean => region.kind !== "slot" && [region.block, ...region.arms ?? []].some(participates);
   // What a scheduler's pending changes must touch to hold its flush for a transition.
   const transitionMask = plan.transitions === undefined ? 0 : blocks.reduce((mask, block) => block.regions.reduce((inner, region) =>
@@ -1677,7 +1720,7 @@ export function emitBlocks(
       } else {
         const child = region.block.id;
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
-        const positional = region.positional === true || region.key?.positional === true;
+        const positional = region.positional === true || Boolean(region.key?.positional);
         const type = `${region.block.ranged === true ? "Ranged" : ""}${region.key === undefined ? "IndexedList" : positional ? "PositionalList" : "KeyedList"}`;
         entries.push(`L${index}: new ${type}(${start}, ${end}, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`,
           ...hydrate ? [`b${index}: z && 1`] : []);
@@ -1830,10 +1873,15 @@ export function emitBlocks(
         const start = lines.length;
         switch (binding.kind) {
           case "attribute":
-          case "url":
+          case "url": {
+            // A bound style attribute would drop the transition's own properties, written once.
+            const write = binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
+              : binding.name === "style" && transitioned(block, binding.site) ? `writeTransitionStyle(${site}, `
+              : `writeAttribute(${site}, ${JSON.stringify(binding.name)}, `;
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
-              `    if (${output} !== ${last}) ${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    if (${output} !== ${last}) ${write}${last} = ${output});`);
             break;
+          }
           case "value":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) writeText(${site}, ${last} = ${output});`);
             break;
@@ -2022,8 +2070,8 @@ export function emitBlocks(
       const list = region.list!;
       const key = region.key;
       // Keys that read roots, nested data or positions are re-read for every item when those change.
-      const rekey = key === undefined ? 0 : key.bits | (key.nested ? NESTED : 0);
-      const full = key?.positional === true ? "true" : rekey === 0 ? undefined : `(c & ${rekey}) !== 0`;
+      const rekey = key === undefined ? 0 : key.bits | (key.nested ? NESTED : 0) | (key.positional ? POSITION : 0);
+      const full = key?.positional ? "true" : rekey === 0 ? undefined : `(c & ${rekey}) !== 0`;
       const update = (value: string): string => full === undefined ? `r.L${index}.update(${value}, d, c)`
         : `if (c === -1 || ${full}) r.L${index}.set(${value}, d, true); else r.L${index}.update(${value}, d, c)`;
       // An adopting block's list adopts the server's rows on its first conforming value.
@@ -2037,8 +2085,9 @@ export function emitBlocks(
         ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { ${rows[0]}const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")};${queue} }${rows[1]} }`
         : rows[0] === "" ? hydrate ? `  if (${guard(maskOf(list) | NESTED)}) { ${apply(list.source)} }` : `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`
         : `  if (${guard(maskOf(list) | NESTED)}) { ${rows[0]}${apply(list.source)};${rows[1]} }`);
+      const level = region.block.level;
       const outer = region.block.bindings.reduce((mask, binding) => mask |
-        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | invocationOuter(region.block) | regionOuter(region.block);
+        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding), level) : 0), 0) | invocationOuter(region.block, level) | regionOuter(region.block, level);
       if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c, d);`);
       for (const root of selectors(region)) {
         lines.push(`  if (c !== -1 && c & ${rootBit(root)}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
@@ -2063,7 +2112,7 @@ export function emitBlocks(
     }
     block.regions.forEach((region, index) => {
       if (region.kind === "each" && listOwned(region)) lines.push(`${indent}${record}.L${index}.u = ${record};`);
-      if (region.kind === "each" && region.key === undefined && region.positional === true) lines.push(`${indent}${record}.L${index}.q = true;`);
+      if (region.kind === "each" && region.counted === true) lines.push(`${indent}${record}.L${index}.q = true;`);
     });
     // A consumer's scoped-slot templates, which the component it projects into renders with its props.
     block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: ${hydrate
@@ -2242,7 +2291,7 @@ export function emitBlocks(
     ...root.selects.map((select) => `  R.c${select} = ${selection(root, select, (site) => root.sites[site]!.length === 0 ? "element" : `R.a${site}`)};`),
     ...root.regions.flatMap((region, index) => region.kind !== "each" ? [] : [
       ...listOwned(region) ? [`  R.L${index}.u = R;`] : [],
-      ...region.key === undefined && region.positional === true ? [`  R.L${index}.q = true;`] : [],
+      ...region.counted === true ? [`  R.L${index}.q = true;`] : [],
     ]),
   );
   const contextStart = plan.roots.findIndex((item) => item.context !== undefined);
@@ -2460,7 +2509,7 @@ export function emitBlocks(
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "placeFallback", "recordInputs",
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection",
-    "transitionStyles"]
+    "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;

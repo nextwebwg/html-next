@@ -35,7 +35,7 @@ export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
 export { ADOPT, adoptLifecycle, adoptProjection, adoptRows, adoptTree, holdControls, recordInputs, regionEnd, renderedInstanceRecord, restoreInstance } from "./generated-hydration.js";
-export { holdTransitions, transitionChanged, transitionName, transitionRows, transitionRowsChanged, transitionStyles } from "./generated-transitions.js";
+export { holdTransitions, transitionChanged, transitionName, transitionRows, transitionRowsChanged, transitionStyles, writeTransitionStyle } from "./generated-transitions.js";
 export { eventPasses } from "./event-filter.js";
 export {
   checkAbsent, checkBoolean, checkConstrained, checkEvent, checkFormat, checkFunction, checkInteger, checkKeyword, checkList,
@@ -634,7 +634,7 @@ export function manageProps(instance: GeneratedInstance): void {
     const text = value === undefined || value === ABSENT || value === null ? null
       : reflected(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
     if (text === null) element.removeAttribute(`data-${kebabCase(name)}`);
-    else element.setAttribute(`data-${kebabCase(name)}`, text);
+    else if (element.getAttribute(`data-${kebabCase(name)}`) !== text) element.setAttribute(`data-${kebabCase(name)}`, text);
   };
   const job = new ReactiveEffect(instance.q, () => {
     if (!connected) return;
@@ -690,9 +690,12 @@ export function manageProps(instance: GeneratedInstance): void {
     for (const [name, value] of Object.entries(input)) {
       const prop = props[name];
       if (prop === undefined) continue;
+      // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
       const previous = inputs[name];
-      inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
-      notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      if (previous?.source !== "value" || previous.present !== (value !== undefined) || !Object.is(previous.value, value === undefined ? null : value)) {
+        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+        notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      }
       // A bound data-* attribute is template output; only its binding writes it.
       const attribute = `data-${kebabCase(name)}`;
       if (value === undefined || value === null) {
@@ -701,7 +704,8 @@ export function manageProps(instance: GeneratedInstance): void {
       } else {
         explicit.add(name);
         if (!record.b.includes(name)) {
-          element.setAttribute(attribute, reflected(value, selected(prop, next)));
+          const text = reflected(value, selected(prop, next));
+          if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
           record.w.add(name);
         }
       }
@@ -1043,6 +1047,8 @@ export interface GeneratedInstance {
   /** Recorded refs, read by `host.refs` and handler steps. */
   readonly r: Record<string, unknown>;
   readonly c: () => boolean;
+  /** The change bits waiting for the next render: one per root, and NESTED for writes below a root. */
+  readonly d: () => number;
   /** A facade over a raw object, for writes into an outer local's data. */
   readonly p: (value: object) => unknown;
   /** Writes a root's value and schedules its render, as a prop update does. */
@@ -1706,7 +1712,7 @@ export function attachGeneratedController(
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {

@@ -2,17 +2,27 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
 import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "../src/component-styles-build.js";
-import { rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
+import { guardComponentPseudoElements, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
 
-it("preserves statement at-rule terminators when hoisting build styles", () => {
+it("preserves an implicit universal selector before a descendant pseudo-element", () => {
+  assert.equal(guardComponentPseudoElements(".item ::before"), '.item :where(:not([data-component], [data-slotted]))::before');
+  assert.equal(guardComponentPseudoElements(".item > ::after"), '.item > :where(:not([data-component], [data-slotted]))::after');
+});
+
+it("preserves statement at-rule terminators in build styles", () => {
   const definition = parseComponent('<template component="import-demo"><div></div></template>');
-  const compiled = compileComponentStylesForBuild('@import "one.css"; @import "two.css"; :host { color: red; }', definition).css;
-  assert.match(compiled, /@import "one\.css";/);
-  assert.match(compiled, /@import "two\.css";/);
+  const compiled = compileComponentStylesForBuild('@layer one; @layer two; :host { color: red; }', definition).css;
+  assert.match(compiled, /@layer one;/);
+  assert.match(compiled, /@layer two;/);
   assert.match(compiled, /@scope/);
+});
+
+it("rejects unresolved imports instead of emitting an unscoped resource", () => {
+  const definition = parseComponent('<template component="import-demo"><div></div></template>');
+  for (const compile of compilers) assert.throws(() => compile('@import "one.css";', definition), /HY004.*loadNodeComponents/);
 });
 const definition = parseComponent(`<template component="x-style-contract"><defs>
   <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
@@ -38,7 +48,8 @@ describe("resolved prop and state selectors", () => {
     for (const compile of compilers) {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
-      assert.match(result.css, /(?::scope|\[data-component~="x-style-contract"\])\.active/);
+      assert.match(result.css, compile === compileComponentStylesForVue ? /:scope\.active/
+        : /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/);
     }
   });
 
@@ -74,4 +85,15 @@ describe("resolved prop and state selectors", () => {
       assert.throws(() => compile(":host-state([sourceEvent]) { color: red; }", event), /HY002/);
     }
   });
+});
+
+
+it("keeps Vue grouping rules in the component scope and keyframes document-wide", () => {
+  const result = compileComponentStylesForVue(`@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }
+    @media (min-width: 0px) { :host::before { animation: pulse 1s; } *::after { box-sizing: border-box; } }`, definition);
+  assert.match(result.css, /^@keyframes pulse/);
+  assert.match(result.css, /@scope \(\[data-component~="x-style-contract"\]\) to \(\[data-component\]\) \{\s*@media/);
+  assert.match(result.css, /:scope::before/);
+  assert.match(result.css, /\*::after/);
+  assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });

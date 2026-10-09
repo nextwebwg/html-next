@@ -2,7 +2,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { checkExpressionSemantics, compileExpression, compilePath, getWritablePath, type CompiledExpression, type ExpressionNode } from "./expression.js";
+import { checkExpressionSemantics, compileExpression, compilePath, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
@@ -45,6 +45,8 @@ export interface ComponentParserPlatform {
   readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
   readonly onDiagnostic?: (diagnostic: HtmlDiagnostic) => void;
   readonly warnInvalidDeclaration?: (message: string, source: string) => void;
+  /** Receives warnings, such as HT022, when no check collects them through `onDiagnostic`. */
+  readonly warn?: (diagnostic: HtmlDiagnostic) => void;
 }
 
 /** Parse the inert contents of a consumer's scoped-slot template against its exposed names. */
@@ -59,7 +61,7 @@ export function parseProjectedSlotContent(
     roots: new Set(names),
     writableRoots: new Set(),
     handlers: new Set(),
-    report: platform.onDiagnostic,
+    report: platform.onDiagnostic ?? platform.warn,
   };
   const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[], refs: new Set<string>() };
   const nodes: TemplateNode[] = [];
@@ -193,6 +195,75 @@ interface ParseScope {
   /** Check-mode sink for non-fatal diagnostics, and the authored element they point at. */
   readonly report?: ((diagnostic: HtmlDiagnostic) => void) | undefined;
   readonly at?: DiagnosticLocation | undefined;
+  /** What each `$each`, `$with`, and `$match` name stands for when a path field writes through it. */
+  readonly aliases?: ReadonlyMap<string, Writable>;
+  /** How many `$each` layers enclose this point, so a `loop.index` segment names the right loop. */
+  readonly loops?: number;
+}
+
+/**
+ * A path's state destination, valid only at `loops` depth when it reads a `loop.index`, or why it
+ * cannot be written. An alias of a writable path is writable (Declarative Components, Bindings).
+ */
+type Writable = { readonly path: WritablePath; readonly loops?: number } | { readonly reason?: string };
+
+function readsLoop(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(readsLoop);
+  if (node === null || typeof node !== "object") return false;
+  const id = node as ExpressionNode;
+  return id.kind === "id" && id.name === "loop" || Object.values(node).some(readsLoop);
+}
+
+function writableAt(node: ExpressionNode, scope: ParseScope): Writable {
+  const segments = writablePathOf(node);
+  if (segments === undefined || segments[0] === "$$event") return {};
+  const [root, ...rest] = segments as [string, ...typeof segments];
+  const loops = scope.loops ?? 0;
+  const local = rest.some((segment) => typeof segment === "object" && readsLoop(segment.expression)) ? loops : undefined;
+  const alias = scope.aliases?.get(root);
+  if (alias === undefined) return scope.writableRoots.has(root) ? { path: segments, ...local === undefined ? {} : { loops: local } } : {};
+  if (!("path" in alias)) return alias;
+  if (alias.loops !== undefined && alias.loops !== loops) {
+    return { reason: `\`${root}\` is an outer loop's item here; name that loop's index (\`${root}, i of …\`) to write through it` };
+  }
+  // Replacing a whole loop item needs its live position; a field of it is written through the item.
+  const last = alias.path.at(-1);
+  if (rest.length === 0 && typeof last === "object" && last.item !== undefined) {
+    return { reason: `\`${root}\` is a whole loop item; bind one of its fields, or a field of its state path` };
+  }
+  const at = alias.loops ?? local;
+  return { path: [...alias.path, ...rest], ...at === undefined ? {} : { loops: at } };
+}
+
+/** The write targets the names of a structural directive introduce for its subtree. */
+function withAliases(scope: ParseScope, flow: Flow | undefined): ParseScope {
+  if (flow?.kind === "each") {
+    const loops = (scope.loops ?? 0) + 1;
+    const list = flow.listPlan === undefined ? {} : writableAt(flow.listPlan.ast, scope);
+    const item: Writable = !("path" in list) ? { reason: `\`${flow.item}\` is an item of a list that is not declared state` }
+      : flow.where !== undefined || flow.sortKeys !== undefined || flow.limit !== undefined
+        ? { reason: `\`${flow.item}\` is an item of a \`$where\`, \`$sort\`, or \`$limit\` list, whose positions differ from the state's` }
+        : list.loops !== undefined ? { reason: `\`${flow.item}\` iterates an outer loop's item; name that loop's index to write through it` }
+          : {
+              path: [...list.path, { kind: "index", item: flow.item, expression: flow.index === undefined
+                ? { kind: "member", object: { kind: "id", name: "loop" }, key: "index" }
+                : { kind: "id", name: flow.index } }],
+              ...flow.index === undefined ? { loops } : {},
+            };
+    const aliases = new Map(scope.aliases);
+    aliases.set(flow.item, item);
+    aliases.set("loop", { reason: "`loop` is the loop record" });
+    if (flow.index !== undefined) aliases.set(flow.index, { reason: `\`${flow.index}\` is a loop index` });
+    return { ...scope, aliases, loops };
+  }
+  if ((flow?.kind === "with" || flow?.kind === "match") && flow.alias !== undefined) {
+    const subject = flow.expressionPlan === undefined ? {} : writableAt(flow.expressionPlan.ast, scope);
+    const aliases = new Map(scope.aliases);
+    aliases.set(flow.alias, "path" in subject ? subject
+      : { reason: `\`${flow.alias}\` stands for \`${flow.expr}\`, which is not a writable state path` });
+    return { ...scope, aliases };
+  }
+  return scope;
 }
 
 function withRoots(scope: ParseScope, ...roots: (string | undefined)[]): ParseScope {
@@ -211,23 +282,24 @@ function compileScopedExpression(
 ): CompiledExpression {
   const expression = compileDeclarationExpression(value, source, path);
   validateCompiledExpression(expression, scope, source);
-  if (scope.report !== undefined) warnBareNames(expression.ast, scope, source);
+  if (scope.report !== undefined) warnBareNames(expression.ast, scope, source, value);
   return expression;
 }
 
 /** A bare word is a keyword literal. Spelling a name in scope is almost always a missing `$`. */
-function warnBareNames(node: unknown, scope: ParseScope, source: string): void {
+function warnBareNames(node: unknown, scope: ParseScope, source: string, expression: string): void {
   if (Array.isArray(node)) {
-    for (const child of node) warnBareNames(child, scope, source);
+    for (const child of node) warnBareNames(child, scope, source, expression);
   } else if (node !== null && typeof node === "object") {
     const literal = node as ExpressionNode;
     if (literal.kind !== "literal") {
-      for (const child of Object.values(node)) warnBareNames(child, scope, source);
+      for (const child of Object.values(node)) warnBareNames(child, scope, source, expression);
     } else if (literal.keyword && scope.roots.has(literal.value as string)) {
       const name = literal.value as string;
+      // The expression locates the mistake where a browser-parsed carrier has no line numbers.
       scope.report!({
         code: "HT022",
-        message: `\`${name}\` is a keyword, not a reference; did you mean \`$${name}\`?`,
+        message: `\`${name}\` is a keyword, not a reference; did you mean \`$${name}\`? (in \`${expression}\`)`,
         source,
         ...scope.at,
         severity: "warning",
@@ -750,12 +822,13 @@ function readDeclarations(
   source: string,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
   onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
+  warn?: ComponentParserPlatform["warn"],
 ): { declarations: ComponentDeclaration[]; scope: ParseScope } {
   const declarations: ComponentDeclaration[] = [];
   const roots = new Set(Object.keys(contract.props));
   const writableRoots = new Set<string>();
   const handlers = new Set<string>();
-  if (group === undefined) return { declarations, scope: { roots, writableRoots, handlers, report: onDiagnostic } };
+  if (group === undefined) return { declarations, scope: { roots, writableRoots, handlers, report: onDiagnostic ?? warn } };
   if (onDiagnostic !== undefined) {
     for (const prop of directElements(group, "prop")) {
       const name = attr(prop, "name");
@@ -818,7 +891,7 @@ function readDeclarations(
     }
   }
 
-  const declarationScope = { roots, writableRoots, handlers, report: onDiagnostic };
+  const declarationScope = { roots, writableRoots, handlers, report: onDiagnostic ?? warn };
   for (const element of elements) {
     if (invalid?.has(element)) continue;
     const scope = { ...declarationScope, at: sourceLocation(element) };
@@ -997,10 +1070,12 @@ function parseAttributes(
         fail("HT007", `Two-way binding cannot target \`${name || attribute.name}\`.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source, true);
-      const writablePath = getWritablePath(attribute.value, scope.writableRoots);
-      if (writablePath === undefined) {
-        fail("HT005", `\`${attribute.value}\` is not a writable state-rooted path.`, source);
+      const writable = writableAt(expressionPlan.ast, scope);
+      if (!("path" in writable)) {
+        fail("HT005", writable.reason === undefined ? `\`${attribute.value}\` is not a writable state-rooted path.`
+          : `\`${attribute.value}\` is not writable: ${writable.reason}.`, source);
       }
+      const writablePath = writable.path;
       parsed.push({
         kind: "attribute",
         name,
@@ -1298,12 +1373,14 @@ function parseElementAtSource(
     else bindingAttributes.push(attribute);
   }
   const flow = extractFlow(flowValues, scope, source);
-  const nodeScope =
+  const nodeScope = withAliases(
     flow?.kind === "each"
       ? withRoots(scope, flow.item, flow.index, "loop")
       : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
         ? withRoots(scope, flow.alias)
-        : scope;
+        : scope,
+    flow,
+  );
   // The receiving component declares these names, so a standalone consumer definition cannot
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   const childScope = tagName === "template" && attr(element, "slot") !== undefined
@@ -1356,7 +1433,7 @@ function parseElementAtSource(
         fail("HT008", "A slot only supports `$each` structural flow.", source);
       }
       const flow = parsedFlow?.kind === "each" ? parsedFlow : undefined;
-      const slotScope = flow === undefined ? childScope : withRoots(childScope, flow.item, flow.index, "loop");
+      const slotScope = flow === undefined ? childScope : withAliases(withRoots(childScope, flow.item, flow.index, "loop"), flow);
       const props = rawProps.map((prop) => ({
         ...prop,
         expressionPlan: compileScopedExpression(prop.expression, slotScope, source),
@@ -1632,7 +1709,7 @@ function parseComponentNodesAtSource(
     platform.onDiagnostic,
   );
 
-  const { declarations, scope: declarationScope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source, platform.warnInvalidDeclaration, platform.onDiagnostic);
+  const { declarations, scope: declarationScope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source, platform.warnInvalidDeclaration, platform.onDiagnostic, platform.warn);
   let scope = declarationScope;
   if (legacyProps && platform.onDiagnostic !== undefined && declarationGroup !== undefined) {
     const roots = new Set(scope.roots);
