@@ -122,8 +122,8 @@ function rewriteComponentTags(selector: string, componentRoot: (tag: string) => 
 
 /**
  * Rewrites one renamed selector. `host` is what `:host` becomes: `:scope` inside the component's
- * `@scope` rules (both of them are rooted at the component root), or the root's own selector where
- * there is no `@scope` (Vue's scoped styles).
+ * `@scope` rules (both of them are rooted at the component root), or an explicit root selector
+ * supplied by another build target.
  */
 export function rewriteComponentSelector(
   selector: string,
@@ -213,7 +213,7 @@ export interface CompiledComponentStyles {
   readonly css: string;
   /** The props and state the state attribute must carry, in first-use order. */
   readonly stateNames: readonly string[];
-  /** Vue: the components the styles select by tag, whose invocations carry the tag as a class. */
+  /** Vue: the components the template invokes, which bound the scope and carry their tag as a class. */
   readonly components?: readonly string[];
 }
 

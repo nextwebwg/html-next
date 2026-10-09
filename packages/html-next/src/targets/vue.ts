@@ -23,7 +23,7 @@ import type {
 } from "../template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../template.js";
 import type { WritablePathSegment } from "../expression.js";
-import { compileComponentStylesForVue, vueHostSelector } from "../component-styles-build.js";
+import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
@@ -131,9 +131,9 @@ interface Context {
   readonly model: boolean;
   readonly validityValues?: string;
   readonly hostState: boolean;
-  /** The root carries its tag as a class, because the scoped styles select it as `:host`. */
+  /** The root carries its tag as a class: the scoped styles' `@scope` root. */
   readonly hostClass: boolean;
-  /** Components the scoped styles select by tag: each invocation carries the tag as a class. */
+  /** Invoked components, the scope's limits: each invocation carries its tag as a class. */
   readonly styledComponents: ReadonlySet<string>;
   readonly guarded: string[];
   readonly globals: ReadonlySet<string>;
@@ -655,7 +655,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   // A <template> without structural flow produces its content with no wrapper element.
   if (node.name === "template" && !isRoot) return content ?? renderChildren(node.children, names, context);
-  // Scoped styles select the root as `:host` and an invoked component by its tag, through a class.
+  // The scoped styles' root and limits are the root's and each invoked component's tag, as classes.
   const styled = [
     ...(isRoot && context.hostClass ? [context.definition.contract.tag] : []),
     ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
@@ -938,7 +938,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     root: needsRoot,
     ...(arms === undefined ? {} : { rootArmRef: "@html-next/root" }),
     hostState: styles.stateNames.length > 0,
-    hostClass: styles.css.includes(vueHostSelector(contract.tag)),
+    hostClass: styles.components !== undefined,
     styledComponents: new Set(styles.components ?? []),
     model: modelProp !== undefined,
     ...(validityValues === undefined ? {} : { validityValues }),
