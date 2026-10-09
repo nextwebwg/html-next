@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.41
 
+### Fixed
+
 - The `html-next` and `html-next-convert` commands run when started through their installed `node_modules/.bin` link, as `npx`, package scripts and direct calls do on macOS and Linux. Earlier releases exited there without output or files.
 
 ## 1.0.0-alpha.40
