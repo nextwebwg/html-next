@@ -1,6 +1,6 @@
 ---
 title: Moving between pages
-order: 3.5
+order: 4
 blurb: client navigation · prefetch · opt-outs
 eyebrow: HTMLKit
 ---

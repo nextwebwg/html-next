@@ -1,43 +1,77 @@
 ---
 title: HTMLKit
 order: -1
-blurb: routes · layouts · loaders · static pages
+blurb: pages · layouts · data · static sites
 eyebrow: HTMLKit
 status: Open source · MIT licensed
 pager: false
 ---
 
-# Build applications with HTML Next components.
+# Build websites from HTML components.
 
-HTMLKit (`@nextwebwg/htmlkit`) turns a folder of HTML Next components into a website. It provides file routes, layouts, server loaders, browser delivery, and development tools. The first production adapter generates static pages; [the server-rendering design](https://github.com/nextwebwg/html-next/blob/main/packages/htmlkit/docs/server-rendering.md) keeps a path open to request-time rendering.
+HTMLKit turns a folder of [HTML Next](/html-next/) components into a website. Each file in
+`app/pages` is a page, layouts wrap pages, and small server files load their data. `htmlkit build`
+writes a static site you can host anywhere.
 
-## Install and run
+## Get started
 
-Use Node `>=22.22.2 <23 || >=24.15 <25` and pnpm through Corepack. Install `@nextwebwg/htmlkit`, then run:
+Use Node 22.22.2+ or 24.15+. Install HTMLKit and add its commands to `package.json`:
 
 ```sh
-corepack pnpm exec htmlkit dev
-corepack pnpm exec htmlkit build
-corepack pnpm exec htmlkit preview
+npm install @nextwebwg/htmlkit
 ```
 
-Commands accept an optional application root and `--base /docs/`, `--origin https://example.com`,
-`--out-dir dist`, `--port 3000`, and `--host 127.0.0.1`. Development and preview default to loopback.
-Preview serves the built files without running loaders.
+```json
+{
+  "type": "module",
+  "scripts": {
+    "dev": "htmlkit dev",
+    "build": "htmlkit build",
+    "preview": "htmlkit preview"
+  }
+}
+```
+
+Create your first page:
+
+```html
+<!-- app/pages/index.html -->
+<template component="page-home">
+  <title>Hello</title>
+  <main>
+    <h1>Hello, HTMLKit</h1>
+  </main>
+</template>
+```
+
+Run `npm run dev` and open the URL it prints. Edit the page and the browser reloads.
+
+## A project at a glance
+
+```text
+app/
+  pages/          one file per page; the folder structure is the URL structure
+  layouts/        shared shells, such as default.html
+  components/     your own components
+  head.js         optional script that runs before the page first paints
+public/           files copied as-is, such as favicon.ico
+htmlkit.config.ts optional settings
+```
 
 ## Deploy
 
-`htmlkit build` writes a static site to `dist`. Deploy that folder to a static host at the chosen
-base path, and configure the host's missing-page response to use `404.html`.
+`npm run build` writes the site to `dist/`. Upload that folder to any static host, and set the
+host's "page not found" response to `404.html`. `npm run preview` serves `dist/` locally first.
 
-## Where to go next
+The commands accept `--base /docs/` to serve the site under a path, `--out-dir`, `--port`, and
+`--host`.
 
-| You want to… | Start here |
+## Next steps
+
+| To… | Read |
 | --- | --- |
-| Lay out pages, URLs, and shared shells | [Routes and layouts](/htmlkit/routes) |
-| Load data for a page and understand what reaches the browser | [Loaders and the browser](/htmlkit/loaders) |
-| Order pages and build a site navigation | [Ordered routes and navigation](/htmlkit/navigation) |
+| Add pages, dynamic URLs, and layouts | [Pages and routing](/htmlkit/routes) |
+| Load data into a page | [Loading data](/htmlkit/loaders) |
+| Add site navigation and order pages | [Navigation](/htmlkit/navigation) |
 | Move between pages without reloading | [Moving between pages](/htmlkit/client-navigation) |
-| Register routes in code or use HTMLKit as a library | [Configuration and API](/htmlkit/configuration) |
-
-HTMLKit renders [HTML Next](/html-next/) components. The component language itself is the [Declarative HTML Components](/declarative-components/) proposal.
+| Change settings, use plugins, or call HTMLKit from code | [Configuration](/htmlkit/configuration) |

@@ -5,17 +5,24 @@ layouts, server loaders, browser delivery, and development tools. The first prod
 generates static pages; [the server-rendering design](./docs/server-rendering.md) preserves a path
 to request-time rendering.
 
-Use Node `>=22.22.2 <23 || >=24.15 <25` and Corepack pnpm. Install `@nextwebwg/htmlkit`, then run:
+Use Node `>=22.22.2 <23 || >=24.15 <25`. Install `@nextwebwg/htmlkit` and add its commands to your
+`package.json` scripts:
 
-```sh
-corepack pnpm exec htmlkit dev
-corepack pnpm exec htmlkit build
-corepack pnpm exec htmlkit preview
+```json
+{
+  "scripts": {
+    "dev": "htmlkit dev",
+    "build": "htmlkit build",
+    "preview": "htmlkit preview"
+  }
+}
 ```
 
-**Guide:** [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/) covers routes and layouts,
-loaders and browser delivery, ordered routes and navigation, moving between pages, and
-configuration. Its source is [`docs/guide`](./docs/guide/) in this package.
+Then run `pnpm dev`, `pnpm build`, or `pnpm preview` (`npm run dev` and the others work too).
+
+**Guide:** [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/) covers pages and routing,
+loading data, navigation, moving between pages, and configuration. Its source is
+[`docs/guide`](./docs/guide/) in this package.
 [The client-navigation design](./docs/client-navigation.md) records how pages swap in place.
 
 ## Proof applications
@@ -23,10 +30,11 @@ configuration. Its source is [`docs/guide`](./docs/guide/) in this package.
 From this monorepo, after building packages:
 
 ```sh
-corepack pnpm --filter @nextwebwg/htmlkit exec node dist/cli.js build examples/basic
-corepack pnpm --filter @nextwebwg/htmlkit exec node dist/cli.js preview examples/basic
-corepack pnpm --filter @nextwebwg/htmlkit build:docs-proof
-corepack pnpm --filter @nextwebwg/htmlkit exec node dist/cli.js preview ../../.context/htmlkit-docs-proof
+cd packages/htmlkit
+node dist/cli.js build examples/basic
+node dist/cli.js preview examples/basic
+pnpm build:docs-proof
+node dist/cli.js preview ../../.context/htmlkit-docs-proof
 ```
 
 The basic application exercises routes, loaders, state, and controllers without documentation
