@@ -1034,7 +1034,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.deepEqual([...source.matchAll(/^import[^\n]*from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./props"]);
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "vue/props.ts" && artifact.kind === "helper"));
     assert.match(await readFile(join(outDirectory, "vue", "props.ts"), "utf8"), /function checkedProp/);
-    assert.match(source, /<style scoped>\n\[data-component~="x-card"\] \{\n  display: block;\n\}/);
+    assert.match(source, /<style scoped>\n@scope \(\[data-component~="x-card"\]\) to \(\[data-component\]\) \{\s+:scope \{\s+display: block;\s+\}/);
     assert.equal(manifest.graph, "application");
     assert.deepEqual(manifest.entries, [{ source: "x-card.html", tag: "x-card", artifact: "vue/XCard.vue" }]);
     assert.equal(manifest.output.entry, "vue/application.ts");
