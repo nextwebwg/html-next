@@ -57,8 +57,12 @@ the parent's private value is important. The rules run only under the Firefox-sp
 `@supports (-moz-appearance: none)` query. Author fill, typography, custom properties and
 other inherited values retain ordinary CSS behavior.
 
-Common rules are delivered once per live document or closed graph, outside authored import
-conditions; definition-specific root identities stay with their compiled CSS. Native CSS
+The live loader installs one common reset independent of application-owned sheets; a closed
+graph includes one reset outside authored import conditions. Hybrid delivery retains the live
+reset even when a precompiled sheet also includes one, because that sheet can be conditioned
+or disabled independently.
+
+Definition-specific root identities stay with their compiled CSS. Native CSS
 matching and inheritance handle insertion, movement and removal. Svelte's existing ownership
 selectors mark its projection regions; Vue's built-in scoped selectors already distinguish
 owned and projected nodes. No new observer or element ownership marker is introduced.

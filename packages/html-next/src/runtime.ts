@@ -331,11 +331,7 @@ type ComponentStyleCompiler = (css: string, definition: ComponentDefinition, sou
 /** Shared platform-workaround rules are independent of authored import conditions and layers. */
 function installStyleBoundaries(document: Document): void {
   if (document.head.querySelector("style[data-html-next-style-boundaries]") !== null) return;
-  // An explicitly owned server/build sheet already includes the shared reset. Empty
-  // component carriers need no reset and must not prevent a later styled definition.
-  for (const owned of document.head.querySelectorAll("style[data-html-next-component-styles], link[rel=stylesheet][data-html-next-component-styles]")) {
-    if (owned.localName === "link" || owned.textContent?.trim()) return;
-  }
+  // Owned build sheets may be conditional or disabled independently of live styles.
   const style = document.createElement("style");
   style.setAttribute("data-html-next-style-boundaries", "");
   style.textContent = COMPONENT_STYLE_BOUNDARIES;

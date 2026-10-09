@@ -96,8 +96,10 @@ roots, projection regions and nested boundaries have distinct marker values. Pri
 root/projection markers keeps layered imports from overriding the normal boundary reset.
 This property is reserved for the tools; author properties still inherit normally.
 
-Live loading delivers the common reset once per document, and closed graph CSS delivers it
-once outside authored import conditions. Each definition supplies its root identity. Svelte
+Live loading installs one independent common reset per document; closed graph CSS includes
+one outside authored import conditions. Mixing live and precompiled delivery can retain both
+copies because an application can disable or condition the precompiled sheet independently.
+Each definition supplies its root identity. Svelte
 uses its existing authored-ownership selectors for projection; Vue's scoped selectors already
 exclude projected SVG. No mutation observer or new element ownership attribute is needed.
 Browser tests assert compiled exclusion in every engine and retain the independent native
