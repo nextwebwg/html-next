@@ -299,9 +299,10 @@ describe("HTML Next unplugin", () => {
     // priority order (owner-approved, 2026-10-07), more than 29 state roots, the host's prop channel, a
     // host root that follows a root switch, and list node methods that also serve rows of several nodes.
     // +15 B: the reconcile records the rows it kept in place, so lists whose rows read their position
-    // visit only the rows that moved. Ratchet this down whenever it shrinks.
+    // visit only the rows that moved. +4 B: the compiled-root handle exposes its pending change
+    // bits, so a transitions hold also sees writes below a root. Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_640, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_644, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

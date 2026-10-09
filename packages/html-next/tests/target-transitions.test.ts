@@ -131,6 +131,14 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
           out.pushed = await w.played(await next());
           await settle();
 
+          // A row pushed in the same task as a root no region reads still animates.
+          const beforeBoth = w.transitions.length;
+          first.state.items.push({ id: "e", label: "E" });
+          first.state.count = 6;
+          await Promise.resolve();
+          out.pushedWithRoot = [w.transitions.length - beforeBoth, await w.played(w.transitions.at(-1)!)];
+          await settle();
+
           // A nested write that adds, removes and moves nothing skips its transition.
           first.state.items[0]!.label = "Z";
           const edit = await next();
@@ -150,6 +158,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
         // Moved rows animate as the browser's own move; the moving rows' names carry no keyframes.
         assert.deepEqual(result.moving, []);
         assert.deepEqual(result.pushed, [["::view-transition-new", "hn-fade", 300, "normal"]]);
+        assert.deepEqual(result.pushedWithRoot, [1, [["::view-transition-new", "hn-fade", 300, "normal"]]]);
         assert.deepEqual(result.edit, ["skipped", "Z"]);
         assert.equal(result.sheetsAfter, 1);
         assert.deepEqual(result.names, [["match-element", true], ["match-element", true]]);

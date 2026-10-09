@@ -1045,6 +1045,8 @@ export interface GeneratedInstance {
   /** Recorded refs, read by `host.refs` and handler steps. */
   readonly r: Record<string, unknown>;
   readonly c: () => boolean;
+  /** The change bits waiting for the next render: one per root, and NESTED for writes below a root. */
+  readonly d: () => number;
   /** A facade over a raw object, for writes into an outer local's data. */
   readonly p: (value: object) => unknown;
   /** Writes a root's value and schedules its render, as a prop update does. */
@@ -1612,7 +1614,7 @@ export function attachGeneratedController(
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {
