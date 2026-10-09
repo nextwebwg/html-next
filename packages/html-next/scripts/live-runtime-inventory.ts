@@ -50,6 +50,8 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/sanitizer-default.ts",
   ],
   componentResources: [
+    "packages/html-next/src/stylesheet-resources.ts",
+    "packages/html-next/src/stylesheet-resources-browser.ts",
     "packages/html-next/src/graph.ts",
     "packages/html-next/src/resource-metadata.ts",
     "packages/html-next/src/resolve.ts",
