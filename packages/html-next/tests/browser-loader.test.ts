@@ -71,7 +71,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             @media (width > 1px) { @keyframes pulse { to { opacity: .5; } } }
           ` : `<!doctype html><head></head><body>
             ${["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span class="own">own</span><slot></slot></section><style>@import "defaults.css";${tag === "x-a" ? ':host { box-sizing: content-box; }' : ''}</style></template>`).join("")}
-            <x-a id="a"><p id="projected">projected</p></x-a><x-b id="b"></x-b>
+            <x-a id="a"><p id="projected">projected<span id="projected-child">child</span></p></x-a><x-b id="b"></x-b>
           </body>`;
           await route.fulfill({ contentType: path.endsWith(".css") ? "text/css" : "text/html", body });
         });
@@ -84,6 +84,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           const read = (selector: string, pseudo?: string) => getComputedStyle(document.querySelector(selector)!, pseudo).boxSizing;
           return { a: read("#a"), b: read("#b"), own: read("#a .own"), before: read("#a .own", "::before"),
             projected: read("#projected"), projectedBefore: read("#projected", "::before"),
+            projectedChild: read("#projected-child"), projectedChildBefore: read("#projected-child", "::before"),
             color: getComputedStyle(document.querySelector("#b .own")!).color,
             shared: document.querySelectorAll("style[data-html-next-shared-styles]").length,
             bodyCopies: [...document.querySelectorAll("style")].map(style => style.textContent).join("\n").match(/box-sizing: border-box/g)?.length,
@@ -91,7 +92,8 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           };
         });
         assert.deepEqual(values, { a: "content-box", b: "border-box", own: "border-box", before: "border-box",
-          projected: "content-box", projectedBefore: "content-box", color: "rgb(1, 2, 3)", shared: 1, bodyCopies: 1, conditionalKeyframes: true },
+          projected: "content-box", projectedBefore: "content-box", projectedChild: "content-box", projectedChildBefore: "content-box",
+          color: "rgb(1, 2, 3)", shared: 1, bodyCopies: 1, conditionalKeyframes: true },
           await page.evaluate(() => [...document.querySelectorAll("style")].map(style => style.textContent).join("\n") + document.body.innerHTML));
         const moved = await page.evaluate(async () => {
           const before = [...document.head.querySelectorAll("style")];
