@@ -19,7 +19,7 @@ export async function fixture(): Promise<string> {
   await write(root, "app/layouts/default.server.ts", `export function load() {
     return { props: { brand: 'HTMLKit' }, data: { owner: 'kit' }, head: { title: 'Application' } };
   }`);
-  await write(root, "app/pages/index.html", `<meta name="htmlkit:page" content="home-page">
+  await write(root, "app/pages/index.html", `<meta name="hk:page" content="home-page">
     <template component="home-button"><defs><prop name="count" type="number" default="0">Count</prop></defs><button type="button"><slot></slot><span $value="$count"></span></button></template>
     <template component="home-label"><strong>Shared-file helper</strong><style>:host { color: rgb(90, 80, 70); }</style></template>
     <template component="home-page" controller="./home.js"><meta name="description" from:content="$asset"><defs>
@@ -47,7 +47,7 @@ export async function fixture(): Promise<string> {
   }`);
   await write(root, "app/layouts/items.html", `<template component="items-layout"><defs><prop name="brand" type="string" required>Brand</prop></defs><main><header $value="$brand"></header><article><h2>Items</h2><slot name="page"></slot></article></main><style>:host { color: rgb(20, 30, 40); }</style></template>`);
   await write(root, "app/layouts/items.server.ts", `export const load = () => ({ props: { brand: "HTMLKit" }, data: { owner: "kit" } });`);
-  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><meta name="htmlkit:layout" content="items"><defs>
+  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><meta name="hk:layout" content="items"><defs>
     <prop name="label" type="string" required>Label</prop>
     <prop name="tags" type="list(string)" required>Tags</prop></defs>
     <section><h1 $value="$label"></h1><p $each="tag of $tags" $value="$tag"></p></section></template>`);

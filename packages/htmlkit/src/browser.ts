@@ -59,7 +59,7 @@ export const stop = observeDocument(document, { onConnect(element, definition) {
   initialized.add(host);
   return controller.default(host);
 } });
-document.dispatchEvent(new Event('htmlkit:ready'));
+document.dispatchEvent(new Event('hk:ready'));
 `;
 }
 

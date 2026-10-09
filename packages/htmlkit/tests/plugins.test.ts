@@ -14,7 +14,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 function notes(root: string): HtmlKitPlugin {
   return {
     name: "notes",
-    config: () => ({ routeOrdering: true, headScript: "window.notes = true;", pages: [{ dir: "docs", prefix: "/v/one/" }, { dir: "docs" }],
+    config: () => ({ headScript: "window.notes = true;", pages: [{ dir: "docs", prefix: "/v/one/" }, { dir: "docs" }],
       layout: { component: join(root, "plugin/shell.html"), server: { async load({ navigation }: { navigation: (query?: NavigationQuery) => Promise<readonly NavigationItem[]> }) {
         const items = await navigation({ from: "/v/one/" });
         return { props: { links: items.map(item => item.label + (item.current === "page" ? "*" : "")).join(", ") } };
@@ -32,9 +32,9 @@ async function site() {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-plugins-")); roots.push(root);
   await write(root, "package.json", '{"type":"module"}');
   await write(root, "plugin/shell.html", '<template component="notes-shell"><defs><prop name="links" type="string" required>Links</prop></defs><main><nav>{$links}</nav><slot name="page"></slot></main></template>');
-  await write(root, "docs/01-index.note", '<title>Home</title><meta name="htmlkit:label" content="Home"><article>Home body</article>');
-  await write(root, "docs/02-install.note", '<title>Install</title><meta name="htmlkit:label" content="Installing"><meta name="htmlkit:alias" content="/start/"><article><a href="@href(01-index.note)">Back</a> <img src="@asset(mark.svg)" alt="Mark"> Install body</article>');
-  await write(root, "docs/03-hidden.note", '<meta name="htmlkit:navigation" content="hidden"><article>Hidden body</article>');
+  await write(root, "docs/01.index.note", '<title>Home</title><meta name="hk:label" content="Home"><article>Home body</article>');
+  await write(root, "docs/02.install.note", '<title>Install</title><meta name="hk:label" content="Installing"><meta name="hk:alias" content="/start/"><article><a href="@href(01.index.note)">Back</a> <img src="@asset(mark.svg)" alt="Mark"> Install body</article>');
+  await write(root, "docs/03.hidden.note", '<meta name="hk:navigation" content="hidden"><article>Hidden body</article>');
   await write(root, "docs/mark.svg", '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>');
   return root;
 }
@@ -66,7 +66,7 @@ it("serves plugin page files and recompiles edited pages in development", async 
     const html = await (await fetch(server.url + "v/one/install/")).text();
     const image = await fetch(new URL(/src="([^"]+mark\.svg)"/.exec(html)![1]!, server.url));
     expect([image.status, image.headers.get("content-type")]).toEqual([200, "image/svg+xml"]);
-    await write(root, "docs/02-install.note", '<title>Install</title><meta name="htmlkit:label" content="Installing"><article>Edited body</article>');
+    await write(root, "docs/02.install.note", '<title>Install</title><meta name="hk:label" content="Installing"><article>Edited body</article>');
     await expect.poll(async () => (await fetch(server.url + "v/one/install/")).text(), { timeout: 10_000 }).toContain("Edited body");
   } finally { await server.close(); }
 }, 60_000);

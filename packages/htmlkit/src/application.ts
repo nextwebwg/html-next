@@ -210,13 +210,13 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         parent = Object.freeze({ ...parent, ...result.data });
         const index = results.length - 1;
         head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
-          (definition, values) => invocation(definition, values, "htmlkit-head", "", false));
+          (definition, values) => invocation(definition, values, "hk-head", "", false));
       }
       if (headScript !== undefined) head = { ...head, script: headScript };
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       let body = "";
       for (let i = layers.length - 1; i >= 0; i--) {
-        const id = `htmlkit-layer-${i}`;
+        const id = `hk-layer-${i}`;
         const result = results[i]!;
         if (result.state !== undefined) state[`#${id}`] = result.state;
         body = invocation(layerDefinitions[i]!, result, id, body, i > 0);

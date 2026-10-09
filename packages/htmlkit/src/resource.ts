@@ -12,6 +12,11 @@ interface ComponentMetadata {
   readonly propDeclarations: string;
 }
 
+// HTMLKit metadata was spelled htmlkit:*; name the new spelling rather than ignore it.
+function renamed(name: string | undefined, file: string): void {
+  if (name?.startsWith("htmlkit:")) throw new HtmlKitError(`HTMLKit metadata uses the hk: prefix; write ${"hk:" + name.slice(8)} instead of ${name}.`, file);
+}
+
 /** Native HTML parsing determines resource nodes; HTML Next owns component syntax. */
 export function applicationResource(source: string, file: string) {
   const parsed = parseComponentResource(source, file);
@@ -21,12 +26,13 @@ export function applicationResource(source: string, file: string) {
   for (const node of fragment.childNodes) {
     if (!("tagName" in node) || !["meta", "title", "link"].includes(node.tagName)) continue;
     const name = node.attrs.find(attribute => attribute.name === "name")?.value;
-    if (node.tagName === "meta" && name === "htmlkit:page") {
+    renamed(name, file);
+    if (node.tagName === "meta" && name === "hk:page") {
       const content = node.attrs.find(attribute => attribute.name === "content")?.value;
       if (!content || configuration.has(name)) throw new HtmlKitError(`Declare ${name} once with nonempty content.`, file);
       configuration.set(name, content);
     } else if (node.tagName !== "link" || !node.attrs.find(attribute => attribute.name === "rel")?.value.toLowerCase().split(/\s+/).includes("component")) {
-      throw new HtmlKitError('Page and layout metadata belongs inside its owning <template component>; only htmlkit:page selects the file entry outside it.', file);
+      throw new HtmlKitError('Page and layout metadata belongs inside its owning <template component>; only hk:page selects the file entry outside it.', file);
     }
   }
   for (const node of fragment.childNodes) {
@@ -40,14 +46,15 @@ export function applicationResource(source: string, file: string) {
     for (const child of children) {
       if (!("tagName" in child) || !["meta", "title", "link"].includes(child.tagName)) continue;
       const name = child.attrs.find(attribute => attribute.name === "name")?.value;
-      if (child.tagName === "meta" && name?.startsWith("htmlkit:")) {
+      renamed(name, file);
+      if (child.tagName === "meta" && name?.startsWith("hk:")) {
         const content = child.attrs.find(attribute => attribute.name === "content")?.value;
         if (!content) throw new HtmlKitError(`Declare ${name} with nonempty content.`, file);
-        if (name === "htmlkit:alias") { aliases.push(content); continue; }
-        const key = ({ "htmlkit:layout": "layout", "htmlkit:label": "label", "htmlkit:navigation": "hidden" } as const)[name];
-        if (key === undefined) throw new HtmlKitError(`Component configuration is htmlkit:layout, htmlkit:label, htmlkit:navigation, or htmlkit:alias; htmlkit:page belongs outside the carrier (${name}).`, file);
+        if (name === "hk:alias") { aliases.push(content); continue; }
+        const key = ({ "hk:layout": "layout", "hk:label": "label", "hk:navigation": "hidden" } as const)[name];
+        if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:navigation, or hk:alias; hk:page belongs outside the carrier (${name}).`, file);
         if (configuration[key] !== undefined) throw new HtmlKitError(`Declare ${name} once per component.`, file);
-        if (key === "hidden" && content !== "hidden") throw new HtmlKitError('htmlkit:navigation accepts only content="hidden".', file);
+        if (key === "hidden" && content !== "hidden") throw new HtmlKitError('hk:navigation accepts only content="hidden".', file);
         if (key === "hidden") configuration.hidden = true; else configuration[key] = content;
       } else head.push(serializeOuter(child));
     }
@@ -60,9 +67,9 @@ export function applicationResource(source: string, file: string) {
 }
 
 export function pageDefinition(resource: ReturnType<typeof applicationResource>, file: string): ComponentDefinition {
-  const selected = resource.configuration.get("htmlkit:page");
+  const selected = resource.configuration.get("hk:page");
   if (selected === undefined && resource.definitions.length !== 1) {
-    throw new HtmlKitError("Multiple components require <meta name=\"htmlkit:page\" content=\"page-name\">.", file);
+    throw new HtmlKitError("Multiple components require <meta name=\"hk:page\" content=\"page-name\">.", file);
   }
   const definition = selected === undefined ? resource.definitions[0] : resource.definitions.find(value => value.contract.tag === selected);
   if (definition === undefined) throw new HtmlKitError(`Unknown page component ${selected}.`, file);

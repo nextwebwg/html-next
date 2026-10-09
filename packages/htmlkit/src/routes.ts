@@ -11,7 +11,7 @@ export function parameter(segment: string): string | undefined { return /^\[([A-
 export function validSegment(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value !== "." && value !== ".." && !value.includes("/") && !/[\\\0?#]/.test(value);
 }
-type DiscoveryOptions = Pick<ApplicationOptions, "base" | "routes" | "fileRoutes" | "pages" | "layout" | "layoutDefaults" | "routeOrdering" | "plugins">;
+type DiscoveryOptions = Pick<ApplicationOptions, "base" | "routes" | "fileRoutes" | "pages" | "layout" | "layoutDefaults" | "plugins">;
 
 export async function discoverRoutes(root = process.cwd(), options: DiscoveryOptions = {}): Promise<readonly ApplicationRoute[]> {
   return (await discover(root, options)).routes;
@@ -49,8 +49,10 @@ export async function discover(root: string, options: DiscoveryOptions) {
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), prefix,
       ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }) });
   };
+  // A number and a dot ("01.guide") order a file or directory and stay out of its URL. Route
+  // segments cannot contain dots, so the prefix is never part of a name.
   const ordered = (name: string, source: string) => {
-    const prefix = options.routeOrdering ? /^(\d+)-(.*)$/.exec(name) : null;
+    const prefix = /^(\d+)\.(.*)$/.exec(name);
     if (prefix?.[2] === "") throw new HtmlKitError("Ordering prefix leaves an empty route segment.", source);
     return { slug: prefix?.[2] ?? name, rank: prefix?.[1] ?? null };
   };
@@ -134,7 +136,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     if (route.canonical !== undefined) continue;
     const { resource } = await resourceOf(route.component);
     for (const alias of resource.components.get(pageDefinition(resource, route.component).contract.tag)!.aliases) {
-      if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("htmlkit:alias needs a route path with leading and trailing slashes.", route.component);
+      if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("hk:alias needs a route path with leading and trailing slashes.", route.component);
       add({ component: route.component, ...(route.server === undefined ? {} : { server: route.server }), layouts: route.layouts,
         pattern: route.prefix + alias.slice(1), canonical: route.pattern }, route.prefix);
     }

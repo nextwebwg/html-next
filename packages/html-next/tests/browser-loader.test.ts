@@ -64,7 +64,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           const path = new URL(route.request().url()).pathname;
           requests.push(path);
           const body = path === "/page.html" ?
-            '<meta name="htmlkit:layout" content="admin"><head>' +
+            '<meta name="hk:layout" content="admin"><head>' +
             '<title $value="$missing">Imported title</title>' +
             '<meta name="description" content="Imported description" from:content="$missing">' +
             '<meta property="og:title" content="Imported social title">' +
@@ -73,7 +73,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             '<link rel="preload" as="script" href="./ignored.js">' +
             '<link rel="component" href="./child.html"></head>' +
             '<template component="products-page"><title $value="$missing">Carrier title</title>' +
-            '<meta name="htmlkit:layout" content="admin"><meta name="description" from:content="$missing">' +
+            '<meta name="hk:layout" content="admin"><meta name="description" from:content="$missing">' +
             '<link rel="stylesheet" href="./carrier.css"><link rel="preload" as="script" href="./carrier.js">' +
             '<section>Products <product-detail></product-detail></section></template>' :
             path === "/child.html" ?
@@ -96,7 +96,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             text: document.querySelector("#page")?.textContent,
             title: document.title,
             description: document.querySelector('meta[name="description"]')?.getAttribute("content"),
-            layouts: document.querySelectorAll('meta[name="htmlkit:layout"]').length,
+            layouts: document.querySelectorAll('meta[name="hk:layout"]').length,
             social: document.querySelectorAll('meta[property="og:title"]').length,
             links: document.querySelectorAll('link[rel="stylesheet"], link[rel="canonical"], link[rel="preload"]').length };
           started.stop();

@@ -53,7 +53,6 @@ when an adapter supplies them, as the development server does.
 
 ```ts
 export default defineConfig({
-  routeOrdering: true,
   pages: [{ dir: 'docs', prefix: '/v/current/' }, { dir: 'docs' }],
 });
 ```

@@ -16,8 +16,8 @@ describe("application platform", () => {
     await rm(join(root, "app/layouts/default.server.ts"));
     await write(root, "app/layouts/default.html", '<template component="default-shell"><main>Default<slot name="page"></slot></main></template>');
     await write(root, "app/layouts/admin.html", '<template component="admin-shell"><main>Admin<slot name="page"></slot></main></template>');
-    await write(root, "extra/products.html", '<meta name="htmlkit:page" content="page-products"><template component="product-label"><meta name="htmlkit:layout" content="absent"><title>Helper title</title><strong>Helper</strong></template><template component="page-products"><meta name="htmlkit:layout" content="admin"><title>Products</title><product-label></product-label></template>');
-    await write(root, "extra/plain.html", '<template component="page-plain"><meta name="htmlkit:layout" content="none"><p>Standalone</p></template>');
+    await write(root, "extra/products.html", '<meta name="hk:page" content="page-products"><template component="product-label"><meta name="hk:layout" content="absent"><title>Helper title</title><strong>Helper</strong></template><template component="page-products"><meta name="hk:layout" content="admin"><title>Products</title><product-label></product-label></template>');
+    await write(root, "extra/plain.html", '<template component="page-plain"><meta name="hk:layout" content="none"><p>Standalone</p></template>');
     await write(root, "extra/default.html", '<template component="page-default"><p>Content</p></template>');
     const options = { root, fileRoutes: false, layoutDefaults: { "/admin/": "admin" }, routes: [
       { pattern: "/products/", component: "extra/products.html" },
@@ -36,8 +36,8 @@ describe("application platform", () => {
       expect((await application.render("/admin/")).body).toContain('data-component="admin-shell"');
     } finally { await application.close(); }
     await write(root, "extra/products.html", '<template component="product-label"><p>Label</p></template><template component="page-products"><p>Page</p></template>');
-    await expect(discoverRoutes(root, options)).rejects.toThrow(/htmlkit:page/);
-    await write(root, "extra/products.html", '<meta name="htmlkit:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
+    await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page/);
+    await write(root, "extra/products.html", '<meta name="hk:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
     await expect(discoverRoutes(root, options)).rejects.toThrow(/absent-page/);
   });
 
@@ -45,7 +45,7 @@ describe("application platform", () => {
     const root = await app();
     await rm(join(root, "app/layouts/default.server.ts"));
     await write(root, "app/layouts/default.html", '<template component="head-shell"><title>Site title</title><meta name="description" content="Site description"><meta property="og:title" content="Site"><link rel="canonical" href="https://example.test/"><link rel="stylesheet" href="/shared.css"><link rel="alternate" hreflang="en" href="https://example.test/en/"><main><slot name="page"></slot></main></template>');
-    await write(root, "extra/head.html", '<meta name="htmlkit:page" content="page-head"><template component="head-helper"><title $value="$missing"></title><meta name="htmlkit:layout" content="absent"><meta name="description" content="Helper description"><meta property="og:image" content="https://example.test/helper.png"><strong>Helper content</strong></template><template component="page-head"><title $value="$title"></title><meta name="description" from:content="$description"><meta property="og:title" from:content="$title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="$canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><section><p $value="$title"></p><head-helper></head-helper></section></template>');
+    await write(root, "extra/head.html", '<meta name="hk:page" content="page-head"><template component="head-helper"><title $value="$missing"></title><meta name="hk:layout" content="absent"><meta name="description" content="Helper description"><meta property="og:image" content="https://example.test/helper.png"><strong>Helper content</strong></template><template component="page-head"><title $value="$title"></title><meta name="description" from:content="$description"><meta property="og:title" from:content="$title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="$canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><section><p $value="$title"></p><head-helper></head-helper></section></template>');
     await write(root, "extra/head.server.ts", 'export const load = () => ({ props: { title: "Page & title", description: "a < b", canonical: "https://example.test/page/" } });');
     const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/head.html", server: "extra/head.server.ts" }] });
     try {
@@ -117,10 +117,10 @@ describe("application platform", () => {
 
   it("keeps each page's metadata with its component when a file contains multiple candidate pages", async () => {
     const root = await app();
-    const pages = '<template component="page-first"><meta name="htmlkit:layout" content="none"><title>First title</title><meta name="description" content="First description"><p>First page</p></template>' +
-      '<template component="page-second"><meta name="htmlkit:layout" content="default"><title>Second title</title><meta name="description" content="Second description"><p>Second page</p></template>';
+    const pages = '<template component="page-first"><meta name="hk:layout" content="none"><title>First title</title><meta name="description" content="First description"><p>First page</p></template>' +
+      '<template component="page-second"><meta name="hk:layout" content="default"><title>Second title</title><meta name="description" content="Second description"><p>Second page</p></template>';
     for (const selected of ["first", "second"]) {
-      await write(root, "extra/pages.html", `<meta name="htmlkit:page" content="page-${selected}">${pages}`);
+      await write(root, "extra/pages.html", `<meta name="hk:page" content="page-${selected}">${pages}`);
       const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/pages.html" }] });
       try {
         const page = await application.render("/");
@@ -135,12 +135,12 @@ describe("application platform", () => {
   it("diagnoses file-level page metadata and component-level file selectors", async () => {
     const root = await app();
     const options = { root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/page.html" }] };
-    for (const metadata of ['<title>File title</title>', '<meta name="description" content="File description">', '<meta name="htmlkit:layout" content="none">']) {
+    for (const metadata of ['<title>File title</title>', '<meta name="description" content="File description">', '<meta name="hk:layout" content="none">']) {
       await write(root, "extra/page.html", `${metadata}<template component="page-invalid"><p>Page</p></template>`);
       await expect(discoverRoutes(root, options)).rejects.toThrow(/metadata belongs inside its owning/);
     }
-    await write(root, "extra/page.html", '<template component="page-invalid"><meta name="htmlkit:page" content="page-invalid"><p>Page</p></template>');
-    await expect(discoverRoutes(root, options)).rejects.toThrow(/htmlkit:page belongs outside/);
+    await write(root, "extra/page.html", '<template component="page-invalid"><meta name="hk:page" content="page-invalid"><p>Page</p></template>');
+    await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page belongs outside/);
   });
 
   it("rejects duplicate page component names across file and registered routes before loading application code", async () => {

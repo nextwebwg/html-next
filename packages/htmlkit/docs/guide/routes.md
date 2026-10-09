@@ -28,7 +28,7 @@ htmlkit.config.ts             optional configuration
 ```
 
 A page resource selects one entry component. A single definition is inferred; a file with helper
-components must select its page using `<meta name="htmlkit:page" content="page-products">`.
+components must select its page using `<meta name="hk:page" content="page-products">`.
 Selection never depends on declaration order. The file-level selector is separate from component-owned
 metadata: each page or layout declares its own title, description, links, and layout choice as direct
 children of its `<template component>`. Helpers use ordinary HTML Next component semantics; their
@@ -64,7 +64,7 @@ components explicitly. Adding a parent page never wraps descendant routes.
 
 ```html
 <template component="page-products">
-  <meta name="htmlkit:layout" content="admin">
+  <meta name="hk:layout" content="admin">
   <meta name="description" content="Manage your products.">
   <meta property="og:title" content="Product administration">
   <title>Products · Admin</title>
@@ -83,13 +83,13 @@ A layout uses normal component syntax:
 </template>
 ```
 
-`htmlkit:*` metadata configures the build and is removed from the generated document. Inside a
-page's carrier, `htmlkit:layout` picks its layout, `htmlkit:label` and `htmlkit:navigation`
-(`content="hidden"`) shape [navigation](./navigation.md), and each `htmlkit:alias` adds a further
+`hk:*` metadata configures the build and is removed from the generated document. Inside a
+page's carrier, `hk:layout` picks its layout, `hk:label` and `hk:navigation`
+(`content="hidden"`) shape [navigation](./navigation.md), and each `hk:alias` adds a further
 route for the page, such as `content="/start/"`, relative to its page directory's prefix. Ordinary
 `title`, `meta`, and metadata `link` elements directly inside a selected carrier contribute to the
 document head. They are siblings of `<defs>`, the rendered root, and `<style>`; no `<head>` wrapper
-is needed. Keep only `htmlkit:page` and component dependency links at file scope. HTMLKit diagnoses
+is needed. Keep only `hk:page` and component dependency links at file scope. HTMLKit diagnoses
 file-level head metadata instead of silently assigning it to a component. The regular HTML Next
 resource loader accepts and ignores resource-level and direct carrier metadata;
 it does not select layouts, update a host document, or evaluate their bindings. Resource-level

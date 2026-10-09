@@ -24,7 +24,7 @@ Node uses HTML Next's renderer for the baseline. It executes neither browser con
 declared browser reads. Per-page browser modules register parsed definitions and let HTML Next
 adopt existing DOM, resume reads, and connect controllers. The platform adds no parser, scheduler,
 hydration record, or lifecycle registry. Document navigation uses native links. The browser emits
-`htmlkit:ready` on `document` after initial observation is installed.
+`hk:ready` on `document` after initial observation is installed.
 
 Relative declared read sources are bundled as assets beside the browser delivery. Root-relative
 read URLs are prefixed with the application base; absolute HTTP(S) sources retain their origin.

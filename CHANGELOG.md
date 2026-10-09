@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.40
+
+### Breaking
+
+- HTMLKit metadata uses the `hk:` prefix: `hk:page`, `hk:layout`, `hk:label`, `hk:navigation`, and `hk:alias`. The old `htmlkit:` spelling is an error that names its replacement. The navigation component is `<hk-navigation>`, rendered layers have `hk-layer-N` ids, and the browser event is `hk:ready`.
+- Ordering prefixes are a number and a dot, and always apply: `01.guide/02.install.html` routes to `/guide/install/` and orders navigation. The `routeOrdering` option is removed. A dash no longer marks an ordering prefix, so rename `01-guide` to `01.guide`; a name such as `2024-recap` keeps its URL.
+
 ## 1.0.0-alpha.39
 
 - HTMLKit plugins add page formats. A plugin's `pages` compiler claims file extensions such as `.md` and turns each file into an HTML Next page resource; HTMLKit then routes, orders, watches, renders, and builds those pages like `.html` pages. While compiling, a page can resolve another page's URL with `page.href` and serve a referenced file with `page.asset`. A plugin's `config()` contributes options, including a layout whose loader is a module object and a `headScript` inlined before `app/head.js`.
