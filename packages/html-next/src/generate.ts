@@ -28,7 +28,7 @@ import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.38";
+export const GENERATOR_VERSION = "1.0.0-alpha.39";
 
 export interface GeneratedArtifact {
   readonly path: string;
