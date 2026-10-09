@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.40
+## 1.0.0-alpha.41
 
 ### Breaking
 
@@ -20,6 +20,10 @@
 - HTMLKit's `css` option adds page-wide stylesheets to every page, such as `['@/styles/page.css']`, for rules like `html` and `body`. They load before the page is shown, in builds and in development.
 - HTMLKit plugins compose with the site: page folders, stylesheets, and routes a plugin adds join the site's own instead of replacing them, and `app/pages` stays. A page folder can name its own `layout`, which its pages use unless they name one, so a plugin's layout no longer wraps the whole site. `optional: true` skips a folder that doesn't exist.
 - HTMLKit has built-in `<hk-breadcrumbs>` and `<hk-pager>`, unstyled and accessible like `<hk-nav>` and needing no component link. Loaders get `breadcrumbs()`, the existing pages from the home page (or `from`) down to the current one, and `pager()`, the pages before and after it in navigation order.
+
+## 1.0.0-alpha.40
+
+- Component CSS prevents Firefox 155's scoped SVG class rules from leaking across scope limits. Live loading, graph CSS, Vite, SSR, React and Svelte keep owned, projected and nested component styling distinct through DOM moves. The compiler uses a Firefox-specific private CSS marker; shared boundary rules are delivered once per graph or live document. Author inheritance remains intact; no DOM observers or ownership attributes are added. Mozilla bug 2080046 tracks the underlying browser defect.
 
 ## 1.0.0-alpha.39
 

@@ -81,6 +81,15 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "SVG class rules stay inside owned scope while explicit slot styles and inheritance survive",
+    source: `<template component="x-svg-boundary" status="early" summary="SVG scope boundaries.">
+      <div><svg><rect class="shape" width="10" height="10"></rect></svg><slot></slot></div>
+      <style>:host { fill: green; } .shape { fill: red; } :slotted(.styled) { fill: blue; }</style>
+    </template><x-svg-boundary><svg><rect class="shape" width="10" height="10"></rect><rect class="shape styled" x="20" width="10" height="10"></rect></svg></x-svg-boundary>`,
+    expect: { probe: `return [...document.querySelectorAll('rect')].map(node => getComputedStyle(node).fill);`,
+      result: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'] },
+  },
+  {
     name: "one-way native controls preserve authored defaults without duplicate attributes",
     source: `<template component="x-oneway-defaults" status="early" summary="One-way control defaults."><defs>
       <state name="value" type="string" value="One"></state><state name="checked" type="boolean" value="false"></state>
