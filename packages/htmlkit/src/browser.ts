@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { normalizePath, type Plugin } from "vite";
 import type { ClientOptions } from "./client.js";
 import type { BrowserDefinition } from "./types.js";
+import { collectSharedStylesheets, compileComponentGraphStylesForBuild } from "@nextwebwg/html-next";
 
 const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/runtime"));
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]runtime\.js$/, "/src/runtime.ts");
@@ -12,6 +13,12 @@ const client = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./client
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
   const sources = new Map<string, string>();
+  const shared = collectSharedStylesheets(components.map(component => component.definition));
+  if (shared.length > 0) {
+    sources.set(normalizePath(fileURLToPath(components[0]!.definition.source.file)) + ".htmlkit-shared.css",
+      compileComponentGraphStylesForBuild(components.map(component => component.definition)));
+    return sources;
+  }
   for (const component of components) {
     if (component.styles.css === "") continue;
     const id = normalizePath(fileURLToPath(component.definition.source.file)) + ".htmlkit.css";
@@ -24,7 +31,7 @@ export function stylesheetSources(components: readonly BrowserDefinition[]): Rea
 export function browserSource(components: readonly BrowserDefinition[], options: ClientOptions): string {
   const { base } = options;
   const controlled = components.filter(component => component.controller !== undefined);
-  const definitions = components.map(({ definition }) => ({ ...definition, css: definition.css ? "/* external stylesheet */" : "",
+  const definitions = components.map(({ definition }) => ({ ...definition, stylesheets: undefined, css: definition.css || definition.stylesheets?.length ? "/* external stylesheet */" : "",
     source: { file: `${definition.contract.tag}.html` } }));
   const reads: { definition: number; declaration: number; asset: string; suffix: string }[] = [];
   for (let i = 0; i < definitions.length; i++) {

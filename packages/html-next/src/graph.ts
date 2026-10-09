@@ -43,6 +43,7 @@ export interface BuildGraphOptions {
   readonly resolver: ComponentResourceResolver;
   readonly fetchComponent: ComponentFetcher;
   readonly parseComponentResource: ComponentResourceParser;
+  readonly prepareStyles?: (definition: ComponentDefinition, resource: ResolvedResource) => Promise<ComponentDefinition>;
   readonly isCustomElementRegistered?: (tag: string) => boolean;
 }
 
@@ -143,6 +144,12 @@ export async function buildComponentGraph(
     });
     // Publish the whole resource before traversing its links, so cycles never fetch it again.
     resources.set(finalURL, Object.freeze(ids));
+    if (options.prepareStyles !== undefined) {
+      for (const id of ids) {
+        const draft = drafts.get(id)!;
+        draft.definition = await options.prepareStyles(draft.definition, { url: finalURL, trustRoot: resource.trustRoot });
+      }
+    }
     const dependencies = new Set<string>();
     for (const specifier of parsed.dependencies) {
       try {
