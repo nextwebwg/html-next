@@ -76,6 +76,25 @@ const cases: readonly ParityCase[] = [
     expectedAfter: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'],
   },
   {
+    name: "declared names never take a handler's step locals or the shared host's exports",
+    features: ["handlers", "checked writes", "naming"],
+    definitions: {
+      "x-step-names": `<template component="x-step-names"><defs>
+        <state name="next0" type="number" value="1"></state>
+        <state name="count" type="number" value="0"></state>
+        <state name="arithmetic" type="length" value="2px"></state>
+        <state name="preserveRootFocus" type="string" value="kept"></state>
+        <handler name="advance"><set name="next0" expr:value="$next0 + 1"></set><set name="count" expr:value="$next0 + 1"></set></handler>
+      </defs><section><output>{$next0}/{$count}/{$arithmetic + $arithmetic}/{$preserveRootFocus}</output><button on:click="advance">Go</button></section></template>`,
+    },
+    invocation: `<x-step-names id="case"></x-step-names>`,
+    vueRender: `h(XStepNames, { id: "case" })`,
+    root: "#case",
+    probe: `({ output: root.querySelector("output").textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { output: "2/3/4px/kept" },
+  },
+  {
     name: "namespaced component type selectors keep their namespace",
     features: ["scoped styles", "namespaces", "host"],
     definitions: {
