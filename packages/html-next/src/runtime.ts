@@ -1573,10 +1573,15 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        // A row's loop fields change one by one, so a reader of one that holds does not run again.
+        // A row's loop fields change one by one, so a reader of one that holds does not run again;
+        // a row whose position and count hold writes nothing.
         const rowScope = block.scope;
-        const loop = untracked(() => rowScope.get("loop")) as Record<string, Value>;
-        for (const [field, value] of Object.entries(locals.loop as Record<string, Value>)) loop[field] = value;
+        const next = locals.loop as Record<string, Value>;
+        const plain = untracked(() => rowScope.read("loop")) as Record<string, Value>;
+        if (plain.index !== next.index || plain.first !== next.first || plain.last !== next.last || plain.count !== next.count) {
+          const loop = untracked(() => rowScope.get("loop")) as Record<string, Value>;
+          loop.index = next.index!; loop.first = next.first!; loop.last = next.last!; loop.count = next.count!;
+        }
       }
       next.set(key, block);
       ordered?.push(block);
