@@ -108,6 +108,8 @@ describe("application platform", () => {
       expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/items/one/"]);
       expect(await (await handle(new Request("http://localhost/items/one/"))).text()).toContain("kit: one");
       expect((await handle(new Request("http://localhost/missing/"))).status).toBe(404);
+      // A leading // would name another origin; it is simply not a page here.
+      expect((await handle(new Request("http://localhost//evil.example/"))).status).toBe(404);
       const post = await handle(new Request("http://localhost/", { method: "POST" }));
       expect([post.status, post.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
     } finally { await application.close(); }

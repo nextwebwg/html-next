@@ -242,7 +242,9 @@ export async function createApplication(options: ApplicationOptions = {}, module
     async fetch(request) {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
       const { pathname } = new URL(request.url);
-      const page = await application.render(pathname, request.signal);
+      // A path starting with // names another origin to render(), which rejects it; no page lives there.
+      const page = pathname.startsWith("//") ? { status: 404 as const, pathname, ...notFoundPage(headScript), css: "", components: [] }
+        : await application.render(pathname, request.signal);
       if (page.status === 200 && !pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" } });
       return new Response(request.method === "HEAD" ? null : documentHTML(page.body, page.head, assets?.(page)),
         { status: page.status, headers: { "content-type": "text/html; charset=utf-8" } });
