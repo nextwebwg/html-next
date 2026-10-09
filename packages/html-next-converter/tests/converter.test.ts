@@ -72,6 +72,34 @@ async function typecheckReact(root: string, files: readonly string[]): Promise<v
 }
 
 describe("framework converter", () => {
+  for (const target of ["react", "svelte", "vue"] as const) {
+    it(`resolves shared defaults and preserves ${target}'s component and slot boundaries`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "html-next-converter-shared-"));
+      temporary.push(root);
+      await writeFile(join(root, "package.json"), "{}");
+      await writeFile(join(root, "defaults.css"), ':host, *, *::before, *::after { box-sizing: border-box; } :host-state([open]) { color: rebeccapurple; }');
+      await writeFile(join(root, "components.html"), ["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span>own</span><slot></slot></section><style>@import "defaults.css";</style></template>`).join(""));
+      const output = join(root, "out");
+      const manifest = await convertComponents({ entries: ["components.html"], target, root, outDirectory: output, mode: "library" });
+      assert.ok(manifest.sourceFiles.includes("defaults.css"));
+      const files = await Promise.all(manifest.output.artifacts.filter(file => file.kind === "component" || file.kind === "style")
+        .map(async file => ({ path: file.path, content: await readFile(join(output, file.path), "utf8") })));
+      for (const file of files) assert.doesNotMatch(file.content, /@import "defaults\.css"/);
+      const css = files.filter(file => file.path.endsWith(".css")).map(file => file.content).join("\n");
+      if (target === "react") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
+      if (target === "svelte") {
+        assert.match(css, /:not\(\[data-html-next-owner~="x-a"\]\)/);
+        assert.match(css, /:not\(\[data-html-next-owner~="x-b"\]\)/);
+        for (const file of files.filter(file => file.path.endsWith(".svelte"))) assert.match(file.content, /data-html-next-owner/);
+      }
+      if (target === "vue") for (const file of files) {
+        assert.match(file.content, /box-sizing: border-box/);
+        compileVue(file.content, file.path);
+      }
+      for (const tag of ["x-a", "x-b"]) assert.match(files.map(file => file.content).join("\n"), new RegExp(`data-${tag}-state`));
+    });
+  }
+
   it("preserves the state reference for an unchanged nested control write", async () => {
     const source = reactControlArtifact().content;
     const compiled = await transform(source, { loader: "ts", format: "esm" });

@@ -55,6 +55,59 @@ describe.skipIf(!enabled)("browser graph loader", () => {
   });
 
   for (const engine of [chromium, firefox, webkit]) {
+    it(`${engine.name()} shares imported defaults across adopters, preserves slot and pseudo-element boundaries, and keeps CSS order after DOM moves`, async () => {
+      const browser = await engine.launch();
+      try {
+        const page = await browser.newPage();
+        const requests: string[] = [];
+        const requestTypes: string[] = [];
+        await page.route("https://shared.example/**", async route => {
+          const path = new URL(route.request().url()).pathname;
+          requests.push(path);
+          requestTypes.push(`${path}:${route.request().resourceType()}`);
+          const body = path === "/defaults.css" ? `
+            :host, *, :host::before, :host::after, *::before, *::after { box-sizing: border-box; }
+            :host-state([open]) .own { color: rgb(1, 2, 3); }
+            @media (width > 1px) { @keyframes pulse { to { opacity: .5; } } }
+          ` : `<!doctype html><head></head><body>
+            ${["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span class="own">own</span><slot></slot></section><style>@import "defaults.css";${tag === "x-a" ? ':host { box-sizing: content-box; }' : ''}</style></template>`).join("")}
+            <x-a id="a"><p id="projected">projected</p></x-a><x-b id="b"></x-b>
+          </body>`;
+          await route.fulfill({ contentType: path.endsWith(".css") ? "text/css" : "text/html", body });
+        });
+        await page.goto("https://shared.example/");
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(async () => {
+          await (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents();
+        });
+        const values = await page.evaluate(() => {
+          const read = (selector: string, pseudo?: string) => getComputedStyle(document.querySelector(selector)!, pseudo).boxSizing;
+          return { a: read("#a"), b: read("#b"), own: read("#a .own"), before: read("#a .own", "::before"),
+            projected: read("#projected"), projectedBefore: read("#projected", "::before"),
+            color: getComputedStyle(document.querySelector("#b .own")!).color,
+            shared: document.querySelectorAll("style[data-html-next-shared-styles]").length,
+            bodyCopies: [...document.querySelectorAll("style")].map(style => style.textContent).join("\n").match(/box-sizing: border-box/g)?.length,
+            conditionalKeyframes: [...document.querySelectorAll("style")].some(style => /@media[\s\S]*@keyframes pulse/.test(style.textContent ?? "")),
+          };
+        });
+        assert.deepEqual(values, { a: "content-box", b: "border-box", own: "border-box", before: "border-box",
+          projected: "content-box", projectedBefore: "content-box", color: "rgb(1, 2, 3)", shared: 1, bodyCopies: 1, conditionalKeyframes: true },
+          await page.evaluate(() => [...document.querySelectorAll("style")].map(style => style.textContent).join("\n") + document.body.innerHTML));
+        const moved = await page.evaluate(async () => {
+          const before = [...document.head.querySelectorAll("style")];
+          const content = before.map(style => style.textContent);
+          document.body.prepend(document.querySelector("#b")!);
+          await new Promise(resolve => setTimeout(resolve, 20));
+          return before.every((style, index) => document.head.querySelectorAll("style")[index] === style && style.textContent === content[index]);
+        });
+        assert.equal(moved, true);
+        // Firefox's HTML preload scanner can request an import in a template before our loader runs.
+        assert.equal(requestTypes.filter(request => request === "/defaults.css:fetch").length, 1, requestTypes.join(", "));
+      } finally { await browser.close(); }
+    });
+  }
+
+  for (const engine of [chromium, firefox, webkit]) {
     it(`${engine.name()} loads component resources without promoting their metadata into the document`, async () => {
       const metadataBrowser = await engine.launch({ headless: true });
       try {

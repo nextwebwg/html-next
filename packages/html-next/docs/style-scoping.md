@@ -21,7 +21,8 @@ A style block compiles to two scopes:
 @scope ([data-component~="x-card"]) to ([data-component]) { /* :slotted() rules */ }
 ```
 
-- `:host` becomes `:scope` in the first scope and the root selector in the second.
+- `:host` becomes `:scope:where([data-component~="tag"])`. The zero-specificity qualifier
+  prevents Firefox from retaining another root's scoped style during dynamic root replacement.
 - `:host-state([name="value"])` becomes tokens of the state attribute; names must be declared
   props or state of a scalar type (HY001, HY002).
 - `:slotted(X)` matches projected content at any depth:
@@ -30,13 +31,59 @@ A style block compiles to two scopes:
   `:is(x-card, :where([data-component~="x-card"]))`.
 - `:scope` is not authoring syntax (HY003).
 - `:valid`, `:invalid`, and `:user-invalid` also match the validity runtime's mirrors.
-- `@keyframes`, `@font-face`, `@property`, and other document-wide rules are hoisted unscoped.
+- `@keyframes`, `@font-face`, `@property`, and other name-defining rules keep their authored
+  order and conditional/layer context. Native `@scope` allows them; their names remain global.
+- Own selector lists containing pseudo-elements get a zero-specificity boundary guard so
+  Firefox cannot match projected or nested-component roots through a scope limit.
 
 The browser runtime needs no CSS parser. It renames `:slotted(` and `:host-state(` into selectors
 the browser accepts, parses the block twice with `CSSStyleSheet`, drops the other scope's rules from
 each copy, and rewrites the remaining selectors through the CSS Object Model
 (`src/component-styles.ts`). Build tools run the same steps over postcss
 (`src/component-styles-build.ts`).
+
+## Shared CSS resources
+
+Author shared CSS with an ordinary import inside the component's style block:
+
+```html
+<style>
+  @import "../styles/defaults.css";
+  :host { padding: 1rem; }
+</style>
+```
+
+`loadNodeComponents()` and `startBrowserComponents()` resolve the stylesheet graph before
+compilation. The live loader parses imports in an inert document; Node uses PostCSS. Each
+resource's final URL remains the base for its imports and assets. Vite uses its CSS resolver
+for aliases and packages, and processes rebased assets through its ordinary CSS pipeline.
+Synchronous compilation diagnoses unresolved imports (HY004); it never emits a global import
+as a fallback. `NodeLoaderOptions` accepts a host CSS resolver, stylesheet reader, and asset
+URL mapper, and the returned graph lists `stylesheetInputs` for dependency watching.
+Shared resources containing `@namespace` currently produce HY004: flattening their
+stylesheet-local namespace environments would change selector matching. Plain Node hosts
+must map asset URLs to deployment URLs with `stylesheetAssetURL` when file URLs are not
+served by their integration.
+
+Resolved definitions retain local `css` and separate `stylesheets`. Compatible occurrences
+share one emitted body with a scope listing all adopting component roots. Prop and state
+selectors include each adopter's own attribute tests. Conditions, anonymous layers, opposing
+import orders, global-name overrides, and delegated-root overlap can require separate scoped
+occurrences. Resource bytes are fetched once even when several occurrences are necessary.
+`compileComponentGraphStylesForBuild()` delivers these occurrences and local overrides in
+graph definition order, matching live installation and SSR. DOM moves and repeated instances
+never reorder style carriers. Vite emits one graph CSS module so module traversal cannot
+reorder a component's shared imports relative to another definition's overrides.
+
+React output shares graph CSS in the same way. Svelte's ownership-based slot limits and Vue's
+generated scope IDs can require separate transformed occurrences. Their imported CSS follows
+the same component/slot boundaries as their inline CSS; framework scoping never becomes
+document-wide ordinary selectors.
+
+Defaults are explicit author CSS. For example, `:host, *, :host::before, :host::after,
+*::before, *::after { box-sizing: border-box; }` covers elements and pseudo-elements. `*`
+does not select pseudo-elements, and `box-sizing` is not normally inherited. Scope limits
+selector matching; an explicit `inherit` still reads the DOM parent's value.
 
 ## Delivery and hydration
 

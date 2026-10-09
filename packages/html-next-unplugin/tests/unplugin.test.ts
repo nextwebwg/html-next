@@ -32,6 +32,26 @@ afterEach(async () => {
 });
 
 describe("HTML Next unplugin", () => {
+  it("resolves shared CSS through Vite, emits one compatible body in graph order, and builds stylesheet-relative assets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-shared-css-"));
+    temporary.push(root);
+    await mkdir(join(root, "styles"));
+    await writeFile(join(root, "styles/defaults.css"), ':host, *, *::before, *::after { box-sizing: border-box; } .icon { background: url("./check.svg"); }');
+    await writeFile(join(root, "styles/check.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1"/></svg>');
+    await writeFile(join(root, "a.html"), '<template component="x-a"><div></div><style>@import "@styles/defaults.css"; :host { box-sizing: content-box; }</style></template>');
+    await writeFile(join(root, "b.html"), '<template component="x-b"><section></section><style>@import "@styles/defaults.css";</style></template>');
+    await writeFile(join(root, "main.js"), `export { createXA, createXB } from ${JSON.stringify(componentsModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["b.html", "a.html"] })],
+      resolve: { alias: { ...generatedRuntimeAlias, "@styles": join(root, "styles") } },
+      build: { minify: false, cssMinify: false, lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } } });
+    const css = await readFile(join(root, "dist/components.css"), "utf8");
+    assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
+    assert.match(css, /@scope\s*\(\[data-component~="x-a"\], \[data-component~="x-b"\]\)/);
+    assert.ok(css.indexOf("border-box") < css.indexOf("content-box"));
+    assert.match(css, /data:image\/svg\+xml/);
+    assert.doesNotMatch(css, /@import|@styles|file:\/\/|\/@fs\//);
+  });
+
   it("consumes a packed component folder with native factories and no configured entries", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-native-package-"));
     temporary.push(root);
