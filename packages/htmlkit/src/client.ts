@@ -67,8 +67,9 @@ export function page(runtime: Runtime, options: ClientOptions, pageDefinitions: 
     initialized.add(host);
     return controller.default(host);
   } });
-  // ponytail: without the Navigation API (before Firefox 147 and Safari 26.2), links stay document navigations.
-  if ("navigation" in window) navigate(runtime, options);
+  // ponytail: links stay document navigations without NavigateEvent.sourceElement (Chrome 135, Firefox 147,
+  // Safari 26.2), which carries the per-link opt-outs; earlier Navigation API versions would skip them.
+  if ("navigation" in window && "sourceElement" in NavigateEvent.prototype) navigate(runtime, options);
   document.dispatchEvent(new Event("hk:ready"));
 }
 

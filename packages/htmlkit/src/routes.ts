@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HtmlKitError, within } from "./config.js";
 import { applicationResource, pageDefinition } from "./resource.js";
@@ -120,6 +120,10 @@ export async function discover(root: string, options: DiscoveryOptions) {
           // The native resolver, as for the root: on Windows the JS one keeps 8.3 short names (RUNNER~1).
           try { real = realpathSync.native(absolute); } catch { throw new HtmlKitError(`Missing asset ${file}.`, component); }
           if (!within(realRoot, real) || !statSync(real).isFile()) throw new HtmlKitError(`Asset ${file} must be a file inside the application root.`, component);
+          // Never publish what a stray reference could name: dotfiles and dot folders (.env, .git) or keys.
+          if (relative(realRoot, real).split(sep).some(part => part.startsWith(".")) || /\.(?:pem|crt|key)$/i.test(real)) {
+            throw new HtmlKitError(`Asset ${file} is private: dotfiles, dot folders, keys, and certificates are never published.`, component);
+          }
           const name = `_htmlkit/files/${createHash("sha256").update(relative(realRoot, real)).digest("hex").slice(0, 16)}-${basename(real)}`;
           files.set(name, real);
           return base + name.split("/").map(encodeURIComponent).join("/");
@@ -162,7 +166,8 @@ export async function discover(root: string, options: DiscoveryOptions) {
     }
     pageNames.set(pageName, { component: route.component, pattern: route.pattern, identity });
     const metadata = resource.components.get(pageName)!;
-    const directory = layoutDefaults.find(([prefix]) => route.pattern.startsWith(prefix));
+    // An alias is a further URL for its page, so it takes the layout of the page's own URL.
+    const directory = layoutDefaults.find(([prefix]) => (route.canonical ?? route.pattern).startsWith(prefix));
     let selected = metadata.layout ?? directory?.[1] ?? options.layout;
     if (selected === undefined && route.layouts.length === 0) {
       try { await stat(resolve(root, "app/layouts/default.html")); selected = "default"; }

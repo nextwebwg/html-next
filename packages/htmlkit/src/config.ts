@@ -13,6 +13,8 @@ export function within(parent: string, child: string): boolean {
   return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 export function configure(options: ApplicationOptions) {
+  // Removed with the always-on 01. ordering; name that rather than quietly move pages to /01-guide/.
+  if ("routeOrdering" in options) throw new HtmlKitError("The routeOrdering option was removed: a number and a dot (01.guide/) always orders pages.");
   const root = resolve(options.root ?? process.cwd());
   const base = options.base ?? "/";
   if (!/^\/(?:[A-Za-z0-9_-]+\/)*$/.test(base)) throw new HtmlKitError("base must be an absolute path with a trailing slash, for example /docs/.");

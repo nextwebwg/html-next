@@ -115,7 +115,8 @@ navigation.addEventListener('navigatesuccess', () => {
 
 ## Browser support
 
-Client navigation needs the Navigation API: Chrome and Edge 102, Firefox 147, and Safari 26.2.
+Client navigation needs the Navigation API with `NavigateEvent.sourceElement`: Chrome and Edge 135,
+Firefox 147, and Safari 26.2.
 Older browsers and readers without JavaScript load every page in full, with the same result.
 
 In `htmlkit dev`, styles from pages you've visited stay loaded until the next full reload. Built

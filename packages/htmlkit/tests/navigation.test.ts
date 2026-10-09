@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -72,4 +73,14 @@ it("names the hk: spelling for metadata written with the old htmlkit: prefix", a
   const root = await site();
   await write(root, "app/pages/about.html", '<template component="page-about"><meta name="htmlkit:label" content="About"><h1>about</h1></template>');
   await expect(discoverRoutes(root)).rejects.toThrow(/write hk:label instead of htmlkit:label/);
+});
+
+it("names the removed routeOrdering option and exports every built-in component", async () => {
+  const root = await mkdtemp(join(tmpdir(), "htmlkit-removed-")); roots.push(root);
+  await expect(createApplication({ root, routeOrdering: true } as never)).rejects.toThrow(/routeOrdering option was removed/);
+  // Package consumers link built-ins by specifier, through exports rather than HTMLKit's import map.
+  const require = createRequire(import.meta.url);
+  for (const file of await readdir(new URL("../components/", import.meta.url))) {
+    expect(require.resolve(`@nextwebwg/htmlkit/components/${file}`).replaceAll("\\", "/")).toMatch(new RegExp(`/components/${file}$`));
+  }
 });
