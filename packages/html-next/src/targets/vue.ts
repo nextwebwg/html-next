@@ -25,9 +25,9 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../te
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { conformingScalarStates, literalInitial } from "./state-roots.js";
+import { conformingScalarStates } from "./state-roots.js";
 import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
@@ -35,7 +35,7 @@ import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
 import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
-import { handlerDestinationCheck, typeCheck } from "./type-guards.js";
+import { conformingLiteralWrite, handlerDestinationCheck, setSteps, typeCheck, WRITE_PREDICATES, writePredicate } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
@@ -762,32 +762,6 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
   }
   const parameter = lines.some((line) => /\bevent\b/.test(line)) ? "event: Event" : "";
   return [`function ${name}(${parameter}): void {`, ...lines, "}"].join("\n");
-}
-
-/** A handler step that writes a literal the destination's declared type already accepts needs no check. */
-function conformingLiteralWrite(step: Extract<HandlerDeclaration["steps"][number], { kind: "set" }>, definition: ComponentDefinition): boolean {
-  if (step.writablePath.length !== 1) return false;
-  const declaration = definition.declarations?.find((entry) => entry.kind === "state" && entry.name === step.writablePath[0]);
-  if (declaration?.kind !== "state") return false;
-  const node = declarationTypeNode(declaration.type, declaration.shape);
-  const literal = literalInitial(step.value.ast);
-  return node !== undefined && literal !== undefined && literal.value !== null && parseTypedValue(literal.value, node, "$", "value").ok;
-}
-
-function setSteps(handler: HandlerDeclaration): number {
-  return handler.steps.filter((step) => step.kind === "set").length;
-}
-
-/** The shared host's named predicates for scalar destinations; other types check inline. */
-const WRITE_PREDICATES: Readonly<Record<string, string>> = {
-  'typeof value === "string"': "isString",
-  '(typeof value === "number" && Number.isFinite(value))': "isNumber",
-  "Number.isInteger(value)": "isInteger",
-  'typeof value === "boolean"': "isBoolean",
-};
-
-function writePredicate(check: string): string {
-  return WRITE_PREDICATES[check] ?? `(value: any) => ${check}`;
 }
 
 /** One `data-<tag>-state` token source per styled name: the bare name when truthy, and name=value. */

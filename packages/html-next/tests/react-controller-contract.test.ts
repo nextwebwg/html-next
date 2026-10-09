@@ -9,7 +9,7 @@ import { JSDOM } from "jsdom";
 import { parseComponent } from "../src/source-parser.js";
 import { generateReactOutput } from "../src/targets/react.js";
 import { reactHostArtifact } from "../src/targets/react-host.js";
-import { nativeEventsModule } from "../src/targets/react-events.js";
+import { reactEventsArtifact } from "../src/targets/react-events.js";
 import { reactPropsArtifact } from "../src/targets/react-props.js";
 import { reactRenderArtifact } from "../src/targets/react-render.js";
 
@@ -220,7 +220,7 @@ describe("React controller contract", () => {
       return module.exports;
     };
     modules.set("./props", await evaluate(reactPropsArtifact("test").content));
-    modules.set("./events", await evaluate(nativeEventsModule("test", true)));
+    modules.set("./events", await evaluate(reactEventsArtifact("test", true).content));
     modules.set("./host", await evaluate(reactHostArtifact("test").content));
     modules.set("./context", { componentContext: () => React.createContext({ value: undefined }) });
     modules.set("./render", await evaluate(reactRenderArtifact("test").content, "tsx"));
