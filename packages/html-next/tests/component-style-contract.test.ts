@@ -97,3 +97,11 @@ it("keeps Vue grouping rules in the component scope and keyframes document-wide"
   assert.match(result.css, /\*::after/);
   assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });
+
+it("keeps a component type selector's namespace in Vue's class form", () => {
+  const nested = parseComponent('<template component="x-ns"><div><x-ns-child></x-ns-child></div></template>');
+  const css = compileComponentStylesForVue('@namespace n "http://www.w3.org/1999/xhtml"; :host:is(n|x-ns) { color: red; } *|x-ns-child { color: blue; }', nested).css;
+  assert.match(css, /:is\((htmlnextns\w+)\|x-ns, \1\|\*\.x-ns\)/);
+  assert.match(css, /:is\(\*\|x-ns-child, \*\|\*\.x-ns-child\)/);
+  assert.doesNotMatch(css, /\|:is\(/);
+});

@@ -76,6 +76,20 @@ const cases: readonly ParityCase[] = [
     expectedAfter: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'],
   },
   {
+    name: "namespaced component type selectors keep their namespace",
+    features: ["scoped styles", "namespaces", "host"],
+    definitions: {
+      "x-ns-host": `<template component="x-ns-host"><p>Host</p><style>@namespace n "http://www.w3.org/1999/xhtml";
+        :host:is(n|x-ns-host) { border-top: 3px solid; }</style></template>`,
+    },
+    invocation: `<x-ns-host id="case"></x-ns-host>`,
+    vueRender: `h(XNsHost, { id: "case" })`,
+    root: "#case",
+    probe: `({ border: getComputedStyle(root).borderTopWidth })`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: { border: "3px" },
+  },
+  {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
     features: ["scoped styles", "delegated root", "host pseudo-elements"],
     definitions: {
