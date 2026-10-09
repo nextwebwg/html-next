@@ -44,7 +44,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(stylePackage, "production.css"), ':host { font-weight: 700; }');
     await writeFile(join(stylePackage, "development.css"), ':host { font-weight: 400; }');
     await writeFile(join(stylePackage, "fallback.css"), ':host { font-weight: 900; }');
-    await writeFile(join(root, "styles/defaults.css"), ':host, *, *::before, *::after { box-sizing: border-box; } .icon { background: url("./check.svg"); }');
+    await writeFile(join(root, "styles/defaults.css"), '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: rebeccapurple; } :host, *, *::before, *::after { box-sizing: border-box; } .icon { background: url("./check.svg"); }');
     await writeFile(join(root, "styles/check.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1"/></svg>');
     await writeFile(join(root, "a.html"), '<template component="x-a"><div></div><style>@import "@styles/defaults.css?baseline=1"; @import "shared-defaults"; :host { box-sizing: content-box; }</style></template>');
     await writeFile(join(root, "b.html"), '<template component="x-b"><section></section><style>@import "@styles/defaults.css?baseline=1"; @import "shared-defaults";</style></template>');
@@ -57,6 +57,9 @@ describe("HTML Next unplugin", () => {
       resolve: { alias: { ...generatedRuntimeAlias, "@styles": join(root, "styles") } },
       build: { minify: false, cssMinify: false, lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } } });
     const css = await readFile(join(root, "dist/components.css"), "utf8");
+    assert.equal(css.match(/@namespace/g)?.length, 1);
+    assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
+    assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
     assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
     assert.match(css, /@scope\s*\(\[data-component~="x-a"\], \[data-component~="x-b"\]\)/);
     assert.ok(css.indexOf("border-box") < css.indexOf("content-box"));
