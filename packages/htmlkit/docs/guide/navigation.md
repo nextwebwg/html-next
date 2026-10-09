@@ -53,4 +53,4 @@ renders native anchors in a flat list with `data-depth` on each item; it adds no
 to `/`; `current` is a deployment pathname and defaults to the current page inside a loader.
 Static entries are materialized once per application so rendering and navigation use the same catalog.
 
-Next: [Configuration and API](/htmlkit/configuration).
+Next: [Moving between pages](/htmlkit/client-navigation).

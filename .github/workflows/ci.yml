@@ -66,7 +66,9 @@ jobs:
       matrix:
         # Parity shards are balanced by measured spec time (vitest.targets.config.ts), about 8.5 minutes each.
         include:
-          - { suite: runtime and consumers, command: pnpm test:browser && pnpm test:consumer }
+          - { suite: runtime and consumers, command: pnpm test:browser --exclude 'packages/htmlkit/**' && pnpm test:consumer }
+          # HTMLKit builds and serves applications for each engine, so it runs beside the runtime suite.
+          - { suite: HTMLKit, command: pnpm test:browser packages/htmlkit }
           - { suite: framework parity 1/6, command: pnpm test:targets --shard=1/6 }
           - { suite: framework parity 2/6, command: pnpm test:targets --shard=2/6 }
           - { suite: framework parity 3/6, command: pnpm test:targets --shard=3/6 }

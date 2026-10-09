@@ -7,6 +7,7 @@ const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]runtime\.js$/, "/src/runtime.ts");
 // Workspace source execution can test the same entry before packages have been built.
 const runtime = import.meta.url.endsWith(".ts") && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
+const client = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./client.ts" : "./client.js", import.meta.url));
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
   const sources = new Map<string, string>();
@@ -18,7 +19,7 @@ export function stylesheetSources(components: readonly BrowserDefinition[]): Rea
   return sources;
 }
 
-/** HTML Next owns adoption, observation, reads, controllers, and teardown. */
+/** HTML Next owns adoption, observation, reads, controllers, and teardown; client.ts shares them across pages. */
 export function browserSource(components: readonly BrowserDefinition[], base: string): string {
   const controlled = components.filter(component => component.controller !== undefined);
   const definitions = components.map(({ definition }) => ({ ...definition, css: definition.css ? "/* external stylesheet */" : "",
@@ -40,26 +41,16 @@ export function browserSource(components: readonly BrowserDefinition[], base: st
       return declaration;
     });
   }
-  return `import { registerComponentDefinitions, observeDocument, getComponentHost } from ${JSON.stringify(runtime)};
+  return `import { registerComponentDefinitions, observeDocument, getComponentHost, adoptRenderedProps } from ${JSON.stringify(runtime)};
+import { page } from ${JSON.stringify(client)};
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
 ${reads.map((read, i) => `import read${i} from ${JSON.stringify(read.asset + "?url&no-inline")};`).join("\n")}
 ${controlled.map((component, index) => `import * as controller${index} from ${JSON.stringify(component.controller)};`).join("\n")}
-const controllers = { ${controlled.map((component, index) => `${JSON.stringify(component.definition.contract.tag)}: controller${index}`).join(",")} };
-const styleStates = ${JSON.stringify(Object.fromEntries(components.map(component => [component.definition.contract.tag, component.styles.stateNames])))};
 const definitions = ${JSON.stringify(definitions)};
 ${reads.map((read, i) => `definitions[${read.definition}].declarations[${read.declaration}].source = read${i} + ${JSON.stringify(read.suffix)};`).join("\n")}
-registerComponentDefinitions(definitions, document, (_css, definition) => ({ css: '', stateNames: styleStates[definition.contract.tag] ?? [] }));
-const initialized = new WeakSet();
-export const stop = observeDocument(document, { onConnect(element, definition) {
-  const controller = controllers[definition.contract.tag];
-  if (!controller) return;
-  if (typeof controller.default !== 'function') throw new Error('Controller for ' + definition.contract.tag + ' must export a default function');
-  const host = getComponentHost(element);
-  if (initialized.has(host)) return;
-  initialized.add(host);
-  return controller.default(host);
-} });
-document.dispatchEvent(new Event('hk:ready'));
+page({ registerComponentDefinitions, observeDocument, getComponentHost, adoptRenderedProps }, ${JSON.stringify(base)}, definitions,
+  { ${controlled.map((component, index) => `${JSON.stringify(component.definition.contract.tag)}: controller${index}`).join(",")} },
+  ${JSON.stringify(Object.fromEntries(components.map(component => [component.definition.contract.tag, component.styles.stateNames])))});
 `;
 }
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.42
+
+- HTMLKit navigates between pages in place, as Nuxt does. After the first page hydrates, a link to another page under the base fetches that page's static HTML, loads its browser module, keeps every layout the two pages share with its DOM, state, and controller, and swaps the rest. A kept layout takes its loader's new props, so `<hk-nav>` marks the new page current. The title and head metadata follow the new page, and screen readers hear its title. It uses the Navigation API (Chrome 102, Firefox 147, Safari 26.2), so back and forward, scrolling, and focus behave as for document loads; older browsers and readers without JavaScript keep loading whole pages.
+- HTMLKit prefetches a page when a link keeps the pointer or keyboard focus for 80 ms. Other sites, other base paths, files, downloads, new tabs, modified clicks, same-page fragments, posted forms, and links inside `data-hk-reload` load normally, and a page that cannot render in place (missing, failed, or redefining a component already on the page) loads as a document. An author's `@view-transition { navigation: auto; }` animates client navigation too. The browser modules share one client, which adds 2.3 KB gzip (5.6%) to the first page; `docs/client-navigation.md` records the design and measurements.
+- HTML Next's `adoptRenderedProps(element, rendered)` applies the props a fresh server rendering recorded on a component root to a live instance a framework keeps, through the `updateComponentProps` channel, without resetting its state or DOM.
+
 ## 1.0.0-alpha.41
 
 ### Breaking

@@ -14,8 +14,9 @@ corepack pnpm exec htmlkit preview
 ```
 
 **Guide:** [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/) covers routes and layouts,
-loaders and browser delivery, ordered routes and navigation, and configuration. Its source is
-[`docs/guide`](./docs/guide/) in this package.
+loaders and browser delivery, ordered routes and navigation, moving between pages, and
+configuration. Its source is [`docs/guide`](./docs/guide/) in this package.
+[The client-navigation design](./docs/client-navigation.md) records how pages swap in place.
 
 ## Proof applications
 

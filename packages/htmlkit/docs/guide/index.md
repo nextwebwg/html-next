@@ -37,6 +37,7 @@ base path, and configure the host's missing-page response to use `404.html`.
 | Lay out pages, URLs, and shared shells | [Routes and layouts](/htmlkit/routes) |
 | Load data for a page and understand what reaches the browser | [Loaders and the browser](/htmlkit/loaders) |
 | Order pages and build a site navigation | [Ordered routes and navigation](/htmlkit/navigation) |
+| Move between pages without reloading | [Moving between pages](/htmlkit/client-navigation) |
 | Register routes in code or use HTMLKit as a library | [Configuration and API](/htmlkit/configuration) |
 
 HTMLKit renders [HTML Next](/html-next/) components. The component language itself is the [Declarative HTML Components](/declarative-components/) proposal.
