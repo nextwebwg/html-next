@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { fileURLToPath } from "node:url";
-
 import { convertComponents, type ConversionGraph, type FrameworkTarget } from "./index.js";
 
 function usage(): string {
@@ -25,7 +23,7 @@ async function main(argv: readonly string[]): Promise<void> {
   await convertComponents({ mode, entries: argv.slice(1, modeIndex), target, outDirectory, ...(publicRootURL === undefined ? {} : { publicRootURL }) });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   try {
     await main(process.argv.slice(2));
   } catch (error) {

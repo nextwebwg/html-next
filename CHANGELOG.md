@@ -46,6 +46,7 @@
 
 - Hydration by the live runtime adopts a `<template $each>` row's server nodes instead of rendering the row again beside them, which showed each row twice.
 - A compiled component evaluates an empty object or list literal (`format($names, 'list', {}, $locale)`, `format([], 'list')`) and a call with no arguments as the live runtime does. They compiled to a missing argument, so the call rendered nothing.
+- The `html-next` and `html-next-convert` commands run when started through their installed `node_modules/.bin` link, as `npx`, package scripts and direct calls do on macOS and Linux. Earlier releases exited there without output or files.
 
 ## 1.0.0-alpha.40
 
