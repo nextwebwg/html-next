@@ -180,7 +180,7 @@ it("lowers conditional and aliased child regions without wrapper elements", asyn
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["panel.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
   assert.match(await serverHtml(outDirectory, "XPanel", source), /<span>Shown<\/span>/);
-  assert.match(source, /\{@const htmlNextAlias =/);
+  assert.match(source, /\{@const user =/);
   compile(source, { filename: "XPanel.svelte", generate: "client" });
   compile(source, { filename: "XPanel.svelte", generate: "server" });
 });
@@ -261,9 +261,9 @@ it("converts nested-folder component graphs and parses child HTML literals by th
       "svelte/components/nested/XChild.svelte", "svelte/components/XParent.svelte",
     ]);
     const parent = await readFile(join(outDirectory, "svelte/components/XParent.svelte"), "utf8");
-    assert.match(parent, /import XChild from "\.\/nested\/XChild\.svelte"/);
+    assert.match(parent, /import XChild from '\.\/nested\/XChild\.svelte'/);
     assert.match(parent, /amount=\{2\}/);
-    assert.match(parent, /label=\{"Ready"\}/);
+    assert.match(parent, /label="Ready"|label=\{"Ready"\}/);
     compile(parent, { filename: "XParent.svelte", generate: "client" });
     const entry = join(outDirectory, "server-entry.ts");
     await writeFile(entry, `import { render } from "svelte/server";
@@ -272,13 +272,7 @@ export const html = render(XParent).body;`);
     await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir");
     const outfile = join(outDirectory, "server.mjs");
     await build({ entryPoints: [entry], outfile, bundle: true, packages: "external", platform: "node", format: "esm",
-      loader: { ".css": "empty" }, plugins: [{ name: "svelte-server", setup(plugin) {
-        plugin.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({
-          contents: compile(await readFile(path, "utf8"), { filename: path, generate: "server" }).js.code,
-          loader: "js",
-          resolveDir: join(path, ".."),
-        }));
-      } }] });
+      loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
     const rendered = await import(pathToFileURL(outfile).href) as { html: string };
     assert.match(rendered.html, /<output[^>]*data-label="Ready"[^>]*>3<\/output>/);
   }
@@ -347,7 +341,7 @@ it("keeps each row's sanitized HTML boundary local to that row", async () => {
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["rows.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /\{#each [^}]+\}\{@const htmlSite0 = retainedSanitizedHtml\(\)\}/);
+  assert.match(source, /\{#each [^\n]*? as \{[^}]*\}[^}]*\}\{@const htmlSite0 = retainedSanitizedHtml\(\)\}/);
   compile(source, { filename: "XRows.svelte", generate: "client" });
   const html = (await serverHtml(outDirectory, "XRows", source)).replace(/<!--[\s\S]*?-->/g, "");
   assert.match(html, /<li[^>]*><b>A<\/b><\/li>.*<li[^>]*><i>B<\/i><\/li>/);

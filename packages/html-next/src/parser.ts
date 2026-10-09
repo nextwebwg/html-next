@@ -6,6 +6,7 @@ import { checkExpressionSemantics, compileExpression, compilePath, getWritablePa
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
+  isPreformattedElement,
   isReservedElement,
   validateDefinitionElementName,
   validateLiteralAttributeName,
@@ -18,6 +19,7 @@ import type {
   ComponentDefinition,
   ComponentDeclaration,
   ElementNode,
+  ElementTransition,
   EventBinding,
   Flow,
   HandlerStep,
@@ -198,6 +200,8 @@ interface ParseScope {
   readonly aliases?: ReadonlyMap<string, Writable>;
   /** How many `$each` layers enclose this point, so a `loop.index` segment names the right loop. */
   readonly loops?: number;
+  /** Inside a preformatted element, where whitespace-only text renders. */
+  readonly preformatted?: boolean;
 }
 
 /**
@@ -1360,9 +1364,14 @@ function parseElementAtSource(
   const bindingAttributes: SourceAttribute[] = [];
   let eventAttributes: SourceAttribute[] | undefined;
   let refName: string | undefined;
+  let transitionValue: string | undefined;
+  let transitionName: string | undefined;
   for (const attribute of sourceAttributes(element)) {
     if (FLOW_NAME_RE.test(attribute.name)) (flowValues ??= {})[attribute.name] = attribute.value;
     else if (attribute.name === "$ref") refName = attribute.value;
+    // The `transitions` extension. Its value grammar is checked only where the extension is built.
+    else if (attribute.name === "$transition") transitionValue = attribute.value;
+    else if (attribute.name === "$transition-name") transitionName = attribute.value;
     else if (attribute.name.startsWith("on:")) (eventAttributes ??= []).push(attribute);
     else bindingAttributes.push(attribute);
   }
@@ -1379,10 +1388,11 @@ function parseElementAtSource(
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   const childScope = tagName === "template" && attr(element, "slot") !== undefined
     ? { ...nodeScope, allowUndeclared: true }
-    : nodeScope;
+    : isPreformattedElement(tagName) ? { ...nodeScope, preformatted: true } : nodeScope;
   const attributes = parseAttributes(bindingAttributes, tagName, contract, nodeScope, source, platform);
   const events = parseEvents(eventAttributes, nodeScope, source);
   const ref = parseRef(refName, slotState.refs, source);
+  const transition = parseTransition(element, tagName, transitionValue, transitionName, nodeScope, source);
   const children: TemplateNode[] = [];
   const childNodes = sourceChildren(element);
   // A root `$match` renders exactly one arm, so each arm may declare the same slots and refs.
@@ -1396,7 +1406,7 @@ function parseElementAtSource(
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
       const value = sourceText(child);
-      if (value.trim() !== "") children.push(...parseText(value, childScope, source));
+      if (childScope.preformatted === true || value.trim() !== "") children.push(...parseText(value, childScope, source));
       continue;
     }
     if (!isElement(child)) continue;
@@ -1446,7 +1456,7 @@ function parseElementAtSource(
         if (fallbackNode.nodeName === "#comment") continue;
         if (isText(fallbackNode)) {
           const value = sourceText(fallbackNode);
-          if (value.trim() !== "") fallback.push(...parseText(value, slotScope, source));
+          if (slotScope.preformatted === true || value.trim() !== "") fallback.push(...parseText(value, slotScope, source));
         } else if (isElement(fallbackNode)) {
           fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
         }
@@ -1563,6 +1573,7 @@ function parseElementAtSource(
     flow?: Flow;
     events?: EventBinding[];
     ref?: string;
+    transition?: ElementTransition;
   } = {
     kind: "element",
     name: tagName,
@@ -1572,7 +1583,36 @@ function parseElementAtSource(
   if (flow !== undefined) parsed.flow = flow;
   if (events !== undefined) parsed.events = events;
   if (ref !== undefined) parsed.ref = ref;
+  if (transition !== undefined) parsed.transition = transition;
   return parsed;
+}
+
+function parseTransition(
+  element: Element,
+  tagName: string,
+  value: string | undefined,
+  name: string | undefined,
+  scope: ParseScope,
+  source: string,
+): ElementTransition | undefined {
+  if (value === undefined && name === undefined) return undefined;
+  if (tagName === "template") {
+    scope.report?.({
+      code: "HT026",
+      message: "A `<template>` has no box to animate; put `$transition` and `$transition-name` on the elements inside it.",
+      source,
+      ...scope.at,
+      severity: "warning",
+    });
+    return undefined;
+  }
+  const transition: { -readonly [K in keyof ElementTransition]: ElementTransition[K] } = { ...sourceLocation(element) };
+  if (value !== undefined) transition.value = value.trim();
+  if (name !== undefined) {
+    transition.name = name;
+    transition.namePlan = compileScopedExpression(name, scope, source);
+  }
+  return transition;
 }
 
 export function parseComponentNodes(...args: Parameters<typeof parseComponentNodesAtSource>): ComponentDefinition {

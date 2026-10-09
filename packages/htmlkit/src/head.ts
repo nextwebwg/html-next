@@ -36,11 +36,11 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
     const fragment = parseFragment(metadata.head);
     for (const node of fragment.childNodes) {
       if (!("tagName" in node)) continue;
-      node.attrs.push({ name: "data-htmlkit-head", value: node.tagName });
+      node.attrs.push({ name: "data-hk-head", value: node.tagName });
       node.tagName = "span";
       node.nodeName = "span";
     }
-    const headDefinition = parseComponent(`<template component="htmlkit-head"><defs>${metadata.propDeclarations}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
+    const headDefinition = parseComponent(`<template component="hk-head"><defs>${metadata.propDeclarations}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
     const rendered = await renderComponents(invoke(headDefinition, { props: result.props ?? {} }), { definitions: [headDefinition], url });
     const root = parseFragment(rendered.html).childNodes.find(node => "tagName" in node);
     if (root === undefined || !("childNodes" in root)) throw new HtmlKitError("Head rendering produced no root.", definition.source.file);
@@ -48,10 +48,10 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
     const current: HeadElement[] = [];
     for (const node of root.childNodes) {
       if (!("tagName" in node)) continue;
-      const tag = node.attrs.find(attribute => attribute.name === "data-htmlkit-head")?.value;
+      const tag = node.attrs.find(attribute => attribute.name === "data-hk-head")?.value;
       if (tag === "title") { title = text(node); continue; }
       if (tag !== "meta" && tag !== "link") throw new HtmlKitError("Head content must render title, meta, or link elements.", definition.source.file);
-      const attributes = Object.fromEntries(node.attrs.filter(attribute => attribute.name !== "data-htmlkit-head").map(attribute => [attribute.name, attribute.value]));
+      const attributes = Object.fromEntries(node.attrs.filter(attribute => attribute.name !== "data-hk-head").map(attribute => [attribute.name, attribute.value]));
       if (Object.keys(attributes).some(name => name.startsWith("on")) || (tag === "meta" && attributes["http-equiv"] !== undefined)) {
         throw new HtmlKitError("Head metadata cannot activate event handlers or http-equiv policies.", definition.source.file);
       }
@@ -69,6 +69,8 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
     for (let i = elements.length - 1; i >= 0; i--) if (replaced.has(identity(elements[i]!) ?? "")) elements.splice(i, 1);
     elements.push(...current);
   }
-  return { ...previous, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...result.head,
+  // Only PageHead fields: an untyped loader's extra head keys must not reach the document assembler.
+  const loaded = Object.entries(result.head ?? {}).filter(([name]) => name === "title" || name === "description" || name === "lang");
+  return { ...previous, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...Object.fromEntries(loaded),
     elements };
 }

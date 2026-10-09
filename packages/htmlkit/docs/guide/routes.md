@@ -1,146 +1,152 @@
 ---
-title: Routes and layouts
+title: Pages and routing
 order: 1
-blurb: file routes · layouts · page head
+blurb: file routes · dynamic pages · layouts · page head
 eyebrow: HTMLKit
 ---
 
-# Routes and layouts
+# Pages and routing
 
-File routes follow familiar Nuxt directory and parameter names:
+Every file in `app/pages` is a page, and its path is its URL:
+
+| File | URL |
+| --- | --- |
+| `app/pages/index.html` | `/` |
+| `app/pages/about.html` | `/about/` |
+| `app/pages/blog/index.html` | `/blog/` |
+| `app/pages/blog/first-post.html` | `/blog/first-post/` |
+| `app/pages/blog/[slug].html` | `/blog/anything/` (one page per value) |
+
+A few rules cover the rest:
+
+- `index.html` is its folder's page.
+- URLs end with a slash; HTMLKit redirects `/about` to `/about/`.
+- Files and folders starting with `_` or `.` are not pages, so keep helpers there or in `app/components`.
+- A number and a dot at the start of a name, as in `01.guide/`, orders [navigation](/htmlkit/navigation)
+  and never appears in the URL.
+
+## A page
+
+A page is an HTML Next component. Its `<title>` and `<meta>` tags go in the page's `<head>`:
+
+```html
+<!-- app/pages/about.html -->
+<template component="page-about">
+  <title>About us</title>
+  <meta name="description" content="Who we are.">
+  <main>
+    <h1>About us</h1>
+  </main>
+</template>
+```
+
+Component names must be unique across the site. A `page-` prefix keeps them apart from your other
+components.
+
+If a file declares more than one component, say which one is the page:
+
+```html
+<meta name="hk:page" content="page-about">
+<template component="team-card">…</template>
+<template component="page-about">…</template>
+```
+
+## Dynamic pages
+
+A name in brackets matches any single URL segment. Its value reaches the page through a
+[loader](/htmlkit/loaders), which also lists the pages to build:
 
 ```text
-app/
-  components/                 reusable HTML Next components
-  layouts/
-    default.html              automatic shared shell
-    default.server.ts         optional shell loader
-    admin.html                named alternative shell
-  pages/
-    index.html                /
-    index.server.ts           optional home loader
-    about.html                /about/
-    items/
-      [slug].html             /items/[slug]/
-      [slug].server.ts        loader and static entries
-public/                       files copied to the deployment root
-htmlkit.config.ts             optional configuration
+app/pages/blog/[slug].html        /blog/first-post/, /blog/second-post/, …
+app/pages/blog/[slug].server.ts   loads each post and lists the slugs
 ```
-
-A page resource selects one entry component. A single definition is inferred; a file with helper
-components must select its page using `<meta name="htmlkit:page" content="page-products">`.
-Selection never depends on declaration order. The file-level selector is separate from component-owned
-metadata: each page or layout declares its own title, description, links, and layout choice as direct
-children of its `<template component>`. Helpers use ordinary HTML Next component semantics; their
-metadata never contributes to the page head, even when the page renders them.
-Layouts each declare one root component and project the page through `<slot name="page"></slot>`.
-Component links and controllers use existing HTML Next syntax and resolution rules. Keep non-page
-resources outside `app/pages`; filenames beginning with `_` or `.` are ignored by file routing.
-
-Page component names must be unique across the application, including both file and registered
-routes. Discovery reports both conflicting files and route patterns before executing any loaders
-or controllers. Use `page-` by convention, for example `page-home`, `page-products`, and
-`page-product-detail`; the prefix is recommended rather than required. One page definition may
-serve several registered route aliases or many parameter values without needing another name.
-Renaming a page requires route rediscovery; the development server does this on file changes.
-
-Route URLs, component names, and bundle locations are separate identities. For example,
-`app/pages/shop.html` may declare `component="page-products"`; its URL is `/shop/`, and its generated
-browser module has an independent build-assigned location. `ApplicationRoute.pageName` exposes the
-component name separately from `pattern` and the `component` source path. The deployment manifest's
-`pages` records likewise separate `pathname`, `pageName`, and `browserModule`, so bundle grouping
-does not define application routes or authored component names.
-
-Each filename contributes a URL segment; `index.html` names its directory's URL. Whole segments
-such as `[slug]` become parameters. Literal segments take priority over parameters. Routes have
-trailing slashes; preview redirects directory URLs that omit them. Equivalent patterns and output
-collisions are errors. Optional parameters, mixed parameter segments, groups, catch-all routes,
-and client routing are outside this first delivery.
-
-The default layout is `app/layouts/default.html` when present. Page metadata chooses a named
-layout or disables it with `content="none"`. Layout selection is independent of the route URL;
-choosing `admin` replaces the default shell. Nested shells can compose ordinary HTML Next
-components explicitly. Adding a parent page never wraps descendant routes.
-
-```html
-<template component="page-products">
-  <meta name="htmlkit:layout" content="admin">
-  <meta name="description" content="Manage your products.">
-  <meta property="og:title" content="Product administration">
-  <title>Products · Admin</title>
-
-  <article><h1>Products</h1></article>
-</template>
-```
-
-A layout uses normal component syntax:
-
-```html
-<template component="admin-shell">
-  <title>Administration</title>
-  <meta name="description" content="Administration tools.">
-  <main><header>Administration</header><slot name="page"></slot></main>
-</template>
-```
-
-`htmlkit:*` metadata configures the build and is removed from the generated document. Ordinary
-`title`, `meta`, and metadata `link` elements directly inside a selected carrier contribute to the
-document head. They are siblings of `<defs>`, the rendered root, and `<style>`; no `<head>` wrapper
-is needed. Keep only `htmlkit:page` and component dependency links at file scope. HTMLKit diagnoses
-file-level head metadata instead of silently assigning it to a component. The regular HTML Next
-resource loader accepts and ignores resource-level and direct carrier metadata;
-it does not select layouts, update a host document, or evaluate their bindings. Resource-level
-`style`, `script`, `base`, policy `meta` (`http-equiv`), and arbitrary body nodes are rejected.
-Component styles inside a carrier and controller references retain their normal behavior.
-
-Head values may bind to the selected component's declared props, populated by its loader, using
-the existing HTML Next binding syntax:
-
-```html
-<template component="page-item">
-  <title $value="$label"></title>
-  <meta name="description" from:content="$description">
-  <link rel="canonical" from:href="$canonicalURL">
-  <defs>
-    <prop name="label" type="string" required>Item label</prop>
-    <prop name="description" type="string" required>Description</prop>
-    <prop name="canonicalURL" type="string" required>Canonical URL</prop>
-  </defs>
-  <article><h1 $value="$label"></h1></article>
-</template>
-```
-
-Head bindings use the same parser, prop contracts, serialization, and renderer as body bindings.
-They run during rendering against props; they do not start browser controllers, reads, or reactive
-subscriptions. Layout metadata supplies defaults. A page replaces matching title, description,
-meta name/property, canonical link, or alternate language/type/media defaults. The last singleton
-in a layer wins. Stylesheets and alternate languages remain repeatable; social image arrays stay
-ordered, and a page's image group replaces the layout's image group. A loader's `head` fields take
-precedence over that layer's declarative title/description. Values are escaped when assembled.
-Use public URLs (including `base` where needed) for head links; these links do not enter Vite's
-component stylesheet pipeline.
-
-Its `[slug].server.ts` can export:
 
 ```ts
-import type { LoadContext, LoaderResult } from '@nextwebwg/htmlkit';
+// app/pages/blog/[slug].server.ts
+export const entries = () => [{ slug: 'first-post' }, { slug: 'second-post' }];
 
-export const entries = () => [{ slug: 'one' }, { slug: 'two' }];
-export function load({ params }: LoadContext): LoaderResult {
-  return {
-    props: {
-      label: `Item ${params.slug}`, description: `Details for ${params.slug}`,
-      canonicalURL: `https://example.com/items/${params.slug}/`,
-    },
-    head: { title: `Item ${params.slug}` },
-  };
+export function load({ params }) {
+  return { props: { title: `Post ${params.slug}` } };
 }
 ```
 
-Development can render any matching parameter value. Static production requires `entries()` to
-list every intended parameterized page, including parameters from ancestor directories. It must
-return a nonempty array with exactly the declared parameter keys. Values must be single URL
-segments. Discovery and enumeration produce a complete build manifest; no link crawler decides
-which pages exist.
+When a literal page and a dynamic one could both match, the literal page wins.
 
-Next: [Loaders and the browser](/htmlkit/loaders).
+## Layouts
+
+A layout wraps pages. `app/layouts/default.html` wraps every page automatically; the page appears
+where the layout puts `<slot name="page">`:
+
+```html
+<!-- app/layouts/default.html -->
+<template component="site-shell">
+  <title>My site</title>
+  <header>My site</header>
+  <main><slot name="page"></slot></main>
+</template>
+```
+
+To use another layout for one page, name it; `content="none"` uses no layout:
+
+```html
+<template component="page-dashboard">
+  <meta name="hk:layout" content="admin">   <!-- app/layouts/admin.html -->
+  <h1>Dashboard</h1>
+</template>
+```
+
+To give a whole folder a layout, see `layoutDefaults` in [Configuration](/htmlkit/configuration).
+
+## The page head
+
+`<title>`, `<meta>`, and `<link>` tags directly inside a page or layout component go in the document
+head. A page's `<title>` and `<meta>` tags replace the layout's; stylesheet and alternate `<link>`s from
+both are kept. They can use the page's props:
+
+```html
+<template component="page-post">
+  <title>{$title}</title>
+  <meta name="description" from:content="$summary">
+  <defs>
+    <prop name="title" type="string" required>Post title</prop>
+    <prop name="summary" type="string" required>Post summary</prop>
+  </defs>
+  <article><h1>{$title}</h1></article>
+</template>
+```
+
+A loader can also set `head: { title, description, lang }`.
+
+Settings that start with `hk:` configure HTMLKit and never reach the page:
+
+| Metadata | Does |
+| --- | --- |
+| `hk:page` | Chooses the page component in a file with several components. Goes outside the components. |
+| `hk:layout` | Chooses a layout, or `none`. |
+| `hk:label` | Sets the page's label in [navigation](/htmlkit/navigation). |
+| `hk:navigation` | `content="hidden"` keeps the page out of navigation. |
+| `hk:alias` | Adds another URL for the page, such as `content="/start/"`. |
+
+## A script before first paint
+
+`app/head.js` runs in every page's head before anything is drawn, which is how a site applies a
+saved dark theme without a flash. Keep it small, because it delays the first paint:
+
+```js
+// app/head.js
+document.documentElement.dataset.theme = localStorage.getItem('theme') ?? 'light';
+```
+
+It cannot contain `<!--`, `<script`, or `</script`. If the site has a Content Security Policy,
+allow it with a `'sha256-…'` hash of its text.
+
+## Details
+
+- Two files that produce the same URL are an error that names both files.
+- Literal URL segments take priority over parameters. Optional and catch-all parameters are not
+  supported yet.
+- Pages, layouts, and components link other components with
+  `<link rel="component" href="…">`. `@/` is the project root, so
+  `href="@/components/card.html"` works from anywhere.
+- Outside HTMLKit, the regular HTML Next loader ignores page metadata, so the same component files
+  still work there.

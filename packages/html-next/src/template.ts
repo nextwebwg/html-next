@@ -152,6 +152,22 @@ export interface ElementNode {
   readonly flow?: Flow;
   readonly events?: readonly EventBinding[];
   readonly ref?: string;
+  /** The `transitions` extension's directives on this element. */
+  readonly transition?: ElementTransition;
+}
+
+/**
+ * `$transition` and `$transition-name`, as authored. The value stays unparsed: only a build that
+ * enables the `transitions` extension reads its grammar, so the live runtime carries none of it.
+ */
+export interface ElementTransition {
+  /** The `$transition` literal, trimmed: a keyframes name and optional duration, easing, and delay. */
+  readonly value?: string;
+  /** The `$transition-name` expression. */
+  readonly name?: string;
+  readonly namePlan?: CompiledExpression;
+  readonly line?: number;
+  readonly column?: number;
 }
 
 export interface EventBinding {
@@ -273,6 +289,22 @@ export function elementMatchRoot(node: ElementNode): ElementNode {
     ...wrapper,
     children: [{ kind: "element", name: "template", attributes: [], children, flow }],
   };
+}
+
+/**
+ * The dynamic slot names a region's body reads as it renders: outside its own regions, fallbacks
+ * included. A change to their text rebuilds the body, as a change to its decision does.
+ */
+const slotNames = new WeakMap<ElementNode, readonly CompiledExpression[]>();
+
+export function dynamicSlotNames(body: ElementNode): readonly CompiledExpression[] {
+  const collect = (children: readonly TemplateNode[]): CompiledExpression[] => children.flatMap((child): CompiledExpression[] => {
+    if (child.kind === "slot") return child.flow !== undefined ? [] : [...child.nameExpression === undefined ? [] : [child.nameExpression], ...collect(child.fallback ?? [])];
+    return child.kind === "element" && child.flow === undefined ? collect(child.children) : [];
+  });
+  let names = slotNames.get(body);
+  if (names === undefined) slotNames.set(body, names = collect(body.children));
+  return names;
 }
 
 /**

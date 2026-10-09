@@ -71,6 +71,21 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "keeps whitespace-only text between elements and rows inside pre",
+    source: scene({
+      defs: `<state name="lines" type="list(string)" value="['c', 'd']"></state>`,
+      root: `<pre><code><span class="line"><span>a</span><span>1</span></span>
+<span class="line">b</span>
+<template $each="line of $lines"><span class="line">{$line}</span>
+</template></code></pre>`,
+      use: `<x-t id="code"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#code').textContent;`,
+      result: "a1\nb\nc\nd\n",
+    },
+  },
+  {
     name: "preserves SVG namespaces and camelCase attributes inside a native root",
     source: scene({
       tag: "icon-close",
@@ -488,6 +503,68 @@ const successes: ConformanceCase[] = [
       result: { conditional: null, alias: null, match: null, rows: [] },
       after: [
         { action: `document.querySelector('#b button').click();`, result: { conditional: "shown", alias: "2px", match: "other", rows: ["2px"] } },
+      ],
+    },
+  },
+  {
+    name: "$if, $with and $match keep their content while the decision holds, and rebuild it when it changes",
+    source: scene({
+      defs:
+        `<state name="count" type="number" value="1"></state>` +
+        `<handler name="add"><set name="count" expr:value="$count + 1"></set></handler>` +
+        `<handler name="clear"><set name="count" value="0"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="add">Add</button><button type="button" on:click="clear">Clear</button>` +
+        `<p class="if" $if="$count > 0"><input></p>` +
+        `<p class="with" $with="$count as n"><input><b>{$n}</b></p>` +
+        `<template $match="$count as n"><p class="small" $when="$n < 3"><input></p><p class="large" $else><input></p></template></div>`,
+      use: `<x-t id="kept"></x-t>`,
+    }),
+    expect: {
+      // Each input's region, its value, and whether it is the node typed into.
+      probe: `return qa('#kept input').map((input) => [input.parentElement.className, input.value, input.typed === true]).concat([[q('#kept b').textContent]]);`,
+      result: [["if", "", false], ["with", "", false], ["small", "", false], ["1"]],
+      after: [
+        {
+          action: `for (const input of document.querySelectorAll('#kept input')) { input.value = 'typed'; input.typed = true; } document.querySelectorAll('#kept button')[0].click();`,
+          result: [["if", "typed", true], ["with", "typed", true], ["small", "typed", true], ["2"]],
+        },
+        { action: `document.querySelectorAll('#kept button')[0].click();`, result: [["if", "typed", true], ["with", "typed", true], ["large", "", false], ["3"]] },
+        { action: `document.querySelectorAll('#kept button')[1].click();`, result: [["with", "typed", true], ["small", "", false], ["0"]] },
+      ],
+    },
+  },
+  {
+    name: "bindings and bound controls write no attribute when a change leaves their result as it was",
+    source: scene({
+      defs:
+        `<state name="a" type="number" value="1"></state><state name="b" type="number" value="2"></state>` +
+        `<state name="count" type="number" value="0"></state><state name="text" type="string" value="hi"></state>` +
+        `<state name="flag" type="boolean" value="true"></state><state name="choice" type="string" value="y"></state>` +
+        `<handler name="swap"><set name="a" value="2"></set><set name="b" value="1"></set></handler>` +
+        `<handler name="bump"><set name="count" expr:value="$count + 1"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="swap">Swap</button><button type="button" on:click="bump">Bump</button>` +
+        `<p from:title="$a + $b" class:wide="$a + $b > 2" style:--sum="$a + $b">{$a + $b}</p>` +
+        `<input bind:value="text"><input type="checkbox" bind:checked="flag">` +
+        `<select bind:value="choice"><option value="x">X</option><option value="y">Y</option></select>` +
+        `<output $value="$count"></output></div>`,
+      use: `<x-t id="w"></x-t>`,
+    }),
+    expect: {
+      // Attribute writes during each step: a swap that keeps the sum, then a re-render around the controls.
+      probe: `return { writes: window.attributeWrites ?? null, sum: q('#w p').textContent, count: q('#w output').textContent };`,
+      result: { writes: null, sum: "3", count: "0" },
+      after: [
+        {
+          // Screenshots hide the caret with an inline style on the controls, so their style is not watched.
+          action: `window.attributeWrites = []; const observer = new MutationObserver((records) => { for (const record of records) window.attributeWrites.push(record.attributeName); });` +
+            `for (const element of document.querySelectorAll('#w, #w p, #w option')) observer.observe(element, { attributes: true });` +
+            `for (const control of document.querySelectorAll('#w input, #w select')) observer.observe(control, { attributes: true, attributeFilter: ['value', 'checked', 'name', 'type', 'title', 'class', 'aria-invalid'] });` +
+            `document.querySelectorAll('#w button')[0].click();`,
+          result: { writes: [], sum: "3", count: "0" },
+        },
+        { action: `window.attributeWrites = []; document.querySelectorAll('#w button')[1].click();`, result: { writes: [], sum: "3", count: "1" } },
       ],
     },
   },

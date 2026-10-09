@@ -14,6 +14,9 @@
       ],
       "@nextwebwg/html-next/server": [
         "../html-next/src/server.ts"
+      ],
+      "@nextwebwg/html-next/runtime": [
+        "../html-next/src/runtime.ts"
       ]
     }
   },

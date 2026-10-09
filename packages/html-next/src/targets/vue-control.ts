@@ -70,11 +70,14 @@ function writeBoundControl(element: Control, binding: BoundControl): void {
 /** SSR must not turn a live property binding into a new native form-reset default. */
 function restoreDefault(element: Control, binding: Pick<BoundControl, "name" | "defaultValue" | "defaultChecked">): void {
   if (element instanceof HTMLInputElement && binding.name === "checked") {
+    // Defaults already in place are not written again.
+    if (element.defaultChecked === (binding.defaultChecked ?? false)) return;
     const current = element.checked;
     element.checked = current;
     element.defaultChecked = binding.defaultChecked ?? false;
     element.checked = current;
   } else if (!(element instanceof HTMLSelectElement)) {
+    if (element.defaultValue === (binding.defaultValue ?? "")) return;
     const current = element.value;
     element.value = current;
     element.defaultValue = binding.defaultValue ?? "";
@@ -117,6 +120,8 @@ export const SelectedOptions = defineComponent({
     const restoreDefaults = () => {
       const options = defaults.flatMap(([node, original]) =>
         node.el instanceof HTMLOptionElement ? [{ option: node.el, original, selected: node.el.selected }] : []);
+      // Defaults already in place are not written again on each update.
+      if (options.every(({ option, original }) => option.defaultSelected === original)) return;
       for (const { option, original } of options) option.defaultSelected = original;
       // Setting one default can change another option's live selection in a single select.
       // Restore the full pre-default selection only after every authored default is in place.

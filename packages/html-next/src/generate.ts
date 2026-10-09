@@ -1,6 +1,7 @@
 import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
+import { TRANSITIONS_EXTENSION } from "./transition-syntax.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
 import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
 import { generateSvelteOutput, type SvelteConversionOptions, type SvelteConversionOutput } from "./targets/svelte.js";
@@ -11,11 +12,13 @@ import { reactHtmlArtifact as makeReactHtmlArtifact } from "./targets/react-html
 import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host.js";
 import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
+import { reactRenderArtifact as makeReactRenderArtifact } from "./targets/react-render.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
 import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
 import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
+import { svelteRenderArtifact as makeSvelteRenderArtifact } from "./targets/svelte-render.js";
 import { svelteDataArtifact as makeSvelteDataArtifact } from "./targets/svelte-data.js";
 import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
 import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
@@ -30,7 +33,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.40";
+export const GENERATOR_VERSION = "1.0.0-alpha.41";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -46,6 +49,16 @@ export interface GenerationOptions {
    * renders the registered component; a tag not listed stays a plain custom element.
    */
   readonly invocations?: ReadonlyMap<string, Invoked>;
+  /**
+   * Optional language extensions the build enables, by name. A component that uses one the build
+   * does not enable fails `HT024`.
+   */
+  readonly extensions?: readonly string[];
+  /**
+   * The Vanilla factory also adopts a server-rendered root, given as its third argument, binding that
+   * DOM in place (see `docs/compiled-direct-path.md`, Hydration).
+   */
+  readonly hydrate?: boolean;
 }
 
 /** A component another's template invokes: the module exporting its factory, and its definition. */
@@ -58,7 +71,8 @@ export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
@@ -126,6 +140,11 @@ export function svelteDataArtifact(): GeneratedArtifact {
   return makeSvelteDataArtifact(GENERATOR_VERSION);
 }
 
+/** The rendering helpers converted Svelte components share; every package that emits Svelte ships it once. */
+export function svelteRenderArtifact(): GeneratedArtifact {
+  return makeSvelteRenderArtifact(GENERATOR_VERSION);
+}
+
 export function sveltePropsArtifact(): GeneratedArtifact {
   return makeSveltePropsArtifact(GENERATOR_VERSION);
 }
@@ -170,6 +189,11 @@ export function reactDepthArtifact(): GeneratedArtifact {
   return makeReactDepthArtifact(GENERATOR_VERSION);
 }
 
+/** The rendering helpers converted React components share; every package that emits React ships it once. */
+export function reactRenderArtifact(): GeneratedArtifact {
+  return makeReactRenderArtifact(GENERATOR_VERSION);
+}
+
 export { importsVueHost } from "./targets/vue-host.js";
 export { importsVueHtml } from "./targets/vue-html.js";
 export { importsVueControl } from "./targets/vue-control.js";
@@ -206,7 +230,7 @@ export function generateReactConversion(definition: ComponentDefinition, options
 }
 
 export function generateSvelteConversion(definition: ComponentDefinition, options?: SvelteConversionOptions): SvelteConversionOutput {
-  return generateSvelteOutput(inlineStylesheetSources(definition), options);
+  return generateSvelteOutput(inlineStylesheetSources(definition), GENERATOR_VERSION, options);
 }
 
 function inlineStylesheetSources(definition: ComponentDefinition): ComponentDefinition {

@@ -502,7 +502,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
-    it(`${engine} renews each loop record on every list run`, async () => {
+    it(`${engine} keeps each row's loop record through list runs that leave its fields as they were`, async () => {
       const definition = parseComponent(`<template component="loop-record-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
         </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-index="$loop.index" from:data-edge="$loop.first ? 'first' : $loop.last ? 'last' : ''">
@@ -521,8 +521,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const read = () => Array.from(list.querySelectorAll("li"), row =>
             [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
           const initial = read();
-          // An equal-keyed replacement reruns the list without changing any row's loop fields. Each
-          // run still gives every row a new loop record, so loop readers rerun and write again.
+          // An equal-keyed replacement reruns the list without changing any row's loop fields. A row
+          // keeps its loop record and writes only fields that changed, so no loop reader writes.
           const observer = new MutationObserver(() => undefined);
           observer.observe(list, { attributes: true, subtree: true });
           host.state.rows[1] = { id: 2 };
@@ -535,7 +535,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         }, JSON.stringify(definition));
         assert.deepEqual(actual, {
           initial: ["0 first 3", "1  3", "2 last 3"],
-          indexWrites: 3,
+          indexWrites: 0,
           reordered: ["0 first 2", "1 last 2"],
         });
       } finally { await browser.close(); }

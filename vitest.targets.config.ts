@@ -47,6 +47,7 @@ const config = mergeConfig(baseConfig, {
 config.test!.include = [
   "packages/html-next/tests/targets.test.ts",
   "packages/html-next/tests/target-runtime.test.ts",
+  "packages/html-next/tests/target-transitions.test.ts",
   "packages/html-next/tests/vue-parity.test.ts",
   "packages/html-next-converter/tests/vue-*-parity.test.ts",
   "packages/html-next-converter/tests/react-*-parity.test.ts",

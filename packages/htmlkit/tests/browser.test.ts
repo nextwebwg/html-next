@@ -7,7 +7,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixture } from "./fixture.js";
+import { fixture, write } from "./fixture.js";
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application adoption", () => {
   let root: string;
@@ -55,6 +55,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
           input.value = "edited before startup"; input.focus(); input.setSelectionRange(2, 8);
         });
         expect(await page.locator("output").textContent()).toBe("4");
+        expect(await page.evaluate(() => document.documentElement.dataset.prepaint)).toBe("true");
         released = true; release();
         const subject = page.locator('[data-component="home-page"]');
         await expect.poll(() => subject.getAttribute("data-connections")).toBe("1");
@@ -95,6 +96,11 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
     const server = await devApplication({ root, base: "/development/", port: 0 });
     const browser = await chromium.launch({ headless: true });
     try {
+      // Component stylesheets are document links, so they apply at first paint, before any module runs.
+      const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+      await unscripted.goto(server.url);
+      expect(await unscripted.locator("main").evaluate(element => getComputedStyle(element).color)).toBe("rgb(20, 30, 40)");
+      expect(await unscripted.locator('[data-component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
       const page = await browser.newPage();
       const errors: string[] = [];
       page.on("pageerror", error => errors.push(error.message));
@@ -132,5 +138,26 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       expect(page.url()).toContain("/proof/guide/quick-start/");
       expect(errors).toEqual([]);
     } finally { await browser.close(); await server?.close(); await rm(root, { recursive: true, force: true }); }
+  }, 60_000);
+});
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("page-wide stylesheets", () => {
+  it("apply on first paint in built and development pages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-page-css-"));
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "styles/page.css", "html { background: rgb(1, 2, 3); } body { margin: 0; }");
+    await write(root, "app/pages/index.html", '<template component="page-home"><h1>Home</h1></template>');
+    const options = { root, css: ["@/styles/page.css"] };
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+      const check = async () => expect(await page.evaluate(() => [getComputedStyle(document.documentElement).backgroundColor, getComputedStyle(document.body).marginTop]))
+        .toEqual(["rgb(1, 2, 3)", "0px"]);
+      await buildApplication(options);
+      const preview = await previewApplication({ ...options, port: 0 });
+      try { await page.goto(preview.url); await check(); } finally { await preview.close(); }
+      const dev = await devApplication({ ...options, port: 0 });
+      try { await page.goto(dev.url); await check(); } finally { await dev.close(); }
+    } finally { await browser.close(); await rm(root, { recursive: true, force: true }); }
   }, 60_000);
 });

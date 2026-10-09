@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { normalizePath, type Plugin } from "vite";
+import type { ClientOptions } from "./client.js";
 import type { BrowserDefinition } from "./types.js";
 import { collectSharedStylesheets, compileComponentGraphStylesForBuild } from "@nextwebwg/html-next";
 
@@ -8,12 +10,17 @@ const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]runtime\.js$/, "/src/runtime.ts");
 // Workspace source execution can test the same entry before packages have been built.
 const runtime = import.meta.url.endsWith(".ts") && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
+const client = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./client.ts" : "./client.js", import.meta.url));
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
   const sources = new Map<string, string>();
   const shared = collectSharedStylesheets(components.map(component => component.definition));
   if (shared.length > 0) {
-    sources.set(normalizePath(fileURLToPath(components[0]!.definition.source.file)) + ".htmlkit-shared.css",
+    // One stylesheet holds the page's whole graph, so it is named for the graph: pages that share a
+    // first component (their layout) would otherwise overwrite each other's styles.
+    const files = components.map(component => component.definition.source.file);
+    const graph = createHash("sha256").update(files.join("\0")).digest("hex").slice(0, 16);
+    sources.set(`${normalizePath(fileURLToPath(files[0]!))}.${graph}.htmlkit-shared.css`,
       compileComponentGraphStylesForBuild(components.map(component => component.definition)));
     return sources;
   }
@@ -25,8 +32,9 @@ export function stylesheetSources(components: readonly BrowserDefinition[]): Rea
   return sources;
 }
 
-/** HTML Next owns adoption, observation, reads, controllers, and teardown. */
-export function browserSource(components: readonly BrowserDefinition[], base: string): string {
+/** HTML Next owns adoption, observation, reads, controllers, and teardown; client.ts shares them across pages. */
+export function browserSource(components: readonly BrowserDefinition[], options: ClientOptions, css: readonly string[] = []): string {
+  const { base } = options;
   const controlled = components.filter(component => component.controller !== undefined);
   const definitions = components.map(({ definition }) => ({ ...definition, stylesheets: undefined, css: definition.css || definition.stylesheets?.length ? "/* external stylesheet */" : "",
     source: { file: `${definition.contract.tag}.html` } }));
@@ -47,36 +55,30 @@ export function browserSource(components: readonly BrowserDefinition[], base: st
       return declaration;
     });
   }
-  return `import { registerComponentDefinitions, observeDocument, getComponentHost } from ${JSON.stringify(runtime)};
+  const functions = "registerComponentDefinitions, observeDocument, getComponentHost, adoptRenderedProps, lowerDocument, serializeRenderedForm, replaceProjectedNode";
+  return `import { ${functions} } from ${JSON.stringify(runtime)};
+import { page } from ${JSON.stringify(client)};
+${css.map(file => `import ${JSON.stringify(normalizePath(file))};`).join("\n")}
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
 ${reads.map((read, i) => `import read${i} from ${JSON.stringify(read.asset + "?url&no-inline")};`).join("\n")}
 ${controlled.map((component, index) => `import * as controller${index} from ${JSON.stringify(component.controller)};`).join("\n")}
-const controllers = { ${controlled.map((component, index) => `${JSON.stringify(component.definition.contract.tag)}: controller${index}`).join(",")} };
-const styleStates = ${JSON.stringify(Object.fromEntries(components.map(component => [component.definition.contract.tag, component.styles.stateNames])))};
 const definitions = ${JSON.stringify(definitions)};
 ${reads.map((read, i) => `definitions[${read.definition}].declarations[${read.declaration}].source = read${i} + ${JSON.stringify(read.suffix)};`).join("\n")}
-registerComponentDefinitions(definitions, document, (_css, definition) => ({ css: '', stateNames: styleStates[definition.contract.tag] ?? [] }));
-const initialized = new WeakSet();
-export const stop = observeDocument(document, { onConnect(element, definition) {
-  const controller = controllers[definition.contract.tag];
-  if (!controller) return;
-  if (typeof controller.default !== 'function') throw new Error('Controller for ' + definition.contract.tag + ' must export a default function');
-  const host = getComponentHost(element);
-  if (initialized.has(host)) return;
-  initialized.add(host);
-  return controller.default(host);
-} });
-document.dispatchEvent(new Event('htmlkit:ready'));
+page({ ${functions} }, ${JSON.stringify(options)}, definitions,
+  { ${controlled.map((component, index) => `${JSON.stringify(component.definition.contract.tag)}: controller${index}`).join(",")} },
+  ${JSON.stringify(Object.fromEntries(components.map(component => [component.definition.contract.tag, component.styles.stateNames])))});
 `;
 }
 
 export function browserPlugin(sources: ReadonlyMap<string, string>, inputs?: Set<string>): Plugin {
   return {
     name: "htmlkit-browser",
-    resolveId(id) { if (sources.has(id)) return id.endsWith(".css") ? id : `\0${id}`; },
-    load(id) { return sources.get(id.startsWith("\0") ? id.slice(1) : id); },
+    // Vite adds ?direct when a document <link> requests a stylesheet; keep the query for its CSS plugin.
+    resolveId(id) { const path = id.split("?")[0]!; if (sources.has(path)) return path.endsWith(".css") ? id : `\0${id}`; },
+    load(id) { return sources.get((id.startsWith("\0") ? id.slice(1) : id).split("?")[0]!); },
     generateBundle() {
-      if (inputs !== undefined) for (const id of this.getModuleIds()) if (!id.startsWith("\0")) inputs.add(id);
+      // Virtual stylesheets keep their ids for Vite's CSS plugin; report only source files.
+      if (inputs !== undefined) for (const id of this.getModuleIds()) if (!id.startsWith("\0") && !sources.has(id.split("?")[0]!)) inputs.add(id);
     },
   };
 }

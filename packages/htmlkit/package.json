@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/htmlkit",
-  "version": "1.0.0-alpha.40",
+  "version": "1.0.0-alpha.41",
   "description": "HTML Next application platform: file-based routes, layouts, loaders, and static deployment.",
   "license": "MIT",
   "type": "module",
@@ -10,7 +10,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./components/navigation.html": "./components/navigation.html"
+    "./components/*": "./components/*"
   },
   "files": [
     "dist",

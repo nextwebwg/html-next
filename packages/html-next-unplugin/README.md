@@ -29,8 +29,9 @@ check; use `html-next-check` for backend validation.
 
 This command does not load `vite.config`. Pass the same entries, target, and mode as your build.
 For framework checks with component-relative data URLs, supply `--public-root-url /app/` as you
-would for conversion. Native checks accept repeated `--external-custom-element x-tag` options
-corresponding to the plugin's declared dynamic boundaries.
+would for conversion. Native checks accept repeated `--extension <name>` options for the plugin's
+`extensions`, and repeated `--external-custom-element x-tag` options for its declared dynamic
+boundaries.
 
 ### Combine with TypeScript
 
@@ -312,6 +313,20 @@ htmlNext({
   ],
 });
 ```
+
+Optional language extensions are off until the `extensions` option lists them. A component that
+uses one that is off fails `HT024`, and an unknown name fails `HN013`:
+
+```ts
+htmlNext({
+  entries: ["src/components/app.html"],
+  extensions: ["transitions"],
+});
+```
+
+`transitions` animates what `$if`, `$each`, and `$match` add, remove, and move; see the
+[Transitions guide](https://nextwebwg.org/html-next/transitions). `html-next-check` accepts the same
+setting as repeated `--extension <name>` options.
 
 The external element remains a native `document.createElement()` boundary and is listed with its
 users in the manifest. Capability chunks and the universal HTML Next runtime are not yet dynamic

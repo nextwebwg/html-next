@@ -10,6 +10,11 @@ import { typeScriptType } from "../type-system.js";
 export const SSR_BOOLEAN_PROPERTIES = new Set(["disabled", "hidden", "required", "readOnly", "multiple", "open", "controls"]);
 export const SSR_STRING_PROPERTIES = new Set(["formAction", "title", "id", "name", "placeholder", "alt"]);
 
+/** Attributes React types as numbers alone; Vue and Svelte accept a number or text for them. */
+export const NUMERIC_ATTRIBUTES = new Set(["tabindex", "colspan", "rowspan", "maxlength", "minlength", "size", "rows", "cols", "span", "start",
+  "high", "low", "optimum", "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-level", "aria-posinset", "aria-setsize",
+  "aria-colcount", "aria-colindex", "aria-colspan", "aria-rowcount", "aria-rowindex", "aria-rowspan"]);
+
 const VOID_ELEMENTS = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
   "source", "track", "wbr",

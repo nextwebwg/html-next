@@ -44,7 +44,7 @@ export function useDataRead<T>(options: DataReadOptions): DataState<T> {
     accepted.set(parameter.name, value);
     return { value, valid: true };
   };
-  const prepared = { valid: false, values: [] as readonly unknown[] };
+  const prepared = { valid: false, values: [] as readonly unknown[], key: "" };
   const sources = $derived.by(() => {
     if (!connected()) return prepared.values;
     let valid = true;
@@ -54,9 +54,13 @@ export function useDataRead<T>(options: DataReadOptions): DataState<T> {
       return result.value;
     });
     prepared.valid = valid;
-    // Retaining identity lets Svelte keep an existing request and poll alive on invalid reads.
-    // Every valid evaluation creates a new snapshot, including equal serialized URLs.
-    if (valid) prepared.values = values;
+    // Retaining identity keeps an existing request and poll alive on invalid reads, and on valid
+    // ones whose from-parameters send what they sent before.
+    const key = dataKey(values.filter((_value, index) => options.parameters[index]!.mode === "from"));
+    if (valid && key !== prepared.key) {
+      prepared.values = values;
+      prepared.key = key;
+    }
     return prepared.values;
   });
   $effect(() => {

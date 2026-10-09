@@ -9,6 +9,7 @@ import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
 import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
 import { componentName, kebabCase } from "../names.js";
+import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import type {
   ComponentDefinition,
@@ -27,33 +28,37 @@ import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
+import { conformingScalarStates } from "./state-roots.js";
 import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
-import { VUE_HOST_SPECIFIER } from "./vue-host.js";
+import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
 import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
-import { handlerDestinationCheck, typeCheck } from "./type-guards.js";
+import { conformingLiteralWrite, handlerDestinationCheck, setSteps, typeCheck, WRITE_PREDICATES, writePredicate } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
-  "htmlNextAuthoredCheck", "htmlNextAuthoredCheckReported", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
+  "warnUnless", "formatValue", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
-  "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
+  "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
-  "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed",
-  "SanitizedHtml", "RetainedInlineText", "inlineTextSegment", "moduleFormatValue",
+  "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
+  "SanitizedHtml", "RetainedInlineText", "inlineTextSegment",
   "String", "Boolean", "Number", "Math", "Object", "Array", "Symbol", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
-  "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS,
+  "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS, ...VUE_HOST_EXPORTS,
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum",
   "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null",
   "return", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
   "let", "static", "implements", "interface", "package", "private", "protected", "public", "await", "arguments", "eval",
 ]);
+
+/** The locals a handler numbers per step (`next1`, `detail2`), which share the handler's scope with state reads. */
+const STEP_LOCAL = /^(?:next|detail)\d+$/;
 
 /** Allocates readable script identifiers: the declared name when it is free. */
 class Identifiers {
@@ -65,7 +70,7 @@ class Identifiers {
 
   take(name: string, suffix: string): string {
     const base = name.replace(/[^A-Za-z0-9_$]/g, "_").replace(/^(?=\d)/, "_");
-    let candidate = this.#taken.has(base) ? `${base}${suffix}` : base;
+    let candidate = this.#taken.has(base) || STEP_LOCAL.test(base) ? `${base}${suffix}` : base;
     for (let index = 2; this.#taken.has(candidate); index++) candidate = `${base}${suffix}${index}`;
     this.#taken.add(candidate);
     return candidate;
@@ -130,12 +135,18 @@ interface Context {
   readonly model: boolean;
   readonly validityValues?: string;
   readonly hostState: boolean;
+  /** The root carries its tag as a class: the scoped styles' `@scope` root. */
+  readonly hostClass: boolean;
+  /** Invoked components, the scope's limits: each invocation carries its tag as a class. */
+  readonly styledComponents: ReadonlySet<string>;
   readonly guarded: string[];
   readonly globals: ReadonlySet<string>;
   usesHtml: boolean;
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
   usesRetainedInlineText: boolean;
+  /** Inside a preformatted element, where Vue keeps whitespace between elements. */
+  preformatted: boolean;
 }
 
 function referenceCheck(type: TypeNode, value: string): string {
@@ -173,6 +184,8 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
     // Prop boundary handling is separate from these mutable declaration guards.
     if (definition.contract.props[root!] !== undefined) continue;
     if (declaration?.kind === "state" || declaration?.kind === "computed") {
+      // A conforming scalar state's own value is checked in full on every write, so reading it cannot fail.
+      if (steps.length === 0 && declaration.kind === "state" && conformingScalarStates(definition).has(root!)) continue;
       type = declarationTypeNode(declaration.type, declaration.shape);
     } else if (declaration?.kind === "data") {
       const first = steps.shift();
@@ -210,7 +223,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
   const name = context.identifiers.take("guarded", "Binding");
   if (!retains) {
     if (structural) {
-      context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = { ready: true, value: ${emit(names.script)} }; });`);
+      context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; const value = ${emit(names.script)}; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
       return name;
     }
     context.guarded.push(`let ${name}Previous: any;`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${emit(names.script)}; });`);
@@ -220,7 +233,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
   const raw = retains ? context.lowering.value(plan.ast, names.script) : undefined;
   const next = raw === undefined ? output : raw === output ? "candidate" : output;
   if (structural) {
-    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = { ready: true, value: ${next} }; });`);
+    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}const value = ${next}; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
     return name;
   }
   context.guarded.push(`let ${name}Previous: any = null;`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = ${next}; });`);
@@ -233,12 +246,19 @@ function isComponentTag(name: string): boolean {
 
 /**
  * Adjacent elements go on separate lines, for the formatter to lay out; Vue drops whitespace that
- * holds a newline between elements, so the rendering is unchanged. Text keeps its own whitespace.
+ * holds a newline between elements, so the rendering is unchanged. Text keeps its own whitespace,
+ * and a preformatted element keeps its children as written, since Vue keeps the newline there.
  */
 function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context, receivingTag?: string): string {
   return nodes.map((child, index) => {
-    const markup = renderNode(child, names, context, receivingTag);
-    return index > 0 && child.kind !== "text" && nodes[index - 1]!.kind !== "text" ? `\n${markup}` : markup;
+    let markup = renderNode(child, names, context, receivingTag);
+    // Authored indentation at the start or end of an element's text goes; a space between
+    // siblings stays, as Vue keeps it.
+    if (child.kind === "text" && child.segments !== undefined && !context.preformatted) {
+      if (index === 0 && /^\s*\n/.test(child.segments[0]!.value)) markup = markup.replace(/^ (?=.)/, "");
+      if (index === nodes.length - 1 && /\n\s*$/.test(child.segments.at(-1)!.value)) markup = markup.replace(/(?<=.) $/, "");
+    }
+    return index > 0 && !context.preformatted && child.kind !== "text" && nodes[index - 1]!.kind !== "text" ? `\n${markup}` : markup;
   }).join("");
 }
 
@@ -388,13 +408,14 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
       return `<RetainedInlineText :segments=${bound(`[${parts.join(", ")}]`)} />`;
     }
     if (node.segments !== undefined) {
-      const parts = node.segments.map((segment) => {
+      // Template text reads as authored, with Vue's own whitespace handling: each run of ASCII
+      // whitespace is one space (Vue keeps a space but drops a newline between elements). Vue
+      // keeps <pre> and <textarea> text exactly, and so does the markup there.
+      return node.segments.map((segment) => {
         const plan = segment.expressionPlan;
-        return plan === undefined ? quote(segment.value)
-          : `(${guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template)} ?? '')`;
-      });
-      // Begin with a string so adjacent numeric insertions concatenate; absence stays empty.
-      return `{{ '' + ${parts.join(" + ")} }}`;
+        return plan === undefined ? escapeHtml(context.preformatted ? segment.value : segment.value.replace(/[\t\n\f\r ]+/g, " ")).replace(/\{\{/g, "{{ '{{' }}")
+          : `{{ ${guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template)} }}`;
+      }).join("");
     }
     const plan = node.expressionPlan;
     if (plan === undefined) return escapeHtml(node.value).replace(/\{\{/g, "{{ '{{' }}");
@@ -562,7 +583,10 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       const value = ast(attribute.expressionPlan, attribute.expression);
       const code = lowering.text(value, names.template);
       const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.text(value, scope));
-      styles.push(`${quote(attribute.name)}: ${guarded ?? (typeOf(value, names.template).nullable ? `(${code} ?? undefined)` : code)}`);
+      // Vue types a style value as never null. A number is the text the DOM stores, and TypeScript
+      // reads `?? undefined` after arithmetic as dead code.
+      const styleType = typeOf(value, names.template);
+      styles.push(`${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
       if (nativeControl && ["value", "checked"].includes(attribute.name)) {
@@ -572,7 +596,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
         const read = `readBoundControl(${control}) as any`;
         const update = node.name === "input" && attribute.name === "checked"
-          ? `(${control}.type !== 'radio' || ${control}.checked) && (${writable} = ${read})`
+          // Only an <input> binds checked, so the radio guard reads it as one.
+          ? `(($event.currentTarget as HTMLInputElement).type !== 'radio' || ($event.currentTarget as HTMLInputElement).checked) && (${writable} = ${read})`
           : `${writable} = ${read}`;
         attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: ${quote(attribute.name as "value" | "checked")}, value: ${writable}, ${authoredDefault(attribute.name as "value" | "checked")} }`)}`);
         attributes.push(`@${event}=${bound(update)}`);
@@ -621,7 +646,6 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     // The consumer's attributes win over the template's literals and lose to its bindings, as in
     // the runtime; Vue combines class and style itself.
     const tag = context.definition.contract.tag;
-    literals.unshift(`data-component=${attributeValue(tag)}`);
     literals.push("v-bind=\"nativeAttrs($attrs)\"");
     if (context.validityValues !== undefined) {
       attributes.push(`v-prop-validity=${bound(`{ contract: propValidityContract, values: ${context.validityValues} }`)}`);
@@ -646,10 +670,23 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   // A <template> without structural flow produces its content with no wrapper element.
   if (node.name === "template" && !isRoot) return content ?? renderChildren(node.children, names, context);
+  // The scoped styles' root and limits are the root's and each invoked component's tag, as classes.
+  const styled = [
+    ...(isRoot && context.hostClass ? [context.definition.contract.tag] : []),
+    ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
+  ];
+  if (styled.length > 0) {
+    const index = literals.findIndex((literal) => literal.startsWith("class="));
+    if (index < 0) literals.unshift(`class=${attributeValue(styled.join(" "))}`);
+    else literals[index] = `class="${styled.join(" ")} ${literals[index]!.slice('class="'.length)}`;
+  }
   attributes.unshift(...directives, ...literals);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
+  const outerPreformatted = context.preformatted;
+  context.preformatted ||= isPreformattedElement(node.name);
   const renderedChildren = content ?? renderChildren(node.children, names, context, component ? node.name : undefined);
+  context.preformatted = outerPreformatted;
   const selectBinding = node.name === "select" && twoWayControl
     ? node.attributes.find((attribute) => attribute.kind === "attribute" && attribute.twoWay === true && attribute.name === "value")
     : undefined;
@@ -696,20 +733,21 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const target = writableTarget(step.writablePath, local.script, lowering);
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
-      const destinationCheck = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
-        step.writablePath, 1, `next${index}`, local.script, lowering);
-      const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
-        `(next${index} === undefined || ${destinationCheck})`,
-        `handler:${handler.name}:${step.path}`,
-        `${context.definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
-      if (check === undefined && !mayBeInvalid) {
+      const destinationCheck = conformingLiteralWrite(step, context.definition) ? undefined
+        : handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
+          step.writablePath, 1, "value", local.script, lowering);
+      if (destinationCheck === undefined && !mayBeInvalid) {
         lines.push(`  ${guard}${target} = ${value};`);
       } else {
-        const next = `next${index}`;
-        lines.push(`  ${guard}{`);
-        lines.push(`    const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`);
-        lines.push(`    if (${mayBeInvalid ? `${next} !== Symbol.for("html-next.invalid-result") && ` : ""}${check === undefined ? "true" : `(${check})`}) ${target} = ${next} as never;`);
-        lines.push("  }");
+        // One checked write per handler reads as `next`; later ones number theirs.
+        const next = setSteps(handler) > 1 ? `next${index}` : "next";
+        const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(context.definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
+        // A value of the destination's own kind assigns as it is; another kind is cast after its check.
+        const destination = step.writablePath.length === 1 ? local.script.types.get(String(step.writablePath[0]))?.type : undefined;
+        const cast = !mayBeInvalid && (destination === undefined || category(destination) !== category(typeOf(step.value.ast, local.script).type));
+        const write = [`const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`, `if (acceptsWrite(${next}${check})) ${target} = ${next}${cast ? " as never" : ""};`];
+        if (guard === "") lines.push(...write.map((line) => `  ${line}`));
+        else lines.push(`  ${guard}{`, ...write.map((line) => `    ${line}`), "  }");
       }
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
@@ -802,7 +840,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ? target.props.find((prop) => prop.name === "value")
     : undefined;
   const identifiers = new Identifiers(target.props.map((prop) => prop.name));
-  const lowering = new Lowering(identifiers.take("htmlNextAuthoredCheck", ""));
+  const lowering = new Lowering("warnUnless");
   const templateScope = { code: new Map<string, string>(), types: new Map<string, Static>() };
   const script = { code: new Map<string, string>(), types: new Map<string, Static>() };
   const names: Names = { template: templateScope, script };
@@ -892,6 +930,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     root: needsRoot,
     ...(arms === undefined ? {} : { rootArmRef: "@html-next/root" }),
     hostState: styles.stateNames.length > 0,
+    hostClass: styles.components !== undefined,
+    styledComponents: new Set(styles.components ?? []),
     model: modelProp !== undefined,
     ...(validityValues === undefined ? {} : { validityValues }),
     guarded: [],
@@ -900,6 +940,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     usesHydrationControl: false,
     usesKeyedBoundary: false,
     usesRetainedInlineText: false,
+    preformatted: false,
   };
   // A root `$with` always renders one element. Keep its alias reactive in setup instead of
   // adding a v-for fragment around the component's native root.
@@ -936,10 +977,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return `(${test}) ? ${quote(arm.name)} : (${fallback})`;
     }, "undefined");
   const hydrationInstanceName = identifiers.take("hydrationInstance", "");
-  const hydrationNodeName = identifiers.take("hydrationNode", "");
   const nestedDepthName = options.guardNestedDepth ? identifiers.take("nestedDepth", "") : undefined;
   const nestedDepthLimit = nestedDepthName === undefined ? undefined : definitionMayInvokeComponents(definition) ? 32 : 33;
-  const hydrationMessage = `Server markup for <${contract.tag}> has an incompatible root.`;
   const rootArmRefs = arms === undefined ? [] : [...new Set(arms.map((arm) => arm.ref ?? context.rootArmRef!))];
   const unnamedRootRef = rootArmRefs.includes(context.rootArmRef ?? "")
     ? identifiers.take("rootArmElement", "") : undefined;
@@ -984,7 +1023,14 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const checkNames = new Map<EventDeclaration, string>();
   const checksBySource = new Map<string, string>();
   for (const event of events) {
-    const source = typeCheck(declarationTypeNode(event.type, event.shape)!, "detail");
+    const type = declarationTypeNode(event.type, event.shape)!;
+    // A scalar detail uses the host's named predicate; other types get one generated check each.
+    const named = WRITE_PREDICATES[typeCheck(type, "value")];
+    if (named !== undefined) {
+      checkNames.set(event, named);
+      continue;
+    }
+    const source = typeCheck(type, "detail");
     let name = checksBySource.get(source);
     if (name === undefined) {
       name = identifiers.take(`is${pascal(event.name)}Detail`, "Check");
@@ -1057,59 +1103,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       "}));",
       ...(hasStateSelected ? [] : ["void checkedProps.value;", "watchSyncEffect(() => { void checkedProps.value; });"]),
     ]),
-    "function nativeAttrs(attrs: Record<string, unknown>): Record<string, unknown> {",
-    "  const names = Object.keys(attrs);",
-    "  if (!names.some((name) => Object.hasOwn(Object.prototype, name))) return attrs;",
-    "  return Object.fromEntries(names.map((name) => [",
-    "    Object.hasOwn(Object.prototype, name) ? name === '__proto__' ? '__Proto__' : name[0]!.toUpperCase() + name.slice(1) : name,",
-    "    attrs[name],",
-    "  ]));",
-    "}",
-    ...(context.usesRetainedInlineText ? [
-      "type InlineTextSegment = { readonly value: unknown; readonly text: string; readonly accepted: boolean };",
-      "function inlineTextSegment(value: unknown, accepted: boolean, text: (value: any) => string): InlineTextSegment {",
-      "  return { value, accepted, text: accepted && value !== Symbol.for('html-next.invalid-result') ? text(value) ?? '' : '' };",
-      "}",
-      "const RetainedInlineText = defineComponent({",
-      "  props: { segments: { type: Array as PropType<InlineTextSegment[]>, required: true } },",
-      "  setup(props) {",
-      "    const previous: string[] = [];",
-      "    return () => createTextVNode(props.segments.map((segment, index) => {",
-      "      if (segment.accepted && segment.value !== Symbol.for('html-next.invalid-result')) previous[index] = segment.text;",
-      "      return previous[index] ?? '';",
-      "    }).join(''));",
-      "  },",
-      "});",
-    ] : []),
-    ...(context.usesKeyedBoundary ? [
-      "const KeyedFailure = defineComponent({",
-      "  props: { error: { type: null, required: true } },",
-      "  setup(props) { return () => { throw props.error; }; },",
-      "});",
-      "const KeyedBoundary = defineComponent({",
-      "  setup(_props, { slots }) {",
-      "    let last: VNode[] = [];",
-      "    return () => {",
-      "      try { last = slots.default?.() ?? []; return last; }",
-      "      catch (error) {",
-      "        if (!(error instanceof Error) || (error as Error & { diagnostic?: { code?: string } }).diagnostic?.code !== 'HR004') throw error;",
-      "        if (typeof window === 'undefined') throw error;",
-      "        return [...last, h(KeyedFailure, { error })];",
-      "      }",
-      "    };",
-      "  },",
-      "});",
-    ] : []),
-    ...(!reflectsProps ? [] : [
-      "const componentInstance = getCurrentInstance();",
-      "function reflectedProp(name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean, separator?: string): string | undefined {",
-      "  const incoming = componentInstance?.vnode.props;",
-      "  if (!bound && (incoming === null || incoming === undefined || (!Object.hasOwn(incoming, name) && !Object.hasOwn(incoming, kebab)))) return fallback;",
-      "  if (value === null || value === undefined) return undefined;",
-      "  return Array.isArray(value) && separator !== undefined ? value.join(separator) : typeof value === 'object' ? JSON.stringify(value) : String(value);",
-      "}",
-    ]),
-    `const ${hydrationInstanceName} = getCurrentInstance();`,
+    ...(!reflectsProps ? [] : ["const reflectedProp = useReflectedProp();"]),
+    ...(definition.controller !== undefined && target.props.length > 0 ? [`const ${hydrationInstanceName} = getCurrentInstance();`] : []),
     ...(emits.length === 0 ? [] : ["const emit = defineEmits<{", ...emits, "}>();"]),
     ...(modelProp === undefined ? [] : [
       "const model = computed({",
@@ -1124,24 +1119,6 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(arms === undefined && needsRoot && template.ref !== undefined ? [`const root = ${context.refs.get(template.ref)!};`] : []),
     ...(arms === undefined ? [] : [`const root = ${rootValues.length === 1 ? rootValues[0] : `computed(() => ${rootValues.map((name) => `${name}.value`).join(" ?? ")} ?? null)`};`]),
     ...(arms === undefined ? [] : ["preserveRootFocus(root);"]),
-    ...(computedValues.length === 0 ? [] : [
-      "// Vue may return an in-progress computed value on a cyclic read; guard the public value access instead.",
-      "function cycleCheckedComputed<T>(evaluate: () => T) {",
-      "  const value = computed(evaluate);",
-      "  let reading = false;",
-      "  return new Proxy(value, {",
-      "    get(target, property) {",
-      "      if (property !== 'value') return Reflect.get(target, property);",
-      "      if (reading) {",
-      "        const message = 'A reactive computed value depends on itself.';",
-      "        throw Object.assign(new Error(`HR006: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR006', message }) });",
-      "      }",
-      "      reading = true;",
-      "      try { return target.value; } finally { reading = false; }",
-      "    },",
-      "  });",
-      "}",
-    ]),
     ...states.map(stateSource),
     ...(hasStateSelected ? [
       ...target.props.map((prop) => `void checkedProps.value[${quote(prop.name)}];`),
@@ -1157,27 +1134,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       `provide(${quote(`html-next:${contract.tag}:${state.name}`)}, ${stateNames.get(state)!});`),
     ...contexts.flatMap((declaration) => {
       const name = contextNames.get(declaration)!;
-      const message = `<${contract.tag}> requires context \`${declaration.name}\` from <${declaration.from}>.`;
-      return [
-        `const ${name} = inject<any>(${quote(`html-next:${declaration.from}:${declaration.name}`)});`,
-        `if (${name} === undefined) throw Object.assign(new Error(${quote(`HR009: ${message}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message: ${quote(message)} }) });`,
-      ];
+      return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
-    ...(!(definition.slots ?? []).some((slot) => (slot.props?.length ?? 0) > 0) ? [] : [
-      "const projectedSlots = useSlots();",
-      "function scopedSlotName(value: unknown): string {",
-      "  const name = value == null ? '' : String(value);",
-      "  if (projectedSlots[name] === undefined && projectedSlots.default?.().some((node) => node.props?.slot === name)) {",
-      "    const message = 'Scoped slot `' + name + '` requires a consumer <template slot=\"' + name + '\">.';",
-      "    throw Object.assign(new Error(`HR007: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR007', message }) });",
-      "  }",
-      "  return name;",
-      "}",
-    ]),
-    `const ${hydrationNodeName} = ${hydrationInstanceName}?.vnode.el;`,
-    `if (typeof window !== "undefined" && ${hydrationNodeName} != null && (!(${hydrationNodeName} instanceof Element) || ${hydrationNodeName}.localName !== (${hydrationExpectedTag}))) {`,
-    `  throw Object.assign(new Error(${quote(`HR005: ${hydrationMessage}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR005", message: ${quote(hydrationMessage)} }) });`,
-    "}",
+    ...(!(definition.slots ?? []).some((slot) => (slot.props?.length ?? 0) > 0) ? [] : ["const scopedSlotName = useScopedSlotName();"]),
+    `checkHydratedRoot(${hydrationExpectedTag}, ${quote(contract.tag)});`,
     ...(styles.stateNames.length === 0 ? [] : [
       "",
       "/** The values the styles' :host-state() rules test. */",
@@ -1197,10 +1157,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       context: new Map(contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!])),
       hydrationInstanceName,
     }, options.controllerSpecifier ?? definition.controller),
-    ...lowering.fallbacks().flatMap((source) => ["", source]),
   );
-  const moduleFallbacks = lowering.moduleFallbacks("moduleFormatValue");
-  if (moduleFallbacks.length > 0) body.unshift("const formatValue = moduleFormatValue;", "");
   // `props` is named only when the script reads it; the template reads props by name.
   if (!body.some((line) => /\bprops\b/.test(line) && !line.startsWith("const props = ")) && !/\bprops\b/.test(rootMarkup)) {
     const index = body.findIndex((line) => line.startsWith("const props = "));
@@ -1209,16 +1166,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const code = `${body.join("\n")}\n${rootMarkup}`;
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   // The shared module holds what every component's host and dispatcher do the same way.
-  const shared = ["createDispatch", "useComponentHost", "useDataRead", "runFilteredEvent", "preserveRootFocus"]
-    .filter((name) => code.includes(`${name}(`));
-  const vueTypes = [
-    ...(target.props.length === 0 && !context.usesRetainedInlineText ? [] : ["PropType"]),
-    ...(context.usesKeyedBoundary ? ["VNode"] : []),
-  ];
-  const moduleSources = [...moduleFallbacks, ...lowering.authoredFallbacks()];
+  const shared = [...["createDispatch", "useComponentHost", "useDataRead", "runFilteredEvent", "preserveRootFocus", "acceptsWrite",
+    "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "useReflectedProp", "useScopedSlotName",
+    "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", ...Object.values(WRITE_PREDICATES)]
+    .filter((name) => new RegExp(`\\b${name}\\b`).test(code)), ...lowering.helpers()].sort();
+  const vueTypes = target.props.length === 0 ? [] : ["PropType"];
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
-    ...(moduleSources.length === 0 ? [] : ["<script lang=\"ts\">", ...moduleSources, "</script>", ""]),
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),

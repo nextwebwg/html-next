@@ -1,4 +1,6 @@
-import { readFile, rm, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,8 +18,8 @@ describe("application platform", () => {
     await rm(join(root, "app/layouts/default.server.ts"));
     await write(root, "app/layouts/default.html", '<template component="default-shell"><main>Default<slot name="page"></slot></main></template>');
     await write(root, "app/layouts/admin.html", '<template component="admin-shell"><main>Admin<slot name="page"></slot></main></template>');
-    await write(root, "extra/products.html", '<meta name="htmlkit:page" content="page-products"><template component="product-label"><meta name="htmlkit:layout" content="absent"><title>Helper title</title><strong>Helper</strong></template><template component="page-products"><meta name="htmlkit:layout" content="admin"><title>Products</title><product-label></product-label></template>');
-    await write(root, "extra/plain.html", '<template component="page-plain"><meta name="htmlkit:layout" content="none"><p>Standalone</p></template>');
+    await write(root, "extra/products.html", '<meta name="hk:page" content="page-products"><template component="product-label"><meta name="hk:layout" content="absent"><title>Helper title</title><strong>Helper</strong></template><template component="page-products"><meta name="hk:layout" content="admin"><title>Products</title><product-label></product-label></template>');
+    await write(root, "extra/plain.html", '<template component="page-plain"><meta name="hk:layout" content="none"><p>Standalone</p></template>');
     await write(root, "extra/default.html", '<template component="page-default"><p>Content</p></template>');
     const options = { root, fileRoutes: false, layoutDefaults: { "/admin/": "admin" }, routes: [
       { pattern: "/products/", component: "extra/products.html" },
@@ -36,16 +38,16 @@ describe("application platform", () => {
       expect((await application.render("/admin/")).body).toContain('data-component="admin-shell"');
     } finally { await application.close(); }
     await write(root, "extra/products.html", '<template component="product-label"><p>Label</p></template><template component="page-products"><p>Page</p></template>');
-    await expect(discoverRoutes(root, options)).rejects.toThrow(/htmlkit:page/);
-    await write(root, "extra/products.html", '<meta name="htmlkit:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
+    await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page/);
+    await write(root, "extra/products.html", '<meta name="hk:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
     await expect(discoverRoutes(root, options)).rejects.toThrow(/absent-page/);
-  });
+  }, 60_000);
 
   it("renders head bindings from loader props and merges page overrides while preserving repeatable links", async () => {
     const root = await app();
     await rm(join(root, "app/layouts/default.server.ts"));
     await write(root, "app/layouts/default.html", '<template component="head-shell"><title>Site title</title><meta name="description" content="Site description"><meta property="og:title" content="Site"><link rel="canonical" href="https://example.test/"><link rel="stylesheet" href="/shared.css"><link rel="alternate" hreflang="en" href="https://example.test/en/"><main><slot name="page"></slot></main></template>');
-    await write(root, "extra/head.html", '<meta name="htmlkit:page" content="page-head"><template component="head-helper"><title $value="$missing"></title><meta name="htmlkit:layout" content="absent"><meta name="description" content="Helper description"><meta property="og:image" content="https://example.test/helper.png"><strong>Helper content</strong></template><template component="page-head"><title $value="$title"></title><meta name="description" from:content="$description"><meta property="og:title" from:content="$title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="$canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><section><p $value="$title"></p><head-helper></head-helper></section></template>');
+    await write(root, "extra/head.html", '<meta name="hk:page" content="page-head"><template component="head-helper"><title>{$missing}</title><meta name="hk:layout" content="absent"><meta name="description" content="Helper description"><meta property="og:image" content="https://example.test/helper.png"><strong>Helper content</strong></template><template component="page-head"><title>{$title}</title><meta name="description" from:content="$description"><meta property="og:title" from:content="$title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="$canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><section><p>{$title}</p><head-helper></head-helper></section></template>');
     await write(root, "extra/head.server.ts", 'export const load = () => ({ props: { title: "Page & title", description: "a < b", canonical: "https://example.test/page/" } });');
     const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/head.html", server: "extra/head.server.ts" }] });
     try {
@@ -58,12 +60,129 @@ describe("application platform", () => {
       expect(head).not.toContain("Site description");
       expect(head.match(/rel="canonical"/g)).toHaveLength(1);
       for (const value of ["/shared.css", "/page.css", 'hreflang="en"', 'hreflang="fr"', "a.png", "b.png"]) expect(head).toContain(value);
-      expect(head).not.toMatch(/htmlkit:|from:|\$value/);
+      expect(head).not.toMatch(/hk:|from:|\{\$/);
       expect(head).not.toContain("Helper description");
       expect(head).not.toContain("helper.png");
       expect(html.split("</head>")[1]).toContain("Helper content");
     } finally { await application.close(); }
   });
+  it("inlines app/head.js before stylesheets and rejects text that would end its script", async () => {
+    const prepaint = "<script>document.documentElement.dataset.prepaint = String(document.body === null);</script>";
+    const root = await app();
+    await write(root, "app/layouts/default.html", '<template component="app-layout"><link rel="stylesheet" href="/shared.css"><main><slot name="page"></slot></main></template>');
+    await write(root, "app/layouts/default.server.ts", 'export const load = () => ({ head: { title: "Loaded", script: "injected()" } });');
+    const application = await createApplication({ root });
+    try {
+      const { html } = await application.render("/");
+      expect(html).toContain('<head><meta charset="utf-8"><script>document.documentElement.dataset.prepaint = String(document.body === null);</script><meta name="viewport"');
+      expect(html.indexOf("<script>")).toBeLessThan(html.indexOf("/shared.css"));
+      // The not-found page gets it too, rendered and built, so a saved theme never flashes there.
+      expect((await application.render("/missing/")).html).toContain(prepaint);
+    } finally { await application.close(); }
+    await buildApplication({ root });
+    expect(await readFile(join(root, "dist/404.html"), "utf8")).toContain(prepaint);
+    await write(root, "app/head.js", 'console.log("</SCRIPT>");');
+    await expect(createApplication({ root })).rejects.toThrow("app/head.js cannot contain");
+    // Without app/head.js, a loader's untyped head fields still cannot add a script.
+    await rm(join(root, "app/head.js"));
+    const unscripted = await createApplication({ root });
+    try {
+      const { html } = await unscripted.render("/");
+      expect(html).toContain("<title>Home &amp; kit</title>");
+      expect(html).not.toContain("injected()");
+    } finally { await unscripted.close(); }
+  }, 60_000);
+
+  it("serves rendered pages for native Requests through application.fetch", async () => {
+    const root = await app();
+    const application = await createApplication({ root });
+    try {
+      // Unbound, as runtimes receive it: Deno.serve(application.fetch).
+      const { fetch: handle } = application;
+      const home = await handle(new Request("http://localhost/"));
+      expect([home.status, home.headers.get("content-type")]).toEqual([200, "text/html; charset=utf-8"]);
+      const html = await home.text();
+      expect(html).toContain("<title>Home &amp; kit</title>");
+      expect(html).toContain("<script>document.documentElement.dataset.prepaint");
+      expect(html).not.toContain("@vite/client");
+      expect(await (await handle(new Request("http://localhost/", { method: "HEAD" }))).text()).toBe("");
+      const redirect = await handle(new Request("http://localhost/items/one?query"));
+      expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/items/one/"]);
+      expect(await (await handle(new Request("http://localhost/items/one/"))).text()).toContain("kit: one");
+      expect((await handle(new Request("http://localhost/missing/"))).status).toBe(404);
+      // A leading // would name another origin; it is simply not a page here.
+      expect((await handle(new Request("http://localhost//evil.example/"))).status).toBe(404);
+      expect((await handle(new Request("http://localhost/_htmlkit/pages//evil.example/payload.json"))).status).toBe(404);
+      const post = await handle(new Request("http://localhost/", { method: "POST" }));
+      expect([post.status, post.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
+      // Each page's payload, through the same render: its head, and each layer's invocation and state.
+      const payload = await handle(new Request("http://localhost/_htmlkit/pages/payload.json"));
+      expect([payload.status, payload.headers.get("content-type")]).toEqual([200, "application/json"]);
+      expect(await payload.json()).toMatchObject({ version: 1, modules: [], styles: [],
+        head: { lang: "en", title: "Home & kit", description: "/mark.svg" },
+        layers: [{ component: "app-layout", attributes: { brand: "HTMLKit" } }, { component: "home-page", attributes: { asset: "/mark.svg" }, state: { count: 4 } }] });
+      expect(JSON.stringify(await (await handle(new Request("http://localhost/_htmlkit/pages/items/one/payload.json"))).json())).not.toContain("owner");
+      for (const path of ["missing/payload.json", "items/payload.json", "payload.json/", "items/one/other.json"]) {
+        expect((await handle(new Request(`http://localhost/_htmlkit/pages/${path}`))).status).toBe(404);
+      }
+    } finally { await application.close(); }
+  }, 60_000);
+
+  it("leaves out the payload of a page whose state JSON cannot carry exactly", async () => {
+    const root = await app();
+    await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' }, state: { count: -0 } });");
+    const result = await buildApplication({ root });
+    await expect(readFile(join(result.outDir, "_htmlkit/pages/payload.json"))).rejects.toThrow(/ENOENT/);
+    expect(JSON.parse(await readFile(join(result.outDir, "_htmlkit/pages/items/one/payload.json"), "utf8")).layers[1].component).toBe("item-page");
+    const application = await createApplication({ root });
+    try { expect((await application.fetch(new Request("http://localhost/_htmlkit/pages/payload.json"))).status).toBe(404); }
+    finally { await application.close(); }
+  }, 60_000);
+
+  it("gives each page graph with shared stylesheet imports its own stylesheet, even under one layout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-shared-css-")); roots.push(root);
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "app/layouts/default.html", '<template component="site-shell"><main><slot name="page"></slot></main><style>:host { color: rgb(1, 1, 1); }</style></template>');
+    await write(root, "app/styles/card.css", ".card { border-color: rgb(7, 7, 7); }");
+    for (const [file, tag, color] of [["index", "home-page", "rgb(2, 2, 2)"], ["guide", "guide-page", "rgb(3, 3, 3)"]]) {
+      await write(root, `app/pages/${file}.html`, `<template component="${tag}"><article class="card"><h1>${tag}</h1></article><style>@import "@/app/styles/card.css"; h1 { color: ${color}; }</style></template>`);
+    }
+    const result = await buildApplication({ root });
+    const css = async (page: string) => {
+      const html = await readFile(join(result.outDir, page), "utf8");
+      return (await Promise.all([...html.matchAll(/href="\/(_htmlkit\/[^"]+\.css)"/g)].map(match => readFile(join(result.outDir, match[1]!), "utf8")))).join("");
+    };
+    // Both graphs start with the layout; each page still links its own styles, not the last page's.
+    for (const [page, own, other] of [["index.html", "home-page", "guide-page"], ["guide/index.html", "guide-page", "home-page"]] as const) {
+      const styles = await css(page);
+      expect([styles.includes(`[data-component~=${own}]`), styles.includes(`[data-component~=${other}]`), styles.includes("#070707")]).toEqual([true, false, true]);
+    }
+  }, 60_000);
+
+  it("resolves @/ from the project root and links built-in components without a link", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-alias-")); roots.push(root);
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "components/card.html", '<template component="app-card" controller="@/controllers/card.ts"><p>Card</p><style>@import "@/styles/card.css";</style></template>');
+    await write(root, "controllers/card.ts", "export default function (host) { host.root.dataset.card = 'ready'; }");
+    await write(root, "styles/card.css", "p { color: rgb(1, 2, 3); }");
+    await write(root, "lib/title.ts", "export const title = 'From @/';");
+    await write(root, "app/pages/index.html", '<link rel="component" href="@/components/card.html"><template component="page-home"><defs><prop name="links" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs><main><app-card></app-card><hk-nav from:items="$links"></hk-nav></main></template>');
+    await write(root, "app/pages/index.server.ts", "import { title } from '@/lib/title.ts'; export const load = async ({ navigation }) => ({ props: { links: await navigation() }, head: { title } });");
+    const application = await createApplication({ root });
+    try {
+      const { html } = await application.render("/");
+      expect(html).toContain("<title>From @/</title>");
+      expect(html).toContain("Card");
+      expect(html).toMatch(/<nav[^>]*data-component="hk-nav"/);
+    } finally { await application.close(); }
+    const result = await buildApplication({ root });
+    expect(result.browserInputs.some(input => input.endsWith("controllers/card.ts"))).toBe(true);
+    // Only source files: tools read each input, and HTMLKit's virtual stylesheets have no file.
+    expect(result.browserInputs.filter(input => !existsSync(input))).toEqual([]);
+    const styles = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(name => name.endsWith(".css")).map(name => readFile(join(result.outDir, "_htmlkit", name), "utf8")));
+    expect(styles.join("")).toContain("#010203");
+  }, 60_000);
+
   it("discovers routes and named layouts without importing controllers", async () => {
     const root = await app();
     const routes = await discoverRoutes(root);
@@ -73,10 +192,10 @@ describe("application platform", () => {
 
   it("keeps each page's metadata with its component when a file contains multiple candidate pages", async () => {
     const root = await app();
-    const pages = '<template component="page-first"><meta name="htmlkit:layout" content="none"><title>First title</title><meta name="description" content="First description"><p>First page</p></template>' +
-      '<template component="page-second"><meta name="htmlkit:layout" content="default"><title>Second title</title><meta name="description" content="Second description"><p>Second page</p></template>';
+    const pages = '<template component="page-first"><meta name="hk:layout" content="none"><title>First title</title><meta name="description" content="First description"><p>First page</p></template>' +
+      '<template component="page-second"><meta name="hk:layout" content="default"><title>Second title</title><meta name="description" content="Second description"><p>Second page</p></template>';
     for (const selected of ["first", "second"]) {
-      await write(root, "extra/pages.html", `<meta name="htmlkit:page" content="page-${selected}">${pages}`);
+      await write(root, "extra/pages.html", `<meta name="hk:page" content="page-${selected}">${pages}`);
       const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/pages.html" }] });
       try {
         const page = await application.render("/");
@@ -91,12 +210,12 @@ describe("application platform", () => {
   it("diagnoses file-level page metadata and component-level file selectors", async () => {
     const root = await app();
     const options = { root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/page.html" }] };
-    for (const metadata of ['<title>File title</title>', '<meta name="description" content="File description">', '<meta name="htmlkit:layout" content="none">']) {
+    for (const metadata of ['<title>File title</title>', '<meta name="description" content="File description">', '<meta name="hk:layout" content="none">']) {
       await write(root, "extra/page.html", `${metadata}<template component="page-invalid"><p>Page</p></template>`);
       await expect(discoverRoutes(root, options)).rejects.toThrow(/metadata belongs inside its owning/);
     }
-    await write(root, "extra/page.html", '<template component="page-invalid"><meta name="htmlkit:page" content="page-invalid"><p>Page</p></template>');
-    await expect(discoverRoutes(root, options)).rejects.toThrow(/htmlkit:page belongs outside/);
+    await write(root, "extra/page.html", '<template component="page-invalid"><meta name="hk:page" content="page-invalid"><p>Page</p></template>');
+    await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page belongs outside/);
   });
 
   it("rejects duplicate page component names across file and registered routes before loading application code", async () => {
@@ -171,6 +290,23 @@ describe("application platform", () => {
         { pathname: "/docs/items/one/", pageName: "item-page" }, { pathname: "/docs/items/two/", pageName: "item-page" }]);
     expect(manifest.pages.every((page: { browserModule: string }) => /^\/docs\/_htmlkit\/.*\.js$/.test(page.browserModule))).toBe(true);
     expect(result.browserInputs.some(path => /(?:server-worker|node-loader|jsdom|parse5|\.server\.|browser-source)/.test(path))).toBe(false);
+    // Every page module shares one client and runtime chunk, so client navigation keeps one registry.
+    const chunks = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(file => file.endsWith(".js"))
+      .map(file => readFile(join(result.outDir, "_htmlkit", file), "utf8")));
+    expect(chunks.filter(source => source.includes("hk-announcer"))).toHaveLength(1);
+    // Payloads live in the reserved _htmlkit tree and name what the page's document links.
+    const payload = JSON.parse(await readFile(join(result.outDir, "_htmlkit/pages/items/one/payload.json"), "utf8"));
+    expect(payload.modules).toEqual([manifest.pages[1].browserModule]);
+    const itemDocument = await readFile(join(result.outDir, "items/one/index.html"), "utf8");
+    expect(payload.styles).toEqual([...itemDocument.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(match => match[1]));
+    expect(payload.styles.length).toBeGreaterThan(0);
+    expect(payload.layers.map((layer: { component: string }) => layer.component)).toEqual(["items-layout", "item-page"]);
+    expect(payload.layers[1].attributes).toEqual({ label: "kit: one", tags: '["a < b","quote \\" here"]' });
+    // Shared chunks, which links on screen prefetch, never include a page's own module.
+    for (const page of manifest.pages) {
+      expect(page.chunks.length).toBeGreaterThan(0);
+      expect(page.chunks.every((chunk: string) => /^\/docs\/_htmlkit\/[^/]+\.js$/.test(chunk) && !manifest.pages.some((other: { browserModule: string }) => other.browserModule === chunk))).toBe(true);
+    }
     const server = await previewApplication({ root, port: 0 });
     try {
       expect(await (await fetch(server.url + "items/two/")).text()).toContain("kit: two");
@@ -206,7 +342,7 @@ describe("application platform", () => {
 
   it("serializes false boolean values and camelCase props independently of native DOM targets", async () => {
     const root = await app();
-    await write(root, "extra/values.html", '<template component="value-page"><defs><prop name="active" type="boolean" default="true">Active</prop><prop name="itemURL" type="string" required>Link</prop></defs><section><button from:disabled="$active" $value="$active"></button><a from:href="$itemURL">Item</a></section></template>');
+    await write(root, "extra/values.html", '<template component="value-page"><defs><prop name="active" type="boolean" default="true">Active</prop><prop name="itemURL" type="string" required>Link</prop></defs><section><button from:disabled="$active">{$active}</button><a from:href="$itemURL">Item</a></section></template>');
     await write(root, "extra/values.server.ts", 'export const load = () => ({ props: { active: false, itemURL: "/target/" } });');
     const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/values.html", server: "extra/values.server.ts" }] });
     try {

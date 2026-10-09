@@ -83,6 +83,7 @@
   "packages/html-next-converter/tests/vue-type-parity.test.ts": 3,
   "packages/html-next-unplugin/tests/framework.test.ts": 101,
   "packages/html-next/tests/target-runtime.test.ts": 114,
+  "packages/html-next/tests/target-transitions.test.ts": 15,
   "packages/html-next/tests/targets.test.ts": 5,
   "packages/html-next/tests/vue-parity.test.ts": 158
 }

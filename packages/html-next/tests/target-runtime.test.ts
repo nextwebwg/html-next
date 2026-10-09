@@ -412,17 +412,17 @@ import { createXSteps } from "./vanilla/XSteps.js";
 import { createXStep } from "./vanilla/XStep.js";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = document.createElement("h1"); title.slot = "title"; title.textContent = "Title";
-const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
+const component = createDemoCounter({ attributes: { id: "counter" }, children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
 component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
-document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready", attributes: { class: "consumer", role: "region" } }), createXSteps({ children: [createXStep({ index: 1, children: ["One"] }), createXStep({ index: 2, children: ["Two"] })] }));`,
+document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready", attributes: { id: "panel", class: "consumer", role: "region" } }), createXSteps({ attributes: { id: "steps" }, children: [createXStep({ index: 1, attributes: { class: "step" }, children: ["One"] }), createXStep({ index: 2, attributes: { class: "step" }, children: ["Two"] })] }));`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
 import DemoPanel from "./vue/DemoPanel";
 import XSteps from "./vue/XSteps";
 import XStep from "./vue/XStep";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: event => events.push(event.detail), onInvalidChange: event => window.invalidTargetEvents.push(event.detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, null, { default: () => [h(XStep, { index: 1 }, () => "One"), h(XStep, { index: 2 }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { id: "counter", onCountChange: event => events.push(event.detail), onInvalidChange: event => window.invalidTargetEvents.push(event.detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { id: "panel", align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, { id: "steps" }, { default: () => [h(XStep, { index: 1, class: "step" }, () => "One"), h(XStep, { index: 2, class: "step" }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -466,12 +466,13 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: event => eve
         await page.addScriptTag({ path: bundles.get(target)! });
         await page.waitForTimeout(50);
         assert.deepEqual(pageErrors, []);
-        await page.waitForSelector('[data-component~="demo-counter"] output', { state: "attached", timeout: 3_000 });
+        // Tests find components by the consumer's own ids and classes; runtime markers differ by target.
+        await page.waitForSelector("#counter output", { state: "attached", timeout: 3_000 });
         const result = await page.evaluate(async () => {
-          const root = document.querySelector('[data-component~="demo-counter"]') as HTMLElement;
+          const root = document.querySelector("#counter") as HTMLElement;
           const output = root.querySelector("output")!;
           const input = root.querySelector("input") as HTMLInputElement;
-          const panel = document.querySelector('[data-component~="demo-panel"]') as HTMLElement;
+          const panel = document.querySelector("#panel") as HTMLElement;
           const before = output;
           (root.querySelector("button") as HTMLButtonElement).click();
           await Promise.resolve();
@@ -511,12 +512,13 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: event => eve
           ownTitle: false,
           // Both targets record explicit props as data-* for the rendered form.
           panel: { ownAlign: false, dataAlign: "end", dataLabel: "Ready", className: "base consumer", role: "region" },
-          provenance: "demo-counter",
+          // The vanilla build stamps its root's provenance; Vue scopes styles its own way and need not.
+          provenance: target === "vanilla" ? "demo-counter" : null,
         });
         const context = await page.evaluate(async () => {
-          const read = () => Array.from(document.querySelectorAll('[data-component="x-step"]'), (step) => step.getAttribute("aria-current"));
+          const read = () => Array.from(document.querySelectorAll(".step"), (step) => step.getAttribute("aria-current"));
           const before = read();
-          (document.querySelector('[data-component="x-steps"] button') as HTMLButtonElement).click();
+          (document.querySelector("#steps button") as HTMLButtonElement).click();
           await Promise.resolve();
           await Promise.resolve();
           return { before, after: read() };
@@ -527,7 +529,7 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: event => eve
           page.on("pageerror", (error) => resolve(error.message));
           page.on("console", (message) => { if (message.type() === "error") resolve(message.text()); });
         });
-        await page.locator('[data-component~="demo-counter"] button[data-invalid]').click();
+        await page.locator("#counter button[data-invalid]").click();
         assert.match(await invalidError, /HR002: Event `invalid-change` detail does not satisfy its declared type/);
         assert.deepEqual(
           await page.evaluate(() => (window as unknown as { invalidTargetEvents: unknown[] }).invalidTargetEvents),
@@ -571,7 +573,7 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
     const entries: Readonly<Record<string, string>> = {
       vue: `import { createApp, h } from "vue";
 import ComputedCounter from "./vue/ComputedCounter";
-createApp({ render: () => h(ComputedCounter) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h(ComputedCounter, { id: "counter" }) }).mount(document.querySelector("main"));`,
     };
     for (const [target, entry] of Object.entries(entries)) {
       const entryPath = join(directory, `${target}.ts`);
@@ -604,9 +606,9 @@ createApp({ render: () => h(ComputedCounter) }).mount(document.querySelector("ma
         const page = await browser.newPage();
         await page.setContent("<main></main>");
         await page.addScriptTag({ path: bundles.get(target)! });
-        await page.waitForSelector('[data-component~="computed-counter"] output');
+        await page.waitForSelector("#counter output");
         const result = await page.evaluate(async () => {
-          const root = document.querySelector('[data-component~="computed-counter"]')!;
+          const root = document.querySelector("#counter")!;
           const output = root.querySelector("output")!;
           const before = output.textContent;
           (root as HTMLButtonElement).click();
@@ -3172,10 +3174,12 @@ createApp({ render: () => [
             text: element.textContent,
           }));
         });
+        // The vanilla build stamps each root's provenance; Vue scopes styles its own way and need not.
+        const component = target === "vanilla" ? "x-action" : null;
         assert.deepEqual(roots, [
-          { tag: "button", component: "x-action", href: null, type: "button", disabled: false, text: "Save" },
-          { tag: "a", component: "x-action", href: "/next", type: null, disabled: false, text: "Next" },
-          { tag: "a", component: "x-action", href: null, type: null, disabled: false, text: "Off" },
+          { tag: "button", component, href: null, type: "button", disabled: false, text: "Save" },
+          { tag: "a", component, href: "/next", type: null, disabled: false, text: "Next" },
+          { tag: "a", component, href: null, type: null, disabled: false, text: "Off" },
         ]);
       } finally {
         await browser.close();
@@ -3343,9 +3347,10 @@ describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
           steps: Array<{ name: string; rows: number; same: number }>; warnings: string[]; errors: string[];
         }>;
         assert.deepEqual(compiled!.steps, live!.steps);
+        // Reconnecting keeps every row: the table's `$if` still holds, so nothing is rebuilt.
         assert.deepEqual(live!.steps.map((step) => [step.rows, step.same]), [
           [0, 0], [1000, 0], [1000, 0], [1000, 1000], [1000, 1000], [1000, 1000], [999, 999], [979, 979],
-          [1979, 979], [1979, 0], [1979, 1979], [0, 0], [10000, 0], [10000, 10000], [0, 0],
+          [1979, 979], [1979, 1979], [1979, 1979], [0, 0], [10000, 0], [10000, 10000], [0, 0],
         ]);
         assert.deepEqual([compiled!.warnings, compiled!.errors, live!.warnings, live!.errors], [[], [], [], []]);
       } finally {

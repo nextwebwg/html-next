@@ -12,7 +12,7 @@ import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import { formattingType } from "../format.js";
 import { formattingHelperSource } from "./format-source.js";
 import type { TypeNode } from "../type-system.js";
-import { quote } from "./shared.js";
+import { NUMERIC_ATTRIBUTES, quote } from "./shared.js";
 
 /** How each root name is read, and its static type, in one scope. */
 export interface Scope {
@@ -411,6 +411,43 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
 
 const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
 
+/**
+ * The expression helpers every converted Vue component shares, exported from the host module so a
+ * component imports the ones it calls instead of carrying its own copies.
+ */
+export function expressionHelpersSource(): string {
+  return [
+    `const warned = new Set<string>();
+/** An authored value's check: false warns once per authored location. */
+export function warnUnless(accepted: boolean, location: string, message: string): boolean {
+  if (!accepted && !warned.has(location)) {
+    warned.add(location);
+    console.warn(message);
+  }
+  return accepted;
+}
+
+/**
+ * Whether a handler may write a value: never an invalid result, and absent or of the destination's
+ * type. A wrong type warns once for its authored write and leaves the destination as it was.
+ */
+export function acceptsWrite(value: unknown, check?: (value: any) => boolean, file?: string, handler?: string, path?: string): boolean {
+  if (value === Symbol.for("html-next.invalid-result")) return false;
+  if (check === undefined || value === undefined || check(value)) return true;
+  return warnUnless(false, \`handler:\${handler}:\${path}\`, \`\${file}: HR007: State \${path} does not satisfy its declared type.\`);
+}
+
+export const isString = (value: unknown): value is string => typeof value === "string";
+export const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+export const isInteger = (value: unknown): value is number => Number.isInteger(value);
+export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";`,
+    ...Object.values(FALLBACKS),
+    formattingHelperSource("formatValue"),
+  ].join("\n\n").replace(/^(function|type|const formatValue) /gm, "export $1 ")
+    // Only a component that formats keeps the formatter: the module-level call has no other effect.
+    .replace(/= createFormatValue\(\)/, "= /* @__PURE__ */ createFormatValue()");
+}
+
 /** Vue's boolean attributes: it removes them for false and writes them empty for true. */
 const BOOLEAN_ATTRIBUTES = new Set(("allowfullscreen,async,autofocus,autoplay,checked,controls,default,defer,disabled,"
   + "formnovalidate,hidden,inert,ismap,itemscope,loop,multiple,muted,nomodule,novalidate,open,playsinline,readonly,"
@@ -418,15 +455,18 @@ const BOOLEAN_ATTRIBUTES = new Set(("allowfullscreen,async,autofocus,autoplay,ch
 
 const IDENTIFIER_PATH = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*$/;
 
-/** Emits expressions for one component, recording which fallback functions it needs. */
+/** Emits expressions for one component, recording which helper functions it calls. */
 export class Lowering {
   readonly #used = new Set<string>();
+
+  readonly #direct = new Set<string>();
 
   constructor(readonly warningName = "htmlNextAuthoredCheck") {}
 
   /** Warn once for an authored location while retaining the existing acceptance predicate. */
   authoredCheck(check: string, location: string, message: string): string {
     this.#used.add("authoredWarning");
+    this.#direct.add(this.warningName);
     return `${this.warningName}(${check}, ${quote(location)}, ${quote(message)})`;
   }
 
@@ -442,8 +482,10 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
 }`];
   }
 
-  #use(name: string): string {
+  /** Records a helper the emitted code calls by name and returns that name. */
+  use(name: string): string {
     this.#used.add(name);
+    this.#direct.add(name);
     for (const dependency of FALLBACK_DEPENDENCIES[name] ?? []) this.#used.add(dependency);
     return name;
   }
@@ -456,6 +498,11 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
   /** Stateful Intl reuse belongs to the module, outside component setup or render. */
   moduleFallbacks(binding = "formatValue"): string[] {
     return this.#used.has("formatValue") ? [formattingHelperSource(binding)] : [];
+  }
+
+  /** The helpers the emitted code calls by name, for a component that imports them from a shared module. */
+  helpers(): string[] {
+    return [...this.#direct].sort();
   }
 
   /** The expression's value. */
@@ -498,11 +545,11 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
         if (node.operand.kind === "literal" && typeof node.operand.value === "number") return `-${node.operand.value}`;
         const type = typeOf(node.operand, scope).type;
         if (type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name)) {
-          return `(${this.#use("math")}("negate", [${quote(type.name)}], [${this.value(node.operand, scope)}]) as string | undefined)`;
+          return `(${this.use("math")}("negate", [${quote(type.name)}], [${this.value(node.operand, scope)}]) as string | undefined)`;
         }
         const operand = this.#numeric(node.operand, scope);
         if (operand !== undefined) return `-${operand}`;
-        const number = this.#use("number");
+        const number = this.use("number");
         return `(${number}(${this.value(node.operand, scope)}) === undefined ? undefined : -${number}(${this.value(node.operand, scope)})!)`;
       }
       case "binary":
@@ -532,7 +579,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
 
   /** Apply native expression truthiness to an already evaluated value. */
   truthiness(source: string): string {
-    return `${this.#use("truthy")}(${source})`;
+    return `${this.use("truthy")}(${source})`;
   }
 
   /** The expression as a condition, where JavaScript truthiness is enough. */
@@ -565,7 +612,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       case "list": return mayProduceInvalidResult(node, scope)
         ? `((value: any) => value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}length)(${code})`
         : type.nullable ? `${this.#wrap(node, code)}?.length` : `${this.#wrap(node, code)}.length`;
-      default: return `${this.#use("truthy")}(${code})`;
+      default: return `${this.use("truthy")}(${code})`;
     }
   }
 
@@ -578,7 +625,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
       ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
       : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
-    return `${this.#use("text")}(${code})`;
+    return `${this.use("text")}(${code})`;
   }
 
   /** The expression bound to an attribute of a native element. */
@@ -589,6 +636,11 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     if (kind === "boolean" && !BOOLEAN_ATTRIBUTES.has(name) && !isEnumeratedBoolean(name)) {
       return `${this.#wrap(node, this.condition(node, scope))} ? "" : undefined`;
     }
+    // A number bound to an attribute typed as text is the text the DOM stores, as live writes it.
+    // Frameworks leave `data-*` attributes untyped.
+    if (kind === "number" && !NUMERIC_ATTRIBUTES.has(name) && !name.startsWith("data-") && !mayProduceInvalidResult(node, scope)) {
+      return type.nullable || type.null === true ? `${this.#wrap(node, code)}?.toString()` : `String(${code})`;
+    }
     // Vue removes an attribute bound to null, but its attribute types accept only undefined.
     const plain = type.null === true ? `${this.#wrap(node, code)} ?? undefined` : code;
     if (kind === "boolean" || kind === "string" || kind === "number") return plain;
@@ -598,8 +650,8 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
       ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
       : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
-    if (isEnumeratedBoolean(name)) return `typeof (${code}) === "boolean" ? String(${code}) : ${this.#use("attribute")}(${code})`;
-    return `${this.#use("attribute")}(${code})`;
+    if (isEnumeratedBoolean(name)) return `typeof (${code}) === "boolean" ? String(${code}) : ${this.use("attribute")}(${code})`;
+    return `${this.use("attribute")}(${code})`;
   }
 
   /** The list a `$each` iterates, filtered, sorted, and limited as declared. */
@@ -612,22 +664,22 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
   ): string {
     const type = typeOf(node, scope);
     // Vue iterates null and undefined as nothing; anything but a list must also iterate as nothing.
-    let code = type.type.kind === "list" ? source : `${this.#use("list")}(${source})`;
+    let code = type.type.kind === "list" ? source : `${this.use("list")}(${source})`;
     if (options.where === undefined && options.sort.length === 0 && options.limit === undefined) return code;
     if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
     if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
-    if (options.sort.length > 0) code = `${this.#use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
+    if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
     if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
     return code;
   }
 
   /** Bind an already-shaped list and its loop metadata once for Vue's iteration. */
   eachRows(code: string): string {
-    return `${this.#use("eachRows")}(${code})`;
+    return `${this.use("eachRows")}(${code})`;
   }
 
   uniqueKeys(items: string, keyOf: string): string {
-    return `${this.#use("uniqueKeys")}(${items}, ${keyOf})`;
+    return `${this.use("uniqueKeys")}(${items}, ${keyOf})`;
   }
 
   #not(node: ExpressionNode, scope: Scope): string {
@@ -678,13 +730,13 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       const rightKind = rightType.kind === "terminal" ? rightType.name : "unknown";
       if (["length", "percentage", "duration"].includes(leftKind) ||
         ["length", "percentage", "duration"].includes(rightKind)) {
-        return `(${this.#use("arithmetic")}(${quote(op)}, ${quote(leftKind)}, ${quote(rightKind)}, ${left}, ${right}) as string | symbol | undefined)`;
+        return `(${this.use("arithmetic")}(${quote(op)}, ${quote(leftKind)}, ${quote(rightKind)}, ${left}, ${right}) as string | symbol | undefined)`;
       }
     }
     const x = this.#numeric(node.left, scope);
     const y = this.#numeric(node.right, scope);
     if (x !== undefined && y !== undefined) return `${left} ${op} ${right}`;
-    const number = this.#use("number");
+    const number = this.use("number");
     return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${number}(${left})! ${op} ${number}(${right})!)`;
   }
 
@@ -694,7 +746,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       const input = node.args[0];
       if (input === undefined) return "Symbol.for('html-next.invalid-result')";
       const hint = input.kind === "array" && input.items.length === 0 ? "list" : formattingType(typeOf(input, scope).type);
-      return `${this.#use("formatValue")}(${this.value(input, scope)}, ${hint === undefined ? "undefined" : quote(hint)}, ${quote(node.fn)}${node.args.length > 1 ? ", " + node.args.slice(1).map((arg) => this.value(arg, scope)).join(", ") : ""})`;
+      return `${this.use("formatValue")}(${this.value(input, scope)}, ${hint === undefined ? "undefined" : quote(hint)}, ${quote(node.fn)}${node.args.length > 1 ? ", " + node.args.slice(1).map((arg) => this.value(arg, scope)).join(", ") : ""})`;
     }
     if (node.fn === "default") {
       if (node.args.length !== 2) return "undefined";
@@ -702,7 +754,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       return `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})`;
     }
     if (node.fn === "concat" || node.fn === "join") {
-      return `${this.#use(node.fn)}(${values})`;
+      return `${this.use(node.fn)}(${values})`;
     }
     const kinds = node.args.map((argument) => {
       const type = typeOf(argument, scope).type;
@@ -720,7 +772,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     }
     const resultType = typeOf(node, scope).type;
     const result = resultType.kind === "terminal" && ["length", "percentage", "duration"].includes(resultType.name) ? "string" : "number";
-    return `(${this.#use("math")}(${quote(node.fn)}, [${kinds.map(quote).join(", ")}], [${values}]) as ${result} | symbol | undefined)`;
+    return `(${this.use("math")}(${quote(node.fn)}, [${kinds.map(quote).join(", ")}], [${values}]) as ${result} | symbol | undefined)`;
   }
 
   /** A known, present number, or undefined when HTML Next's arithmetic would yield absence. */

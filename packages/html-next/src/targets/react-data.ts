@@ -16,6 +16,8 @@ export interface DataReadOptions {
   readonly type?: string;
   readonly debounce?: number;
   readonly poll?: number;
+  /** The from-parameters' values: only a change to them requests again. */
+  readonly sources: () => readonly unknown[];
   readonly parameters: () => Readonly<Record<string, unknown>>;
 }
 
@@ -26,7 +28,7 @@ export function useDataRead<T>(options: DataReadOptions): DataState<T> {
   const [state, setState] = React.useState<DataState<T>>({ pending: true, value: null, error: null, ok: false });
   const value = React.useRef<T | null>(null);
   const generation = React.useRef(0);
-  const active = React.useRef<{ url: string; abort?: AbortController; timer?: ReturnType<typeof setTimeout> } | undefined>(undefined);
+  const active = React.useRef<{ key: string; abort?: AbortController; timer?: ReturnType<typeof setTimeout> } | undefined>(undefined);
 
   React.useEffect(() => {
     return () => {
@@ -43,12 +45,13 @@ export function useDataRead<T>(options: DataReadOptions): DataState<T> {
       try { return new URL(options.definition, document.baseURI).href; }
       catch { return document.baseURI; }
     })();
+    const key = dataKey(options.sources());
+    if (active.current?.key === key) return;
     const url = dataURL(options.source, definition, options.parameters());
-    if (active.current?.url === url) return;
     active.current?.abort?.abort();
     if (active.current?.timer !== undefined) clearTimeout(active.current.timer);
     const current = ++generation.current;
-    const requestState: { url: string; abort?: AbortController; timer?: ReturnType<typeof setTimeout> } = { url };
+    const requestState: { key: string; abort?: AbortController; timer?: ReturnType<typeof setTimeout> } = { key };
     active.current = requestState;
     const stale = (): boolean => generation.current !== current;
     const request = async (): Promise<void> => {

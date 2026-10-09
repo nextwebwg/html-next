@@ -22,6 +22,7 @@ const baseStyle = "<style>html { color-scheme: light; } body { margin: 8px; font
 // Keep every successful public case accounted for as support lands.
 const selected = new Set([
   "HTML parser recovery keeps the first duplicate attribute",
+  "keeps whitespace-only text between elements and rows inside pre",
   "preserves SVG namespaces and camelCase attributes inside a native root",
   "keeps a single native root when $with scopes the root",
   "lowers to native root with prop :attr, passthrough attrs, and default slot",
@@ -45,6 +46,8 @@ const selected = new Set([
   "$each $where filters and reindexes the loop",
   "$sort with multiple keys and descending (a,-b)",
   "$match/$when/$else renders only the winning arm",
+  "bindings and bound controls write no attribute when a change leaves their result as it was",
+  "$if, $with and $match keep their content while the decision holds, and rebuild it when it changes",
   "$match selects a row inside <table><tbody>, falling back to $else",
   "a structural <template> produces no wrapper element",
   "$with binds an aliased expression into a child scope",
@@ -88,6 +91,18 @@ const regressions: readonly ConverterCase[] = [
     </template><x-svg-boundary><svg><rect class="shape" width="10" height="10"></rect><rect class="shape styled" x="20" width="10" height="10"></rect></svg></x-svg-boundary>`,
     expect: { probe: `return [...document.querySelectorAll('rect')].map(node => getComputedStyle(node).fill);`,
       result: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'] },
+  },
+  {
+    name: "declared names and loop aliases never take render helper names or a handler's step locals",
+    source: `<template component="x-step-names" status="early" summary="Generated names."><defs>
+      <state name="items" value=""></state><state name="step" type="number" value="10"></state>
+      <state name="next0" type="number" value="1"></state><state name="count" type="number" value="0"></state>
+      <state name="list" type="string" value="kept"></state>
+      <handler name="advance"><set name="next0" expr:value="$next0 + 1"></set><set name="count" expr:value="$next0 + 1"></set><set name="items" expr:value="[1, 2]"></set></handler>
+      </defs><section><ul><li $each="number of $items">{$number + $step}</li></ul><output>{$next0}/{$count}/{$list}</output><button type="button" on:click="advance">Go</button></section></template><x-step-names></x-step-names>`,
+    expect: { probe: `return [qa('li').map(e => e.textContent), q('output').textContent];`, result: [[], "1/0/kept"], after: [
+      { action: `document.querySelector('button').click();`, result: [["11", "12"], "2/3/kept"] },
+    ] },
   },
   {
     name: "one-way native controls preserve authored defaults without duplicate attributes",
@@ -223,11 +238,12 @@ const regressions: readonly ConverterCase[] = [
     ] },
   },
   {
-    name: "authored text preserves literal braces decoded entities and exact whitespace",
+    name: "authored text preserves literal braces, decoded entities and preformatted whitespace",
     source: `<template component="x-literal-text" status="early" summary="Literal text."><defs><state name="count" type="number" value="1"></state><handler name="next"><set name="count" value="2"></set></handler></defs><section><p class="literal" title="{count}" data-entity="&amp;amp;">  \\{count} &amp; \\&#123;count&#125; \\{#if count} &lt;b&gt;  </p><pre> first
   second </pre><span class="dynamic" $value="$count"></span><button on:click="next">Next</button></section></template><x-literal-text></x-literal-text>`,
-    expect: { probe: `return [q('p.literal').textContent, q('pre').textContent, q('p.literal').getAttribute('title'), q('p.literal').getAttribute('data-entity'), q('span.dynamic').textContent];`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "1"], after: [
-      { action: `document.querySelector('button').click();`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "2"] },
+    // Svelte drops whitespace at the start and end of a tag, as converted text follows Svelte's whitespace handling.
+    expect: { probe: `return [q('p.literal').textContent.trim(), q('pre').textContent, q('p.literal').getAttribute('title'), q('p.literal').getAttribute('data-entity'), q('span.dynamic').textContent];`, result: ["{count} & {count} {#if count} <b>", " first\n  second ", "{count}", "&amp;", "1"], after: [
+      { action: `document.querySelector('button').click();`, result: ["{count} & {count} {#if count} <b>", " first\n  second ", "{count}", "&amp;", "2"] },
     ] },
   },
   {

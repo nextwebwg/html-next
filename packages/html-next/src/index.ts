@@ -22,6 +22,7 @@ export {
   svelteControlArtifact,
   svelteDataArtifact,
   svelteReactivityArtifact,
+  svelteRenderArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
@@ -33,8 +34,10 @@ export {
   reactHostArtifact,
   reactContextArtifact,
   reactDepthArtifact,
+  reactRenderArtifact,
   type GeneratedArtifact,
 } from "./generate.js";
+export { LANGUAGE_EXTENSIONS, TRANSITIONS_EXTENSION, transitionElements } from "./transition-syntax.js";
 export { addControllerGraph } from "./controller-files.js";
 export { parseComponent } from "./source-parser.js";
 export { parseSourceComponent } from "./source.js";

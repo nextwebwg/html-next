@@ -28,6 +28,7 @@ import {
   svelteControlArtifact,
   svelteDataArtifact,
   svelteReactivityArtifact,
+  svelteRenderArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
@@ -39,10 +40,12 @@ import {
   reactHostArtifact,
   reactContextArtifact,
   reactDepthArtifact,
+  reactRenderArtifact,
   type DiagnosticLocation,
   type ComponentGraph,
   type TemplateNode,
   type GeneratedArtifact,
+  transitionElements,
 } from "@nextwebwg/html-next";
 
 export type FrameworkTarget = "vue" | "react" | "svelte";
@@ -381,6 +384,16 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     seenEntries.add(entry);
   }
   const graph = await loadNodeComponents(entries, { baseURL: pathToFileURL(`${projectRoot}${sep}`).href, collectDiagnostics });
+  // Only the native Vite build builds the `transitions` extension; conversion leaves its directives out.
+  const unsupported: HtmlDiagnostic[] = [...graph.nodes.values()].flatMap(({ definition }) => {
+    const [first] = transitionElements(definition);
+    if (first === undefined) return [];
+    return [{
+      code: "HT024", severity: "warning" as const, source: definition.source.file,
+      message: `\`$transition\` and \`$transition-name\` use the \`transitions\` extension, which ${options.target} conversion does not support; \`${definition.contract.tag}\` converts without animation.`,
+      ...first.line === undefined || first.column === undefined ? {} : { line: first.line, column: first.column },
+    }];
+  });
   const sourceFiles = new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)).concat(graph.stylesheetInputs.map(url => fileURLToPath(url))));
   const sharedStyles = collectSharedStylesheets([...graph.nodes.values()].map(node => node.definition));
   const sharedStylePath = `${options.target}/shared-components.css`;
@@ -480,6 +493,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
           reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
+          renderSpecifier: relativeImport(componentPath, "svelte/render.svelte.ts").replace(/\.ts$/, ""),
           importSpecifier,
           propContractsByTag,
           stylesheetSpecifier: `./${node.definition.contract.name}.css`,
@@ -502,6 +516,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           hostSpecifier: reactHelperSpecifier("host"),
           contextSpecifier: reactHelperSpecifier("context"),
           depthSpecifier: reactHelperSpecifier("depth"),
+          renderSpecifier: reactHelperSpecifier("render"),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         })).component;
       } catch (error) {
@@ -560,7 +575,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       }));
     } catch (error) { recover(error); }
   }
-  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...diagnostics]);
+  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...unsupported, ...diagnostics]);
 
   if (options.target === "vue" && neededHelpers.has("host")) {
     claim(vueHostArtifact(), "helper");
@@ -601,6 +616,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "svelte" && neededHelpers.has("reactivity")) {
     claim(svelteReactivityArtifact(), "helper");
   }
+  if (options.target === "svelte" && neededHelpers.has("render")) {
+    claim(svelteRenderArtifact(), "helper");
+  }
   if (options.target === "svelte" && neededHelpers.has("data")) {
     claim(svelteDataArtifact(), "helper");
   }
@@ -627,6 +645,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (options.target === "react" && neededHelpers.has("depth")) {
     claim(reactDepthArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("render")) {
+    claim(reactRenderArtifact(), "helper");
   }
   if (options.target === "react" && reactStyles) {
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
@@ -680,6 +701,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     }),
     components: Object.freeze(manifestComponents),
   });
-  for (const warning of graph.warnings ?? []) options.onWarning?.(warning);
+  for (const warning of [...graph.warnings ?? [], ...unsupported]) options.onWarning?.(warning);
   return { manifest, artifacts: planned.map(({ artifact }) => artifact) };
 }

@@ -4,19 +4,83 @@ import { fail } from "../diagnostics.js";
 import { compilePath, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
 import { componentName, kebabCase } from "../names.js";
+import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
-import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
+import { REACT_EVENTS_EXPORTS } from "./react-events.js";
+import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
+import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
-import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck } from "./type-guards.js";
+import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
+import { conformingLiteralWrite, declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
 import { parseFragment } from "parse5";
+
+/**
+ * Identifiers the generated component already uses: JavaScript names, the helpers it imports, its
+ * own locals, and the parameters of the callbacks it writes. Authored names avoid them. The
+ * rendering and events modules' names come from their sources, so a new helper is never missed.
+ */
+const REACT_RESERVED = new Set([
+  "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export",
+  "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super",
+  "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield", "let", "static", "implements",
+  "interface", "package", "private", "protected", "public", "await", "arguments", "eval", "async", "of", "type",
+  "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
+  "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
+  "document", "console", "globalThis",
+  "props", "nativeAttrs", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
+  "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
+  "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
+  "ref", "cleanup", "binding", "attrs", "detail", "name", "keys", "path",
+  "checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", "propValidityState",
+  "selectedPropNode", "acceptsControllerWrite",
+  "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
+  "useComponentHost", "componentContext", "NestedDepthContext", "ScopedAttachment",
+  ...REACT_RENDER_EXPORTS, ...REACT_EVENTS_EXPORTS,
+]);
+
+/** Names a template local (a loop item or `$with` alias) must not shadow inside the markup it scopes. */
+const REACT_LOCAL_RESERVED = new Set([...REACT_RENDER_EXPORTS, "dispatchDeclaredTargets", "htmlNextAuthoredCheck",
+  "htmlNextAuthoredCheckReported", "Symbol", "Object", "String", "Number", "Array", "Math"]);
+
+/** A generated name the component builds from an index, such as `attachEvents2`, or a private `__` name. */
+const GENERATED_NAME = /^(?:__|_|attachEvents\d|controlRef|controlValue|previousProperty|propertyRef|genericCleanup|HtmlNextContext_)/;
+
+/** The component tags a template invokes, whose imported names the component's scope holds. */
+function componentTagsIn(node: TemplateNode, tags = new Set<string>()): Set<string> {
+  if (node.kind === "text") return tags;
+  if (node.kind === "slot") {
+    for (const child of node.fallback ?? []) componentTagsIn(child, tags);
+    return tags;
+  }
+  if (node.name.includes("-") && getDomInterface(node.name) === undefined) tags.add(node.name);
+  for (const child of node.children) componentTagsIn(child, tags);
+  return tags;
+}
+
+/** An authored name as a JavaScript identifier: `step-up` becomes `stepUp`. */
+function identifierFor(name: string): string {
+  const camel = name.replace(/[^A-Za-z0-9_$]+(.)?/g, (_match, next: string | undefined) => next?.toUpperCase() ?? "");
+  return /^[0-9]/.test(camel) || camel === "" ? `_${camel}` : camel;
+}
+
+function pascal(name: string): string {
+  const identifier = identifierFor(name);
+  return identifier[0]!.toUpperCase() + identifier.slice(1);
+}
+
+/** Where the shared rendering module's import goes; filled once the component's code is known. */
+const RENDER_IMPORT = "\u0000render-import";
+/** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
+const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTextarea", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
@@ -32,6 +96,7 @@ export interface ReactConversionOptions {
   readonly hostSpecifier?: string;
   readonly contextSpecifier?: string;
   readonly depthSpecifier?: string;
+  readonly renderSpecifier?: string;
   readonly guardNestedDepth?: boolean;
   readonly controllerSpecifier?: string;
 }
@@ -39,7 +104,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth")[];
+  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render")[];
 }
 
 interface RootAttributes {
@@ -51,6 +116,10 @@ interface RootAttributes {
 
 interface EventAttachment {
   readonly name: string;
+  /** Only native listeners: the element's ref is \`useNativeEvents\`'s callback. */
+  readonly listensOnly: boolean;
+  /** The root's ref alone: it is \`rootRef\` itself. */
+  readonly forwardsOnly: boolean;
   readonly scoped: boolean;
   readonly bindings: readonly EventBinding[];
   readonly forward: boolean;
@@ -82,6 +151,10 @@ interface RenderState {
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
   usesOutputValue: boolean;
+  /** A free name in the component's scope, for an element's event hook. */
+  readonly allocate: (base: string) => string;
+  /** Inside a preformatted element such as <pre> or <textarea>, whose text is kept exactly, as Vue keeps it. */
+  preformatted: boolean;
 }
 
 interface RenderScope extends Scope {
@@ -101,9 +174,6 @@ const REACT_ATTRIBUTES: Readonly<Record<string, string>> = {
   contenteditable: "contentEditable", colspan: "colSpan", rowspan: "rowSpan",
 };
 
-const REACT_NUMERIC_ATTRIBUTES = new Set(["tabindex", "colspan", "rowspan", "maxlength", "minlength", "size", "rows", "cols", "span", "start",
-  "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-level", "aria-posinset", "aria-setsize"]);
-
 /** Keep JavaScript lookup semantics while allowing HTML Next's absent keys in strict TSX. */
 class ReactLowering extends Lowering {
   override value(node: ExpressionNode, scope: Scope): string {
@@ -119,8 +189,9 @@ class ReactLowering extends Lowering {
   }
 }
 
-function nullableText(value: string): string {
-  return `String(((value: unknown) => value ?? "")(${value}))`;
+/** A value as HTML Next text: absent and null are empty, as in the live runtime. */
+function nullableText(value: string, lowering: Lowering): string {
+  return `${lowering.use("text")}(${value})`;
 }
 
 const adjustedSvgAttributes = new Map<string, string>();
@@ -155,8 +226,29 @@ function literalStyle(value: string, importantStyles: Array<{ readonly name: str
   });
 }
 
-function jsxText(value: string): string {
-  return `{${quote(value)}}`;
+/**
+ * Authored text as JSX text, written as authored with JSX's own whitespace handling: each run of
+ * ASCII whitespace is one space. Text JSX would read as markup, that starts or ends with a space a
+ * formatter could move to a line edge, or that holds other whitespace (a non-breaking space) a
+ * compiler could trim there, stays a string expression, as does preformatted text.
+ */
+function jsxText(value: string, preformatted: boolean): string {
+  const collapsed = preformatted ? value : value.replace(/[\t\n\f\r ]+/g, " ");
+  return preformatted || /[{}<>&]|^ | $|[^\S ]/.test(collapsed) ? `{${quote(collapsed)}}` : collapsed;
+}
+
+/**
+ * One text node's authored and computed parts as a template literal, without the indentation at
+ * its ends: the live runtime renders them as one Text node, which a browser shapes as one run.
+ */
+function jsxTextParts(segments: readonly { readonly value: string; readonly computed?: string }[], preformatted: boolean): string {
+  const parts = segments.map((segment) => segment.computed !== undefined ? segment
+    : { text: preformatted ? segment.value : segment.value.replace(/[\t\n\f\r ]+/g, " ") });
+  const first = parts[0];
+  if (!preformatted && first !== undefined && "text" in first && /^[\t\f\r ]*\n/.test(segments[0]!.value)) first.text = first.text.replace(/^ /, "");
+  const last = parts.at(-1);
+  if (!preformatted && last !== undefined && "text" in last && /\n[\t\f\r ]*$/.test(segments.at(-1)!.value)) last.text = last.text.replace(/ $/, "");
+  return `{\`${parts.map((part) => "text" in part ? part.text.replace(/[\\`]|\$(?=\{)/g, (character) => `\\${character}`) : `\${${part.computed}}`).join("")}\`}`;
 }
 
 function selectedOptionDefaults(node: ElementNode): boolean[] {
@@ -204,7 +296,7 @@ function localScope(scope: RenderScope, names: readonly (readonly [string, Stati
 }
 
 function localIdentifier(name: string, scope: RenderScope, state: RenderState): string {
-  if (isScriptIdentifier(name) && !["dispatchDeclaredTargets", "htmlNextAuthoredCheck", "htmlNextAuthoredCheckReported", "formatValue", "Symbol", "Object", "String", "Number", "Array", "Math", "text", "truthy", "attribute", "number", "list", "concat", "join", "math", "arithmetic"].includes(name)) return name;
+  if (isScriptIdentifier(name) && !REACT_LOCAL_RESERVED.has(name)) return name;
   let alias: string;
   do alias = `__htmlNextLocal${state.nextRetainedAlias++}`;
   while ([...scope.code.values()].includes(alias) || scope.code.has(alias));
@@ -214,28 +306,28 @@ function localIdentifier(name: string, scope: RenderScope, state: RenderState): 
 function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, imports: Set<string>, handlers: ReadonlySet<string>, attachments: EventAttachment[], state: RenderState, rootTag?: RootAttributes, projected = false, inSvg = false): string {
   if (node.kind === "text") {
     if (node.segments !== undefined) {
-      const parts: string[] = [];
+      const parts: { value: string; computed?: string }[] = [];
       const retained: { alias: string; value: string; guard?: string }[] = [];
       for (const segment of node.segments) {
         const plan = segment.expressionPlan;
-        if (plan === undefined) { parts.push(quote(segment.value)); continue; }
+        if (plan === undefined) { parts.push({ value: segment.value }); continue; }
         const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
         if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
           state.usesRetainedValue = true;
           const alias = `__retained${state.nextRetainedAlias++}`;
           retained.push({ alias, value: lowering.value(plan.ast, scope), ...(guard === undefined ? {} : { guard }) });
           const local = localScope(scope, [[alias, typeOf(plan.ast, scope)]]);
-          parts.push(nullableText(lowering.text({ kind: "id", name: alias }, local)));
-        } else parts.push(nullableText(lowering.text(plan.ast, scope)));
+          parts.push({ value: segment.value, computed: nullableText(lowering.text({ kind: "id", name: alias }, local), lowering) });
+        } else parts.push({ value: segment.value, computed: nullableText(lowering.text(plan.ast, scope), lowering) });
       }
-      let content = `{[${parts.join(", ")}].join("")}`;
+      let content = jsxTextParts(parts, state.preformatted);
       for (const part of retained.toReversed()) content = `<RetainedValue value={${part.value}} accepts={() => ${part.guard ?? "true"}} render={(${part.alias}) => <>${content}</>} />`;
       return content;
     }
     const plan = node.expressionPlan;
-    if (plan === undefined) return jsxText(node.value);
+    if (plan === undefined) return jsxText(node.value, state.preformatted);
     const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
-    const text = nullableText(lowering.text(plan.ast, scope));
+    const text = nullableText(lowering.text(plan.ast, scope), lowering);
     if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
       state.usesRetainedText = true;
       return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
@@ -318,6 +410,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         return `<RetainedValue value={${value}} accepts={() => true} render={(${alias}, hasValue) => hasValue ? (${content}) : null} />`;
       };
       const arms = node.children.filter((child): child is ElementNode => child.kind === "element");
+      // Live builds a newly chosen arm afresh, so a nested arm is keyed: React must not reuse the
+      // previous arm's DOM when both have the same shape. A root switch follows live's own rules.
+      const renderArm = (body: ElementNode, index: number): string => {
+        const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
+        return rootTag === undefined ? `<React.Fragment key={${index}}>${content}</React.Fragment>` : content;
+      };
       const retainsChoice = arms.some((arm) => arm.flow?.kind === "when" && arm.flow.testPlan !== undefined &&
         mayProduceInvalidResult(arm.flow.testPlan.ast, scoped));
       if (retainsChoice) {
@@ -334,17 +432,17 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         let selected = "null";
         for (let index = arms.length - 1; index >= 0; index -= 1) {
           const { flow: _choice, ...body } = arms[index]!;
-          selected = `selected === ${index} ? (${renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg)}) : (${selected})`;
+          selected = `selected === ${index} ? (${renderArm(body, index)}) : (${selected})`;
         }
         const markup = `<RetainedValue value={${choice}} render={(selected) => ${selected}} />`;
         return withAlias(markup);
       }
       let expression = "null";
-      for (const arm of arms.toReversed()) {
+      for (const [index, arm] of [...arms.entries()].toReversed()) {
         const { flow: choice, ...choiceBody } = arm;
-        if (choice?.kind === "else") expression = `(${renderNode(choiceBody, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg)})`;
+        if (choice?.kind === "else") expression = `(${renderArm(choiceBody, index)})`;
         else if (choice?.kind === "when" && choice.testPlan !== undefined) {
-          expression = `${lowering.condition(choice.testPlan.ast, scoped)} ? (${renderNode(choiceBody, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg)}) : (${expression})`;
+          expression = `${lowering.condition(choice.testPlan.ast, scoped)} ? (${renderArm(choiceBody, index)}) : (${expression})`;
         } else fail("HT030", "React conversion of an invalid $match arm is not implemented.");
       }
       if (flow.alias === undefined) return `{${expression}}`;
@@ -370,21 +468,22 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (html?.kind === "directive" && html.expressionPlan !== undefined) {
       state.usesHtml = true;
       const guard = declaredReferenceGuard(html.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard !== undefined) {
+      // An invalid result, or a declared reference that does not conform, keeps the last content.
+      if (guard !== undefined || mayProduceInvalidResult(html.expressionPlan.ast, scope)) {
         state.usesRetainedValue = true;
         const alias = `__retained${state.nextRetainedAlias++}`;
-        return `<RetainedValue value={${lowering.text(html.expressionPlan.ast, scope)}} accepts={() => ${guard}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias)}}${projected ? " projected" : ""} />} />`;
+        return `<RetainedValue value={${lowering.text(html.expressionPlan.ast, scope)}} accepts={() => ${guard ?? "true"}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias, lowering)}}${projected ? " projected" : ""} />} />`;
       }
-      return `<SanitizedHtml value={${nullableText(lowering.text(html.expressionPlan.ast, scope))}}${projected ? " projected" : ""} />`;
+      return `<SanitizedHtml value={${nullableText(lowering.text(html.expressionPlan.ast, scope), lowering)}}${projected ? " projected" : ""} />`;
     }
     const value = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "value");
     if (value?.kind === "directive" && value.expressionPlan !== undefined) {
       const guard = declaredReferenceGuard(value.expressionPlan, scope, state.definition, undefined, lowering);
       if (mayProduceInvalidResult(value.expressionPlan.ast, scope) || guard !== undefined) {
         state.usesRetainedText = true;
-        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope))}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
+        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
       }
-      return `<>{${nullableText(lowering.text(value.expressionPlan.ast, scope))}}</>`;
+      return `<>{${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}</>`;
     }
     if (node.attributes.length === 1 && node.attributes[0]?.kind === "literal" && node.attributes[0].name === "slot") {
       return `<template slot=${quote(node.attributes[0].value)}${projected ? ' data-slotted=""' : ""}>${node.children.map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("")}</template>`;
@@ -395,7 +494,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const component = node.name.includes("-") && getDomInterface(node.name) === undefined;
   const outputValue = node.name === "output" && node.attributes.some((attribute) =>
     attribute.kind === "directive" && attribute.name === "value");
-  const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : node.name;
+  // React DOM rewrites an input's name and type, and a textarea's default, whenever it commits one.
+  const memoControl = !component && !outputValue && !inSvg && (node.name === "input" || node.name === "textarea");
+  const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : memoControl
+    ? node.name === "input" ? "HtmlNextInput" : "HtmlNextTextarea" : node.name;
   const svg = !component && (inSvg || node.name === "svg");
   if (component) imports.add(node.name);
   const componentContracts = component ? state.propContractsByTag?.get(node.name) : undefined;
@@ -439,7 +541,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       }
       else if (!component && isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
       else if (!component && ["input", "textarea", "select"].includes(node.name) && attribute.name === "value") literals.push(`defaultValue=${quote(attribute.value)}`);
-      else literals.push(REACT_NUMERIC_ATTRIBUTES.has(attribute.name) && !component
+      else literals.push(NUMERIC_ATTRIBUTES.has(attribute.name) && !component
         ? `${reactAttribute(attribute.name, svg)}={${quote(attribute.value)} as any}`
         : `${reactAttribute(attribute.name, svg)}=${quote(attribute.value)}`);
     } else if (attribute.kind === "attribute" && attribute.target === "class") {
@@ -487,7 +589,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           : node.name === "select" ? `${value} as React.SelectHTMLAttributes<HTMLSelectElement>["defaultValue"]` : `String(${value} ?? "")`;
         const authored = name === "checked" ? `(${defaults}).checked`
           : node.name === "select" ? "undefined" : `(${defaults}).value`;
-        bindings.push(`${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
+        bindings.push(memoControl
+          ? `htmlNextDefault=${quote(name === "checked" ? "defaultChecked" : "defaultValue")} htmlNextAuthored={${authored}} htmlNextInitial={${initial}}`
+          : `${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else {
         genericWrites.push({ state: attribute.writablePath[0], path: pathSource, dynamic });
         bindings.push(`{...{ ${quote(attribute.name)}: ${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)} }}`);
@@ -533,7 +637,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
         const rendered = lowering.attribute({ kind: "id", name: alias }, aliasScope, attribute.name);
         bindings.push(`${reactAttribute(attribute.name, svg)}={${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered}}`);
-      } else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${REACT_NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
+      } else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
     } else if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled property ${attribute.expression}.`);
       const value = lowering.value(attribute.expressionPlan.ast, scope);
@@ -545,11 +649,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const defaults = authoredControlDefaults(node, name);
         control = { name, value, defaults, nativeProperty: true };
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-        const alias = guard === undefined ? value : `__retained${state.nextRetainedAlias++}`;
-        if (guard !== undefined) {
+        const retains = guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope);
+        const alias = retains ? `__retained${state.nextRetainedAlias++}` : value;
+        if (retains) {
           state.usesRetainedValue = true;
-          retainedBindings.push({ alias, value, accepts: `() => ${guard}` });
-          control = { ...control, accepts: guard };
+          retainedBindings.push({ alias, value, accepts: `() => ${guard ?? "true"}` });
+          if (guard !== undefined) control = { ...control, accepts: guard };
         }
         const selectValue = node.name === "select" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "multiple")
           ? `[String(${alias})]` : `String(${alias})`;
@@ -559,13 +664,15 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
             : `${alias} == null ? undefined : String(${alias})`;
         const authored = name === "checked" ? `(${defaults}).checked`
           : node.name === "select" ? "undefined" : `(${defaults}).value`;
-        bindings.push(`${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
+        bindings.push(memoControl
+          ? `htmlNextDefault=${quote(name === "checked" ? "defaultChecked" : "defaultValue")} htmlNextAuthored={${authored}} htmlNextInitial={${initial}}`
+          : `${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else if (attribute.name === "textContent") {
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-        if (guard !== undefined) {
+        if (guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
           state.usesRetainedText = true;
-          content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope))}} accepts={() => ${guard}} />`;
-        } else content = `{${nullableText(value)}}`;
+          content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+        } else content = `{${nullableText(value, lowering)}}`;
       }
       else {
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
@@ -586,7 +693,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       const retained = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) || guard !== undefined;
       const raw = lowering.value(attribute.expressionPlan.ast, scope);
-      const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope));
+      const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering);
       const defined = attribute.expressionPlan.ast.kind === "array" || attribute.expressionPlan.ast.kind === "object"
         ? undefined : `(${raw}) !== undefined`;
       const accepts = [defined, guard === undefined ? undefined : `(${guard})`].filter(Boolean).join(" && ");
@@ -603,11 +710,11 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled HTML ${attribute.expression}.`);
       state.usesHtml = true;
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard !== undefined) {
+      if (guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
         state.usesRetainedValue = true;
         const alias = `__retained${state.nextRetainedAlias++}`;
-        content = `<RetainedValue value={${lowering.text(attribute.expressionPlan.ast, scope)}} accepts={() => ${guard}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias)}} />} />`;
-      } else content = `<SanitizedHtml value={${nullableText(lowering.text(attribute.expressionPlan.ast, scope))}} />`;
+        content = `<RetainedValue value={${lowering.text(attribute.expressionPlan.ast, scope)}} accepts={() => ${guard ?? "true"}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias, lowering)}} />} />`;
+      } else content = `<SanitizedHtml value={${nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering)}} />`;
     } else {
       fail("HT030", `React conversion of ${attribute.kind === "directive" ? `$${attribute.name}` : `:${attribute.name}`} is not implemented.`);
     }
@@ -650,24 +757,30 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   ].join(", ")} } as unknown as React.CSSProperties}`);
   if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || node.ref !== undefined) {
     for (const event of node.events ?? []) if (!handlers.has(event.handler)) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
-    const name = `attachEvents${attachments.length}`;
-    const scoped = scope.local === true && (control !== undefined || properties.length > 0);
-    const attachment: EventAttachment = { name, scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
-      ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
-    attachments.push(attachment);
     const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
       ? `() => ${write.path} as unknown as readonly (string | number)[]` : "undefined");
+    // A path that depends on the render goes through ScopedAttachment, whose ref stays the same between renders.
+    const scoped = scope.local === true && (control !== undefined || properties.length > 0) || dynamicPaths.some((path) => path !== "undefined");
+    const listensOnly = (node.events?.length ?? 0) > 0 && rootTag === undefined && control === undefined && genericWrites.length === 0
+      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined;
+    const forwardsOnly = rootTag !== undefined && !component && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0
+      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined && rootArms(state.definition.template) === undefined;
+    const name = forwardsOnly ? "rootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
+    const attachment: EventAttachment = { name, listensOnly, forwardsOnly, scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
+      ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
+    attachments.push(attachment);
     if (scoped) {
       const ref = `__htmlNextScopedRef${attachments.length - 1}`;
       scopedAttachment = { attachment, ref, paths: dynamicPaths };
       bindings.push(`ref={${ref}}`);
-    } else bindings.push(dynamicPaths.some((path) => path !== "undefined")
-      ? `ref={(element) => ${name}(element, [${dynamicPaths.join(", ")}])}`
-      : `ref={${name}}`);
+    } else bindings.push(`ref={${name}}`);
   }
+  const preformatted = state.preformatted;
+  if (isPreformattedElement(node.name)) state.preformatted = true;
   const children = outputValue || node.name === "textarea" && control?.name === "value" ? ""
     : content ?? componentChildren.map((child) => renderNode(node.name === "select" && control?.name === "value" ? withoutAuthoredSelection(child) : child,
       scope, lowering, imports, handlers, attachments, state, undefined, component, svg && node.name !== "foreignObject")).join("");
+  state.preformatted = preformatted;
   const boundReflections = rootTag === undefined ? [] : Object.keys(state.definition.contract.props).flatMap((name) => {
     const attributeName = `data-${kebabCase(name)}`;
     if (!node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === attributeName)) return [];
@@ -707,26 +820,31 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const providedContexts = new Set(states.map((state) => state.name));
   const usesContext = providedContexts.size > 0 || contexts.length > 0;
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
-  const occupiedNames = new Set([...target.props.map((prop) => prop.name), ...declarations.map((declaration) => declaration.name)]);
-  const allocate = (base: string): string => {
-    let name = base;
+  const name = definition.contract.name;
+  const occupiedNames = new Set([...REACT_RESERVED, name, `${name}Inner`, `${name}Props`, ...[...componentTagsIn(definition.template)].map(componentName)]);
+  /** An authored name where it is free, and otherwise the name with a suffix. */
+  const allocate = (base: string, suffix = ""): string => {
+    let name = GENERATED_NAME.test(base) ? `${base}${suffix || "_"}` : base;
+    if (occupiedNames.has(name) && suffix !== "") name = `${base}${suffix}`;
     while (occupiedNames.has(name)) name += "_";
     occupiedNames.add(name);
     return name;
   };
-  const handlerNames = new Map(handlers.map((handler, index) => [handler.name, allocate(`__htmlNextHandler${index}`)] as const));
-  const valueNames = new Map([...states, ...data, ...contexts, ...computed].map((declaration, index) =>
-    [declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name, allocate(`__htmlNextValue${index}`)] as const));
-  const stateSetters = new Map(states.map((state, index) => [state.name, allocate(`__htmlNextSetState${index}`)] as const));
-  const reactStateSetters = new Map(states.map((state, index) => [state.name, allocate(`__htmlNextReactSetState${index}`)] as const));
-  const stateValuesName = states.length === 0 ? "" : allocate("__htmlNextStateValues");
-  const invalidateStateName = usesController && states.length > 0 ? allocate("__htmlNextInvalidateState") : "";
+  const handlerNames = new Map(handlers.map((handler) => [handler.name, allocate(identifierFor(handler.name), "Handler")] as const));
+  const valueNames = new Map([...states, ...data, ...contexts, ...computed].map((declaration) => {
+    const name = declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name;
+    return [name, allocate(identifierFor(name), declaration.kind === "state" ? "State" : declaration.kind === "computed" ? "Computed" : declaration.kind === "data" ? "Data" : "Context")] as const;
+  }));
+  const stateSetters = new Map(states.map((state) => [state.name, allocate(`set${pascal(valueNames.get(state.name)!)}`)] as const));
+  const stateGetters = new Map(states.map((state) => [state.name, allocate(`get${pascal(valueNames.get(state.name)!)}`)] as const));
+  const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
+  // The paths handler and bound-control writes changed, which the controller host reads after each commit.
+  const stateWritesName = invalidateStateName === "" ? "" : allocate("stateWrites");
   const handlerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextHandlerComputed${index}`)] as const));
   const controllerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextControllerComputed${index}`)] as const));
   const computedPreviousNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextComputedPrevious${index}`)] as const));
   const computedAcceptedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextComputedAccepted${index}`)] as const));
   const computedByName = new Map(computed.map((value) => [value.name, value] as const));
-  const stateSnapshotName = states.length === 0 ? "" : allocate("__htmlNextStateSnapshot");
   const controllerStateTypes = Object.fromEntries(states.map((state) => [state.name, declarationTypeNode(state.type, state.shape)]));
   const checksControllerWrites = usesController && Object.values(controllerStateTypes).some((type) => type !== undefined);
   const eventSchemas = new Map(target.events.map((event, index) =>
@@ -736,7 +854,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   }
   const template = definition.template;
   if (template.name === "template" && template.flow?.kind !== "match") fail("HT030", "React conversion requires one element root.");
-  const lowering = new ReactLowering(allocate("htmlNextAuthoredCheck"));
+  const lowering = new ReactLowering("warnUnless");
   const code = new Map<string, string>();
   const types = new Map<string, Static>();
   for (const prop of target.props) {
@@ -792,12 +910,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
   const styles = compileComponentStylesForBuild(definition.css, definition);
   const renderState: RenderState = { definition, slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
-    nextSlotAlias: 0, nextRetainedAlias: 0, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
-    usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false };
+    nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
+    usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
     { tag: definition.contract.tag, reflections, captureRoot: true, hostState: styles.stateNames.length > 0 });
   const usesEvents = attachments.some((attachment) => attachment.bindings.length > 0) || target.events.length > 0;
-  const hasNativeBindings = attachments.some((attachment) => attachment.bindings.length > 0);
+  const hasNativeBindings = attachments.some((attachment) => attachment.bindings.length > 0 && !attachment.listensOnly);
+  const usesEventHooks = attachments.some((attachment) => attachment.listensOnly);
   const usesControls = attachments.some((attachment) => attachment.control !== undefined || attachment.genericWrites.length > 0);
   const usesNativeControls = attachments.some((attachment) => attachment.control !== undefined);
   const usesScopedAttachments = attachments.some((attachment) => attachment.scoped);
@@ -806,14 +925,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     attachment.control?.write?.path !== undefined && attachment.control.write.path !== "[]" ||
     attachment.genericWrites.some((write) => write.path !== "[]"));
   const usesHtml = renderState.usesHtml;
-  const usesSlots = renderState.usesPlainSlots;
-  const usesScopedSlots = renderState.usesScopedSlots;
-  const usesKeyedLists = renderState.usesKeyedLists;
   const capturesRoot = attachments.some((attachment) => attachment.forward);
   const usesRefActions = handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate"));
   const usesRefs = usesTargetDispatch || usesRefActions || attachments.some((attachment) => attachment.ref !== undefined);
-  const usesNestedHandlerWrites = handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
-  const name = definition.contract.name;
   const rootType = rootArms(template) === undefined ? getDomInterface(template.name) ?? "HTMLElement"
     : [...new Set(rootArms(template)!.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
   const preservesRootFocus = rootArms(template) !== undefined;
@@ -848,9 +962,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")}${dynamicSlots ? " [name: string]: ReactNode | ((props: Record<string, any>) => ReactNode);" : ""} }>`;
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
   const contextMarkup = states.reduceRight((content, state) =>
-    `<${contextExportName(definition.contract.tag, state.name)}.Provider value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}.Provider>`, rootMarkup);
-  const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext.Provider value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext.Provider>`;
-  const component = [
+    `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
+  const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
+  const body = [
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
     'import React from "react";',
     'import type { ReactNode } from "react";',
@@ -858,7 +972,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(target.props.length === 0 ? [] : ["checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
       ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
-    ...(usesEvents ? [`import { ${[...(attachments.some((attachment) => attachment.bindings.length > 0) ? ["attachNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
+    ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
       ...(usesGenericBindings ? ["attachGenericBinding"] : []),
@@ -869,6 +983,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
     ...(usesContext ? [`import { componentContext } from ${quote(options.contextSpecifier ?? "./context")};`] : []),
     ...(nestedDepthLimit === undefined ? [] : [`import { NestedDepthContext } from ${quote(options.depthSpecifier ?? "./depth")};`]),
+    RENDER_IMPORT,
     ...(styles.css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${name}.css`)};`]),
     ...[...imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.tsx`)};`),
     ...[...new Map(contexts.filter((context) => context.from !== definition.contract.tag || !providedContexts.has(context.name))
@@ -920,23 +1035,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }),
       "  };",
     ]),
+    ...(stateWritesName === "" ? [] : [`  const ${stateWritesName} = React.useRef<unknown[][]>([]);`]),
+    // Handlers read a state's latest write through its getter; rendering reads the value React has.
     ...states.map((state) => {
       const initial = state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope);
-      return `  const [${valueNames.get(state.name)!}, ${reactStateSetters.get(state.name)!}] = React.useState<${stateType(state)}>(${initial});`;
+      return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
     }),
     ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
-    ...(states.length === 0 ? [] : [
-      `  const ${stateValuesName} = React.useRef<{ ${states.map((state) => `${propKey(state.name)}: typeof ${valueNames.get(state.name)!}`).join("; ")} } | null>(null);`,
-      `  if (${stateValuesName}.current === null) ${stateValuesName}.current = { ${states.map((state) => `${propKey(state.name)}: ${valueNames.get(state.name)!}`).join(", ")} };`,
-      `  const ${stateSnapshotName} = ${stateValuesName}.current;`,
-      `  React.useLayoutEffect(() => { ${states.map((state) => `${stateSnapshotName}[${quote(state.name)}] = ${valueNames.get(state.name)!};`).join(" ")} });`,
-      ...states.map((state) => {
-        const value = valueNames.get(state.name)!;
-        const setter = stateSetters.get(state.name)!;
-        const rawSetter = reactStateSetters.get(state.name)!;
-        return `  function ${setter}(update: (previous: typeof ${value}) => typeof ${value}): void { const next = update(${stateSnapshotName}[${quote(state.name)}]); ${stateSnapshotName}[${quote(state.name)}] = next; ${rawSetter}(() => next); }`;
-      }),
-    ]),
     ...stateSelectedProps.map((prop) => {
       const select = prop.contract.select!;
       return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(props[${quote(prop.name)}], selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
@@ -956,7 +1061,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...data.map((declaration) => {
       const parameters = declaration.parameters.map((parameter) =>
         `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
-      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: () => ({ ${parameters} }) });`;
+      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from")
+        .map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
+      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
     }),
     ...contexts.flatMap((context, index) => {
       const variable = `__context${index}`;
@@ -1022,7 +1129,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...handlers.map((handler) => {
       const handlerCode = new Map(scope.code);
-      for (const state of states) handlerCode.set(state.name, `${stateSnapshotName}[${quote(state.name)}]`);
+      for (const state of states) handlerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
       for (const value of computed) handlerCode.set(value.name, `${handlerComputedNames.get(value.name)!}.get()`);
       handlerCode.set("$$event", "event");
       const handlerScope: Scope = { code: handlerCode, types: new Map([...scope.types, ["$$event", { type: { kind: "terminal", name: "event" }, nullable: false }]]) };
@@ -1071,22 +1178,30 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
         const setter = stateSetters.get(state.name)!;
         const value = lowering.value(step.value.ast, handlerScope);
-        const candidate = `__htmlNextCandidate${index}`;
-        const destinationCheck = handlerDestinationCheck(handlerScope.types.get(state.name)?.type,
-          step.writablePath, 1, candidate, handlerScope, lowering);
-        const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
-          `(${candidate} === undefined || ${destinationCheck})`,
-          `handler:${handler.name}:${step.path}`,
-          `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
-        const write = step.writablePath.length === 1
-          ? `${setter}(() => ${candidate} as typeof ${valueNames.get(state.name)!});`
-          : `${setter}((previous) => writeStatePath(previous, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
-            ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${candidate}));`;
-        if (check === undefined) return `    ${guard}{ const ${candidate} = ${value}; ${write} }`;
-        return `    ${guard}{ const ${candidate} = ${value}; if (${check}) { ${write} } }`;
+        const mayBeInvalid = mayProduceInvalidResult(step.value.ast, handlerScope);
+        const destinationCheck = conformingLiteralWrite(step, definition) ? undefined
+          : handlerDestinationCheck(handlerScope.types.get(state.name)?.type, step.writablePath, 1, "value", handlerScope, lowering);
+        const destination = handlerScope.types.get(state.name)?.type;
+        // A value of the state's own kind writes as it is; another kind is cast after its check. A
+        // function-valued state writes through an updater, which the setter would otherwise call.
+        const path = `[${step.writablePath.slice(1).map((segment) => typeof segment === "object"
+          ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}]`;
+        // A controller host learns the path a nested write changed, so it notifies only that path.
+        const write = (written: string): string => step.writablePath.length > 1
+          ? stateWritesName === "" ? `${setter}((previous) => writeStatePath(previous, ${path}, ${written}));`
+            : `{ const path = ${path}; ${setter}((previous) => writeStatePath(previous, path, ${written}), path); }`
+          : destination === undefined || category(destination) === "unknown" ? `${setter}(() => ${written} as typeof ${valueNames.get(state.name)!});`
+          : category(destination) === category(typeOf(step.value.ast, handlerScope).type) && !mayBeInvalid ? `${setter}(${written});`
+          : `${setter}(${written} as typeof ${valueNames.get(state.name)!});`;
+        if (destinationCheck === undefined && !mayBeInvalid) return `    ${guard}${write(value)}`;
+        // One checked write per handler reads as `next`; later ones number theirs.
+        const next = setSteps(handler) > 1 ? `next${index}` : "next";
+        const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
+        const lines = [`const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`, `if (acceptsWrite(${next}${check})) ${write(next)}`];
+        return guard === "" ? lines.map((line) => `    ${line}`).join("\n") : `    ${guard}{ ${lines.join(" ")} }`;
       });
       return [
-        `  function ${handlerNames.get(handler.name)!}(event: Event): void {`,
+        `  function ${handlerNames.get(handler.name)!}(${[...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line)) ? "event: Event" : ""}): void {`,
         ...handlerComputed,
         ...steps,
         "  }",
@@ -1117,10 +1232,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ]),
     ...(attachments.length > 0 ? [
       ...(hasNativeBindings ? [
-        `  const latestHandlers = React.useRef({ ${handlers.map((handler) => `${quote(handler.name)}: ${handlerNames.get(handler.name)!}`).join(", ")} });`,
+        `  const latestHandlers = React.useRef<Record<string, (event: Event) => void>>({ ${handlers.map((handler) => `${quote(handler.name)}: ${handlerNames.get(handler.name)!}`).join(", ")} });`,
         `  React.useLayoutEffect(() => { latestHandlers.current = { ${handlers.map((handler) => `${quote(handler.name)}: ${handlerNames.get(handler.name)!}`).join(", ")} }; });`,
       ] : []),
-      ...attachments.map((attachment) => {
+      ...attachments.filter((attachment) => !attachment.forwardsOnly).map((attachment) => {
+        // An element that only listens takes its ref from the hook, which keeps the latest handlers.
+        if (attachment.listensOnly) return `  const ${attachment.name} = useNativeEvents([${attachment.bindings.map((event) =>
+          `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: ${handlerNames.get(event.handler)!} }`).join(", ")}]);`;
         const bindings = attachment.bindings.map((event) =>
           `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: (event: Event) => latestHandlers.current[${quote(event.handler)}](event) }`);
         const attach = bindings.length === 0 ? "undefined" : `attachNativeEvents(element, [${bindings.join(", ")}])`;
@@ -1129,12 +1247,14 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const setter = write === undefined ? "" : stateSetters.get(write.state)!;
         const update = write === undefined ? "undefined" : write.path === "[]"
           ? `(value) => ${setter}(() => value as typeof ${valueNames.get(write.state)!})`
-          : `(value) => ${setter}((previous) => writeBoundPath(previous, ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}, value))`;
+          : stateWritesName === "" ? `(value) => ${setter}((previous) => writeBoundPath(previous, ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}, value))`
+          : `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; ${setter}((previous) => writeBoundPath(previous, path, value), path); }`;
         const genericUpdates = attachment.genericWrites.map((generic, index) => {
           const writeSetter = stateSetters.get(generic.state)!;
           const valueName = valueNames.get(generic.state)!;
           const source = generic.path === "[]" ? `(value) => ${writeSetter}(() => value as typeof ${valueName})`
-            : `(value) => ${writeSetter}((previous) => writeBoundPath(previous, ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}, value))`;
+            : stateWritesName === "" ? `(value) => ${writeSetter}((previous) => writeBoundPath(previous, ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}, value))`
+            : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, value), path); }`;
           return `const genericCleanup${index} = attachGenericBinding(element, ${source});`;
         });
         const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.ref === undefined ? attach : [
@@ -1149,7 +1269,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           ...(control === undefined || attachment.scoped ? [] : [`controlRef${attachment.name}.current = element;`]),
           ...(attachment.properties.length === 0 || attachment.scoped ? [] : [`propertyRef${attachment.name}.current = element;`]),
           ...attachment.importantStyles.map((style) =>
-            `if (element !== null) (element as HTMLElement).style.setProperty(${quote(style.name)}, ${quote(style.value)}, "important");`),
+            `if (element !== null && ((element as HTMLElement).style.getPropertyValue(${quote(style.name)}) !== ${quote(style.value)} || (element as HTMLElement).style.getPropertyPriority(${quote(style.name)}) !== "important")) (element as HTMLElement).style.setProperty(${quote(style.name)}, ${quote(style.value)}, "important");`),
           ...(bindings.length === 0 ? [] : [`const nativeCleanup = ${attach};`]),
           ...(control === undefined ? [] : [`const controlCleanup = attachBoundControl(element, ${quote(control.name)}, ${attachment.scoped ? "scoped?.control" : `controlValue${attachment.name}.current`}, ${control.defaults}, ${update}, ${control.nativeProperty}, ${attachment.scoped ? "scoped?.controlAccepted ?? true" : control.accepts ?? "true"});`]),
           ...genericUpdates,
@@ -1161,7 +1281,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...(usesController ? computed.map((value) => {
       const controllerCode = new Map(scope.code);
-      for (const state of states) controllerCode.set(state.name, `${stateSnapshotName}[${quote(state.name)}]`);
+      for (const state of states) controllerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
       for (const declaration of computed) controllerCode.set(declaration.name, `${controllerComputedNames.get(declaration.name)!}.get()`);
       const controllerScope: Scope = { code: controllerCode, types: scope.types };
       const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, controllerScope);
@@ -1181,7 +1301,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         `    propInputs: (name: string) => props[name] ?? null,`,
         `    propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ...propInputValues${propSelectors.map((selector) => `, ${propKey(selector)}: checkedProps[${quote(selector)}]`).join("")}${stateSelectors.map((selector) => `, ${propKey(selector)}: ${valueNames.get(selector)!}`).join("")} } }, name),`,
       ]),
-      `    state: { ${states.map((state) => `${propKey(state.name)}: { get: () => ${stateSnapshotName}[${quote(state.name)}], set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
+      `    state: { ${states.map((state) => `${propKey(state.name)}: { get: ${stateGetters.get(state.name)!}, set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
+      ...(stateWritesName === "" ? [] : [`    written: () => ${stateWritesName}.current.splice(0),`]),
       `    computed: { ${[
         ...computed.map((value) => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.get()`),
         ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => ${valueNames.get(value.as ?? value.name)!}`),
@@ -1192,18 +1313,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${eventSchemas.get(event.name)!}.type, ${eventSchemas.get(event.name)!}.init);`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  });`,
     ] : []),
-    ...lowering.fallbacks().flatMap((source) => source.split("\n").map((line) => `  ${line}`)),
     `  return (${componentMarkup});`,
     "}",
-    ...(renderState.usesRetainedText ? [
-      "",
-      "function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {",
-      "  const accepted = value !== Symbol.for('html-next.invalid-result') && (accepts?.() ?? true);",
-      "  const last = React.useRef(accepted ? text : \"\");",
-      "  React.useLayoutEffect(() => { if (accepted) last.current = text; }, [accepted, text]);",
-      "  return accepted ? text : last.current;",
-      "}",
-    ] : []),
     ...(usesScopedAttachments ? [
       "",
       "type ScopedPath = (() => readonly (string | number)[]) | undefined;",
@@ -1245,144 +1356,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  return render(ref);",
       "}",
     ] : []),
-    ...(renderState.usesOutputValue ? [
-      "",
-      "function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlNextAccepts = true, ref, ...attrs }: React.OutputHTMLAttributes<HTMLOutputElement> & { readonly htmlNextValue: unknown; readonly htmlNextText: string; readonly htmlNextRetain: boolean; readonly htmlNextAccepts?: boolean; readonly ref?: React.Ref<HTMLOutputElement> }): ReactNode {",
-      "  const accepted = !htmlNextRetain || (htmlNextValue !== undefined && htmlNextValue !== Symbol.for('html-next.invalid-result') && htmlNextAccepts);",
-      "  const last = React.useRef(accepted ? htmlNextText : \"\");",
-      "  const output = React.useRef<HTMLOutputElement | null>(null);",
-      "  const attach = React.useCallback((element: HTMLOutputElement | null) => {",
-      "    output.current = element;",
-      "    if (typeof ref === \"function\") {",
-      "      const cleanup = ref(element);",
-      "      return () => { output.current = null; if (typeof cleanup === \"function\") cleanup(); else ref(null); };",
-      "    }",
-      "    if (ref != null) (ref as { current: HTMLOutputElement | null }).current = element;",
-      "    return () => { output.current = null; if (ref != null) (ref as { current: HTMLOutputElement | null }).current = null; };",
-      "  }, [ref]);",
-      "  const shown = accepted ? htmlNextText : last.current;",
-      "  React.useLayoutEffect(() => {",
-      "    if (accepted) last.current = htmlNextText;",
-      "    if (output.current !== null && output.current.textContent !== shown) output.current.textContent = shown;",
-      "  });",
-      "  return <output {...attrs} ref={attach}>{shown}</output>;",
-      "}",
-    ] : []),
-    ...(renderState.usesRetainedValue ? [
-      "",
-      "function RetainedValue({ value, accepts, render }: { readonly value: unknown; readonly accepts?: (value: unknown) => boolean; readonly render: (value: any, hasValue: boolean) => ReactNode }): ReactNode {",
-      "  const accepted = value !== Symbol.for('html-next.invalid-result') && (accepts === undefined ? value !== undefined : accepts(value));",
-      "  const last = React.useRef<{ value: unknown; hasValue: boolean }>({ value: undefined, hasValue: false });",
-      "  React.useLayoutEffect(() => { if (accepted) last.current = { value, hasValue: true }; }, [accepted, value]);",
-      "  return render(accepted ? value : last.current.value, accepted || last.current.hasValue);",
-      "}",
-    ] : []),
-    ...(computed.length === 0 ? [] : [
-      "",
-      "function cycleCheckedComputed<T>(evaluate: () => T, cache = true): { get(): T } {",
-      "  let reading = false;",
-      "  let ready = false;",
-      "  let cached!: T;",
-      "  return { get() {",
-      "    if (reading) {",
-      "      const message = 'A reactive computed value depends on itself.';",
-      "      throw Object.assign(new Error(`HR006: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR006', message }) });",
-      "    }",
-      "    if (!cache || !ready) {",
-      "      reading = true;",
-      "      try { cached = evaluate(); ready = true; } finally { reading = false; }",
-      "    }",
-      "    return cached;",
-      "  } };",
-      "}",
-    ]),
-    ...(usesKeyedLists ? [
-      "",
-      "type KeyedRowsRender = () => ReactNode;",
-      "interface KeyedBoundaryState { readonly failed: boolean; readonly renderRows: KeyedRowsRender; }",
-      "class KeyedBoundary extends React.Component<{ readonly renderRows: KeyedRowsRender }, KeyedBoundaryState> {",
-      "  state: KeyedBoundaryState = { failed: false, renderRows: this.props.renderRows };",
-      "  private lastCommittedRender: KeyedRowsRender | undefined;",
-      "  static getDerivedStateFromProps(props: { readonly renderRows: KeyedRowsRender }, state: KeyedBoundaryState): Partial<KeyedBoundaryState> | null {",
-      "    return props.renderRows === state.renderRows ? null : { failed: false, renderRows: props.renderRows };",
-      "  }",
-      "  static getDerivedStateFromError(error: unknown): Partial<KeyedBoundaryState> {",
-      "    if ((error as { diagnostic?: { code?: string } } | null)?.diagnostic?.code !== 'HR004') throw error;",
-      "    return { failed: true };",
-      "  }",
-      "  componentDidMount(): void { this.lastCommittedRender = this.props.renderRows; }",
-      "  componentDidUpdate(): void { if (!this.state.failed) this.lastCommittedRender = this.props.renderRows; }",
-      "  render(): ReactNode {",
-      "    return <KeyedRows renderRows={this.state.failed ? this.lastCommittedRender ?? (() => null) : this.props.renderRows} />;",
-      "  }",
-      "}",
-      "function KeyedRows(props: { readonly renderRows: KeyedRowsRender }): ReactNode { return props.renderRows(); }",
-    ] : []),
-    ...(styles.stateNames.length === 0 ? [] : ["", HOST_STATE_TOKENS_SOURCE]),
-    ...(usesSlots ? [
-      "",
-      "function renderPlainSlot(slot: ReactNode | ((props: Record<string, any>) => ReactNode) | undefined, fallback: ReactNode): ReactNode {",
-      "  if (typeof slot === \"function\") return null;",
-      "  return hasSlotContent(slot) ? markProjected(slot) : fallback;",
-      "}",
-      "",
-      "function hasSlotContent(value: ReactNode): boolean {",
-      "  if (value == null || typeof value === \"boolean\" || value === \"\") return false;",
-      "  if (Array.isArray(value)) return value.some(hasSlotContent);",
-      "  if (React.isValidElement(value) && value.type === React.Fragment) {",
-      "    return hasSlotContent((value.props as { children?: ReactNode }).children);",
-      "  }",
-      "  return true;",
-      "}",
-    ] : []),
-    ...(usesScopedSlots ? [
-      "",
-      "function renderScopedSlot<T extends Record<string, unknown>>(slot: ReactNode | ((props: T) => ReactNode) | undefined, values: T, name: string, fallback: ReactNode): ReactNode {",
-      "  if (slot === undefined) return fallback;",
-      "  if (typeof slot !== \"function\") {",
-      "    const message = 'Scoped slot `' + name + '` requires a consumer <template slot=\"' + name + '\">.';",
-      "    throw Object.assign(new Error(`HR007: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR007', message }) });",
-      "  }",
-      "  return markProjected(slot(values));",
-      "}",
-    ] : []),
-    ...(usesSlots || usesScopedSlots ? [
-      "",
-      "function markProjected(value: ReactNode): ReactNode {",
-      "  if (Array.isArray(value)) return value.map(markProjected);",
-      "  if (!React.isValidElement(value)) return value;",
-      "  if (value.type === React.Fragment) return React.cloneElement(value, {}, markProjected((value.props as { children?: ReactNode }).children));",
-      "  return React.cloneElement(value as React.ReactElement<Record<string, unknown>>, { 'data-slotted': '' });",
-      "}",
-    ] : []),
-    ...(usesNestedHandlerWrites ? [
-      "",
-      "function writeStatePath<T>(root: T, path: readonly unknown[], value: unknown): T {",
-      "  if (root === null || typeof root !== 'object') return root;",
-      "  const result = Array.isArray(root) ? root.slice() : { ...root };",
-      "  let source: unknown = root;",
-      "  let target: unknown = result;",
-      "  for (const [index, segment] of path.entries()) {",
-      "    if (typeof segment !== 'string' && typeof segment !== 'number') return root;",
-      "    if (index === path.length - 1) {",
-      "      if (Object.is((source as Record<string | number, unknown>)[segment], value)) return root;",
-      "      (target as Record<string | number, unknown>)[segment] = value;",
-      "    }",
-      "    else {",
-      "      const next = (source as Record<string | number, unknown>)[segment];",
-      "      if (next === null || typeof next !== 'object') return root;",
-      "      const copy = Array.isArray(next) ? next.slice() : { ...next };",
-      "      (target as Record<string | number, unknown>)[segment] = copy;",
-      "      source = next; target = copy;",
-      "    }",
-      "  }",
-      "  return result as T;",
-      "}",
-    ] : []),
     "",
-    ...lowering.moduleFallbacks(),
-    ...lowering.authoredFallbacks(),
   ].join("\n");
+  // The shared module's helpers this component calls: the expression helpers its lowering used,
+  // and the rendering components and functions its markup and handlers name.
+  const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
+  const component = formatReact(body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
+    : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`), `${name}.tsx`);
   return {
     component,
     css: styles.css,
@@ -1395,6 +1375,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(usesController ? ["host" as const] : []),
       ...(usesContext ? ["context" as const] : []),
       ...(nestedDepthLimit === undefined ? [] : ["depth" as const]),
+      ...(rendered.length === 0 ? [] : ["render" as const]),
     ],
   };
 }

@@ -1,15 +1,15 @@
 import { createServer as createHTTPServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
-import { createServer, isRunnableDevEnvironment } from "vite";
+import { dirname, extname, join, resolve } from "node:path";
+import { createServer, isRunnableDevEnvironment, normalizePath } from "vite";
 
 import { createApplication } from "./application.js";
 import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
-import { configure, HtmlKitError, within } from "./config.js";
-import { documentHTML, escapeHTML } from "./document.js";
+import { configure, globalStylesheets, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
+import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
-import type { Application, ApplicationServer, ServerOptions } from "./types.js";
+import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
 
 const mime: Readonly<Record<string, string>> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
@@ -36,7 +36,8 @@ function methodAllowed(request: IncomingMessage, response: ServerResponse): bool
   response.writeHead(405, { allow: "GET, HEAD" }); response.end(); return false;
 }
 
-export async function previewApplication(options: ServerOptions = {}): Promise<ApplicationServer> {
+export async function previewApplication(input: ServerOptions = {}): Promise<ApplicationServer> {
+  const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   // Read deployment metadata, never loaders or page source. The same tree works on a static host.
   const manifest = JSON.parse(await readFile(join(config.outDir, "_htmlkit/manifest.json"), "utf8")) as { base: string };
@@ -81,20 +82,36 @@ export async function previewApplication(options: ServerOptions = {}): Promise<A
   return listen(server, options, base);
 }
 
-export async function devApplication(options: ServerOptions = {}): Promise<ApplicationServer> {
+export async function devApplication(input: ServerOptions = {}): Promise<ApplicationServer> {
+  const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   const sources = new Map<string, string>();
+  // Vite refuses to serve a Windows 8.3 short name such as RUNNER~1, so page-wide stylesheets go by their real paths.
+  const css = await Promise.all(globalStylesheets(options, config.root).map(file => realpath(file).catch(() => file)));
   let watchReady!: () => void;
   const watching = new Promise<void>(done => { watchReady = done; });
-  const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base,
+  const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base, resolve: { alias: rootAlias(config.root) },
     mode: "development", plugins: [browserPlugin(sources), {
       name: "htmlkit-watch-ready", configureServer(server) { server.watcher.once("ready", watchReady); },
     }], optimizeDeps: { noDiscovery: true, include: [] },
     server: { host: options.host ?? "127.0.0.1", port: options.port ?? 3000,
-      fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../.."))] } },
+      // Page-wide stylesheets may live outside the root, as a plugin's own stylesheet does.
+      fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../..")), ...css.map(file => dirname(file))] } },
     logLevel: "silent" });
+  // Browser modules and stylesheets for each served page, as Vite virtual modules.
+  const assets = (page: RenderedPage): PageAssets => {
+    const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
+    const id = `virtual:htmlkit/${graphId}`;
+    sources.set(id, browserSource(page.components, { base: config.base, prefetch: config.prefetch }, css));
+    const styles = stylesheetSources(page.components);
+    for (const [id, css] of styles) sources.set(id, css);
+    // Vite's HTML transformer applies its base to root-relative assets a second time.
+    // This document is already composed for its deployment URL; only modules use Vite.
+    // Page-wide stylesheets first, so component styles follow them in the cascade.
+    return { styles: [...css.map(normalizePath), ...styles.keys()].map(id => config.base + "@fs/" + id), modules: [config.base + "@vite/client", config.base + "@id/" + id] };
+  };
   let application: Application;
-  try { application = await createApplication(options, vite); }
+  try { application = await createApplication(options, vite, assets); }
   catch (error) { await vite.close(); throw error; }
   let dirty = false;
   const change = () => {
@@ -108,26 +125,24 @@ export async function devApplication(options: ServerOptions = {}): Promise<Appli
   vite.watcher.on("add", change).on("unlink", change).on("change", change);
   vite.middlewares.use((request, response, next) => {
     const pathname = requestPath(request);
-    if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@") ||
-      (/\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined)) { next(); return; }
+    if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
+    const payload = pathname.startsWith(config.base + "_htmlkit/pages/");
     void (async () => {
+      if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
+      let file: string | undefined;
+      try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
+      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
       if (!methodAllowed(request, response)) return;
-      if (dirty) { application = await createApplication(options, vite); dirty = false; sources.clear(); }
-      const page = await application.render(pathname);
-      if (page.status === 200 && !pathname.endsWith("/")) { redirect(response, pathname); return; }
-      const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
-      const id = `virtual:htmlkit/${graphId}`;
-      sources.set(id, browserSource(page.components, config.base));
-      const styles = stylesheetSources(page.components);
-      for (const [id, css] of styles) sources.set(id, css);
-      const assets = [...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
-        `<script type="module" src="${escapeHTML(config.base + "@vite/client")}"></script>` +
-        `<script type="module" src="${escapeHTML(config.base + "@id/" + id)}"></script>`;
-      // Vite's HTML transformer applies its base to root-relative assets a second time.
-      // This document is already composed for its deployment URL; only modules use Vite.
-      const html = documentHTML(page.body, page.head, assets);
-      response.writeHead(page.status, { "content-type": "text/html; charset=utf-8" });
-      response.end(request.method === "HEAD" ? undefined : html);
+      if (file !== undefined) {
+        const body = await readFile(file);
+        response.writeHead(200, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
+        response.end(request.method === "HEAD" ? undefined : body);
+        return;
+      }
+      // The page itself comes from the runtime-neutral handler; this adapts Node's request and response.
+      const page = await application.fetch(new Request(new URL(pathname, "http://localhost"), { method: request.method! }));
+      response.writeHead(page.status, Object.fromEntries(page.headers));
+      response.end(page.body === null ? undefined : Buffer.from(await page.arrayBuffer()));
     })().catch(error => {
       vite.ssrFixStacktrace(error instanceof Error ? error : new Error(String(error)));
       response.writeHead(500, { "content-type": "text/html; charset=utf-8" });

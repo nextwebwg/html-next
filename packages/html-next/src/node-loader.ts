@@ -9,6 +9,9 @@ import {
   isWithinTrustRoot,
   type ComponentResourceResolver,
   type ResolvedResource,
+  importMapEntries,
+  resolveImportMap,
+  type ImportMapLike,
 } from "./resolve.js";
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
 import { createStylesheetLoader } from "./stylesheet-resources.js";
@@ -25,6 +28,8 @@ export interface NodeLoaderOptions {
   readonly collectDiagnostics?: boolean;
   readonly baseURL?: string;
   readonly resolvePackage?: (specifier: string, parentURL: string) => ResolvedResource;
+  /** Application import map; mapped bare specifiers resolve before package resolution, relative to baseURL. */
+  readonly importMap?: ImportMapLike;
   readonly readComponent?: (url: string) => Promise<{ readonly url: string; readonly source: string }>;
   readonly readStylesheet?: (url: string) => Promise<{ readonly url: string; readonly source: string }>;
   /** A host bundler can resolve CSS aliases and package paths through its own resolver. */
@@ -70,9 +75,12 @@ class NodeResourceResolver implements ComponentResourceResolver {
   constructor(
     private readonly baseURL: string,
     private readonly resolvePackage: (specifier: string, parentURL: string) => ResolvedResource,
+    private readonly imports: ReadonlyMap<string, string> = new Map(),
   ) {}
 
   private resolveBare(specifier: string, parentURL: string): ResolvedResource {
+    const mapped = resolveImportMap(this.imports, specifier);
+    if (mapped !== undefined) return mapped;
     try {
       return this.resolvePackage(specifier, parentURL);
     } catch (error) {
@@ -128,7 +136,7 @@ export async function loadNodeComponents(
     url,
     source: await readFile(fileURLToPath(url), "utf8"),
   }));
-  const resolver = new NodeResourceResolver(baseURL, resolvePackage);
+  const resolver = new NodeResourceResolver(baseURL, resolvePackage, importMapEntries(options.importMap ?? {}, baseURL));
   const styles = createStylesheetLoader({
     parse: parseStylesheetForBuild,
     fetch: options.readStylesheet ?? readComponent,

@@ -1,21 +1,64 @@
 ---
-title: Configuration and API
-order: 4
-blurb: htmlkit.config.ts · explicit routes · library API
+title: Configuration
+order: 5
+blurb: htmlkit.config.ts · plugins · using HTMLKit from code
 eyebrow: HTMLKit
 ---
 
-# Configuration and API
+# Configuration
 
-Use `htmlkit.config.ts` (or `.js`) for configuration. Explicit routes supplement file routes, or
-set `fileRoutes: false` for a fully registered route table:
+HTMLKit works without configuration. To change a setting, add `htmlkit.config.ts` (or `.js`) at
+the project root:
 
 ```ts
+// htmlkit.config.ts
 import { defineConfig } from '@nextwebwg/htmlkit';
 
 export default defineConfig({
   base: '/docs/',
-  layoutDefaults: { '/admin/': 'admin', '/account/': 'account' },
+  origin: 'https://example.com',
+});
+```
+
+| Option | Default | Does |
+| --- | --- | --- |
+| `base` | `/` | Serves the site under a path, such as `/docs/`. |
+| `origin` | `http://localhost` | The site's origin, used for `url` in loaders. |
+| `outDir` | `dist` | Where `build` writes the site. |
+| `layout` | `default` when `app/layouts/default.html` exists | The layout name for every page, or `false` for none. |
+| `layoutDefaults` | none | Layout names by URL prefix, such as `{ '/admin/': 'admin' }`. |
+| `pages` | `[{ dir: 'app/pages' }]` | Page folders and the URL prefix each serves. |
+| `routes` | none | Pages at URLs of your choosing (below). |
+| `fileRoutes` | `true` | `false` turns off page folders, so only `routes` remain. |
+| `css` | none | Page-wide stylesheets for rules such as `html` and `body`, for example `['@/styles/page.css']`. Components keep their own styles. |
+| `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
+| `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
+
+A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`.
+
+## `@/` and built-in components
+
+`@/` is the project root:
+
+```html
+<link rel="component" href="@/components/card.html">
+```
+
+```ts
+import { site } from '@/lib/site.ts';
+```
+
+It works in component links, controllers, stylesheet `@import`s, and loader imports. The built-in
+components `<hk-nav>`, `<hk-breadcrumbs>`, and `<hk-pager>` need no link at all; the `hk-` prefix is
+reserved for them.
+
+## Routes in code
+
+`routes` adds pages at URLs of your choosing, with the same loaders, layouts, and parameters as
+page files:
+
+```ts
+export default defineConfig({
   routes: [{
     pattern: '/catalog/[id]/',
     component: 'app/catalog/item.html',
@@ -25,13 +68,75 @@ export default defineConfig({
 });
 ```
 
-Page layout metadata wins over the most specific `layoutDefaults` directory prefix, then the
-application `layout` option (a name or `false`), then the automatic default layout. Registered
-`layouts` can supply an explicit outer-to-inner chain when no named/default override is chosen.
+## Page folders
 
-Paths are relative to the application root. Explicit routes use the same parameter, loader,
-composition, collision, and entry rules as file routes; they do not create another renderer.
-No config file is read implicitly by the library API: pass options directly to `createApplication`,
-`buildApplication`, `devApplication`, or `previewApplication`. Close returned applications and
-servers when finished. `Application.render(pathname, signal?)` returns a baseline document, body,
-styles, metadata, and the parsed component graph; browser delivery is added by dev/build.
+`pages` can serve one folder at several URL prefixes, which is how a documentation site keeps
+versions side by side. A folder can also give its pages a layout, and `optional: true` skips a folder
+that doesn't exist:
+
+```ts
+export default defineConfig({
+  pages: [
+    { dir: 'app/pages' },
+    { dir: 'docs', prefix: '/docs/', layout: 'docs' },   // app/layouts/docs.html
+  ],
+});
+```
+
+A page's own `hk:layout` wins over its folder's layout, which wins over `layoutDefaults` and `layout`.
+
+## Plugins
+
+A plugin can add a page format and adjust options. This one makes `.note` files into pages:
+
+```ts
+import { createHash } from 'node:crypto';
+import { defineConfig, type HtmlKitPlugin } from '@nextwebwg/htmlkit';
+
+const notes: HtmlKitPlugin = {
+  name: 'notes',
+  pages: {
+    extensions: ['.note'],
+    compile(source, page) {
+      // Each page needs its own valid component name; a hash of its path is both.
+      const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
+      return `<template component="note-${name}"><article>${source}</article></template>`;
+    },
+  },
+};
+
+export default defineConfig({ plugins: [notes] });
+```
+
+HTMLKit routes, orders, watches, renders, and builds `.note` files like `.html` pages, and errors
+name the `.note` file. While compiling, a plugin can call:
+
+- `page.href(file)` for another page's URL;
+- `page.asset(file)` to serve a file the page references, such as an image, and get its URL.
+
+A plugin's `config(options)` returns settings to merge before the site starts. Page folders,
+stylesheets, and routes are added to the site's own, and `app/pages` stays. Give a plugin's page
+folders their own `layout` (a name, or `{ component, server: { load } }` with an in-process loader)
+so it doesn't wrap the site's other pages. A plugin can also set a `headScript` that runs before
+`app/head.js`. [Markupress](https://github.com/threadlabs-studio/markupress) is built
+this way.
+
+## Using HTMLKit from code
+
+```ts
+import { buildApplication, createApplication, devApplication, previewApplication } from '@nextwebwg/htmlkit';
+
+await buildApplication({ root: 'site' });
+
+const app = await createApplication({ root: 'site' });
+const page = await app.render('/about/');       // { status, html, head, … }
+const response = await app.fetch(new Request('http://localhost/about/'));
+await app.close();
+```
+
+These functions take the same options as the config file, which they don't read. Close
+applications and servers when you're done.
+
+`app.fetch(request)` takes a standard `Request` and returns a `Response`, on Node, Deno 2.8+, and
+Bun. Pass it directly, as in `Deno.serve(app.fetch)`. Its pages don't include browser scripts; the
+development server adds those. Loaders still run as they do for a static build.
