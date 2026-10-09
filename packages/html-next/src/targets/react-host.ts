@@ -57,6 +57,8 @@ export interface ComponentHostOptions {
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  /** The paths, from a state root, that handler and bound-control writes changed since the last call. */
+  readonly written?: () => readonly (readonly unknown[])[];
 }
 
 interface ControllerHost {
@@ -164,8 +166,20 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         previousValues.set("state:" + name, value);
       }
     };
-    const changedState = (name: string): void => {
-      notify(dependency("state:" + name));
+    // A read below a state root depends on its path: \`items.0.name\` on items, items.0 and items.0.name.
+    const statePaths = new Map<string, { readonly path: readonly string[]; readonly dependency: Dependency }>();
+    const pathDependency = (path: readonly string[]): Dependency => {
+      const key = JSON.stringify(path);
+      let entry = statePaths.get(key);
+      if (entry === undefined) statePaths.set(key, entry = { path, dependency: { subscribers: new Set() } });
+      return entry.dependency;
+    };
+    // A write changes the value at its path and every path below it, never the containers above it.
+    const changedPath = (path: readonly string[]): void => {
+      if (path.length === 1) notify(dependency("state:" + path[0]));
+      for (const entry of [...statePaths.values()]) {
+        if (entry.path.length >= path.length && path.every((key, index) => entry.path[index] === key)) notify(entry.dependency);
+      }
       // Fresh generated getters bypass this host's dependency tracker. Check only the computed
       // values controllers have actually read; idle declarations add no write cost.
       checkComputed();
@@ -177,7 +191,9 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           const entry = latest.current.state[name]!;
           const previous = entry.get();
           entry.set(value);
-          if (!Object.is(previous, value)) changedState(name);
+          if (Object.is(previous, value)) return;
+          previousValues.set("state:" + name, value);
+          changedPath([name]);
         },
       }])),
       computed: Object.fromEntries(Object.keys(options.computed).map((name) => [name,
@@ -190,9 +206,10 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       data: Object.fromEntries(Object.keys(options.data).map((name) => [name,
         () => { track(dependency("data:" + name)); return latest.current.data[name]!(); }])),
       acceptsState: (name, keys, value) => latest.current.acceptsState?.(name, keys, value) ?? true,
-      changed: (name) => {
+      read: (name, keys) => track(pathDependency([name, ...keys])),
+      changed: (name, keys) => {
         latest.current.state[name]!.touch();
-        changedState(name);
+        changedPath([name, ...keys]);
       },
     }, options.definition);
     const host: ControllerHost = {
@@ -239,20 +256,31 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         let dirty = true;
         let reading = false;
         let cached!: T;
-        const reaction: Reaction = {
-          dependencies: new Set(), stopped: false,
-          invalidate() { if (!dirty) { dirty = true; notify(source); } },
-        };
-        return { get(): T {
-          track(source);
-          if (reading) throw cycleError();
-          if (!dirty) return cached;
+        const evaluate = (): T => {
           clear(reaction);
           const prior = activeReaction;
           activeReaction = reaction;
           reading = true;
           try { cached = compute(); dirty = false; return cached; }
           finally { reading = false; activeReaction = prior; }
+        };
+        const reaction: Reaction = {
+          dependencies: new Set(), stopped: false,
+          // Read, it recomputes and notifies its readers only when its value changed; unread, it waits.
+          invalidate() {
+            if (dirty) return;
+            dirty = true;
+            if (source.subscribers.size === 0) return;
+            const previous = cached;
+            try { evaluate(); }
+            catch { notify(source); return; }
+            if (!Object.is(previous, cached)) notify(source);
+          },
+        };
+        return { get(): T {
+          track(source);
+          if (reading) throw cycleError();
+          return dirty ? evaluate() : cached;
         } };
       },
       effect(run) {
@@ -369,10 +397,19 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         values["prop:input:" + name] = current.propInputs?.(name);
         values["prop:validity:" + name] = JSON.stringify(current.propValidity?.(name));
       }
+      const replaced = new Set<string>();
       for (const [name, value] of Object.entries(values)) {
-        if (previousValues.has(name) && !Object.is(previousValues.get(name), value)) notify(dependency(name));
+        if (previousValues.has(name) && !Object.is(previousValues.get(name), value)) {
+          if (name.startsWith("state:")) replaced.add(name.slice(6));
+          else notify(dependency(name));
+        }
         previousValues.set(name, value);
       }
+      // A handler or bound-control write copies the containers on its path; it changed only that path.
+      // A root replaced without a reported path changed every path below it.
+      const writes = (current.written?.() ?? []).map((path) => path.map(String));
+      for (const path of writes) if (replaced.has(path[0]!)) changedPath(path);
+      for (const name of replaced) if (!writes.some((path) => path[0] === name)) changedPath([name]);
       checkComputed();
     };
     runtime.current = { host, synchronize, disconnect, checkValues };

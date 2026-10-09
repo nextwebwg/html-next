@@ -520,6 +520,40 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "bindings and bound controls write no attribute when a change leaves their result as it was",
+    source: scene({
+      defs:
+        `<state name="a" type="number" value="1"></state><state name="b" type="number" value="2"></state>` +
+        `<state name="count" type="number" value="0"></state><state name="text" type="string" value="hi"></state>` +
+        `<state name="flag" type="boolean" value="true"></state><state name="choice" type="string" value="y"></state>` +
+        `<handler name="swap"><set name="a" value="2"></set><set name="b" value="1"></set></handler>` +
+        `<handler name="bump"><set name="count" expr:value="$count + 1"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="swap">Swap</button><button type="button" on:click="bump">Bump</button>` +
+        `<p from:title="$a + $b" class:wide="$a + $b > 2" style:--sum="$a + $b">{$a + $b}</p>` +
+        `<input bind:value="text"><input type="checkbox" bind:checked="flag">` +
+        `<select bind:value="choice"><option value="x">X</option><option value="y">Y</option></select>` +
+        `<output $value="$count"></output></div>`,
+      use: `<x-t id="w"></x-t>`,
+    }),
+    expect: {
+      // Attribute writes during each step: a swap that keeps the sum, then a re-render around the controls.
+      probe: `return { writes: window.attributeWrites ?? null, sum: q('#w p').textContent, count: q('#w output').textContent };`,
+      result: { writes: null, sum: "3", count: "0" },
+      after: [
+        {
+          // Screenshots hide the caret with an inline style on the controls, so their style is not watched.
+          action: `window.attributeWrites = []; const observer = new MutationObserver((records) => { for (const record of records) window.attributeWrites.push(record.attributeName); });` +
+            `for (const element of document.querySelectorAll('#w, #w p, #w option')) observer.observe(element, { attributes: true });` +
+            `for (const control of document.querySelectorAll('#w input, #w select')) observer.observe(control, { attributes: true, attributeFilter: ['value', 'checked', 'name', 'type', 'title', 'class', 'aria-invalid'] });` +
+            `document.querySelectorAll('#w button')[0].click();`,
+          result: { writes: [], sum: "3", count: "0" },
+        },
+        { action: `window.attributeWrites = []; document.querySelectorAll('#w button')[1].click();`, result: { writes: [], sum: "3", count: "1" } },
+      ],
+    },
+  },
+  {
     name: "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
     source: scene({
       defs: `<state type="object({ a: number })" name="obj" value="{ a: 1 }"></state>`,
