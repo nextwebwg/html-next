@@ -14,6 +14,10 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { build } from "esbuild";
+import { compileComponentStylesForBuild, compileComponentStylesForSvelte } from "../src/component-styles-build.js";
+import { parseComponent } from "../src/source-parser.js";
+import type { ComponentDefinition } from "../src/template.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
@@ -142,6 +146,57 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
       assert.notEqual(result.consumer, "rgb(1, 1, 1)", `${engine}: consumer content unmatched`);
       assert.notEqual(result.inner, "rgb(2, 2, 2)", `${engine}: nested component unmatched`);
       assert.equal(result.stringKept, true, `${engine}: renamed tokens inside strings and comments untouched`);
+    });
+  });
+});
+
+describe.skipIf(!enabled)("compiled SVG scope boundaries", () => {
+  it("preserves ownership, explicit slot styles, inheritance and moves in browser, build and Svelte CSS", async () => {
+    const a = parseComponent('<template component="x-a"><defs><state name="on" type="boolean" value="false"></state></defs><div><slot></slot></div></template>');
+    const b = parseComponent('<template component="x-b"><div><slot></slot></div></template>');
+    const cssA = ':host { fill: green; } .shape { fill: red; } :host-state([on]) .conditional { stroke: green; } :slotted(.projected) { fill: blue; }';
+    const cssB = ':host { fill: orange; } .shape { fill: purple; }';
+    const bundled = await build({ entryPoints: [new URL('../src/component-styles.ts', import.meta.url).pathname],
+      bundle: true, write: false, format: 'iife', globalName: 'Styles', platform: 'browser', target: 'es2022' });
+    const html = `<div data-component="x-a" data-x-a-state="on" data-html-next-owner="x-a">
+      <svg data-html-next-owner="x-a"><rect id="own" class="shape conditional" data-html-next-owner="x-a"></rect></svg>
+      <svg id="projection" data-slotted><rect id="projected" class="shape conditional"></rect></svg>
+      <section data-slotted><svg><rect id="slotted" class="shape projected"></rect></svg>
+        <div data-component="x-empty"><svg><rect id="empty" class="shape projected"></rect></svg></div></section>
+      <div data-component="x-b" data-html-next-owner="x-b"><svg data-html-next-owner="x-b"><rect id="other" class="shape" data-html-next-owner="x-b"></rect></svg>
+        <svg data-slotted><rect id="other-projected" class="shape"></rect></svg></div>
+      <div data-component="x-a" data-html-next-owner="x-a"><svg data-html-next-owner="x-a"><rect id="same" class="shape conditional" data-html-next-owner="x-a"></rect></svg></div>
+    </div>`;
+    const ids = ['own', 'projected', 'slotted', 'empty', 'other', 'other-projected', 'same'];
+    const expected = [['rgb(255, 0, 0)', 'rgb(0, 128, 0)'], ['rgb(0, 128, 0)', 'none'], ['rgb(0, 0, 255)', 'none'],
+      ['rgb(0, 128, 0)', 'none'], ['rgb(128, 0, 128)', 'none'], ['rgb(255, 165, 0)', 'none'], ['rgb(255, 0, 0)', 'none']];
+    await inEachEngine(html, async (page, engine) => {
+      await page.addScriptTag({ content: bundled.outputFiles[0]!.text });
+      const browserCSS = await page.evaluate(({ definitions, cssA, cssB }) => {
+        const [a, b] = JSON.parse(definitions) as [ComponentDefinition, ComponentDefinition];
+        const compiler = (window as unknown as { Styles: { compileComponentStyles(css: string, definition: ComponentDefinition, document: Document): { css: string } } }).Styles;
+        return [compiler.compileComponentStyles(cssA, a, document).css, compiler.compileComponentStyles(cssB, b, document).css];
+      }, { definitions: JSON.stringify([a, b]), cssA, cssB });
+      const variants = { browser: browserCSS,
+        build: [compileComponentStylesForBuild(cssA, a).css, compileComponentStylesForBuild(cssB, b).css],
+        svelte: [compileComponentStylesForSvelte(cssA, a).css, compileComponentStylesForSvelte(cssB, b).css] };
+      for (const [target, [one, two]] of Object.entries(variants)) {
+        for (const layers of [false, true]) {
+          await page.evaluate(({ html, one, two, layers }) => {
+            document.body.innerHTML = html;
+            document.head.querySelectorAll('style').forEach(style => style.remove());
+            const style = document.createElement('style');
+            style.textContent = (layers ? `@layer base { ${one} }` : one!) + '\n' + two;
+            document.head.append(style);
+          }, { html, one, two, layers });
+          const read = () => page.evaluate(ids => ids.map(id => { const style = getComputedStyle(document.getElementById(id)!); return [style.fill, style.stroke]; }), ids);
+          assert.deepEqual(await read(), expected, `${engine} ${target} layered=${layers}`);
+          await page.evaluate(() => { document.getElementById('projection')!.append(document.getElementById('own')!); });
+          assert.deepEqual((await read())[0], ['rgb(0, 128, 0)', 'none'], `${engine} ${target}: move into projection`);
+          await page.evaluate(() => { document.querySelector('[data-component="x-a"] > svg')!.append(document.getElementById('own')!); });
+          assert.deepEqual(await read(), expected, `${engine} ${target}: move back`);
+        }
+      }
     });
   });
 });

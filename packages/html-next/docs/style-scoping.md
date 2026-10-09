@@ -90,9 +90,20 @@ selector matching; an explicit `inherit` still reads the DOM parent's value.
 Firefox 155 has a native SVG scope-limit defect: a scoped class rule can match a rect below
 an excluded SVG subtree. It also reproduces without namespace declarations or HTML Next.
 [Mozilla bug 2080046](https://bugzilla.mozilla.org/show_bug.cgi?id=2080046) contains the reduced
-case. Namespace browser tests compare that boundary with the independent native fixture;
-Chromium and WebKit enforce the expected exclusion. A Firefox workaround is being investigated
-separately from namespace support.
+case. From alpha.40, compiled CSS prevents the leak using a private inherited
+`--html-next-scope-owner` marker inside `@supports (-moz-appearance: none)`. Component
+roots, projection regions and nested boundaries have distinct marker values. Priority on
+root/projection markers keeps layered imports from overriding the normal boundary reset.
+This property is reserved for the tools; author properties still inherit normally.
+
+Live loading installs one independent common reset per document; closed graph CSS includes
+one outside authored import conditions. Mixing live and precompiled delivery can retain both
+copies because an application can disable or condition the precompiled sheet independently.
+Each definition supplies its root identity. Svelte
+uses its existing authored-ownership selectors for projection; Vue's scoped selectors already
+exclude projected SVG. No mutation observer or new element ownership attribute is needed.
+Browser tests assert compiled exclusion in every engine and retain the independent native
+fixture as evidence of the platform defect.
 
 ## Delivery and hydration
 
