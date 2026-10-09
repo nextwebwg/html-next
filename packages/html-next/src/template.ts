@@ -7,10 +7,26 @@ export interface ComponentDefinition {
   readonly contract: ComponentContract;
   readonly template: ElementNode;
   readonly css: string;
+  /** Resolved component-owned CSS resources; their bodies are delivered separately from local CSS. */
+  readonly stylesheets?: readonly ComponentStylesheet[];
   readonly controller?: string;
   readonly declarations?: readonly ComponentDeclaration[];
   readonly slots?: readonly SlotContract[];
   readonly root?: ComponentRoot;
+}
+
+export interface ComponentStylesheet {
+  /** Final resource URL, also the shared delivery identity. */
+  readonly url: string;
+  readonly css: string;
+  /** Import conditions, from the outermost import inward. */
+  readonly conditions: readonly StylesheetCondition[];
+}
+
+export interface StylesheetCondition {
+  readonly layer?: string;
+  readonly supports?: string;
+  readonly media?: string;
 }
 
 export type ComponentRoot =

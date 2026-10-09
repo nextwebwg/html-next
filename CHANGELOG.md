@@ -1,19 +1,18 @@
 # Changelog
 
-## 1.0.0-alpha.40
+## 1.0.0-alpha.39
 
+- HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.
+- HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
+- The HTMLKit development server's component stylesheet links load again. Vite requests them with a `?direct` query that HTMLKit's virtual sources did not recognize, so they returned 404 and each dev page first painted without component CSS until its module injected the styles, fading any transitioned colors in.
 - HTMLKit plugins add page formats. A plugin's `pages` compiler claims file extensions such as `.md` and turns each file into an HTML Next page resource; HTMLKit then routes, orders, watches, renders, and builds those pages like `.html` pages. While compiling, a page can resolve another page's URL with `page.href` and serve a referenced file with `page.asset`. A plugin's `config()` contributes options, including a layout whose loader is a module object and a `headScript` inlined before `app/head.js`.
 - `pages` lists the page directories and the URL prefix each serves, defaulting to `app/pages` at `/`. One directory may serve several prefixes.
 - Pages can set their navigation label (`htmlkit:label`), stay out of navigation (`htmlkit:navigation` with `content="hidden"`), and add alias routes (`htmlkit:alias`). An alias never appears in navigation and marks its page's own entry current.
 
-## 1.0.0-alpha.39
-
-- HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
-- The HTMLKit development server's component stylesheet links load again. Vite requests them with a `?direct` query that HTMLKit's virtual sources did not recognize, so they returned 404 and each dev page first painted without component CSS until its module injected the styles, fading any transitioned colors in.
-
 ## 1.0.0-alpha.38
 
-- HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.
+- Component styles support shared CSS with ordinary `@import`. Live loading, Node graphs, SSR, HTMLKit, native Vite builds, and framework conversion resolve nested imports before scoping, retain source-relative assets and import conditions, and reuse source fetches. Compatible uses share one delivered body; distinct layers, conditions, cascade positions, global overrides, and target scope boundaries retain separate occurrences when needed. Styles follow graph order and stay in place when instances move or remount. Synchronous compilation diagnoses unresolved imports instead of emitting global imports. Imported `@namespace` is currently HY004 because flattening it would change selector matching.
+- Component style compilation preserves conditional and layered name-defining rules, including keyframes, in source order. Zero-specificity owner and pseudo-element guards prevent Firefox scope-boundary leaks and stale root styles. Defaults remain explicit CSS; no automatic box-model reset is installed.
 
 ## 1.0.0-alpha.37
 
