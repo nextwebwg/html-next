@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.40
+## 1.0.0-alpha.41
 
 ### Breaking
 
@@ -23,6 +23,10 @@
 - HTML Next's `adoptRenderedProps(element, rendered)` applies the props a fresh server rendering recorded on a component root to a live instance a framework keeps, through the `updateComponentProps` channel, without resetting its state or DOM.
 - HTML Next's `replaceProjectedNode(current, next)` replaces a node a live component projects into a slot, in the document and in the component's projection: the new node is marked for slotted styles, appears in `host.slots` and the rendered form, and is what the slot renders if it renders again. Replacing projected content with `replaceWith` left the component projecting the old node.
 - HTMLKit names a page's shared-import stylesheet for its whole component graph. Pages under one layout shared a name, so a build linked every such page to the last page's styles, and development served whichever page rendered last.
+
+## 1.0.0-alpha.40
+
+- Component CSS prevents Firefox 155's scoped SVG class rules from leaking across scope limits. Live loading, graph CSS, Vite, SSR, React and Svelte keep owned, projected and nested component styling distinct through DOM moves. The compiler uses a Firefox-specific private CSS marker; shared boundary rules are delivered once per graph or live document. Author inheritance remains intact; no DOM observers or ownership attributes are added. Mozilla bug 2080046 tracks the underlying browser defect.
 
 ## 1.0.0-alpha.39
 
