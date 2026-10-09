@@ -16,6 +16,7 @@ import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyle
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
 import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
+import { svelteRenderArtifact as makeSvelteRenderArtifact } from "./targets/svelte-render.js";
 import { svelteDataArtifact as makeSvelteDataArtifact } from "./targets/svelte-data.js";
 import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
 import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
@@ -123,6 +124,11 @@ export function svelteDataArtifact(): GeneratedArtifact {
   return makeSvelteDataArtifact(GENERATOR_VERSION);
 }
 
+/** The rendering helpers converted Svelte components share; every package that emits Svelte ships it once. */
+export function svelteRenderArtifact(): GeneratedArtifact {
+  return makeSvelteRenderArtifact(GENERATOR_VERSION);
+}
+
 export function sveltePropsArtifact(): GeneratedArtifact {
   return makeSveltePropsArtifact(GENERATOR_VERSION);
 }
@@ -208,5 +214,5 @@ export function generateReactConversion(definition: ComponentDefinition, options
 }
 
 export function generateSvelteConversion(definition: ComponentDefinition, options?: SvelteConversionOptions): SvelteConversionOutput {
-  return generateSvelteOutput(definition, options);
+  return generateSvelteOutput(definition, GENERATOR_VERSION, options);
 }

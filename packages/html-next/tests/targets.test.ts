@@ -725,9 +725,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /rows\[loop\.index\]\.label = readBoundControl\(/);
     assert.match(react, /\["owner", "name"\]/);
     assert.match(react, /\[loop\.index, "label"\]/);
-    const svelte = Object.values(generateSvelteOutput(definition)).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
-    assert.match(svelte, /htmlNextWritePath\(draft, \["owner", "name"\]/);
-    assert.match(svelte, /htmlNextWritePath\(rows, \[htmlNextRow0\.loop\.index, "label"\]/);
+    const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
+    assert.match(svelte, /writePath\(draft, \["owner", "name"\]/);
+    assert.match(svelte, /writePath\(rows, \[loop\.index, "label"\]/);
   });
 
   it("compiles numeric two-way controls directly through the shared control writer", () => {
