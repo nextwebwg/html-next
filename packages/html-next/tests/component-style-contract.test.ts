@@ -48,7 +48,8 @@ describe("resolved prop and state selectors", () => {
     for (const compile of compilers) {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
-      assert.match(result.css, /(?::scope:where\(\[data-component~="x-style-contract"\]\)|\[data-component~="x-style-contract"\])\.active/);
+      assert.match(result.css, compile === compileComponentStylesForVue ? /:scope\.active/
+        : /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/);
     }
   });
 
@@ -84,4 +85,15 @@ describe("resolved prop and state selectors", () => {
       assert.throws(() => compile(":host-state([sourceEvent]) { color: red; }", event), /HY002/);
     }
   });
+});
+
+
+it("keeps Vue grouping rules in the component scope and keyframes document-wide", () => {
+  const result = compileComponentStylesForVue(`@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }
+    @media (min-width: 0px) { :host::before { animation: pulse 1s; } *::after { box-sizing: border-box; } }`, definition);
+  assert.match(result.css, /^@keyframes pulse/);
+  assert.match(result.css, /@scope \(\[data-component~="x-style-contract"\]\) to \(\[data-component\]\) \{\s*@media/);
+  assert.match(result.css, /:scope::before/);
+  assert.match(result.css, /\*::after/);
+  assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });

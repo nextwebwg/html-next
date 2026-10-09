@@ -118,8 +118,8 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
 /**
  * Styles for a converted Vue component, emitted as `<style scoped>`. Vue's scoping already bounds
  * the region: projected content carries the consumer's scope, and Vue's own `:slotted()` reaches it.
- * The generated root carries `data-component` and the state attribute, so `:host` and
- * `:host-state()` become attribute selectors on it.
+ * A native scope preserves the descendant-only meaning of ordinary selectors and excludes nested
+ * component roots. Explicit host selectors become `:scope`; Vue still owns slot scoping.
  */
 export function compileComponentStylesForVue(
   css: string,
@@ -135,7 +135,14 @@ export function compileComponentStylesForVue(
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = rewriteComponentSelector(rule.selector, tag, `[${COMPONENT_ATTRIBUTE}~="${tag}"]`, names, canonical);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical);
   });
+  const scope = postcss.atRule({ name: "scope", params: `([${COMPONENT_ATTRIBUTE}~="${tag}"]) to ([${COMPONENT_ATTRIBUTE}])` });
+  for (const node of root.nodes.slice()) {
+    if (node.type === "rule" || (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()))) {
+      scope.append(node);
+    }
+  }
+  if (scope.nodes?.length) root.append(scope);
   return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names) }, definition);
 }
