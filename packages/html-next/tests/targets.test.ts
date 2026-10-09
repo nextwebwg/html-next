@@ -20,6 +20,7 @@ import { generateSvelteOutput } from "../src/targets/svelte.js";
 import { generateComponent, generateReactComponent, generateVueComponent, reactRenderArtifact, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
+import { expressionHelpersSource } from "../src/targets/vue-lowering.js";
 import { formattingSource } from "./formatting-fixture.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -298,8 +299,78 @@ describe("official target compilers", () => {
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
     compileVue(vue, "XTypedHandlers.vue");
-    assert.match(vue, /if \(acceptsWrite\(next, isNumber, '<source>', 'badNumber', 'count'\)\) count\.value = next\n/);
-    assert.match(vue, /if \(acceptsWrite\(next, isString, '<source>', 'badField', 'items\[\$index\]\.name'\)\)/);
+    assert.match(vue, /  write\(count, concat\(count\.value\), isNumber, 'count in <source>#badNumber'\)\n/);
+    assert.match(vue, /write\(\n\s+\(next\) => \(items\.value\[index\.value\]\.name = next\),\n\s+7,\n\s+isString,\n\s+'items\[\$index\]\.name in <source>#badField',\n/);
+  });
+
+  it("writes proven values plainly and checks the rest in Vue, React and Svelte", async () => {
+    const definition = parseComponent(`<template component="x-writes"><defs>
+      <state name="count" type="integer" value="0"></state><state name="total" type="number" value="0.5"></state>
+      <state name="copy" type="number" value="0"></state><state name="open" type="boolean" value="false"></state>
+      <state name="label" type="string" value="a"></state><state name="loose" type="integer" value="0"></state>
+      <handler name="step"><set name="count" expr:value="$count + 1"></set><set name="count" expr:value="$count - 3"></set>
+        <set name="total" expr:value="$total + 1"></set><set name="copy" expr:value="$count"></set>
+        <set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set>
+        <set name="loose" expr:value="$loose + 1"></set></handler>
+      <handler name="wrong"><set name="total" expr:value="$label"></set><set name="loose" expr:value="$total"></set></handler>
+    </defs><button on:click="step">{$count}</button></template>`, "writes.html");
+    const vue = generateVueComponent(definition);
+    compileVue(vue, "XWrites.vue");
+    const react = generateReactComponent(definition);
+    await transform(react, { loader: "tsx", format: "esm" });
+    const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
+    const expected = {
+      // An integer state every write keeps an integer steps plainly; a copy, a negation and a literal write plainly.
+      plain: [
+        ["count.value++", "setCount((count) => count + 1);", "count++;"],
+        ["count.value -= 3", "setCount((count) => count - 3);", "count -= 3;"],
+        ["copy.value = count.value", "setCopy(getCount());", "copy = count;"],
+        ["open.value = !open.value", "setOpen(!getOpen());", "open = !open;"],
+        ["label.value = 'b'", 'setLabel("b");', "label = 'b';"],
+      ],
+      // Number arithmetic waits on the proposal's number semantics; a string is refused by a number state;
+      // `loose` takes a number, which may be fractional, so its own integer step stays checked too.
+      checked: [
+        ["write(total, total.value + 1, isNumber, 'total in writes.html#step')",
+          'write(setTotal, getTotal() + 1, isNumber, "total in writes.html#step");',
+          "write((next) => (total = next), total + 1, isNumber, 'total in writes.html#step');"],
+        ["write(loose, loose.value + 1, isInteger, 'loose in writes.html#step')",
+          'write(setLoose, getLoose() + 1, isInteger, "loose in writes.html#step");',
+          "write((next) => (loose = next), loose + 1, isInteger, 'loose in writes.html#step');"],
+        ["write(total, label.value, isNumber, 'total in writes.html#wrong')",
+          'write(setTotal, getLabel(), isNumber, "total in writes.html#wrong");',
+          "write((next) => (total = next), label, isNumber, 'total in writes.html#wrong');"],
+      ],
+    };
+    for (const lines of [...expected.plain, ...expected.checked]) {
+      lines.forEach((line, index) => assert.ok([vue, react, svelte][index]!.includes(`${line}\n`), `${["Vue", "React", "Svelte"][index]}: ${line}`));
+    }
+  });
+
+  it("refuses a handler write of the wrong type once per authored write, and skips invalid results", async () => {
+    const { code } = await transform(expressionHelpersSource(), { loader: "ts", format: "cjs" });
+    const module = { exports: {} as { write: (to: unknown, value: unknown, check?: (value: unknown) => boolean, at?: string) => void; isNumber: (value: unknown) => boolean } };
+    new Function("module", "exports", code)(module, module.exports);
+    const { write, isNumber } = module.exports;
+    const count = { value: 1 };
+    const set: unknown[] = [];
+    const warnings: unknown[] = [];
+    const warn = console.warn;
+    console.warn = (message: unknown) => warnings.push(message);
+    try {
+      write(count, "2", isNumber, "count in x.html#bad");
+      write(count, "3", isNumber, "count in x.html#bad");
+      write(count, Symbol.for("html-next.invalid-result"));
+      write((value: unknown) => set.push(value), Number.POSITIVE_INFINITY, isNumber, "count in x.html#overflow");
+      write(count, undefined, isNumber, "count in x.html#absent");
+      write((value: unknown) => set.push(value), 4, isNumber, "count in x.html#good");
+    } finally { console.warn = warn; }
+    assert.deepEqual(count, { value: undefined });
+    assert.deepEqual(set, [4]);
+    assert.deepEqual(warnings, [
+      "HR007: State count in x.html#bad does not satisfy its declared type.",
+      "HR007: State count in x.html#overflow does not satisfy its declared type.",
+    ]);
   });
 
   it("uses a root $ref as the controller's root handle without duplicate Vue refs", () => {
@@ -494,8 +565,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /checkedProps\.value\.size && 'size'/);
     assert.match(vue, /`size=\$\{encodeURIComponent\(checkedProps\.value\.size\)\}`/);
     assert.match(vue, /function flip\(\): void \{/);
-    assert.match(vue, /const next = !open\.value\n/);
-    assert.match(vue, /if \(acceptsWrite\(next, isBoolean, '<source>', 'flip', 'open'\)\) open\.value = next\n/);
+    // A negation always writes a boolean, so a boolean state takes it unchecked.
+    assert.match(vue, /  open\.value = !open\.value\n/);
     assert.match(vue, /<ul v-if="open">/);
     assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
     assert.match(vue, /sortBy\(\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)/);

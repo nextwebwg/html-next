@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.42
+
+### Changed
+
+- Vue, React and Svelte conversion write a handler's `<set>` as one statement. A write the converter proves satisfies its state's declared type is written plainly: a literal, a negation into a `boolean` state, a copy of a same-typed state, and a step of an `integer` state by a safe integer literal when every write keeps that state an integer (`count.value++`, `setCount((count) => count + 1)`, `count++`). Any other write is one call to the shared `write` helper, `write(count, count.value + 1, isNumber, 'count in counter.html#increment')`, which refuses an invalid result or a value of the wrong type as before. `number` arithmetic stays checked, since its result depends on the proposal's number semantics. The refusal warning now names the handler: `HR007: State count in counter.html#increment does not satisfy its declared type.` The shared helper replaces `acceptsWrite`, and the converted conformance corpus is 1.0 to 2.3% smaller.
+
 ## 1.0.0-alpha.41
 
 ### Breaking

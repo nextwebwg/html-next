@@ -15,7 +15,7 @@ import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { conformingLiteralWrite, declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
+import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
@@ -79,7 +79,7 @@ function pascal(name: string): string {
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
-const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTextarea", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTextarea", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
@@ -1159,7 +1159,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         }
         return `    const ${handlerComputedNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>((): ${type} => (${expression}) as any, false);`;
       });
-      const steps = handler.steps.map((step, index) => {
+      const steps = handler.steps.map((step) => {
         const guard = step.guard === undefined ? "" : `if (${lowering.condition(step.guard.ast, handlerScope)}) `;
         if (step.kind === "dispatch") {
           const declaration = target.events.find((event) => event.name === step.event);
@@ -1179,26 +1179,30 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const setter = stateSetters.get(state.name)!;
         const value = lowering.value(step.value.ast, handlerScope);
         const mayBeInvalid = mayProduceInvalidResult(step.value.ast, handlerScope);
-        const destinationCheck = conformingLiteralWrite(step, definition) ? undefined
+        const proven = !mayBeInvalid && provenWrite(step, definition);
+        const destinationCheck = proven ? undefined
           : handlerDestinationCheck(handlerScope.types.get(state.name)?.type, step.writablePath, 1, "value", handlerScope, lowering);
         const destination = handlerScope.types.get(state.name)?.type;
-        // A value of the state's own kind writes as it is; another kind is cast after its check. A
-        // function-valued state writes through an updater, which the setter would otherwise call.
+        const current = valueNames.get(state.name)!;
         const path = `[${step.writablePath.slice(1).map((segment) => typeof segment === "object"
           ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}]`;
-        // A controller host learns the path a nested write changed, so it notifies only that path.
-        const write = (written: string): string => step.writablePath.length > 1
-          ? stateWritesName === "" ? `${setter}((previous) => writeStatePath(previous, ${path}, ${written}));`
-            : `{ const path = ${path}; ${setter}((previous) => writeStatePath(previous, path, ${written}), path); }`
-          : destination === undefined || category(destination) === "unknown" ? `${setter}(() => ${written} as typeof ${valueNames.get(state.name)!});`
-          : category(destination) === category(typeOf(step.value.ast, handlerScope).type) && !mayBeInvalid ? `${setter}(${written});`
-          : `${setter}(${written} as typeof ${valueNames.get(state.name)!});`;
-        if (destinationCheck === undefined && !mayBeInvalid) return `    ${guard}${write(value)}`;
-        // One checked write per handler reads as `next`; later ones number theirs.
-        const next = setSteps(handler) > 1 ? `next${index}` : "next";
-        const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
-        const lines = [`const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`, `if (acceptsWrite(${next}${check})) ${write(next)}`];
-        return guard === "" ? lines.map((line) => `    ${line}`).join("\n") : `    ${guard}{ ${lines.join(" ")} }`;
+        // A controller host learns the path a nested write changed, so it notifies only that path. A
+        // function-valued state writes through an updater, which the setter would otherwise call.
+        const setPath = (written: string): string => stateWritesName === "" ? `${setter}((previous) => writeStatePath(previous, ${path}, ${written}))`
+          : `{ const path = ${path}; ${setter}((previous) => writeStatePath(previous, path, ${written}), path); }`;
+        const unknown = destination === undefined || category(destination) === "unknown";
+        if (destinationCheck === undefined && !mayBeInvalid) {
+          // A value of the state's own kind writes as it is; another kind is cast.
+          const self = proven ? selfStep(step) : undefined;
+          const write = step.writablePath.length > 1 ? setPath(value)
+            : self !== undefined ? `${setter}((${current}) => ${current} ${self.op} ${self.amount})`
+            : (unknown ? `${setter}(() => ${value} as typeof ${current})`
+              : category(destination) === category(typeOf(step.value.ast, handlerScope).type) ? `${setter}(${value})`
+              : `${setter}(${value} as typeof ${current})`);
+          return `    ${guard}${write}${write.endsWith("}") ? "" : ";"}`;
+        }
+        const to = step.writablePath.length > 1 ? `(next) => ${setPath("next")}` : unknown ? `(next) => ${setter}(() => next)` : setter;
+        return `    ${guard}${lowering.use("write")}(${to}, ${value}${writeCheck(destinationCheck, definition, handler, step)});`;
       });
       return [
         `  function ${handlerNames.get(handler.name)!}(${[...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line)) ? "event: Event" : ""}): void {`,

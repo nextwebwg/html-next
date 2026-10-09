@@ -428,13 +428,16 @@ export function warnUnless(accepted: boolean, location: string, message: string)
 }
 
 /**
- * Whether a handler may write a value: never an invalid result, and absent or of the destination's
- * type. A wrong type warns once for its authored write and leaves the destination as it was.
+ * A handler's checked write to a ref or through a setter. An invalid result writes nothing; a value
+ * neither absent nor of the destination's type warns once for its authored write (\`at\`: the state
+ * path in the file's handler) and leaves the destination as it was.
  */
-export function acceptsWrite(value: unknown, check?: (value: any) => boolean, file?: string, handler?: string, path?: string): boolean {
-  if (value === Symbol.for("html-next.invalid-result")) return false;
-  if (check === undefined || value === undefined || check(value)) return true;
-  return warnUnless(false, \`handler:\${handler}:\${path}\`, \`\${file}: HR007: State \${path} does not satisfy its declared type.\`);
+export function write(to: { value: unknown } | ((value: any) => void), value: unknown, check?: (value: any) => boolean, at?: string): void {
+  if (value === Symbol.for("html-next.invalid-result")) return;
+  if (check !== undefined && value !== undefined && !check(value)) {
+    warnUnless(false, at!, \`HR007: State \${at} does not satisfy its declared type.\`);
+  } else if (typeof to === "function") to(value);
+  else to.value = value;
 }
 
 export const isString = (value: unknown): value is string => typeof value === "string";

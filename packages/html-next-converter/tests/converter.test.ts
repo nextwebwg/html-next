@@ -1166,8 +1166,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     // A conforming state's own value needs no read check, so the computed reads it directly.
     assert.match(source, /const double = cycleCheckedComputed\(\(\) => count\.value \* 2\)\n/);
     assert.match(source, /function increment\(\): void \{/);
-    assert.match(source, /const next = count\.value \+ 1\n/);
-    assert.match(source, /if \(acceptsWrite\(next, isNumber, '[^']*', 'increment', 'count'\)\) count\.value = next\n/);
+    assert.match(source, /  write\(count, count\.value \+ 1, isNumber, 'count in [^']*#increment'\)\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
     assert.match(source, /'count-change': isNumber,/);
     assert.match(source, /:data-count="count"/);

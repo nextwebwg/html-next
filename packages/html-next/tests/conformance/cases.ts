@@ -707,6 +707,35 @@ const successes: ConformanceCase[] = [
       result: { defsLeft: 0, styleInHead: true, isButton: true },
     },
   },
+  {
+    // Converters write integer steps, copies, negations and literals plainly; number arithmetic
+    // and a string written to a number state keep the write check, which refuses the string.
+    name: "handler writes satisfy each state's declared type, and a nonconforming write leaves the state",
+    source: scene({
+      defs:
+        `<state name="count" type="integer" value="0"></state><state name="total" type="number" value="0.5"></state>` +
+        `<state name="copy" type="number" value="0"></state><state name="open" type="boolean" value="false"></state>` +
+        `<state name="label" type="string" value="a"></state>` +
+        `<handler name="step"><set name="count" expr:value="$count + 2"></set><set name="count" expr:value="$count - 1"></set>` +
+        `<set name="total" expr:value="$total + 1"></set><set name="copy" expr:value="$count"></set>` +
+        `<set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set></handler>` +
+        `<handler name="wrong"><set name="total" expr:value="$label"></set></handler>`,
+      root:
+        `<div class:open="$open"><button type="button" class="step" on:click="step">Step</button>` +
+        `<button type="button" class="wrong" on:click="wrong">Wrong</button>` +
+        `<output>{concat($count, '/', $total, '/', $copy, '/', $label)}</output></div>`,
+      use: `<x-t id="writes"></x-t>`,
+    }),
+    expect: {
+      probe: `return [q('#writes output').textContent, q('#writes').classList.contains('open')];`,
+      result: ["0/0.5/0/a", false],
+      after: [
+        { action: `document.querySelector('#writes .step').click();`, result: ["1/1.5/1/b", true] },
+        { action: `document.querySelector('#writes .wrong').click();`, result: ["1/1.5/1/b", true] },
+        { action: `document.querySelector('#writes .step').click();`, result: ["2/2.5/2/b", false] },
+      ],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
