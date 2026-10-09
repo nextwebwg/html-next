@@ -632,7 +632,7 @@ export function manageProps(instance: GeneratedInstance): void {
     const text = value === undefined || value === ABSENT || value === null ? null
       : reflected(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
     if (text === null) element.removeAttribute(`data-${kebabCase(name)}`);
-    else element.setAttribute(`data-${kebabCase(name)}`, text);
+    else if (element.getAttribute(`data-${kebabCase(name)}`) !== text) element.setAttribute(`data-${kebabCase(name)}`, text);
   };
   const job = new ReactiveEffect(instance.q, () => {
     if (!connected) return;
@@ -688,9 +688,12 @@ export function manageProps(instance: GeneratedInstance): void {
     for (const [name, value] of Object.entries(input)) {
       const prop = props[name];
       if (prop === undefined) continue;
+      // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
       const previous = inputs[name];
-      inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
-      notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      if (previous?.source !== "value" || previous.present !== (value !== undefined) || !Object.is(previous.value, value === undefined ? null : value)) {
+        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+        notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      }
       // A bound data-* attribute is template output; only its binding writes it.
       const attribute = `data-${kebabCase(name)}`;
       if (value === undefined || value === null) {
@@ -699,7 +702,8 @@ export function manageProps(instance: GeneratedInstance): void {
       } else {
         explicit.add(name);
         if (!record.b.includes(name)) {
-          element.setAttribute(attribute, reflected(value, selected(prop, next)));
+          const text = reflected(value, selected(prop, next));
+          if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
           record.w.add(name);
         }
       }
