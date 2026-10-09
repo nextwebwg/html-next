@@ -119,8 +119,8 @@ function rewriteComponentTags(selector: string): string {
 
 /**
  * Rewrites one renamed selector. `host` is what `:host` becomes: `:scope` inside the component's
- * `@scope` rules (both of them are rooted at the component root), or the root's own selector where
- * there is no `@scope` (Vue's scoped styles).
+ * `@scope` rules (both of them are rooted at the component root), or an explicit root selector
+ * supplied by another build target.
  */
 export function rewriteComponentSelector(
   selector: string,

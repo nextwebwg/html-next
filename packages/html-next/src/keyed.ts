@@ -114,6 +114,9 @@ export class KeyedList<R extends KeyedRow> {
   a: unknown = this;
   /** The record of the block holding the list, which rows and keys reading outer locals reach. */
   u: unknown = undefined;
+  /** Leading and trailing rows the last partial reconcile kept at their index (trailing: while the count held). */
+  declare f: number;
+  declare g: number;
 
   constructor(
     readonly s: Comment,
@@ -200,6 +203,10 @@ export class KeyedList<R extends KeyedRow> {
     if (!full) for (;;) {
       while (oldStart < oldEnd && newStart < newEnd && same(old[oldStart]!, next[newStart])) rows[newStart++] = old[oldStart++]!;
       while (oldStart < oldEnd && newStart < newEnd && same(old[oldEnd - 1]!, next[newEnd - 1])) rows[--newEnd] = old[--oldEnd]!;
+      if (swaps.length === 0) {
+        this.f = newStart;
+        this.g = count - newEnd;
+      }
       if (oldEnd - oldStart < 2 || newEnd - newStart < 2 ||
         !same(old[oldStart]!, next[newEnd - 1]) || !same(old[oldEnd - 1]!, next[newStart])) break;
       swaps.push(old[oldStart]!, old[oldEnd - 1]!);
@@ -318,7 +325,8 @@ export class KeyedList<R extends KeyedRow> {
 
 /**
  * A keyed list whose rows read their position, or hold rows that do. A row that moved, or (when
- * rows read it) saw the count change, re-runs only what reads the position.
+ * rows read it) saw the count change, re-runs only what reads the position. Rows the reconcile
+ * kept at their index are not visited.
  */
 export class PositionalList<R extends KeyedRow> extends KeyedList<R> {
   /** Rows (or their key) read the row count, so a changed count patches every row. */
@@ -334,9 +342,11 @@ export class PositionalList<R extends KeyedRow> extends KeyedList<R> {
     super.set(items, dirty, full);
     const rows = this.r;
     const count = rows.length;
+    // A full reconcile placed every retained row already.
+    if (full) return;
     const counted = this.q && count !== before;
-    // ponytail: one index compare per row; the reconcile's trimmed ends could skip it at a cost to every keyed list.
-    for (let index = 0; index < count; index += 1) {
+    const end = count === before ? count - this.g : count;
+    for (let index = counted ? 0 : this.f; index < end; index += 1) {
       const row = rows[index]!;
       if (row.j !== index || counted && row.l !== count) {
         row.j = index;
