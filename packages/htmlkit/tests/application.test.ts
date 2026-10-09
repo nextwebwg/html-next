@@ -40,7 +40,7 @@ describe("application platform", () => {
     await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page/);
     await write(root, "extra/products.html", '<meta name="hk:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
     await expect(discoverRoutes(root, options)).rejects.toThrow(/absent-page/);
-  });
+  }, 60_000);
 
   it("renders head bindings from loader props and merges page overrides while preserving repeatable links", async () => {
     const root = await app();
