@@ -10,7 +10,7 @@ eyebrow: HTML Next · Versions
 **The proposal is still changing. Your components don't have to.** Stability comes from pinning a version of these tools, not from the proposal itself. A library or an application can be stable on one tools version while the proposal keeps moving.
 
 > [!warn] Today: alpha releases
-> The tools are `1.0.0-alpha` releases. They follow the proposal's live draft, so any alpha can break your components; the [changelog](https://github.com/nextwebwg/html-next/blob/main/CHANGELOG.md) lists each break under **Breaking**. The promise on this page starts at 1.0. Items marked *planned* are not built yet.
+> The tools are `1.0.0-alpha` releases. They follow the proposal's live draft, so any alpha can break your components. From 1.0.0-alpha.41, the [changelog](https://github.com/nextwebwg/html-next/blob/main/CHANGELOG.md) lists each break under **Breaking**; earlier releases did not always, so read their **Changed** entries too. The promise on this page starts at 1.0. Items marked *planned* are not built yet.
 
 ## What a version means
 
@@ -74,6 +74,6 @@ An [extension](https://nextwebwg.org/declarative-components/#extensions) is an o
 - The live browser runtime and Vue, React, and Svelte conversion do not support extensions, and report any extension syntax they meet.
 - An extension adds code only to pages whose components use it.
 
-No extension is implemented yet; `transitions` is at the Proposal stage.
+The first extension, `transitions`, is at the Incubation stage: these tools implement it.
 
 Next: [Publish a library](/html-next/ship) covers the rest of a library's `package.json`.
