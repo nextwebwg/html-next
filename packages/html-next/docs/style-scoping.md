@@ -127,8 +127,9 @@ results, and early/late loading comparisons.
 
 ## Vue
 
-Converted components use `<style scoped>`. `:host` and `:host-state()` become attribute selectors
-on the generated root; Vue's own `:slotted()` handles projected content.
+Converted components use `<style scoped>` with a native scope that excludes nested component
+roots. `:host` becomes `:scope`; prop and state tests add the generated root's state tokens.
+Vue's own `:slotted()` handles projected content.
 
 ## Proof
 
