@@ -9,6 +9,11 @@ import { toText, type Value } from "./expression.js";
 
 /** The change bit for item data and any data reached through a controller facade. */
 export const NESTED = 1 << 30;
+/**
+ * The change bit for a row's position: bindings that read an index or `loop`, here or in rows below.
+ * `1 << 31`, written as a literal so bundles without positional lists drop it.
+ */
+export const POSITION = -0x80000000;
 /** A controller facade answers this key with its raw target; it works across bundle copies. */
 export const RAW: unique symbol = Symbol.for("@nextwebwg/html-next.raw.v1") as never;
 
@@ -40,7 +45,7 @@ export interface KeyedRow {
    * write may have changed, so the row is patched on every nested write (compare-before-write).
    */
   w?: number;
-  /** Position and row count, kept for rows that read their index or `loop`. */
+  /** Position and row count, kept for rows that read their index or `loop`, or hold rows that do. */
   j?: number;
   l?: number;
   /** Stops the row's listeners and nested regions when it is removed. */
@@ -109,6 +114,9 @@ export class KeyedList<R extends KeyedRow> {
   a: unknown = this;
   /** The record of the block holding the list, which rows and keys reading outer locals reach. */
   u: unknown = undefined;
+  /** Leading and trailing rows the last partial reconcile kept at their index (trailing: while the count held). */
+  declare f: number;
+  declare g: number;
 
   constructor(
     readonly s: Comment,
@@ -195,6 +203,10 @@ export class KeyedList<R extends KeyedRow> {
     if (!full) for (;;) {
       while (oldStart < oldEnd && newStart < newEnd && same(old[oldStart]!, next[newStart])) rows[newStart++] = old[oldStart++]!;
       while (oldStart < oldEnd && newStart < newEnd && same(old[oldEnd - 1]!, next[newEnd - 1])) rows[--newEnd] = old[--oldEnd]!;
+      if (swaps.length === 0) {
+        this.f = newStart;
+        this.g = count - newEnd;
+      }
       if (oldEnd - oldStart < 2 || newEnd - newStart < 2 ||
         !same(old[oldStart]!, next[newEnd - 1]) || !same(old[oldEnd - 1]!, next[newStart])) break;
       swaps.push(old[oldStart]!, old[oldEnd - 1]!);
@@ -311,23 +323,35 @@ export class KeyedList<R extends KeyedRow> {
   }
 }
 
-/** A keyed list whose rows read their index or `loop`: a changed position or count patches them. */
+/**
+ * A keyed list whose rows read their position, or hold rows that do. A row that moved, or (when
+ * rows read it) saw the count change, re-runs only what reads the position. Rows the reconcile
+ * kept at their index are not visited.
+ */
 export class PositionalList<R extends KeyedRow> extends KeyedList<R> {
+  /** Rows (or their key) read the row count, so a changed count patches every row. */
+  q = false;
+
   override place(row: R, index: number, count: number): void {
     row.j = index;
     row.l = count;
   }
 
   override set(items: unknown, dirty: DirtyObjects, full: boolean): void {
+    const before = this.r.length;
     super.set(items, dirty, full);
     const rows = this.r;
     const count = rows.length;
-    for (let index = 0; index < count; index += 1) {
+    // A full reconcile placed every retained row already.
+    if (full) return;
+    const counted = this.q && count !== before;
+    const end = count === before ? count - this.g : count;
+    for (let index = counted ? 0 : this.f; index < end; index += 1) {
       const row = rows[index]!;
-      if (row.j !== index || row.l !== count) {
+      if (row.j !== index || counted && row.l !== count) {
         row.j = index;
         row.l = count;
-        this.p(row, NESTED, dirty);
+        this.p(row, POSITION, dirty);
       }
     }
   }
@@ -335,7 +359,7 @@ export class PositionalList<R extends KeyedRow> extends KeyedList<R> {
 
 /** An unkeyed list: rows follow positions, and a changed item updates its position's row. */
 export class IndexedList<R extends KeyedRow> extends KeyedList<R> {
-  /** Rows read their index or `loop`, so a changed count patches them too. */
+  /** Rows read the row count, so a changed count patches them too; their index never changes. */
   q = false;
 
   override set(items: unknown, dirty: DirtyObjects, full: boolean): void {
@@ -358,7 +382,7 @@ export class IndexedList<R extends KeyedRow> extends KeyedList<R> {
         this.p(row, -1, dirty);
       } else if (this.q && row.l !== count) {
         row.l = count;
-        this.p(row, NESTED, dirty);
+        this.p(row, POSITION, dirty);
       }
     }
     while (rows.length > count) {

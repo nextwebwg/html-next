@@ -1,6 +1,11 @@
 <div align="center">
 
-# HTML Next
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/html-next-lockup-dark.svg">
+    <img src="assets/brand/html-next-lockup.svg" alt="HTML Next" width="280">
+  </picture>
+</h1>
 
 ### Universal components. Built with HTML.
 

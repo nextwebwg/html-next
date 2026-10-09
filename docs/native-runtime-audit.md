@@ -7,3 +7,35 @@ On 2026-09-29, detached inputs were probed in Chromium, Firefox, and WebKit by s
 Native date, month, week, time, and local date-time inputs are useful format probes, but `validity.valid` alone does not establish format validity. Invalid date values were sanitized to empty. A valid time with fractional seconds retained its value but failed the default minute step. Firefox retained `2026-13` in a month input while the other two engines cleared it. The type parser therefore checks the [HTML date and time microsyntaxes](https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#dates) directly and keeps the original string; it does not use form-control step validation for a prop.
 
 For CSS `color`, browsers provide `CSS.supports`, but Node builds and server rendering have no equivalent browser CSS parser. The initial type accepts the same bounded set of named, hex, and numeric function literals in both environments. This avoids a value passing in the browser and failing during server rendering. CSS `color-mix()` and relative color syntax are outside this initial set. The [proposal's type table](https://nextwebwg.org/declarative-components/types) names the supported forms. A broader color grammar needs a parser usable in both environments and representative parity tests before it is added.
+
+## Shared component stylesheets
+
+On 2026-10-08, Chromium 153, Firefox 155, and WebKit 26.6 retained `CSSImportRule` in a style element inside `document.implementation.createHTMLDocument()`, exposing the URL, layer, supports condition, and media list without requesting imported resources. Constructed stylesheet replacement discards imports. The live loader therefore uses an inert document to parse CSS, fetches the import graph under the component resource policy, and passes resolved bodies to the existing CSSOM selector compiler. Node tools use their existing PostCSS parser. Browser URL resolution, CSS parsing, and `@scope` provide the native mechanisms; dependency fetching, URL rebasing, adoption tracking, and shared delivery are the remaining tooling gap.
+
+Direct `box-sizing` rules respect nested-component and projected-content scope limits; inheritance still follows the DOM. A selector list combining universal and pseudo-element selectors exposed a Firefox 155 scope-limit defect: a projected element received the regular element's box-sizing rule. A zero-specificity boundary guard on affected own selectors prevents the leak while retaining the scope root. The guard belongs in the compiler rather than application defaults.
+
+Firefox also retained the previous root's scoped host style during dynamic root replacement. A zero-specificity owner qualifier on the rewritten host selector prevents that stale match. Firefox's HTML preload scanner can fetch imports from authored template source before the loader starts; the loader's inert CSS parser does not initiate those requests.
+
+
+## Stylesheet namespaces
+
+On 2026-10-08, Chromium 153, Firefox 155, and WebKit 26.6 parsed `CSSNamespaceRule` in
+constructed stylesheets and accepted namespace-qualified `CSSStyleRule.selectorText` updates.
+All three rejected removing a namespace declaration while dependent style rules remained.
+The compiler therefore leaves declarations in each parsed sheet while pruning and rewriting
+rules, and moves their serialized declarations into the delivered stylesheet's preamble.
+
+Namespace prefixes and defaults are local to each stylesheet under
+[CSS Namespaces](https://www.w3.org/TR/css-namespaces-3/). Combining sheets needs a source
+transform: stable URI-derived named prefixes, explicit default namespace constraints, and
+rewrites of selector-valued functions and scope/supports preludes. CSSOM owns browser parsing;
+PostCSS owns build parsing. Unprefixed attributes keep their ordinary no-namespace behavior.
+The subject compound inside `:is()`, `:where()`, and `:not()` follows the default-namespace
+exception in [Selectors Level 4](https://www.w3.org/TR/selectors-4/).
+
+A reduced standalone SVG test exposes a Firefox 155 scope-limit defect even without
+namespaces: both an owned rect and a rect below an excluded SVG receive a scoped class rule.
+Chromium and WebKit style only the owned rect. The reproduction is checked in at
+`packages/html-next/tests/fixtures/firefox-svg-scope.html` and filed as
+[Mozilla bug 2080046](https://bugzilla.mozilla.org/show_bug.cgi?id=2080046). This observation
+uses Playwright's Firefox build; a stock release/Nightly reproduction remains unverified.
