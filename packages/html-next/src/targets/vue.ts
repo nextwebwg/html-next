@@ -30,7 +30,7 @@ import { targetComponent } from "./backend.js";
 import { conformingScalarStates, literalInitial } from "./state-roots.js";
 import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
-import { VUE_HOST_SPECIFIER } from "./vue-host.js";
+import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
@@ -49,12 +49,15 @@ const RESERVED = new Set([
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
   "SanitizedHtml", "RetainedInlineText", "inlineTextSegment",
   "String", "Boolean", "Number", "Math", "Object", "Array", "Symbol", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
-  "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS,
+  "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS, ...VUE_HOST_EXPORTS,
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum",
   "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null",
   "return", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
   "let", "static", "implements", "interface", "package", "private", "protected", "public", "await", "arguments", "eval",
 ]);
+
+/** The locals a handler numbers per step (`next1`, `detail2`), which share the handler's scope with state reads. */
+const STEP_LOCAL = /^(?:next|detail)\d+$/;
 
 /** Allocates readable script identifiers: the declared name when it is free. */
 class Identifiers {
@@ -66,7 +69,7 @@ class Identifiers {
 
   take(name: string, suffix: string): string {
     const base = name.replace(/[^A-Za-z0-9_$]/g, "_").replace(/^(?=\d)/, "_");
-    let candidate = this.#taken.has(base) ? `${base}${suffix}` : base;
+    let candidate = this.#taken.has(base) || STEP_LOCAL.test(base) ? `${base}${suffix}` : base;
     for (let index = 2; this.#taken.has(candidate); index++) candidate = `${base}${suffix}${index}`;
     this.#taken.add(candidate);
     return candidate;
