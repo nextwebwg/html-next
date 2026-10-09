@@ -62,6 +62,53 @@ const cases: readonly ParityCase[] = [
     expectedAfter: { sibling: "Total: 2 items", nbsp: "a\u00a0\u00a02", pre: "2  two\n  three" },
   },
   {
+    name: "SVG class rules stay inside owned scope with inherited and explicit projected fills",
+    features: ["scoped styles", "SVG", "slots", "inheritance"],
+    definitions: {
+      "x-svg-boundary": `<template component="x-svg-boundary"><div><svg><rect class="shape" width="10" height="10"></rect></svg><slot></slot></div>
+        <style>:host { fill: green; } .shape { fill: red; } :slotted(.styled) { fill: blue; }</style></template>`,
+    },
+    invocation: '<x-svg-boundary id="case"><svg><rect class="shape" width="10" height="10"></rect><rect class="shape styled" x="20" width="10" height="10"></rect></svg></x-svg-boundary>',
+    vueRender: 'h(XSvgBoundary, { id: "case" }, { default: () => h("svg", {}, [h("rect", { class: "shape", width: 10, height: 10 }), h("rect", { class: "shape styled", x: 20, width: 10, height: 10 })]) })',
+    root: '#case',
+    probe: `Array.from(root.querySelectorAll('rect'), node => getComputedStyle(node).fill)`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'],
+  },
+  {
+    name: "declared names never take a handler's step locals or the shared host's exports",
+    features: ["handlers", "checked writes", "naming"],
+    definitions: {
+      "x-step-names": `<template component="x-step-names"><defs>
+        <state name="next0" type="number" value="1"></state>
+        <state name="count" type="number" value="0"></state>
+        <state name="arithmetic" type="length" value="2px"></state>
+        <state name="preserveRootFocus" type="string" value="kept"></state>
+        <handler name="advance"><set name="next0" expr:value="$next0 + 1"></set><set name="count" expr:value="$next0 + 1"></set></handler>
+      </defs><section><output>{$next0}/{$count}/{$arithmetic + $arithmetic}/{$preserveRootFocus}</output><button on:click="advance">Go</button></section></template>`,
+    },
+    invocation: `<x-step-names id="case"></x-step-names>`,
+    vueRender: `h(XStepNames, { id: "case" })`,
+    root: "#case",
+    probe: `({ output: root.querySelector("output").textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { output: "2/3/4px/kept" },
+  },
+  {
+    name: "namespaced component type selectors keep their namespace",
+    features: ["scoped styles", "namespaces", "host"],
+    definitions: {
+      "x-ns-host": `<template component="x-ns-host"><p>Host</p><style>@namespace n "http://www.w3.org/1999/xhtml";
+        :host:is(n|x-ns-host) { border-top: 3px solid; }</style></template>`,
+    },
+    invocation: `<x-ns-host id="case"></x-ns-host>`,
+    vueRender: `h(XNsHost, { id: "case" })`,
+    root: "#case",
+    probe: `({ border: getComputedStyle(root).borderTopWidth })`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: { border: "3px" },
+  },
+  {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
     features: ["scoped styles", "delegated root", "host pseudo-elements"],
     definitions: {
