@@ -169,7 +169,15 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const packages = new Map<string, ReturnType<typeof packageResource>>();
       const resources = new Map<string, ReturnType<typeof applicationResource>>();
       const layerURLs = new Set(layers.map(layer => pathToFileURL(layer.component).href));
+      const resolveCSS = server.config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
       const graph = await loadNodeComponents(layers.map(layer => pathToFileURL(layer.component).href), {
+        readStylesheet: async url => ({ url, source: await readFile(fileURLToPath(url), "utf8") }),
+        resolveStylesheet: async (specifier, parentURL) => {
+          const resolved = await resolveCSS(specifier, fileURLToPath(parentURL));
+          return resolved === undefined ? undefined
+            : pathToFileURL(resolved.replace(/[?#].*$/, "")).href + (/[?#].*$/.exec(resolved)?.[0] ?? "");
+        },
+        stylesheetAssetURL: url => url.startsWith("file:") ? `/@fs/${fileURLToPath(url)}${new URL(url).search}${new URL(url).hash}` : url,
         // The graph resolver is synchronous. Prepare its bare imports while asynchronously
         // reading each carrier, using Vite's ESM resolution from the consuming application.
         importMap: map,
