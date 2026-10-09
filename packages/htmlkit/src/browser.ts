@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { normalizePath, type Plugin } from "vite";
@@ -15,7 +16,11 @@ export function stylesheetSources(components: readonly BrowserDefinition[]): Rea
   const sources = new Map<string, string>();
   const shared = collectSharedStylesheets(components.map(component => component.definition));
   if (shared.length > 0) {
-    sources.set(normalizePath(fileURLToPath(components[0]!.definition.source.file)) + ".htmlkit-shared.css",
+    // One stylesheet holds the page's whole graph, so it is named for the graph: pages that share a
+    // first component (their layout) would otherwise overwrite each other's styles.
+    const files = components.map(component => component.definition.source.file);
+    const graph = createHash("sha256").update(files.join("\0")).digest("hex").slice(0, 16);
+    sources.set(`${normalizePath(fileURLToPath(files[0]!))}.${graph}.htmlkit-shared.css`,
       compileComponentGraphStylesForBuild(components.map(component => component.definition)));
     return sources;
   }

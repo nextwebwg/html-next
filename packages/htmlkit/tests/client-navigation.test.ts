@@ -40,11 +40,13 @@ async function site(): Promise<string> {
   // A global rule only the home page links; leaving home must drop it, as a document load would.
   await write(root, "app/pages/home.ts", "import './home.css'; export default function(host) { host.root.dataset.ready = 'home'; }");
   await write(root, "app/pages/home.css", "body { background-color: rgb(9, 9, 9); }");
+  // Shared stylesheet imports put each page's graph in one stylesheet, which client navigation loads.
+  await write(root, "app/styles/heading.css", "h1 { border-bottom: 2px solid rgb(7, 8, 9); }");
   await write(root, "app/pages/guide/index.html", `<template component="guide-page" controller="./guide.ts"><title>Guide</title><meta name="description" content="Guide page"><meta name="hk:label" content="Guide">
-    <article><h1>Guide</h1></article><style>:host { color: rgb(4, 5, 6); }</style></template>`);
+    <article><h1>Guide</h1></article><style>@import "@/app/styles/heading.css"; :host { color: rgb(4, 5, 6); }</style></template>`);
   await write(root, "app/pages/guide/guide.ts", "export default function(host) { host.root.dataset.ready = 'guide'; }");
   await write(root, "app/pages/guide/install.html", `<template component="install-page"><title>Install</title><meta name="hk:label" content="Install">
-    <article><h1>Install</h1><div class="spacer"></div><h2 id="deep">Deep</h2><div class="spacer"></div></article><style>.spacer { height: 3000px; }</style></template>`);
+    <article><h1>Install</h1><div class="spacer"></div><h2 id="deep">Deep</h2><div class="spacer"></div></article><style>@import "@/app/styles/heading.css"; .spacer { height: 3000px; }</style></template>`);
   await write(root, "app/pages/items/[slug].html", `<template component="item-page"><meta name="hk:layout" content="items"><defs><prop name="slug" type="string" required>Slug</prop></defs>
     <title $value="$slug"></title><article><h1 $value="$slug"></h1><a id="home" href="/kit/">Home</a></article></template>`);
   await write(root, "app/pages/items/[slug].server.ts", "export const entries = () => [{ slug: 'one' }, { slug: 'two' }]; export const load = ({ params }) => ({ props: { slug: params.slug } });");
@@ -150,10 +152,11 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
       return { kept: shell === (window as unknown as { shell: Element }).shell, connections: shell.dataset.connections,
         expanded: shell.querySelector("button")!.getAttribute("aria-expanded"), page: document.getElementById("hk-layer-1")!.dataset.component,
         ready: document.getElementById("hk-layer-1")!.dataset.ready, color: getComputedStyle(document.getElementById("hk-layer-1")!).color,
+        shared: getComputedStyle(document.querySelector("#hk-layer-1 h1")!).borderBottomColor,
         current: [...document.querySelectorAll("nav a")].map(link => [link.getAttribute("href"), link.getAttribute("aria-current")]),
         description: document.querySelector('meta[name="description"]')?.getAttribute("content"), announced: document.getElementById("hk-announcer")!.textContent,
         focus: document.activeElement === document.body, background: getComputedStyle(document.body).backgroundColor };
-    })).toEqual({ kept: true, connections: "1", expanded: "true", page: "guide-page", ready: "guide", color: "rgb(4, 5, 6)",
+    })).toEqual({ kept: true, connections: "1", expanded: "true", page: "guide-page", ready: "guide", color: "rgb(4, 5, 6)", shared: "rgb(7, 8, 9)",
       current: [["/kit/", "false"], ["/kit/guide/", "page"], ["/kit/guide/install/", "false"], ["/kit/items/one/", "false"], ["/kit/items/two/", "false"]],
       description: "Guide page", announced: "Guide", focus: true, background: built ? "rgba(0, 0, 0, 0)" : "rgb(9, 9, 9)" });
 
@@ -169,6 +172,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await page.unroute(`**${payloadPath("guide/install/")}`);
     expect([await marked(page), count("/kit/guide/install/", "fetch")]).toEqual([true, 1]);
     expect(page.url()).toBe(url + "guide/install/#deep");
+    expect(await page.locator("#hk-layer-1 h1").evaluate(heading => getComputedStyle(heading).borderBottomColor)).toBe("rgb(7, 8, 9)");
     await expect.poll(() => page.evaluate(() => [Math.abs(Math.round(document.getElementById("deep")!.getBoundingClientRect().top)), scrollY > 2000])).toEqual([0, true]);
     await page.evaluate(() => scrollTo(0, 1234));
     await page.evaluate(() => document.querySelector<HTMLAnchorElement>('nav a[href="/kit/guide/"]')!.click());

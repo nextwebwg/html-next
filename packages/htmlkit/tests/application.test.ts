@@ -130,6 +130,26 @@ describe("application platform", () => {
     finally { await application.close(); }
   }, 60_000);
 
+  it("gives each page graph with shared stylesheet imports its own stylesheet, even under one layout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-shared-css-")); roots.push(root);
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "app/layouts/default.html", '<template component="site-shell"><main><slot name="page"></slot></main><style>:host { color: rgb(1, 1, 1); }</style></template>');
+    await write(root, "app/styles/card.css", ".card { border-color: rgb(7, 7, 7); }");
+    for (const [file, tag, color] of [["index", "home-page", "rgb(2, 2, 2)"], ["guide", "guide-page", "rgb(3, 3, 3)"]]) {
+      await write(root, `app/pages/${file}.html`, `<template component="${tag}"><article class="card"><h1>${tag}</h1></article><style>@import "@/app/styles/card.css"; h1 { color: ${color}; }</style></template>`);
+    }
+    const result = await buildApplication({ root });
+    const css = async (page: string) => {
+      const html = await readFile(join(result.outDir, page), "utf8");
+      return (await Promise.all([...html.matchAll(/href="\/(_htmlkit\/[^"]+\.css)"/g)].map(match => readFile(join(result.outDir, match[1]!), "utf8")))).join("");
+    };
+    // Both graphs start with the layout; each page still links its own styles, not the last page's.
+    for (const [page, own, other] of [["index.html", "home-page", "guide-page"], ["guide/index.html", "guide-page", "home-page"]] as const) {
+      const styles = await css(page);
+      expect([styles.includes(`[data-component~=${own}]`), styles.includes(`[data-component~=${other}]`), styles.includes("#070707")]).toEqual([true, false, true]);
+    }
+  }, 60_000);
+
   it("resolves @/ from the project root and links built-in components without a link", async () => {
     const root = await mkdtemp(join(tmpdir(), "htmlkit-alias-")); roots.push(root);
     await write(root, "package.json", '{"type":"module"}');

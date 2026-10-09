@@ -212,6 +212,13 @@ Bundle size, from a production build (`esbuild --minify` for the parts, Vite for
 | First page of the docs proof (page module and shared chunks) | 41.6 KB without client navigation, 44.0 KB with the HTML design, 46.1 KB now (+10.8%) |
 | First page of the test fixture | 41.9 KB, 44.3 KB, 46.4 KB (+10.8%) |
 
+These were measured before #193's shared stylesheets enlarged the runtime. On that base, the client
+and its runtime functions add 4.4 KB gzip to a 43.1 KB runtime (+10.2%).
+
+A page whose components import shared stylesheets gets one stylesheet for its whole graph, named
+for the graph; client navigation loads it like any other new stylesheet, and the browser tests
+check it.
+
 Transfer per navigation on the docs proof, gzip. The page's module is needed either way, unless it is
 already loaded:
 
