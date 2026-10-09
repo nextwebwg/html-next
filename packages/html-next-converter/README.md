@@ -69,7 +69,9 @@ paths produce `HTC002` before any output is written, and an unsupported target v
 
 React output accepts the same quoted globs and mirrors the same source
 directories under `generated/react/`, emitting `.tsx` and adjacent plain `.css` files. The CSS is
-imported by each component; styled-components is not used. React conversion covers
+imported by each component; styled-components is not used. Components import the rendering and
+binding helpers their markup and handlers call from the shared `react/render.tsx`, which an
+application ships once; the output is formatted. React conversion covers
 static markup, props and bindings, default and named/scoped slots, state/computed/handlers,
 context, declared data, native form controls, safe HTML, and structural templates. The shared
 conformance corpus and feature-specific React fixtures compare browser behavior, server output,

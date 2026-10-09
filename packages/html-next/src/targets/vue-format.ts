@@ -20,3 +20,24 @@ export function formatVue(source: string, filePath: string): string {
   }
   return context.formatText({ filePath, fileText: source });
 }
+
+let reactContext: ReturnType<typeof createContext> | undefined;
+
+/**
+ * Formats generated React TSX with dprint's TypeScript plugin, in React's usual double quotes and
+ * semicolons. Formatting only lays the code out: when dprint cannot (its Wasm printer can run out of
+ * memory on deeply nested render props), the component keeps its unformatted, equally valid source.
+ */
+export function formatReact(source: string, filePath: string): string {
+  if (reactContext === undefined) {
+    reactContext = createContext({ indentWidth: 2, lineWidth: 100 });
+    reactContext.addPlugin(readFileSync(require.resolve("@dprint/typescript/plugin.wasm")));
+  }
+  try {
+    return reactContext.formatText({ filePath, fileText: source });
+  } catch {
+    // ponytail: a failed Wasm instance is discarded whole; flatten the nested output if this recurs.
+    reactContext = undefined;
+    return source;
+  }
+}

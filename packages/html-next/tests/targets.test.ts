@@ -17,7 +17,7 @@ import { renderToString as renderReactToString } from "react-dom/server";
 import { JSDOM } from "jsdom";
 
 import { generateSvelteOutput } from "../src/targets/svelte.js";
-import { generateComponent, generateReactComponent, generateVueComponent, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { generateComponent, generateReactComponent, generateVueComponent, reactRenderArtifact, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
 import { formattingSource } from "./formatting-fixture.js";
@@ -25,11 +25,11 @@ import { formattingSource } from "./formatting-fixture.js";
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 
-/** Resolves a converted Vue component's shared helper imports to the modules a build ships beside it. */
-const vueHelpers: Plugin = { name: "generated-vue-helpers", setup(bundler) {
-  const artifacts: Record<string, () => { readonly content: string }> = { host: vueHostArtifact, props: vuePropsArtifact, html: vueHtmlArtifact, control: vueControlArtifact };
-  bundler.onResolve({ filter: /^\.\/(?:host|props|html|control)$/ }, (args) => ({ path: args.path.slice(2), namespace: "generated-vue" }));
-  bundler.onLoad({ filter: /.*/, namespace: "generated-vue" }, (args) => ({ contents: artifacts[args.path]!().content, loader: "ts", resolveDir: packageRoot }));
+/** Resolves a converted component's shared helper imports to the modules a build ships beside it. */
+const vueHelpers: Plugin = { name: "generated-helpers", setup(bundler) {
+  const artifacts: Record<string, () => { readonly content: string }> = { host: vueHostArtifact, props: vuePropsArtifact, html: vueHtmlArtifact, control: vueControlArtifact, render: reactRenderArtifact };
+  bundler.onResolve({ filter: /^\.\/(?:host|props|html|control|render)$/ }, (args) => ({ path: args.path.slice(2), namespace: "generated-helper" }));
+  bundler.onLoad({ filter: /.*/, namespace: "generated-helper" }, (args) => ({ contents: artifacts[args.path]!().content, loader: args.path === "render" ? "tsx" : "ts", resolveDir: packageRoot }));
 } };
 const run = promisify(execFile);
 
