@@ -12,7 +12,7 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
-import { conformingLiteralWrite, declaredReferenceGuard, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
+import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { formatSvelteScript } from "./vue-format.js";
@@ -1060,12 +1060,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless acceptsWrite isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
-  // `next<N>` is a handler's numbered checked write, which shares the handler's scope with state reads.
-  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextStructural\d+$|^next\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
+  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const contextNames = new Map<ContextDeclaration, string>();
   for (const declaration of contexts) {
     const alias = declaration.as ?? declaration.name;
@@ -1207,7 +1206,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const handlerScope: Scope = { code: new Map(scope.code).set("$$event", "event"),
     types: new Map(scope.types).set("$$event", { type: { kind: "terminal", name: "event" }, nullable: false }) };
   const usesTargetDispatch = handlers.some((handler) => handler.steps.some((step) => step.kind === "dispatch" && step.target !== undefined));
-  const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(event: Event): void {\n${handler.steps.map((step, index) => {
+  const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(event: Event): void {\n${handler.steps.map((step) => {
     const condition = step.guard === undefined ? undefined : conformingCondition(step.guard, handlerScope, lowering, context);
     const guardName = condition === undefined ? undefined : context.freshIdentifier("guard");
     const guard = condition === undefined ? "" : `const ${guardName} = ${condition.source}; if (${condition.invalid ? `(${guardName} as unknown) !== Symbol.for('html-next.invalid-result') && ` : ""}${guardName}) `;
@@ -1232,20 +1231,19 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
     const destination = scope.code.get(state.name)!;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
-    const destinationCheck = conformingLiteralWrite(step, definition) ? undefined
+    const proven = !read.invalid && provenWrite(step, definition);
+    const destinationCheck = proven ? undefined
       : handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, "value", handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
     const nested = step.writablePath.length > 1;
     const writeTo = (value: string): string => nested ? `writePath(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
-      ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${value});` : `${destination} = ${value};`;
+      ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${value})` : `${destination} = ${value}`;
     const declared = declarationTypeNode(state.type, state.shape);
     const sameKind = declared !== undefined && category(declared) === category(typeOf(step.value.ast, handlerScope).type);
-    if (destinationCheck === undefined && !read.invalid) return `  ${guard}${writeTo(nested || sameKind ? read.source : `${read.source} as typeof ${destination}`)}`;
-    // One checked write per handler reads as `next`; later ones number theirs.
-    const next = setSteps(handler) > 1 ? `next${index}` : "next";
-    const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
-    const write = [`const ${next}${read.invalid ? ": any" : ""} = ${read.source};`,
-      `if (acceptsWrite(${next}${check})) ${writeTo(nested || read.invalid || sameKind ? next : `${next} as typeof ${destination}`)}`];
-    return guard === "" ? write.map((line) => `  ${line}`).join("\n") : `  ${guard}{\n${write.map((line) => `    ${line}`).join("\n")}\n  }`;
+    if (destinationCheck === undefined && !read.invalid) {
+      return `  ${guard}${(proven ? increment(step, destination) : undefined) ?? writeTo(nested || sameKind ? read.source : `${read.source} as typeof ${destination}`)};`;
+    }
+    // A \`$state\` variable is written through a setter; a path below it, through \`writePath\`.
+    return `  ${guard}${lowering.use("write")}((next) => ${nested ? writeTo("next") : `(${writeTo("next")})`}, ${read.source}${writeCheck(destinationCheck, definition, handler, step)});`;
   }).join("\n")}\n}`)
     // A handler that never reads its event takes no parameter.
     .map((source) => /\bevent\b/.test(source.slice(source.indexOf("{"))) ? source : source.replace("(event: Event)", "()"));

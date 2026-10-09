@@ -203,7 +203,7 @@ describe("framework converter", () => {
 
   it("converts every successful shared conformance definition to React in both graph modes", async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 38, "review new successful conformance cases for React coverage");
+    assert.equal(successful.length, 39, "review new successful conformance cases for React coverage");
     const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -1166,8 +1166,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     // A conforming state's own value needs no read check, so the computed reads it directly.
     assert.match(source, /const double = cycleCheckedComputed\(\(\) => count\.value \* 2\)\n/);
     assert.match(source, /function increment\(\): void \{/);
-    assert.match(source, /const next = count\.value \+ 1\n/);
-    assert.match(source, /if \(acceptsWrite\(next, isNumber, '[^']*', 'increment', 'count'\)\) count\.value = next\n/);
+    assert.match(source, /  write\(count, count\.value \+ 1, isNumber, 'count in [^']*#increment'\)\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
     assert.match(source, /'count-change': isNumber,/);
     assert.match(source, /:data-count="count"/);

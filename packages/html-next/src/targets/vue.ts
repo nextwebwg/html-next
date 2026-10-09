@@ -36,14 +36,14 @@ import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
 import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
-import { conformingLiteralWrite, handlerDestinationCheck, setSteps, typeCheck, WRITE_PREDICATES, writePredicate } from "./type-guards.js";
+import { handlerDestinationCheck, increment, provenWrite, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
-  "warnUnless", "formatValue", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
+  "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
@@ -57,8 +57,8 @@ const RESERVED = new Set([
   "let", "static", "implements", "interface", "package", "private", "protected", "public", "await", "arguments", "eval",
 ]);
 
-/** The locals a handler numbers per step (`next1`, `detail2`), which share the handler's scope with state reads. */
-const STEP_LOCAL = /^(?:next|detail)\d+$/;
+/** The locals a handler numbers per step (`detail2`), which share the handler's scope with state reads. */
+const STEP_LOCAL = /^detail\d+$/;
 
 /** Allocates readable script identifiers: the declared name when it is free. */
 class Identifiers {
@@ -733,21 +733,16 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const target = writableTarget(step.writablePath, local.script, lowering);
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
-      const destinationCheck = conformingLiteralWrite(step, context.definition) ? undefined
+      const proven = !mayBeInvalid && provenWrite(step, context.definition);
+      const destinationCheck = proven ? undefined
         : handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
           step.writablePath, 1, "value", local.script, lowering);
       if (destinationCheck === undefined && !mayBeInvalid) {
-        lines.push(`  ${guard}${target} = ${value};`);
+        lines.push(`  ${guard}${(proven ? increment(step, target) : undefined) ?? `${target} = ${value}`};`);
       } else {
-        // One checked write per handler reads as `next`; later ones number theirs.
-        const next = setSteps(handler) > 1 ? `next${index}` : "next";
-        const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(context.definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
-        // A value of the destination's own kind assigns as it is; another kind is cast after its check.
-        const destination = step.writablePath.length === 1 ? local.script.types.get(String(step.writablePath[0]))?.type : undefined;
-        const cast = !mayBeInvalid && (destination === undefined || category(destination) !== category(typeOf(step.value.ast, local.script).type));
-        const write = [`const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`, `if (acceptsWrite(${next}${check})) ${target} = ${next}${cast ? " as never" : ""};`];
-        if (guard === "") lines.push(...write.map((line) => `  ${line}`));
-        else lines.push(`  ${guard}{`, ...write.map((line) => `    ${line}`), "  }");
+        // A state's ref takes the write itself; a path below it is written through a setter.
+        const to = /^[\w$]+\.value$/.test(target) ? target.slice(0, -".value".length) : `(next) => (${target} = next)`;
+        lines.push(`  ${guard}${lowering.use("write")}(${to}, ${value}${writeCheck(destinationCheck, context.definition, handler, step)});`);
       }
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
@@ -1166,7 +1161,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const code = `${body.join("\n")}\n${rootMarkup}`;
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   // The shared module holds what every component's host and dispatcher do the same way.
-  const shared = [...["createDispatch", "useComponentHost", "useDataRead", "runFilteredEvent", "preserveRootFocus", "acceptsWrite",
+  const shared = [...["createDispatch", "useComponentHost", "useDataRead", "runFilteredEvent", "preserveRootFocus",
     "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "useReflectedProp", "useScopedSlotName",
     "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)), ...lowering.helpers()].sort();
