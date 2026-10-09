@@ -203,7 +203,7 @@ describe("framework converter", () => {
 
   it("converts every successful shared conformance definition to React in both graph modes", async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 35, "review new successful conformance cases for React coverage");
+    assert.equal(successful.length, 36, "review new successful conformance cases for React coverage");
     const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {

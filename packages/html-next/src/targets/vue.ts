@@ -9,6 +9,7 @@ import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
 import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
 import { componentName, kebabCase } from "../names.js";
+import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import type {
   ComponentDefinition,
@@ -136,6 +137,8 @@ interface Context {
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
   usesRetainedInlineText: boolean;
+  /** Inside a preformatted element, where Vue keeps whitespace between elements. */
+  preformatted: boolean;
 }
 
 function referenceCheck(type: TypeNode, value: string): string {
@@ -233,12 +236,13 @@ function isComponentTag(name: string): boolean {
 
 /**
  * Adjacent elements go on separate lines, for the formatter to lay out; Vue drops whitespace that
- * holds a newline between elements, so the rendering is unchanged. Text keeps its own whitespace.
+ * holds a newline between elements, so the rendering is unchanged. Text keeps its own whitespace,
+ * and a preformatted element keeps its children as written, since Vue keeps the newline there.
  */
 function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context, receivingTag?: string): string {
   return nodes.map((child, index) => {
     const markup = renderNode(child, names, context, receivingTag);
-    return index > 0 && child.kind !== "text" && nodes[index - 1]!.kind !== "text" ? `\n${markup}` : markup;
+    return index > 0 && !context.preformatted && child.kind !== "text" && nodes[index - 1]!.kind !== "text" ? `\n${markup}` : markup;
   }).join("");
 }
 
@@ -649,7 +653,10 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   attributes.unshift(...directives, ...literals);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
+  const outerPreformatted = context.preformatted;
+  context.preformatted ||= isPreformattedElement(node.name);
   const renderedChildren = content ?? renderChildren(node.children, names, context, component ? node.name : undefined);
+  context.preformatted = outerPreformatted;
   const selectBinding = node.name === "select" && twoWayControl
     ? node.attributes.find((attribute) => attribute.kind === "attribute" && attribute.twoWay === true && attribute.name === "value")
     : undefined;
@@ -900,6 +907,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     usesHydrationControl: false,
     usesKeyedBoundary: false,
     usesRetainedInlineText: false,
+    preformatted: false,
   };
   // A root `$with` always renders one element. Keep its alias reactive in setup instead of
   // adding a v-for fragment around the component's native root.

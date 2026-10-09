@@ -71,6 +71,21 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "keeps whitespace-only text between elements and rows inside pre",
+    source: scene({
+      defs: `<state name="lines" type="list(string)" value="['c', 'd']"></state>`,
+      root: `<pre><code><span class="line"><span>a</span><span>1</span></span>
+<span class="line">b</span>
+<template $each="line of $lines"><span class="line">{$line}</span>
+</template></code></pre>`,
+      use: `<x-t id="code"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#code').textContent;`,
+      result: "a1\nb\nc\nd\n",
+    },
+  },
+  {
     name: "preserves SVG namespaces and camelCase attributes inside a native root",
     source: scene({
       tag: "icon-close",

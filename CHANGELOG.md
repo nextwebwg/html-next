@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.41
+
+- Whitespace-only text inside `<pre>`, `<listing>`, `<textarea>`, `<xmp>`, and `<plaintext>` is kept in live loading, SSR, HTMLKit pages, compiled output, and Vue, React and Svelte. Before, the template parser dropped it, so a Shiki code block's `\n` between its `.line` spans disappeared and every line rendered as one. Vue output also no longer adds a newline between adjacent elements inside them, which split a highlighted line at each token. Elsewhere, whitespace-only text between elements is still dropped.
+
 ## 1.0.0-alpha.40
 
 - Component CSS prevents Firefox 155's scoped SVG class rules from leaking across scope limits. Live loading, graph CSS, Vite, SSR, React and Svelte keep owned, projected and nested component styling distinct through DOM moves. The compiler uses a Firefox-specific private CSS marker; shared boundary rules are delivered once per graph or live document. Author inheritance remains intact; no DOM observers or ownership attributes are added. Mozilla bug 2080046 tracks the underlying browser defect.
