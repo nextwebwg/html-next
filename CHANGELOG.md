@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.42
+
+### Changed
+
+- The quick-start guide is shorter. `counter.html` is followed directly by the component each framework generates, with one line and a setup link per framework, so switching frameworks changes the code right under the switch. The paragraphs between the source and the output and the separate "Use what you built" section are removed.
+
 ## 1.0.0-alpha.41
 
 ### Breaking
