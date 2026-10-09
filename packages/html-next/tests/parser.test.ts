@@ -1032,6 +1032,31 @@ describe("ref-targeted dispatch", () => {
   });
 });
 
+describe("preformatted whitespace", () => {
+  // Shiki's code blocks separate `.line` spans with "\n" text nodes that hold no other text.
+  const source = `<template component="x-code"><section>
+    <pre class="shiki"><code><span class="line">a</span>
+<span class="line">b</span><template $if="true"> </template><slot>
+</slot></code></pre>
+    <p><b>x</b> <i>y</i></p><listing><b>l</b>
+<b>m</b></listing><textarea>
+  </textarea></section></template>`;
+  it("keeps whitespace-only text inside pre, listing and textarea in parse5 and browser parsing", () => {
+    const { document } = new JSDOM(source).window;
+    for (const { template } of [parseComponent(source), parseBrowserComponent(document.querySelector("template")!, "code.html")]) {
+      const [pre, p, listing, textarea] = template.children as ElementNode[];
+      const code = pre!.children[0] as ElementNode;
+      assert.deepEqual(code.children.map((child) => child.kind === "text" ? child.value : child.kind), ["element", "\n", "element", "element", "slot"]);
+      assert.deepEqual((code.children[3] as ElementNode).children, [{ kind: "text", value: " " }]);
+      assert.deepEqual((code.children[4] as { fallback: unknown }).fallback, [{ kind: "text", value: "\n" }]);
+      // Outside a preformatted element, whitespace-only text between elements is still dropped.
+      assert.equal(p!.children.length, 2);
+      assert.deepEqual(listing!.children[1], { kind: "text", value: "\n" });
+      assert.deepEqual(textarea!.children, [{ kind: "text", value: "  " }]);
+    }
+  });
+});
+
 describe("browser-parsed components", () => {
   it("warns in the console when a bare keyword spells a name in scope", () => {
     const warnings: string[] = [];

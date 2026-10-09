@@ -6,6 +6,7 @@ import { checkExpressionSemantics, compileExpression, compilePath, getWritablePa
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
+  isPreformattedElement,
   isReservedElement,
   validateDefinitionElementName,
   validateLiteralAttributeName,
@@ -199,6 +200,8 @@ interface ParseScope {
   readonly aliases?: ReadonlyMap<string, Writable>;
   /** How many `$each` layers enclose this point, so a `loop.index` segment names the right loop. */
   readonly loops?: number;
+  /** Inside a preformatted element, where whitespace-only text renders. */
+  readonly preformatted?: boolean;
 }
 
 /**
@@ -1385,7 +1388,7 @@ function parseElementAtSource(
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   const childScope = tagName === "template" && attr(element, "slot") !== undefined
     ? { ...nodeScope, allowUndeclared: true }
-    : nodeScope;
+    : isPreformattedElement(tagName) ? { ...nodeScope, preformatted: true } : nodeScope;
   const attributes = parseAttributes(bindingAttributes, tagName, contract, nodeScope, source, platform);
   const events = parseEvents(eventAttributes, nodeScope, source);
   const ref = parseRef(refName, slotState.refs, source);
@@ -1403,7 +1406,7 @@ function parseElementAtSource(
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
       const value = sourceText(child);
-      if (value.trim() !== "") children.push(...parseText(value, childScope, source));
+      if (childScope.preformatted === true || value.trim() !== "") children.push(...parseText(value, childScope, source));
       continue;
     }
     if (!isElement(child)) continue;
@@ -1453,7 +1456,7 @@ function parseElementAtSource(
         if (fallbackNode.nodeName === "#comment") continue;
         if (isText(fallbackNode)) {
           const value = sourceText(fallbackNode);
-          if (value.trim() !== "") fallback.push(...parseText(value, slotScope, source));
+          if (slotScope.preformatted === true || value.trim() !== "") fallback.push(...parseText(value, slotScope, source));
         } else if (isElement(fallbackNode)) {
           fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
         }

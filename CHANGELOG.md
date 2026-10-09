@@ -47,6 +47,7 @@
 - Hydration by the live runtime adopts a `<template $each>` row's server nodes instead of rendering the row again beside them, which showed each row twice.
 - A compiled component evaluates an empty object or list literal (`format($names, 'list', {}, $locale)`, `format([], 'list')`) and a call with no arguments as the live runtime does. They compiled to a missing argument, so the call rendered nothing.
 - The `html-next` and `html-next-convert` commands run when started through their installed `node_modules/.bin` link, as `npx`, package scripts and direct calls do on macOS and Linux. Earlier releases exited there without output or files.
+- Whitespace-only text inside `<pre>`, `<listing>`, `<textarea>`, `<xmp>`, and `<plaintext>` is kept in live loading, SSR, HTMLKit pages, compiled output, and Vue, React and Svelte. Before, the template parser dropped it, so a Shiki code block's `\n` between its `.line` spans disappeared and every line rendered as one. Vue output also no longer adds a newline between adjacent elements inside them, which split a highlighted line at each token. Elsewhere, whitespace-only text between elements is still dropped.
 
 ## 1.0.0-alpha.40
 

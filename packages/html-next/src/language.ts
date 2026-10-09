@@ -7,9 +7,16 @@ const RESERVED_ELEMENT_RE = /^(?:if|else-if|else|for|with|value|state|computed|d
 const UNSUPPORTED_LITERAL_ATTRIBUTE_RE = /^(?:@|v-|#|:|on:|use:|transition:|animate:)/;
 const UNSAFE_DOM_PROPERTY_RE = /^(?:innerhtml|outerhtml|srcdoc)$/;
 const UNSAFE_DEFINITION_ELEMENT_RE = /^(?:base|embed|link|meta|object|script|style)$/;
+// The HTML UA stylesheet's `white-space: pre` and `pre-wrap` elements.
+const PREFORMATTED_ELEMENT_RE = /^(?:listing|plaintext|pre|textarea|xmp)$/;
 
 export function isReservedElement(name: string): boolean {
   return RESERVED_ELEMENT_RE.test(name);
+}
+
+/** Whitespace-only text renders inside these elements, so templates keep it there. */
+export function isPreformattedElement(name: string): boolean {
+  return PREFORMATTED_ELEMENT_RE.test(name);
 }
 
 export function validateDefinitionElementName(name: string, source: string): string {

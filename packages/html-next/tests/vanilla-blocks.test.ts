@@ -1866,6 +1866,21 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     assert.deepEqual(compiled.errors, ["HR004: A keyed list produced duplicate key `1`."]);
   });
 
+  it("keeps whitespace-only text between elements and rows inside pre", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>`, `
+      <section><p>code</p><pre><code><span class="line">a</span>
+<span class="line">b</span>
+<template $each="row of $rows" $key="$row.id"><span class="line" from:data-id="$row.id">{$row.label}</span>
+</template></code></pre></section>`);
+    const compiled = await same(text, [
+      (host) => { host.state.rows = [{ id: 1, label: "c", tags: [] }, { id: 2, label: "d", tags: [] }]; },
+    ]);
+    assert.match(compiled.snapshots[1]!.replaceAll(/<!--[^>]*-->/g, ""), /<code><span class="line">a<\/span>\n<span class="line">b<\/span>\n<span class="line" data-id="1">c<\/span>\n<span class="line" data-id="2">d<\/span>\n<\/code>/);
+  });
+
   it("creates attributes and class tokens on one element in authored order", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
