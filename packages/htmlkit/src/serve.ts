@@ -86,7 +86,8 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   const sources = new Map<string, string>();
-  const css = globalStylesheets(options, config.root);
+  // Vite refuses to serve a Windows 8.3 short name such as RUNNER~1, so page-wide stylesheets go by their real paths.
+  const css = await Promise.all(globalStylesheets(options, config.root).map(file => realpath(file).catch(() => file)));
   let watchReady!: () => void;
   const watching = new Promise<void>(done => { watchReady = done; });
   const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base, resolve: { alias: rootAlias(config.root) },
@@ -95,8 +96,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
     }], optimizeDeps: { noDiscovery: true, include: [] },
     server: { host: options.host ?? "127.0.0.1", port: options.port ?? 3000,
       // Page-wide stylesheets may live outside the root, as a plugin's own stylesheet does.
-      fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../..")), ...css.map(file => dirname(file)),
-        ...await Promise.all(css.map(file => realpath(dirname(file)).catch(() => dirname(file))))] } },
+      fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../..")), ...css.map(file => dirname(file))] } },
     logLevel: "silent" });
   // Browser modules and stylesheets for each served page, as Vite virtual modules.
   const assets = (page: RenderedPage): PageAssets => {

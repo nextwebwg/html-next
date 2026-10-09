@@ -87,6 +87,8 @@ it("serves a page-wide stylesheet from outside the root in development", async (
   try {
     const html = await (await fetch(server.url + "v/one/install/")).text();
     const href = /<link rel="stylesheet" href="([^"]*theme\.css)"/.exec(html)![1]!;
+    // The real path: Vite refuses a temporary directory's short name on Windows, and macOS's /var is a link.
+    expect(href).toContain((await realpath(outside)).replaceAll("\\", "/"));
     expect((await fetch(new URL(href, server.url))).status).toBe(200);
   } finally { await server.close(); }
 }, 60_000);
