@@ -7,7 +7,7 @@ import { createServer, isRunnableDevEnvironment } from "vite";
 import { createApplication } from "./application.js";
 import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
 import { configure, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
-import { documentHTML, escapeHTML } from "./document.js";
+import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
 
@@ -96,17 +96,15 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
       fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../.."))] } },
     logLevel: "silent" });
   // Browser modules and stylesheets for each served page, as Vite virtual modules.
-  const assets = (page: RenderedPage): string => {
+  const assets = (page: RenderedPage): PageAssets => {
     const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
     const id = `virtual:htmlkit/${graphId}`;
-    sources.set(id, browserSource(page.components, config.base));
+    sources.set(id, browserSource(page.components, { base: config.base, prefetch: config.prefetch }));
     const styles = stylesheetSources(page.components);
     for (const [id, css] of styles) sources.set(id, css);
     // Vite's HTML transformer applies its base to root-relative assets a second time.
     // This document is already composed for its deployment URL; only modules use Vite.
-    return [...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
-      `<script type="module" src="${escapeHTML(config.base + "@vite/client")}"></script>` +
-      `<script type="module" src="${escapeHTML(config.base + "@id/" + id)}"></script>`;
+    return { styles: [...styles.keys()].map(id => config.base + "@fs/" + id), modules: [config.base + "@vite/client", config.base + "@id/" + id] };
   };
   let application: Application;
   try { application = await createApplication(options, vite, assets); }
@@ -124,11 +122,12 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   vite.middlewares.use((request, response, next) => {
     const pathname = requestPath(request);
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
+    const payload = pathname.startsWith(config.base + "_htmlkit/pages/");
     void (async () => {
       if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
-      if (file === undefined && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
+      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
       if (!methodAllowed(request, response)) return;
       if (file !== undefined) {
         const body = await readFile(file);

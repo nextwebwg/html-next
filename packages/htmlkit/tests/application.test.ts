@@ -106,7 +106,28 @@ describe("application platform", () => {
       expect((await handle(new Request("http://localhost/missing/"))).status).toBe(404);
       const post = await handle(new Request("http://localhost/", { method: "POST" }));
       expect([post.status, post.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
+      // Each page's payload, through the same render: its head, and each layer's invocation and state.
+      const payload = await handle(new Request("http://localhost/_htmlkit/pages/payload.json"));
+      expect([payload.status, payload.headers.get("content-type")]).toEqual([200, "application/json"]);
+      expect(await payload.json()).toMatchObject({ version: 1, modules: [], styles: [],
+        head: { lang: "en", title: "Home & kit", description: "/mark.svg" },
+        layers: [{ component: "app-layout", attributes: { brand: "HTMLKit" } }, { component: "home-page", attributes: { asset: "/mark.svg" }, state: { count: 4 } }] });
+      expect(JSON.stringify(await (await handle(new Request("http://localhost/_htmlkit/pages/items/one/payload.json"))).json())).not.toContain("owner");
+      for (const path of ["missing/payload.json", "items/payload.json", "payload.json/", "items/one/other.json"]) {
+        expect((await handle(new Request(`http://localhost/_htmlkit/pages/${path}`))).status).toBe(404);
+      }
     } finally { await application.close(); }
+  }, 60_000);
+
+  it("leaves out the payload of a page whose state JSON cannot carry exactly", async () => {
+    const root = await app();
+    await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' }, state: { count: -0 } });");
+    const result = await buildApplication({ root });
+    await expect(readFile(join(result.outDir, "_htmlkit/pages/payload.json"))).rejects.toThrow(/ENOENT/);
+    expect(JSON.parse(await readFile(join(result.outDir, "_htmlkit/pages/items/one/payload.json"), "utf8")).layers[1].component).toBe("item-page");
+    const application = await createApplication({ root });
+    try { expect((await application.fetch(new Request("http://localhost/_htmlkit/pages/payload.json"))).status).toBe(404); }
+    finally { await application.close(); }
   }, 60_000);
 
   it("resolves @/ from the project root and links built-in components without a link", async () => {
@@ -242,6 +263,19 @@ describe("application platform", () => {
     const chunks = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(file => file.endsWith(".js"))
       .map(file => readFile(join(result.outDir, "_htmlkit", file), "utf8")));
     expect(chunks.filter(source => source.includes("hk-announcer"))).toHaveLength(1);
+    // Payloads live in the reserved _htmlkit tree and name what the page's document links.
+    const payload = JSON.parse(await readFile(join(result.outDir, "_htmlkit/pages/items/one/payload.json"), "utf8"));
+    expect(payload.modules).toEqual([manifest.pages[1].browserModule]);
+    const itemDocument = await readFile(join(result.outDir, "items/one/index.html"), "utf8");
+    expect(payload.styles).toEqual([...itemDocument.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(match => match[1]));
+    expect(payload.styles.length).toBeGreaterThan(0);
+    expect(payload.layers.map((layer: { component: string }) => layer.component)).toEqual(["items-layout", "item-page"]);
+    expect(payload.layers[1].attributes).toEqual({ label: "kit: one", tags: '["a < b","quote \\" here"]' });
+    // Shared chunks, which links on screen prefetch, never include a page's own module.
+    for (const page of manifest.pages) {
+      expect(page.chunks.length).toBeGreaterThan(0);
+      expect(page.chunks.every((chunk: string) => /^\/docs\/_htmlkit\/[^/]+\.js$/.test(chunk) && !manifest.pages.some((other: { browserModule: string }) => other.browserModule === chunk))).toBe(true);
+    }
     const server = await previewApplication({ root, port: 0 });
     try {
       expect(await (await fetch(server.url + "items/two/")).text()).toContain("kit: two");

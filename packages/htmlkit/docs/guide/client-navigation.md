@@ -13,8 +13,9 @@ Links between your pages are ordinary links:
 <a href="/guide/install/">Install</a>
 ```
 
-Once the first page has loaded, clicking one doesn't reload the browser tab. HTMLKit fetches the
-next page, keeps the layout both pages share, and swaps in the new page. There's nothing to set up.
+Once the first page has loaded, clicking one doesn't reload the browser tab. HTMLKit loads the
+next page's code and a small file of its data, builds the page in the browser, keeps the layout both
+pages share, and swaps in the new page. There's nothing to set up.
 
 ## What stays and what changes
 
@@ -53,13 +54,37 @@ Put `data-hk-reload` on a link, or on an element around several links, to load t
 </nav>
 ```
 
-If a page can't be shown in place, it loads in full instead. That happens when it's missing, when
-the request fails, or when it defines a component differently from one already on the screen.
+If a page's data file can't be used, HTMLKit fetches the page's HTML instead. If that can't be
+shown in place either, the page loads in full. That happens when it's missing, when the request
+fails, or when it defines a component differently from one already on the screen.
 
 ## Faster clicks
 
-When the pointer rests on a link, or the link gets keyboard focus, HTMLKit starts fetching that
-page. By the click, it's usually ready. Moving across a menu fetches nothing.
+When the pointer rests on a link, the link gets keyboard focus, or a finger touches it, HTMLKit
+starts loading that page's code and data. By the click, it's usually ready. Moving across a menu
+fetches nothing. Links on screen only load code that several pages share, never a page's own
+content, so a long sidebar stays cheap.
+
+Choose a different policy for the whole site in `htmlkit.config.ts`:
+
+```ts
+export default defineConfig({ prefetch: 'visible' });
+```
+
+Or for one link, or every link inside an element:
+
+```html
+<a href="/big-report/" data-hk-prefetch="none">Big report</a>
+<nav data-hk-prefetch="visible">…</nav>
+```
+
+| `prefetch` / `data-hk-prefetch` | Link on screen | Hover, focus, or touch |
+| --- | --- | --- |
+| `interaction` (default) | Shared code | The page's code and data |
+| `visible` | The page's code and data | The page's code and data |
+| `none` | Nothing | Nothing |
+
+`visible` suits small sites. Prefetching never runs a page's code; it only downloads it.
 
 ## Animating the change
 

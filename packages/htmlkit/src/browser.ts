@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { normalizePath, type Plugin } from "vite";
+import type { ClientOptions } from "./client.js";
 import type { BrowserDefinition } from "./types.js";
 
 const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/runtime"));
@@ -20,7 +21,8 @@ export function stylesheetSources(components: readonly BrowserDefinition[]): Rea
 }
 
 /** HTML Next owns adoption, observation, reads, controllers, and teardown; client.ts shares them across pages. */
-export function browserSource(components: readonly BrowserDefinition[], base: string): string {
+export function browserSource(components: readonly BrowserDefinition[], options: ClientOptions): string {
+  const { base } = options;
   const controlled = components.filter(component => component.controller !== undefined);
   const definitions = components.map(({ definition }) => ({ ...definition, css: definition.css ? "/* external stylesheet */" : "",
     source: { file: `${definition.contract.tag}.html` } }));
@@ -41,14 +43,15 @@ export function browserSource(components: readonly BrowserDefinition[], base: st
       return declaration;
     });
   }
-  return `import { registerComponentDefinitions, observeDocument, getComponentHost, adoptRenderedProps } from ${JSON.stringify(runtime)};
+  const functions = "registerComponentDefinitions, observeDocument, getComponentHost, adoptRenderedProps, lowerDocument, serializeRenderedForm, replaceProjectedNode";
+  return `import { ${functions} } from ${JSON.stringify(runtime)};
 import { page } from ${JSON.stringify(client)};
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
 ${reads.map((read, i) => `import read${i} from ${JSON.stringify(read.asset + "?url&no-inline")};`).join("\n")}
 ${controlled.map((component, index) => `import * as controller${index} from ${JSON.stringify(component.controller)};`).join("\n")}
 const definitions = ${JSON.stringify(definitions)};
 ${reads.map((read, i) => `definitions[${read.definition}].declarations[${read.declaration}].source = read${i} + ${JSON.stringify(read.suffix)};`).join("\n")}
-page({ registerComponentDefinitions, observeDocument, getComponentHost, adoptRenderedProps }, ${JSON.stringify(base)}, definitions,
+page({ ${functions} }, ${JSON.stringify(options)}, definitions,
   { ${controlled.map((component, index) => `${JSON.stringify(component.definition.contract.tag)}: controller${index}`).join(",")} },
   ${JSON.stringify(Object.fromEntries(components.map(component => [component.definition.contract.tag, component.styles.stateNames])))});
 `;

@@ -6,7 +6,7 @@ import { createApplication } from "./application.js";
 import { browserSource, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
 import { configure, HtmlKitError, withPlugins, within } from "./config.js";
-import { documentHTML, escapeHTML } from "./document.js";
+import { documentHTML, pagePayload, payloadPath } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { ApplicationOptions, BuildResult } from "./types.js";
 
@@ -66,7 +66,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     for (const pathname of routes) {
       const page = await application.render(pathname);
       pages.push(page);
-      sources.set(`virtual:htmlkit/page-${pages.length - 1}`, browserSource(page.components, config.base));
+      sources.set(`virtual:htmlkit/page-${pages.length - 1}`, browserSource(page.components,
+        { base: config.base, prefetch: config.prefetch, manifest: config.base + "_htmlkit/manifest.json" }));
       for (const [id, css] of stylesheetSources(page.components)) sources.set(id, css);
     }
     const browserInputs = await bundleBrowser({ root: config.root, base: config.base, outDir: stage, sources });
@@ -86,21 +87,28 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const entry = bundles.get(`page-${i}`);
       if (entry === undefined) throw new HtmlKitError(`Missing browser bundle for ${page.pathname}.`);
       const route = matchRoute(application.routes, page.pathname, config.base)!.route;
-      delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file });
       // Vite's manifest includes CSS from the entry and its shared static imports.
       const styles = new Set<string>();
       const seen = new Set<ManifestChunk>();
       const collect = (chunk: ManifestChunk): void => {
         if (seen.has(chunk)) return;
         seen.add(chunk);
-        for (const css of chunk.css ?? []) styles.add(css);
+        for (const css of chunk.css ?? []) styles.add(config.base + css);
         for (const id of chunk.imports ?? []) { const imported = manifest[id]; if (imported !== undefined) collect(imported); }
       };
       collect(entry);
-      const assets = [...styles].map(css => `<link rel="stylesheet" href="${escapeHTML(config.base + css)}">`).join("") +
-        `<script type="module" src="${escapeHTML(config.base + entry.file)}"></script>`;
+      // Shared chunks, which links on screen may prefetch; the entry holds the page's own content.
+      const chunks = [...seen].filter(chunk => chunk !== entry).map(chunk => config.base + chunk.file);
+      delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
+      const assets = { styles: [...styles], modules: [config.base + entry.file] };
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, documentHTML(page.body, page.head, assets));
+      const payload = pagePayload(page, assets);
+      if (payload !== undefined) {
+        const file = join(stage, decodeURIComponent(payloadPath(config.base, page.pathname).slice(config.base.length)));
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, JSON.stringify(payload));
+      }
     }
     await rm(join(stage, "_htmlkit/vite-manifest.json"));
     if (await exists(join(stage, "404.html"))) throw new HtmlKitError("Public asset collision: 404.html is generated.");

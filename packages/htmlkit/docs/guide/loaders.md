@@ -50,8 +50,8 @@ import server-only packages. `@/` is the project root.
 | `head` | `title`, `description`, or `lang` for the document head. |
 | `data` | Private values passed on to inner loaders as `parent`; never sent to the browser. |
 
-Props and state are written into the page's HTML, so **anything in them is public**. Keep secrets
-in `data` or out of the result entirely.
+Props and state are written into the page's HTML and its navigation data file, so **anything in
+them is public**. Keep secrets in `data` or out of the result entirely.
 
 ## What `load()` receives
 

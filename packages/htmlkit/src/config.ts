@@ -25,7 +25,9 @@ export function configure(options: ApplicationOptions) {
   if (within(outDir, root) || ["app", "src", "public", "node_modules", ".git"].some(path => within(resolve(root, path), outDir))) {
     throw new HtmlKitError("Unsafe output directory; choose dist or a separate deployment directory.", outDir);
   }
-  return { root, base, origin: origin.origin, outDir };
+  const prefetch = options.prefetch ?? "interaction";
+  if (!["interaction", "visible", "none"].includes(prefetch)) throw new HtmlKitError('prefetch must be "interaction", "visible", or "none".');
+  return { root, base, origin: origin.origin, outDir, prefetch };
 }
 
 const pluginsApplied = new WeakSet<ApplicationOptions>();

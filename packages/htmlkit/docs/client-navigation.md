@@ -1,14 +1,16 @@
 # Client navigation design
 
 HTMLKit renders every page as a static document. After the first page hydrates, links to other
-pages of the application render in place: HTMLKit fetches the next page's static HTML, loads its
-browser module, keeps the layouts both pages share, and swaps the rest. This is tooling
-documentation; the component language is specified by the
+pages of the application render in place, as in Nuxt: HTMLKit loads the next page's module and its
+data payload, renders its layers in the browser exactly as the server does, keeps the layouts both
+pages share, and swaps the rest. A page the payload cannot render loads from its static HTML
+instead. This is tooling documentation; the component language is specified by the
 [Declarative HTML Components proposal](https://nextwebwg.org/declarative-components/).
 
-The owner's direction was Nuxt-like routing, with Next.js as a second reference. The
-implementation is `src/client.ts` (shared by every page module) and HTML Next's
-`adoptRenderedProps`.
+The owner's direction was Nuxt-like routing, with Next.js as a second reference, and then Nuxt-style
+data payloads with the whole-HTML fetch as the fallback. The implementation is `src/client.ts`
+(shared by every page module), `pagePayload` in `src/document.ts`, and two HTML Next runtime
+functions, `adoptRenderedProps` and `replaceProjectedNode`.
 
 ## Native audit
 
@@ -23,14 +25,17 @@ implementation is `src/client.ts` (shared by every page module) and HTML Next's
 | Scroll to top or fragment; restore on back and forward | `intercept({ scroll })` and `event.scroll()` | Same |
 | Focus as after a document load | `intercept({ focusReset: "after-transition" })` (default) | Same |
 | A navigation finished | `navigation`'s `navigatesuccess` and `navigateerror` events | Same |
-| Fetch and parse the next page | `fetch`, `DOMParser` | All |
+| Fetch the next page's data or HTML | `fetch`, `Response.json()`, `DOMParser` | All |
 | Load the next page's components | dynamic `import()`; the module map shares one runtime instance | All |
+| Render without running anything | An inert document from `document.implementation.createHTMLDocument()` | All |
 | Adopt the new DOM and connect controllers | HTML Next's `observeDocument` (a `MutationObserver`) | All |
-| Prefetch without running anything | `fetch` for the HTML; `<link rel="modulepreload">`, `<link rel="prefetch">` | modulepreload: all; prefetch: Chromium and Firefox |
+| Prefetch without running anything | `fetch` for data; `<link rel="modulepreload">` and `<link rel="prefetch">` for code and styles | modulepreload: all; prefetch: Chromium and Firefox |
+| Links on screen, at idle | `IntersectionObserver`, `requestIdleCallback` (a timer where missing) | IntersectionObserver: all; requestIdleCallback: Chromium and Firefox |
+| Touch intent | `touchstart` (passive) | All |
 | Animate the swap | `document.startViewTransition()`; the author's `@view-transition { navigation: auto }` | Chrome 111 and 126, Safari 18 and 18.2; Firefox 144 has only `startViewTransition` |
 
 Playwright's Chromium 153, Firefox 155, and WebKit 26.6 support every row; the browser tests run on
-all three. Two engine defects needed a line each:
+all three. Engine findings that needed code:
 
 - WebKit 26.6 sometimes restores no scroll position on back and forward after an intercepted
   navigation, through either `scroll: "after-transition"` or `event.scroll()` (in the tests, under
@@ -38,6 +43,8 @@ all three. Two engine defects needed a line each:
   and restores it after the swap; new entries still use `event.scroll()` for the top or fragment.
 - Firefox 155 fires a second `navigate` event, without `downloadRequest`, for a `download` link.
   HTMLKit also leaves alone any navigation whose `sourceElement` has `download`.
+- Vite's development server rewrites a dynamic `import()` of a path to add `?import`, which is a
+  second URL and so a second module instance. HTMLKit imports absolute URLs, which Vite leaves alone.
 
 Not used:
 
@@ -62,50 +69,136 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    outermost, a layer whose root renders the same component (`data-component`) as the next page's
    layer at that depth persists. The page layer is always replaced, and so is everything below the
    first layer that differs. A persisted layer keeps its DOM, state, and controller, but its loader
-   may compute new props, such as `<hk-nav>`'s `current` item. HTML Next had no way to carry a
-   server rendering's props onto a live instance, so it gains `adoptRenderedProps(element, rendered)`,
-   which reads the rendered root's continuation record and applies its props through the
-   `updateComponentProps` channel, with its own regression test in each engine.
-3. **Head metadata.** `meta` and `link` elements that came from server documents are diffed with
+   may compute new props, such as `<hk-nav>`'s `current` item. HTML Next gains
+   `adoptRenderedProps(element, rendered)`, which reads a rendered root's continuation record and
+   applies its props through the `updateComponentProps` channel.
+3. **Replacing the page inside a kept layout.** The page is projected into its layout's `page` slot.
+   HTML Next records projected nodes when it hydrates, so a plain `replaceWith` left the layout
+   projecting the old page: the new page missed `data-slotted` (so the layout's `:slotted()` styles
+   did not reach it), `host.slots` and the rendered form still listed the old page, and a slot that
+   rendered again would bring the old page back. The parity tests found this. HTML Next gains
+   `replaceProjectedNode(current, next)`, which puts the new node in the old one's place in the
+   projection too, with a regression test in each engine.
+4. **Head metadata.** `meta` and `link` elements that came from server documents are diffed with
    `isEqualNode`: shared ones stay, others are removed and added. Elements scripts add are left alone.
    New stylesheets load before the swap; component styles are scoped, so only the next page's global
    rules apply early.
-4. **Route announcement**, above.
-5. **Back and forward positions** in WebKit, above.
+5. **Route announcement** and **back and forward positions** in WebKit, above.
 
-## Chosen approach: fetch the static HTML
+## Chosen approach: payloads, with the HTML as the fallback
 
-The client learns the next page from the HTML file a reader without JavaScript receives.
+The owner chose Nuxt-style payloads over fetching each page's HTML. A page's module already holds its
+component definitions, including all of its static markup, so the HTML repeats what the module
+carries. The payload carries only what the module cannot: the data.
 
-| | Static HTML (chosen) | Per-page payload, like Nuxt's `_payload.json` |
+### Payload format and location
+
+`htmlkit build` writes one payload per page, and `application.fetch` (which `htmlkit dev` uses)
+serves the same JSON per request through the same render as the document:
+
+```text
+/kit/guide/install/  →  /kit/_htmlkit/pages/guide/install/payload.json
+/kit/                →  /kit/_htmlkit/pages/payload.json
+```
+
+`_htmlkit/` is reserved: a route segment and a public file may not use it, so a payload can never
+collide with an application's own URLs. Within it, `pages/` mirrors the route path; route segments
+cannot contain a dot, so `payload.json` never collides with a page's own directory.
+
+```json
+{
+  "version": 1,
+  "head": { "lang": "en", "title": "Install", "description": "…", "elements": [{ "tag": "meta", "attributes": { "charset": "utf-8" } }] },
+  "styles": ["/kit/_htmlkit/page-3-….css"],
+  "modules": ["/kit/_htmlkit/page-3-….js"],
+  "layers": [
+    { "component": "site-shell", "attributes": { "navigation": "[{\"href\":\"/kit/\",…}]" } },
+    { "component": "install-page", "attributes": {}, "state": { "count": 4 } }
+  ]
+}
+```
+
+- `head` is the document head the server renders: language, title, description, and metadata
+  elements. `app/head.js` is not in it; it runs once per document load.
+- `styles` and `modules` are what the page's document links.
+- Each layer has its component, its invocation's prop attributes in their HTML form (defaults
+  included, exactly as the server writes them), and its loader's state. Loader `data` stays private,
+  as before; props and state were already public in the HTML.
+- A page whose state JSON cannot carry exactly (`undefined`, `-0`, non-finite numbers, shared or
+  non-plain objects) gets no payload and navigates by its HTML.
+
+The build's `_htmlkit/manifest.json` also lists each page's shared chunks (`chunks`), for prefetching
+links on screen.
+
+### Rendering a payload
+
+1. Import the page's module, which registers its definitions and controllers. A conflicting
+   definition throws here, before anything renders.
+2. In an inert document, build the layers' invocations from the payload, as `application.ts` builds
+   them; lower them with HTML Next without connecting anything; give each layer its state; let
+   structural updates settle and lower again; serialize with `serializeRenderedForm`. These are the
+   steps of HTML Next's server worker, run by the same runtime.
+3. Swap as before: kept layouts take the new props through `adoptRenderedProps`, the first changed
+   layer replaces the old one through `replaceProjectedNode`, and HTML Next adopts the new DOM as it
+   adopts server HTML, so controllers connect once and declared reads start.
+
+Every layer renders, kept layouts included: a page may read its layouts' context, and the kept
+layouts' new props come from their fresh rendering. Rendering live in place, without serializing,
+would save the serializer (1.2 KB gzip) and a parse, but HTML Next has no way to give an un-lowered
+invocation its initial state before its controller connects; the serialized form is the existing,
+tested server-to-browser contract.
+
+### Fallback to the HTML
+
+The whole-HTML fetch from the first version of this design remains. HTMLKit uses it when the payload
+is missing or fails, when the module fails to load, or when rendering throws. If the HTML cannot
+render in place either (a missing page, a failed fetch, a page without layers, or a conflicting
+definition), the page loads as a document. Every opt-out is unchanged.
+
+Alternatives considered:
+
+| | Payload (chosen) | Static HTML (the fallback) |
 | --- | --- | --- |
-| New build and dev output | None | A payload file per page and a dev endpoint |
-| Rendering the next page | Server markup, adopted as on first load | Client rendering from definitions and props |
-| Equal to a document load | By construction | Needs head, loader state, and render parity checks |
-| Transfer per navigation (docs proof, gzip) | 1.4 to 4.6 KB of HTML | About 0.4 KB, with head and props |
+| Transfer per navigation, docs proof, gzip | 0.48 KB of data | 1.4 to 4.6 KB of HTML |
+| New output | A payload per page, and a dev route | None |
+| Next page's DOM | Rendered in the browser by the server's steps | Server markup |
+| Same result as a document load | Proven by parity tests in each engine and mode | By construction |
 
-The payload would save about 2.3 KB gzip per navigation, but it would add a second rendering path
-whose output must match the server's, plus new artifacts. Next.js's flight payload has the same
-trade-off with a more complex format. Swapping the whole body (Turbo) would lose layout state;
-morphing (idiomorph) would diff every node where comparing layer tags is enough.
+Swapping the whole body (Turbo) would lose layout state; morphing (idiomorph) would diff every node
+where comparing layer tags is enough.
+
+## Prefetching
+
+Prefetching never runs anything: payloads are data, and modules and stylesheets are only hinted with
+`modulepreload` and `prefetch`. The policy is the site's `prefetch` option, overridden by
+`data-hk-prefetch` on a link or an ancestor:
+
+| Policy | Link on screen, at idle | Hover or focus for 80 ms, or touch |
+| --- | --- | --- |
+| `interaction` (default) | The page's shared chunks only, from the build manifest | Payload and module |
+| `visible` | Payload and module | Payload and module |
+| `none` | Nothing | Nothing |
+
+A page's own module holds its content, so the default never downloads it for links on screen: a
+100-link documentation sidebar would otherwise download every page. Sweeping across a menu fetches
+nothing; each page is fetched once and a prefetched payload is used within 30 seconds. Development
+has no build manifest, so links on screen prefetch nothing there by default.
+
+A future request-time server adapter must not prefetch payloads for links on screen: each payload
+request would run that page's loaders.
 
 ## Nuxt and Next.js
 
 | | HTMLKit | Nuxt | Next.js (App Router) |
 | --- | --- | --- | --- |
-| Next page from | Static HTML | `_payload.json` and page chunks | RSC payload |
+| Next page from | Page module and `_htmlkit/pages/…/payload.json`; HTML as the fallback | Page chunks and `_payload.json` | RSC payload |
 | Shared layouts | Kept; props updated in place | Kept | Kept, not re-rendered |
 | Page with new params | Replaced | Replaced (keyed by path) | Replaced |
-| Prefetch | On hover or focus after 80 ms | Visible links (default) or interaction | Visible links |
+| Prefetch | Shared code for links on screen; page data and module on interaction | Visible links (default) or interaction | Visible links |
 | Announcement | `aria-live="polite"` title | `aria-live="polite"` title | `aria-live="assertive"` title, `h1`, or path |
 | Scroll and focus | Navigation API, with recorded back and forward positions | Router `scrollBehavior` | Router |
 | Opt-out | `data-hk-reload` (on the link or an ancestor) | `external` | Plain `<a>` |
-| Failure | Document load | Error page; a document load for a missing chunk | Document load |
-
-Prefetching visible links would fetch every link of a large navigation (the docs proof has 14), and
-a static HTML page is larger than a payload. HTMLKit prefetches on intent instead: a link that keeps
-the pointer or focus for 80 ms. Sweeping across a menu fetches nothing. A prefetched page is used
-once, within 30 seconds.
+| Failure | The HTML, then a document load | Error page; a document load for a missing chunk | Document load |
 
 ## Measurements
 
@@ -113,31 +206,43 @@ Bundle size, from a production build (`esbuild --minify` for the parts, Vite for
 
 | | gzip |
 | --- | --- |
-| `client.ts`, bundled with the runtime | 1.9 KB |
-| `adoptRenderedProps` in the runtime | 96 B |
-| First page of the docs proof (page module and shared chunk) | 41.6 KB before, 44.0 KB after (+5.6%) |
-| First page of the test fixture | 41.9 KB before, 44.3 KB after (+5.6%) |
+| `client.ts`, bundled with the runtime | 2.9 KB |
+| `serializeRenderedForm` in the runtime | 1.2 KB |
+| `adoptRenderedProps`, `lowerDocument`, `replaceProjectedNode` in the runtime | 96 B, 71 B, 68 B |
+| First page of the docs proof (page module and shared chunks) | 41.6 KB without client navigation, 44.0 KB with the HTML design, 46.1 KB now (+10.8%) |
+| First page of the test fixture | 41.9 KB, 44.3 KB, 46.4 KB (+10.8%) |
 
-Navigation cost on the docs proof between two guide pages that share a layout: the median of 20,
-on `htmlkit preview` over loopback. Client navigation is click to `navigatesuccess`, which includes
-the fetch, styles, module, swap, and controller connection. Document navigation is the new
-document's navigation start to `DOMContentLoaded`, which excludes unloading the old one.
+Transfer per navigation on the docs proof, gzip. The page's module is needed either way, unless it is
+already loaded:
 
-| Engine | Client | Client, prefetched | Document |
+| Page | Payload | HTML | Module |
 | --- | --- | --- | --- |
-| Chromium 153 | 3.5 ms | 2.4 ms | 24 ms |
-| Firefox 155 | 7 ms | 4 ms | 26 ms |
-| WebKit 26.6 | 6 ms | 5 ms | 29 ms |
+| `/` | 478 B | 1,417 B | 1,143 B |
+| `/guide/usage/` (largest) | 482 B | 4,614 B | 4,694 B |
+| All 13 pages | 6.3 KB | 35.7 KB | 34.1 KB |
 
-Loopback hides network time. A client navigation needs the HTML and, unless prefetched, the page's
-module and stylesheet; a document navigation also requests every shared asset again.
+Navigation time on the docs proof between two guide pages that share a layout: the median of 20, on
+`htmlkit preview` over loopback, with both modules already loaded. Client navigation is click to
+`navigatesuccess`, which includes the fetch, styles, rendering, swap, and controller connection.
+Document navigation is the new document's navigation start to `DOMContentLoaded`, which excludes
+unloading the old one. The HTML column forces the fallback, so it includes a failed payload request.
+The machine was under heavy load; repeated runs varied by a few milliseconds.
+
+| Engine | Payload | Payload, prefetched | HTML fallback | Document |
+| --- | --- | --- | --- | --- |
+| Chromium 153 | 4.6 ms | 3.4 ms | 4.8 ms | 23 ms |
+| Firefox 155 | 9 ms | 5 ms | 7 ms | 24 ms |
+| WebKit 26.6 | 8 ms | 6 ms | 7 ms | 26 ms |
+
+Instrumented, rendering a payload (registering, lowering, settling, serializing) took about 1 ms in
+each engine. Loopback hides network time, which is where the payload saves: about 2–4 KB less per
+navigation here.
 
 ## Limits
 
-- A layout that renders `<slot name="page">` conditionally (inside `$if` or `$match`) would
-  re-project the page it hydrated with. HTML Next records projected nodes when it hydrates; it has
-  no API to replace them yet.
 - Development keeps component styles Vite injected for earlier pages; builds remove stylesheets the
   next page does not link.
 - `app/head.js` runs once per document load.
 - `GET` forms that submit to an application page render in place; `POST` forms stay native.
+- Links that controllers add after a navigation are not watched for visibility; they still prefetch
+  on interaction.

@@ -31,6 +31,7 @@ export default defineConfig({
 | `routes` | none | Pages at URLs of your choosing (below). |
 | `fileRoutes` | `true` | `false` turns off page folders, so only `routes` remain. |
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
+| `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
 
 A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`.
 
