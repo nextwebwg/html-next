@@ -290,5 +290,48 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
         assert.match(result.unrecorded, /HR005/);
       } finally { await browser.close(); }
     });
+
+    it(`${engine} replaces a kept instance's projected node in its slot, styles, and rendered form`, async () => {
+      const rendered = await renderComponents('<ssr-counter id="subject"><b slot="title">T</b>world<i slot="extra">Shown</i></ssr-counter>',
+        { definitions, state: { "#subject": { open: true } } });
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<main><p id="loose">Loose</p>${rendered.html}</main>`);
+        await page.addScriptTag({ path: bundle });
+        const result = await page.evaluate(async (definitionJSON) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            registerComponentDefinitions(definitions: unknown[]): void; lowerDocument(): number; serializeRenderedForm(element: Element): string;
+            replaceProjectedNode(current: ChildNode, next: ChildNode): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; slots: Record<string, readonly Element[]> } | undefined;
+          } }).HtmlRuntime;
+          runtime.registerComponentDefinitions(JSON.parse(definitionJSON) as unknown[]);
+          runtime.lowerDocument();
+          const root = document.querySelector("#subject")!;
+          const host = runtime.getComponentHost(root)!;
+          const element = (html: string) => { const template = document.createElement("template"); template.innerHTML = html; return template.content.firstElementChild!; };
+          const title = element('<strong slot="title">New title</strong>');
+          const extra = element('<em slot="extra">New extra</em>');
+          const before = root.querySelector("b")!.hasAttribute("data-slotted");
+          runtime.replaceProjectedNode(root.querySelector("b")!, title);
+          runtime.replaceProjectedNode(root.querySelector("i")!, extra);
+          // The conditional slot renders its new node again.
+          host.state.open = false;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const closed = root.querySelector("aside");
+          host.state.open = true;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const loose = element('<p id="loose">Replaced</p>');
+          runtime.replaceProjectedNode(document.querySelector("#loose")!, loose);
+          return { before, slotted: [title.hasAttribute("data-slotted"), extra.hasAttribute("data-slotted")],
+            slots: [host.slots.title!.map((node) => node.outerHTML), host.slots.extra!.map((node) => node.localName)],
+            closed, reopened: root.querySelector("aside")?.innerHTML.replace(/<!--.*?-->|<\?.*?>/g, ""),
+            serialized: runtime.serializeRenderedForm(root).match(/<(?:b|i|strong|em)\b/g), loose: document.querySelector("#loose")!.textContent };
+        }, JSON.stringify(definitions));
+        assert.deepEqual(result, { before: true, slotted: [true, true],
+          slots: [['<strong slot="title" data-slotted="">New title</strong>'], ["em"]], closed: null,
+          reopened: '<em slot="extra" data-slotted="">New extra</em>', serialized: ["<strong", "<em"], loose: "Replaced" });
+      } finally { await browser.close(); }
+    });
   }
 });

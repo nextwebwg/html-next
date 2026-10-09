@@ -150,7 +150,12 @@ interface RuntimeInstance {
   /** The root element in the document; effects tied to the root read it, so they follow a replacement. */
   readonly rootElement: ReactiveSignal<Element | undefined>;
   /** Every projected node and its slot, rendered or not (for serialization). */
-  projection?: { readonly nodes: readonly Node[]; readonly slotNames: WeakMap<Node, string> };
+  projection?: {
+    readonly nodes: readonly Node[];
+    readonly slotNames: WeakMap<Node, string>;
+    /** Puts `next` in `current`'s place, in its slot, wherever this instance records its projection. */
+    readonly replace: (current: Node, next: Node) => void;
+  };
   /**
    * Instances sharing this instance's root because this component delegates its root to them.
    * They are not separately discoverable, so this instance carries their lifecycle.
@@ -2786,6 +2791,14 @@ function prepareRuntimeInvocation(
   }
   const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
   const projected = hydration ? children : Array.from(invocation.childNodes);
+  const replaceProjected = (current: Node, next: Node): void => {
+    for (const nodes of [children, projected]) {
+      const index = nodes.indexOf(current);
+      if (index >= 0) nodes[index] = next;
+    }
+    const slot = projectedSlotNames.get(current);
+    if (slot !== undefined) projectedSlotNames.set(next, slot);
+  };
   // A projected component invocation lowers to its own root, perhaps only once a slot renders it.
   // The projection follows that root, so a slot that renders again inserts it, not the invocation
   // element lowering replaced. A later root switch calls the same rebind with the new root.
@@ -2793,12 +2806,7 @@ function prepareRuntimeInvocation(
     if (node.nodeType !== 1 || !(node as Element).localName.includes("-")) continue;
     let current: Node = node;
     whenLowered(node as Element, (root) => {
-      for (const nodes of [children, projected]) {
-        const index = nodes.indexOf(current);
-        if (index >= 0) nodes[index] = root;
-      }
-      const slot = projectedSlotNames.get(current);
-      if (slot !== undefined) projectedSlotNames.set(root, slot);
+      replaceProjected(current, root);
       current = root;
     });
   }
@@ -2817,7 +2825,7 @@ function prepareRuntimeInvocation(
     owned: renderOwned(),
     rootNode,
     rootElement: createSignal<Element | undefined>(undefined),
-    projection: { nodes: projected, slotNames: projectedSlotNames },
+    projection: { nodes: projected, slotNames: projectedSlotNames, replace: replaceProjected },
   };
   if (Object.keys(definition.contract.props).length > 0) {
     instance.effects.push(createEffect(scope.scheduler, () => {
@@ -3605,6 +3613,24 @@ export function updateComponentProps(
   // A compiled root takes them through its own prop channel, which applies them as below.
   if (instance === undefined) compiledHandle(element)?.B?.u?.(props);
   else applyComponentProps(instance, props);
+}
+
+/**
+ * Replaces a node in the document, as a framework changes the content it passes a kept component:
+ * when a live component projects `current` into a slot, `next` takes its place there too, so the
+ * slot renders it again, `host.slots` and the rendered form list it, and slotted styles reach it.
+ */
+export function replaceProjectedNode(current: ChildNode, next: ChildNode): void {
+  for (let element = current.parentElement; element !== null; element = element.parentElement) {
+    const instance = runtimeInstance(element);
+    const owner = instance === undefined ? undefined
+      : [instance, ...instance.delegates].find((candidate) => candidate.projection?.nodes.includes(current));
+    if (owner === undefined) continue;
+    owner.projection!.replace(current, next);
+    markProjectedRoot(next);
+    break;
+  }
+  current.replaceWith(next);
 }
 
 /**
