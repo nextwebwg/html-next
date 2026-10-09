@@ -3607,6 +3607,22 @@ export function updateComponentProps(
   else applyComponentProps(instance, props);
 }
 
+/**
+ * Carries a fresh server rendering's props onto a live instance that a framework keeps, through
+ * the same channel as `updateComponentProps`: `rendered` is that component's root in the new
+ * server output, not yet hydrated. The instance keeps its DOM, state, and controller; props the
+ * rendering left implicit return to their defaults.
+ */
+export function adoptRenderedProps(element: Element, rendered: Element): void {
+  const instance = runtimeInstance(element);
+  const record = instance === undefined ? undefined : renderedInstanceRecord(rendered, instance.definition.contract.tag);
+  if (instance === undefined || record === undefined) {
+    fail("HR005", "The rendered element records no props for this element's component.");
+  }
+  applyComponentProps(instance, Object.fromEntries(Object.keys(instance.definition.contract.props)
+    .map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+}
+
 /** Applies props to one named instance, which a shared root makes explicit. */
 function applyComponentProps(
   instance: RuntimeInstance,
