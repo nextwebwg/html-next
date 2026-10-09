@@ -60,8 +60,8 @@ export interface PageHead {
 export interface RenderedHead extends PageHead {
   /** Rendered native metadata, merged by identity; values are escaped on output. */
   readonly elements?: readonly HeadElement[];
-  /** The application's app/head.js, inlined after the charset so it runs before first paint. */
-  readonly script?: string;
+  /** A plugin's headScript, then app/head.js, each inlined after the charset so they run before first paint. */
+  readonly scripts?: readonly string[];
 }
 
 export interface HeadElement {

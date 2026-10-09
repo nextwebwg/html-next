@@ -40,21 +40,36 @@ function packageResource(path: string) {
   return { url: pathToFileURL(path).href, trustRoot: pathToFileURL(directory + "/").href };
 }
 
+// Classic scripts inlined into each document head run before first paint, e.g. to apply a saved theme:
+// a plugin's headScript, then app/head.js, each in its own element so neither can break the other.
+export async function headScripts(options: ApplicationOptions, root: string): Promise<readonly string[]> {
+  const path = join(root, "app/head.js");
+  const file = existsSync(path) ? await readFile(path, "utf8") : undefined;
+  const scripts: string[] = [];
+  for (const [script, name, source] of [[options.headScript, "headScript", undefined], [file, "app/head.js", path]] as const) {
+    if (script === undefined) continue;
+    if (/<!--|<\/?script/i.test(script)) {
+      throw new HtmlKitError(`${name} cannot contain <!--, <script, or </script, which would end or nest its inline script.`, source);
+    }
+    scripts.push(script);
+  }
+  return scripts;
+}
+
+// Every page gets the head scripts, the not-found page included, so it cannot flash either.
+export function notFoundPage(scripts: readonly string[]) {
+  const head: RenderedHead = { title: "Page not found", scripts };
+  const body = "<main><h1>Page not found</h1></main>";
+  return { head, body, html: documentHTML(body, head) };
+}
+
 /** assets supplies a serving adapter's browser modules and stylesheets for fetch(). */
 export async function createApplication(input: ApplicationOptions = {}, moduleServer?: ViteDevServer,
   assets?: (page: RenderedPage) => string): Promise<Application> {
   const options = await withPlugins(input);
   const config = configure(options);
   const { routes, sources, files } = await discover(config.root, { ...options, base: config.base });
-  // A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
-  const headPath = join(config.root, "app/head.js");
-  const fileScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
-  for (const [script, name, source] of [[options.headScript, "headScript", undefined], [fileScript, "app/head.js", headPath]] as const) {
-    if (script !== undefined && /<!--|<\/?script/i.test(script)) {
-      throw new HtmlKitError(`${name} cannot contain <!--, <script, or </script, which would end or nest its inline script.`, source);
-    }
-  }
-  const headScript = [options.headScript, fileScript].filter(script => script !== undefined).join("\n") || undefined;
+  const scripts = await headScripts(options, config.root);
   const ownsServer = moduleServer === undefined;
   const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom",
     mode: "development", publicDir: false, server: { middlewareMode: true, watch: null, hmr: false },
@@ -148,9 +163,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       if (url.origin !== config.origin || url.search || url.hash) throw new HtmlKitError("Static rendering requires an application pathname without a query or fragment.");
       const matched = matchRoute(routes, url.pathname, config.base);
       if (matched === undefined) {
-        const head = { title: "Page not found" };
-        const body = '<main><h1>Page not found</h1></main>';
-        return { status: 404, pathname, html: documentHTML(body, head), css: "", head, body, components: [] };
+        return { status: 404, pathname, ...notFoundPage(scripts), css: "", components: [] };
       }
       const { route, params } = matched;
       const layers = [...route.layouts, route];
@@ -220,7 +233,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
           (definition, values) => invocation(definition, values, "htmlkit-head", "", false));
       }
-      if (headScript !== undefined) head = { ...head, script: headScript };
+      if (scripts.length > 0) head = { ...head, scripts };
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       let body = "";
       for (let i = layers.length - 1; i >= 0; i--) {
@@ -241,7 +254,9 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     async fetch(request) {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
       const { pathname } = new URL(request.url);
-      const page = await application.render(pathname, request.signal);
+      // A path starting with // names another origin to render(), which rejects it; no page lives there.
+      const page = pathname.startsWith("//") ? { status: 404 as const, pathname, ...notFoundPage(scripts), css: "", components: [] }
+        : await application.render(pathname, request.signal);
       if (page.status === 200 && !pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" } });
       return new Response(request.method === "HEAD" ? null : documentHTML(page.body, page.head, assets?.(page)),
         { status: page.status, headers: { "content-type": "text/html; charset=utf-8" } });
