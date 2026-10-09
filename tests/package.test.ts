@@ -136,7 +136,7 @@ describe("workspace package contracts", () => {
       `${publicExports
         .filter((path) => path !== "./browser")
         .map((path) => `import ${JSON.stringify(specifier(path))};`)
-        .join("\n")}\nconst { renderComponents } = await import("@nextwebwg/html-next/server");\nconst { parseComponent } = await import("@nextwebwg/html-next");\nconst rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });\nif (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");\nprocess.stdout.write("ok");\n`,
+        .join("\n")}\nconst { renderComponents } = await import("@nextwebwg/html-next/server");\nconst { parseComponent, add, subtract, multiply, divide } = await import("@nextwebwg/html-next");\nconst compiled = await import("@nextwebwg/html-next/generated-runtime");\nif (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");\nconst rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });\nif (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");\nprocess.stdout.write("ok");\n`,
     );
     expect(
       execFileSync(process.execPath, [nodeEntry], { cwd: consumer, encoding: "utf8" }),

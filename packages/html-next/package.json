@@ -130,6 +130,7 @@
     "@vue/server-renderer": "catalog:",
     "alien-signals": "catalog:",
     "anod": "catalog:",
+    "decimal.js": "catalog:",
     "esbuild": "catalog:",
     "mobx": "catalog:",
     "playwright": "catalog:",

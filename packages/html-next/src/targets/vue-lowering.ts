@@ -8,8 +8,9 @@
  * type chooses the inline form. Only a value whose type cannot be known falls back to a small named
  * function in the component, emitted when used.
  */
-import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
+import { isEnumeratedBoolean, wholeNumber, type ExpressionNode } from "../expression.js";
 import { formattingType } from "../format.js";
+import { DECIMAL_SOURCE } from "../generated/decimal-source.js";
 import { formattingHelperSource } from "./format-source.js";
 import type { TypeNode } from "../type-system.js";
 import { NUMERIC_ATTRIBUTES, quote } from "./shared.js";
@@ -341,7 +342,8 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
   }
   return !Number.isFinite(result) ? Symbol.for("html-next.invalid-result") : unit === undefined ? result : String(result) + unit;
 }`,
-  arithmetic: `function arithmetic(op: string, leftKind: string, rightKind: string, left: unknown, right: unknown): string | symbol | undefined {
+  arithmetic: `function arithmetic(op: string, leftKind: string, rightKind: string, left: unknown, right: unknown,
+  operate: (a: number, b: number) => number): string | symbol | undefined {
   const invalid = Symbol.for("html-next.invalid-result");
   if (left === invalid || right === invalid) return invalid;
   if (left === null || left === undefined || right === null || right === undefined) return undefined;
@@ -360,17 +362,17 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
   let value: number, unit: string;
   if (op === "+" || op === "-") {
     if (x === undefined || y === undefined || leftKind !== rightKind || x.unit !== y.unit) return invalid;
-    value = op === "+" ? x.number + y.number : x.number - y.number;
+    value = operate(x.number, y.number);
     unit = x.unit;
   } else if (op === "*") {
     const quantity = x ?? y;
     const factor = x === undefined ? left : right;
     if (quantity === undefined || x !== undefined && y !== undefined || typeof factor !== "number" || !Number.isFinite(factor)) return invalid;
-    value = quantity.number * factor;
+    value = operate(quantity.number, factor);
     unit = quantity.unit;
   } else {
     if (op !== "/" || x === undefined || y !== undefined || typeof right !== "number" || !Number.isFinite(right) || right === 0) return invalid;
-    value = x.number / right;
+    value = operate(x.number, right);
     unit = x.unit;
   }
   return Number.isFinite(value) ? String(value) + unit : invalid;
@@ -411,6 +413,11 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
 
 const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
 
+/** The shared module's decimal operation for each arithmetic operator (`src/decimal.ts`). */
+const DECIMAL_HELPERS: Readonly<Record<string, string>> = {
+  "+": "decimalAdd", "-": "decimalSubtract", "*": "decimalMultiply", "/": "decimalDivide", "%": "decimalRemainder",
+};
+
 /**
  * The expression helpers every converted Vue component shares, exported from the host module so a
  * component imports the ones it calls instead of carrying its own copies.
@@ -442,6 +449,7 @@ export const isNumber = (value: unknown): value is number => typeof value === "n
 export const isInteger = (value: unknown): value is number => Number.isInteger(value);
 export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";`,
     ...Object.values(FALLBACKS),
+    DECIMAL_SOURCE,
     formattingHelperSource("formatValue"),
   ].join("\n\n").replace(/^(function|type|const formatValue) /gm, "export $1 ")
     // Only a component that formats keeps the formatter: the module-level call has no other effect.
@@ -730,14 +738,28 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       const rightKind = rightType.kind === "terminal" ? rightType.name : "unknown";
       if (["length", "percentage", "duration"].includes(leftKind) ||
         ["length", "percentage", "duration"].includes(rightKind)) {
-        return `(${this.use("arithmetic")}(${quote(op)}, ${quote(leftKind)}, ${quote(rightKind)}, ${left}, ${right}) as string | symbol | undefined)`;
+        const operate = this.use(DECIMAL_HELPERS[op]!);
+        return `(${this.use("arithmetic")}(${quote(op)}, ${quote(leftKind)}, ${quote(rightKind)}, ${left}, ${right}, ${operate}) as string | symbol | undefined)`;
       }
     }
+    // Whole numbers calculate exactly with JavaScript's operators; other numbers use the decimal operation.
+    const whole = (operand: ExpressionNode): boolean => wholeNumber(operand, (read) => typeOf(read, scope).type);
+    const decimal = op !== "/" && DECIMAL_HELPERS[op] !== undefined && !(whole(node.left) && whole(node.right))
+      ? this.use(DECIMAL_HELPERS[op]!) : undefined;
     const x = this.#numeric(node.left, scope);
     const y = this.#numeric(node.right, scope);
-    if (x !== undefined && y !== undefined) return `${left} ${op} ${right}`;
+    if (x !== undefined && y !== undefined) {
+      if (decimal === undefined) return `${left} ${op} ${right}`;
+      // A call argument needs none of the parentheses an operand has for an operator.
+      const argument = (operand: ExpressionNode, code: string): string => {
+        const value = this.value(operand, scope);
+        return code === `(${value})` ? value : code;
+      };
+      return `${decimal}(${argument(node.left, left)}, ${argument(node.right, right)})`;
+    }
     const number = this.use("number");
-    return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${number}(${left})! ${op} ${number}(${right})!)`;
+    return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${decimal === undefined
+      ? `${number}(${left})! ${op} ${number}(${right})!` : `${decimal}(${number}(${left})!, ${number}(${right})!)`})`;
   }
 
   #call(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): string {

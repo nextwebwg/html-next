@@ -31,6 +31,7 @@ import type { boundFailures } from "./value-constraints.js";
 import { manageDerivedValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
+export { add, divide, multiply, remainder, subtract } from "./decimal.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
