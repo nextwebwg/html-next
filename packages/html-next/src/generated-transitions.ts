@@ -149,7 +149,7 @@ export function writeTransitionStyle(element: Element & ElementCSSInlineStyle, v
   style.setProperty("view-transition-class", cls);
 }
 
-// Keywords the property reads as itself rather than as a name.
+// Keywords the property reads as itself rather than as a name, in any case.
 const KEYWORDS = new Set(["none", "auto", "match-element", "initial", "inherit", "unset", "revert", "revert-layer", "default"]);
 
 /**
@@ -159,6 +159,6 @@ const KEYWORDS = new Set(["none", "auto", "match-element", "initial", "inherit",
 export function transitionName(value: Value): string {
   if (value === ABSENT || value === NONCONFORMING || value === null || value === "") return "match-element";
   const text = toText(value);
-  if (KEYWORDS.has(text)) return `hn-${text}`;
+  if (KEYWORDS.has(text.toLowerCase())) return `hn-${text}`;
   return typeof CSS === "undefined" ? text : CSS.escape(text);
 }
