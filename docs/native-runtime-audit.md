@@ -39,3 +39,38 @@ Chromium and WebKit style only the owned rect. The reproduction is checked in at
 `packages/html-next/tests/fixtures/firefox-svg-scope.html` and filed as
 [Mozilla bug 2080046](https://bugzilla.mozilla.org/show_bug.cgi?id=2080046). This observation
 uses Playwright's Firefox build; a stock release/Nightly reproduction remains unverified.
+
+
+## Firefox SVG scope workaround
+
+On 2026-10-08, changing only an unused inherited custom property on a boundary prevented
+Firefox 155 from applying the native fixture's scoped SVG class rule below that boundary.
+The same result holds for conflicting namespaces, nested and empty components, explicit
+slotted rules, layered sheets, resolved host states and DOM moves. This supports incorrect
+style reuse as the cause; Firefox's internal cache behavior has not been traced in source.
+
+The compiler supplies an inherited `--html-next-scope-owner` identity using existing
+`data-component` and projection selectors. A normal reset marks nested boundaries, while
+important private declarations identify roots and projection regions independently of author
+layers. Direct declarations at a child boundary replace inheritance from a parent even when
+the parent's private value is important. The rules run only under the Firefox-specific
+`@supports (-moz-appearance: none)` query. Author fill, typography, custom properties and
+other inherited values retain ordinary CSS behavior.
+
+The live loader installs one common reset independent of application-owned sheets; a closed
+graph includes one reset outside authored import conditions. Hybrid delivery retains the live
+reset even when a precompiled sheet also includes one, because that sheet can be conditioned
+or disabled independently.
+
+Definition-specific root identities stay with their compiled CSS. Native CSS
+matching and inheritance handle insertion, movement and removal. Svelte's existing ownership
+selectors mark its projection regions; Vue's built-in scoped selectors already distinguish
+owned and projected nodes. No new observer or element ownership marker is introduced.
+
+A sequential local Playwright Firefox stress probe used 50 definitions, 1,000 component roots
+and 24,000 SVG rects. Across 20 measured alternating samples, initial DOM insertion plus forced
+style reads had medians of 24 ms without the workaround and 27 ms with its shared rules
+(1.125×); class updates plus style reads were 9 ms in both cases. These synthetic observations
+are a cost check, not a general application benchmark. Repeated copies of the common rules
+cost more, so live and graph delivery keep only one copy. The browser fixture, loader parity,
+SSR graph comparison and build/Svelte boundary cases provide the independent regression checks.
