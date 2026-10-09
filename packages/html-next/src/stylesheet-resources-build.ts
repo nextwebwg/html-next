@@ -1,4 +1,4 @@
-import { hoistStylesheetNamespaces, stylesheetNamespaceContext, rewriteNamespacePrelude } from "./stylesheet-namespaces.js";
+import { stylesheetNamespaceContext, rewriteNamespacePrelude } from "./stylesheet-namespaces.js";
 import postcss from "postcss";
 import { decodeCSS, type ParsedStylesheet, type StylesheetImport, type StylesheetEntry } from "./stylesheet-resources.js";
 
@@ -58,7 +58,7 @@ export function parseStylesheetForBuild(css: string): ParsedStylesheet {
 /** Normalize each sheet before combining it with a different namespace environment. */
 export function normalizeStylesheetNamespacesForBuild(css: string): string {
   if (!/@namespace\b/i.test(css)) return css;
-  const root = postcss.parse(hoistStylesheetNamespaces(css));
+  const root = postcss.parse(css);
   let allowed = true;
   const declarations = root.nodes.filter(node => {
     if (node.type === "comment") return false;

@@ -153,6 +153,12 @@ describe("shared component CSS resources", () => {
     assert.doesNotMatch(css, /url\(/);
   });
 
+  it("ignores late source namespaces even when an author uses a generated-looking prefix", () => {
+    const css = normalizeStylesheetNamespacesForBuild('p { color: blue; } @namespace htmlnextns0078 "x"; htmlnextns0078|rect { fill: red; }');
+    assert.doesNotMatch(css, /@namespace/);
+    assert.match(css, /p \{ color: blue; \}/);
+  });
+
   it("keeps scoped copies for incompatible conditions, opposite import orders, and intervening global overrides", () => {
     const a = parseComponent('<template component="x-a"><div></div></template>');
     const b = parseComponent('<template component="x-b"><div></div></template>');

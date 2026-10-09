@@ -1,11 +1,11 @@
-import { hoistStylesheetNamespaces, rewriteNamespacePrelude, stylesheetNamespaceContext } from "./stylesheet-namespaces.js";
+import { rewriteNamespacePrelude, stylesheetNamespaceContext } from "./stylesheet-namespaces.js";
 
 /** CSSOM owns parsing; only selector namespace qualification remains a source transform. */
 export function normalizeStylesheetNamespacesInBrowser(css: string, document: Document): string {
   if (!/@namespace\b/i.test(css)) return css;
   const Sheet = (document.defaultView ?? globalThis).CSSStyleSheet;
   const sheet = new Sheet();
-  sheet.replaceSync(hoistStylesheetNamespaces(css));
+  sheet.replaceSync(css);
   const rules = [...sheet.cssRules];
   const context = stylesheetNamespaceContext(rules.filter(rule => rule.type === 10).map(rule => rule.cssText));
   const serialize = (rule: CSSRule): string => {
