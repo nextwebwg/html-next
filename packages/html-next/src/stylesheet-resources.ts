@@ -1,3 +1,4 @@
+import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentFetcher } from "./graph.js";
 import type { ResolvedResource } from "./resolve.js";
@@ -71,11 +72,6 @@ export function createStylesheetLoader(options: StylesheetLoaderOptions): {
       const canonical = cache.get(finalURL);
       if (finalURL !== resource.url && canonical !== undefined) return canonical;
       const loaded = { resource: { ...resource, url: finalURL }, parsed: options.parse(response.source) };
-      // Flattening namespaces changes unprefixed selectors and generated scope anchors.
-      // Diagnose this until delivery can preserve each stylesheet's namespace environment.
-      if (/@namespace\b/i.test(loaded.parsed.css.replace(/\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, ""))) {
-        fail("HY004", "Shared component stylesheets with @namespace are not supported; use namespace-free shared CSS.", finalURL);
-      }
       if (finalURL !== resource.url) cache.set(finalURL, Promise.resolve(loaded));
       return loaded;
     })();
@@ -83,7 +79,7 @@ export function createStylesheetLoader(options: StylesheetLoaderOptions): {
     return pending;
   };
   const prepare = async (definition: ComponentDefinition, resource: ResolvedResource): Promise<ComponentDefinition> => {
-    if (!/@import\b|url\(|image-set\(/i.test(definition.css)) return definition;
+    if (!/@import\b|@namespace\b|url\(|image-set\(/i.test(definition.css)) return definition;
     const parsed = options.parse(definition.css);
     const stylesheets: ComponentStylesheet[] = [];
     let occurrence = 0;
@@ -131,7 +127,7 @@ export function wrapStylesheetConditions(css: string, conditions: readonly Style
     if (condition.media !== undefined && condition.media !== "") css = `@media ${condition.media} {\n${css}\n}`;
     if (condition.supports !== undefined) css = `@supports (${condition.supports}) {\n${css}\n}`;
   }
-  return css;
+  return hoistStylesheetNamespaces(css);
 }
 
 export interface SharedStylesheet {
@@ -148,7 +144,7 @@ export function collectSharedStylesheets(definitions: readonly ComponentDefiniti
   const effects: string[] = [];
   const globalEffects = (css: string): boolean => {
     const rules = css.replace(/\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, "");
-    return [...rules.matchAll(/@([-\w]+)/g)].some(match => !["media", "supports", "container", "scope", "starting-style"].includes(match[1]!.toLowerCase()));
+    return [...rules.matchAll(/@([-\w]+)/g)].some(match => !["media", "supports", "container", "scope", "starting-style", "namespace"].includes(match[1]!.toLowerCase()));
   };
   for (const definition of definitions) {
     let cursor = 0;

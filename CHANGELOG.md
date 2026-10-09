@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.39
+## 1.0.0-alpha.40
 
 ### Breaking
 
@@ -20,6 +20,10 @@
 - HTMLKit's `css` option adds page-wide stylesheets to every page, such as `['@/styles/page.css']`, for rules like `html` and `body`. They load before the page is shown, in builds and in development.
 - HTMLKit plugins compose with the site: page folders, stylesheets, and routes a plugin adds join the site's own instead of replacing them, and `app/pages` stays. A page folder can name its own `layout`, which its pages use unless they name one, so a plugin's layout no longer wraps the whole site. `optional: true` skips a folder that doesn't exist.
 - HTMLKit has built-in `<hk-breadcrumbs>` and `<hk-pager>`, unstyled and accessible like `<hk-nav>` and needing no component link. Loaders get `breadcrumbs()`, the existing pages from the home page (or `from`) down to the current one, and `pager()`, the pages before and after it in navigation order.
+
+## 1.0.0-alpha.39
+
+- Shared and inline component styles preserve stylesheet-local `@namespace` declarations in live loading, Vite builds, SSR, and framework conversion. Imported default namespaces become explicit selector constraints; conflicting named prefixes remain isolated. Firefox 155's native SVG scope-limit defect is documented with a standalone reproduction and Mozilla bug 2080046.
 
 ## 1.0.0-alpha.38
 

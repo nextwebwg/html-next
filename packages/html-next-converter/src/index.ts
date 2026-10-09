@@ -638,7 +638,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         compileComponentStylesForSvelte(sheet.css, definition).css, sheet.conditions)),
       svelteLocalCSS.get(definition.contract.tag) ?? "",
     ]).join("\n");
-    claim({ path: sharedStylePath, content: css + "\n" }, "style");
+    claim({ path: sharedStylePath, content: wrapStylesheetConditions(css, []) + "\n" }, "style");
   }
 
   const conversionEntries = graph.roots.map((id) => {
