@@ -22,6 +22,7 @@ export {
   svelteControlArtifact,
   svelteDataArtifact,
   svelteReactivityArtifact,
+  svelteRenderArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,

@@ -17,6 +17,7 @@
     "clean": "pnpm --recursive --if-present run clean",
     "generate:dom": "pnpm --filter @nextwebwg/html-next generate:dom",
     "generate:snapshots": "pnpm --filter @nextwebwg/html-next generate:snapshots",
+    "generate:quick-start": "pnpm --filter @nextwebwg/html-next generate:quick-start",
     "lint": "oxlint --config oxlint.json --deny-warnings .",
     "measure:runtime": "pnpm --filter @nextwebwg/html-next measure:runtime",
     "measure:hydration": "pnpm --filter @nextwebwg/html-next measure:hydration",

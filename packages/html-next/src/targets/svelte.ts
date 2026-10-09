@@ -12,9 +12,10 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
-import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
+import { conformingLiteralWrite, declaredReferenceGuard, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
-import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
+import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
+import { formatSvelteScript } from "./vue-format.js";
 
 function hasStructuredHtmlInput(type: TypeNode): boolean {
   if (type.kind === "constrained") return hasStructuredHtmlInput(type.base);
@@ -26,13 +27,6 @@ function unknownValueScope(name: string): Scope {
   return { code: new Map([[name, name]]), types: new Map([[name, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
 }
 
-// A NUL cannot appear in an authored HTML attribute or a declared public prop name.
-const SLOTS_PROP = "\0html-next:slots";
-const ROOT_OWNER_PROP = "\0html-next:root-owner";
-const DECORATIONS_PROP = "\0html-next:decorations";
-const BINDING_INPUTS_PROP = "\0html-next:binding-inputs";
-const LITERAL_INPUTS_PROP = "\0html-next:literal-inputs";
-const NATIVE_BINDINGS_PROP = "\0html-next:native-bindings";
 
 export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
@@ -50,6 +44,7 @@ export interface SvelteConversionOptions {
   readonly guardNestedDepth?: boolean;
   readonly reactivitySpecifier?: string;
   readonly hostSpecifier?: string;
+  readonly renderSpecifier?: string;
   readonly controllerSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
@@ -58,8 +53,11 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render")[];
 }
+
+/** A value Svelte reads as written in a quoted attribute: no entity, brace, quote or edge space. */
+const PLAIN_ATTRIBUTE = /^[\w.,:;/#%+=@!?()-]+(?: [\w.,:;/#%+=@!?()-]+)*$/;
 
 function nativeControlBinding(tag: string, name: string): boolean {
   return ["input", "textarea", "select"].includes(tag) &&
@@ -142,10 +140,8 @@ interface RenderContext {
   readonly slotsByTag?: SvelteConversionOptions["slotsByTag"];
   usesScopedSlots: boolean;
   usesSampledSlots: boolean;
-  readonly checkedSlotName: string;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   readonly styleOwner?: string;
-  nextLoop: number;
   htmlSites: number;
   readonly localHtmlSites: Set<number>;
   readonly optionHtmlSites: Set<number>;
@@ -166,8 +162,6 @@ interface RenderContext {
   readonly initialBindingReadName: string;
   readonly nativeBindingReadName: string;
   readonly rootBindingAttributeName: string;
-  readonly decorationAttachmentName: string;
-  readonly propertyAttachmentName: string;
   usesControls: boolean;
   usesNestedBindings: boolean;
   boundSelect: boolean | string;
@@ -183,8 +177,11 @@ interface RenderContext {
   readonly resetRootRefs: boolean;
   readonly refAttachmentName: string;
   readonly refTargetName: string;
-  readonly writePathName: string;
+  /** Inside <pre> or <textarea>, whose text Svelte keeps exactly, or <option>, whose text is its implicit value. */
+  preformatted: boolean;
   readonly freshIdentifier: (base: string) => string;
+  /** A template-local name: the authored one, unless the script or a helper already uses it. */
+  readonly localName: (authored: string, fallback: string) => string;
 }
 
 function strictTypeCheck(type: TypeNode, value: string, context: RenderContext): string {
@@ -320,7 +317,10 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
     { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
     { name: "count", type: indexType.type, optional: false },
   ] }, nullable: false };
-  const row = `htmlNextRow${context.nextLoop++}`;
+  // Each row destructures to the names the source gives its item and index.
+  const item = context.localName(flow.item, "item");
+  const index = context.localName(flow.index ?? "index", "index");
+  const loop = context.localName("loop", "loop");
   const scopeWith = (item: string, index: string, loop: string): Scope => ({
     code: new Map([...scope.code, [flow.item, item], ...(flow.index === undefined ? [] : [[flow.index, index] as const]), ["loop", loop]]),
     types: new Map([...scope.types, [flow.item, itemType], ...(flow.index === undefined ? [] : [[flow.index, indexType] as const]), ["loop", loopType]]),
@@ -340,7 +340,7 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
   const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list,
     `(item, index, loop) => ${lowering.value(flow.keyPlan.ast, callbackScope)}`);
   const rows = lowering.eachRows(checked);
-  const rowScope = scopeWith(`${row}.item`, `${row}.index`, `${row}.loop`);
+  const rowScope = scopeWith(item, index, loop);
   const key = flow.keyPlan === undefined ? "" : ` (${lowering.value(flow.keyPlan.ast, rowScope)})`;
   const { flow: _flow, ...body } = node;
   const firstHtmlSite = context.htmlSites;
@@ -348,13 +348,22 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
   const inputs: string[] = [];
   const markup = renderNode(body, false, rowScope, lowering, context, inputs);
   const declarations = localOwnership(context, firstHtmlSite, firstRetention);
-  return `{#each ${rows} as ${row}${key}}${declarations}${inputs.join("")}${markup}{/each}`;
+  const content = `${declarations}${inputs.join("")}${markup}`;
+  const fields = ([["item", item], ["index", index], ["loop", loop]] as const)
+    .filter(([field, name]) => field === "item" || new RegExp(`\\b${name}\\b`).test(`${key}${content}`))
+    .map(([field, name]) => field === name ? field : `${field}: ${name}`);
+  return `{#each ${rows} as { ${fields.join(", ")} }${key}}${content}{/each}`;
 }
 
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
   context: RenderContext, blockInputs?: string[]): string {
   if (node.kind === "text") {
-    return context.boundSelect && context.selectSelection === undefined && node.expressionPlan === undefined && node.segments === undefined ? escapeHtml(node.value) : `{${textSource(node, scope, lowering, context)}}`;
+    if (context.boundSelect && context.selectSelection === undefined && node.expressionPlan === undefined && node.segments === undefined) return escapeHtml(node.value);
+    if (context.preformatted) return `{${textSource(node, scope, lowering, context)}}`;
+    // Template text reads as authored, with Svelte's whitespace handling: each run of ASCII
+    // whitespace is one space, and Svelte drops it at the start and end of a tag.
+    return (node.segments ?? [node]).map((segment) => segment.expressionPlan === undefined
+      ? escapeHtml(segment.value.replace(/[\t\n\f\r ]+/g, " ")) : `{${textSource(segment, scope, lowering, context)}}`).join("");
   }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
@@ -363,13 +372,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (sampledName !== undefined) context.usesSampledSlots = true;
     const name = sampledName ?? quote(node.name ?? "");
     const nameDeclaration = sampledName === undefined ? "" : `{@const ${sampledName} = untrack(() => String(${lowering.value(node.nameExpression!.ast, scope)}))}`;
-    const selected = context.freshIdentifier("htmlNextSlot");
+    const selected = context.freshIdentifier("slot");
     const scoped = (node.props?.length ?? 0) > 0;
     if (scoped) context.usesScopedSlots = true;
     const defaultSlot = node.name === undefined && node.nameExpression === undefined;
     const hasChildren = context.definition.contract.props.children === undefined;
     const supplied = defaultSlot ? `slots?.[""]${scoped && hasChildren ? " ?? (children === undefined ? undefined : null)" : ""}` : `slots?.[${name}]`;
-    const checked = scoped ? `${context.checkedSlotName}(${supplied}, ${name})` : supplied;
+    const checked = scoped ? `checkedSlot(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
       const source = lowering.value(prop.expressionPlan.ast, scope);
       return `${objectKey(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
@@ -388,7 +397,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (node.flow.expressionPlan === undefined) fail("HT030", `Expression \`${node.flow.expr}\` could not be converted.`);
     const { flow: _flow, ...body } = node;
     const value = node.flow.expressionPlan.ast;
-    const alias = context.freshIdentifier("htmlNextAlias");
+    const alias = context.localName(node.flow.alias, "value");
     const local: RootScope = {
       ...(scope as RootScope),
       code: new Map([...scope.code, [node.flow.alias, alias]]),
@@ -406,7 +415,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (node.name !== "template") return renderNode(elementMatchRoot(node), root, scope, lowering, context);
     const flow = node.flow;
     const value = flow.expressionPlan?.ast;
-    const alias = flow.alias === undefined ? undefined : context.freshIdentifier("htmlNextAlias");
+    const alias = flow.alias === undefined ? undefined : context.localName(flow.alias, "value");
     const local: RootScope = flow.alias === undefined ? scope as RootScope : {
       ...(scope as RootScope),
       code: new Map([...scope.code, [flow.alias, alias!]]),
@@ -513,8 +522,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const scoped = (contract?.props?.length ?? 0) > 0;
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
       if (scoped && carrier === undefined) { slotBindings.push(`${objectKey(slot)}: null`); continue; }
-      const alias = context.freshIdentifier("htmlNextSlotProps");
-      const snippet = context.freshIdentifier("htmlNextProjection");
+      const alias = context.freshIdentifier("slotProps");
+      const snippet = context.freshIdentifier(`${isScriptIdentifier(slot) ? slot : "default"}Slot`);
       const projectedScope: Scope = !scoped ? scope : {
         ...scope,
         code: new Map([...scope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
@@ -619,7 +628,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const value = context.bindingValueName;
     if (path.length > 1) context.usesNestedBindings = true;
     const write = path.length === 1 ? `${destination} = ${value} as typeof ${destination};`
-      : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
+      : `writePath(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
     return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
   };
   const selectedBindingInput = (prop: string, attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" }>): void => {
@@ -670,7 +679,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const declared = childProp(attribute.name);
       if (declared !== undefined && declared[1].select === undefined && node.attributes.some((entry) =>
         entry.kind === "attribute" && entry.target === undefined && childProp(entry.name)?.[0] === declared[0])) continue;
-      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && /^[-+]?\d+(?:\.\d+)?$/.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
+      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
         literals.push(componentPropAttribute(prop, literalPropValue(attribute.value, contract)));
@@ -776,7 +785,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           if (node.name === "option") optionTextValue = value;
         } else {
           context.usesProperties = true;
-          bindings.push(`{@attach ${context.propertyAttachmentName}(${quote(attribute.name)}, () => ${source})}`);
+          bindings.push(`{@attach setProperty(${quote(attribute.name)}, () => ${source})}`);
           if (SSR_BOOLEAN_PROPERTIES.has(attribute.name) || SSR_STRING_PROPERTIES.has(attribute.name)) {
             const boolean = SSR_BOOLEAN_PROPERTIES.has(attribute.name);
             let rendered = boolean ? `Boolean(${source})` : `String(${source})`;
@@ -872,7 +881,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (literalInputs.length > 0) bindings.push(`${LITERAL_INPUTS_PROP}={{ ${literalInputs.join(", ")} }}`);
   const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
   if (root) {
-    attributes.push("{...rootAttrs}");
+    attributes.push("{...rootAttrs()}");
     if (component) attributes.push(`{...{ ${quote(ROOT_OWNER_PROP)}: true }}`);
     attributes.push(rootScope!.preservesRootFocus
       ? "{@attach (element: Element) => { rootElement = element; if (rootFocusPending) { (element as HTMLElement).focus({ preventScroll: true }); rootFocusPending = false; } return () => { rootFocusPending ||= element.ownerDocument.activeElement === element; if (rootElement === element) rootElement = undefined; }; }}"
@@ -892,7 +901,6 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (authoredStyle?.kind === "literal" && (component || !decoratesStyles)) {
       attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
     }
-    attributes.push(`data-component={[rest["data-component"], ${quote((scope as RootScope).tag)}].filter(Boolean).join(" ")}`);
     if ((scope as RootScope).stateNames.length > 0) attributes.push(`data-${(scope as RootScope).tag}-state={hostState || undefined}`);
     for (const prop of rootScope!.props) {
       const name = `data-${kebabCase(prop)}`;
@@ -931,7 +939,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.style == null || rest.style === false ? undefined : ${quote("")})` : "undefined";
         attributes.push(`style={(typeof document === 'undefined' ? styleText(${base}, ${rules}) : ${base}) || ${empty}}`);
       }
-      attributes.push(`{@attach ${context.decorationAttachmentName}(${rules})}`);
+      attributes.push(`{@attach decorate(${rules})}`);
     }
   }
   attributes.push(...bindings);
@@ -949,17 +957,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     attributes.push(`{@attach (element: Element) => attachNativeEvents(element, [${nativeEvents.map((event) =>
       `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: ${context.handlerNames.get(event.handler) ?? event.handler} }`).join(", ")}])}`);
   }
-  const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
-  if (!component && isVoidElement(node.name)) return open;
+  if (!component && isVoidElement(node.name)) return layoutElement(name, attributes);
   const previousBoundSelect = context.boundSelect;
   const previousSelectSelection = context.selectSelection;
   if (node.name === "select") context.boundSelect = controlledNames.has("value") ? true
     : root && context.rootBindings?.includes("value") ? `${context.nativeBindingReadName}("value") !== undefined` : false;
   if (node.name === "select") context.selectSelection = selectSelectionName;
-  const children = content ?? componentChildren.map((child) => renderNode(child, false, scope, lowering, context)).join("");
+  const previousPreformatted = context.preformatted;
+  if (node.name === "pre" || node.name === "textarea" || node.name === "option") context.preformatted = true;
+  const childNodes = content === undefined ? componentChildren.map((child) => renderNode(child, false, scope, lowering, context)) : [content];
+  // Svelte drops whitespace at the start and end of a tag, so the markup leaves it out.
+  if (!context.preformatted && componentChildren[0]?.kind === "text" && content === undefined) childNodes[0] = childNodes[0]!.replace(/^ /, "");
+  if (!context.preformatted && componentChildren.at(-1)?.kind === "text" && content === undefined) childNodes[childNodes.length - 1] = childNodes.at(-1)!.replace(/ $/, "");
+  context.preformatted = previousPreformatted;
+  const children = childNodes.join("");
   context.boundSelect = previousBoundSelect;
   context.selectSelection = previousSelectSelection;
-  let markup = `${open}${children}</${name}>`;
+  let markup = layoutElement(name, attributes, childNodes);
   if (node.name === "textarea" && content === undefined && node.children.some((child) => child.kind === "text" && (child.expressionPlan !== undefined || child.segments !== undefined))) {
     markup = `<svelte:element this={"textarea"}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>${children}</svelte:element>`;
   }
@@ -975,6 +989,43 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   return snippetDeclarations === "" ? markup : `{#if true}${snippetDeclarations}${markup}{/if}`;
 }
 
+/** Where the shared render module's import goes, once the component's code shows what it calls. */
+const RENDER_IMPORT = "\0html-next:render-import";
+
+function svelteImport(names: readonly string[]): string[] {
+  return [names.length === 0 ? 'import type { Snippet } from "svelte";' : `import { ${[...names, "type Snippet"].join(", ")} } from "svelte";`];
+}
+
+/** The options \`rootAttributes\` takes, only those that differ from its defaults. */
+function rootAttributeOptions(nativeRoot: boolean, omit: readonly string[], clientOmit: readonly string[], server: string | undefined): string {
+  const options = [
+    ...(nativeRoot ? [] : ["forwardBindings: true"]),
+    ...(omit.length === 0 ? [] : [`omit: ${JSON.stringify(omit)}`]),
+    ...(clientOmit.length === 0 ? [] : [`clientOmit: ${JSON.stringify(clientOmit)}`]),
+    ...(server === undefined ? [] : [`server: () => ${server}`]),
+  ];
+  return options.length === 0 ? "" : `, { ${options.join(", ")} }`;
+}
+
+const LINE_WIDTH = 100;
+
+/**
+ * An element's markup. Svelte renders whitespace between elements as a space, and HTML Next
+ * templates have none there, so lines break inside tags: a long start tag puts each attribute on
+ * its own line, and long content puts each child element on its own, hugging the tags around it.
+ */
+function layoutElement(name: string, attributes: readonly string[], children?: readonly string[]): string {
+  const indent = (markup: string): string => markup.replaceAll("\n", "\n\t");
+  const flat = `<${name}${attributes.map((attribute) => ` ${attribute}`).join("")}`;
+  const broken = flat.length > LINE_WIDTH || flat.includes("\n");
+  const start = broken ? `<${name}${attributes.map((attribute) => `\n\t${indent(attribute)}`).join("")}` : flat;
+  if (children === undefined) return `${start}${broken ? "\n" : ""}>`;
+  const inline = `${start}${broken ? "\n" : ""}>${children.join("")}</${name}>`;
+  const elements = children.length > 0 && children.every((child) => child.startsWith("<") && child.endsWith(">"));
+  if (!elements || !inline.includes("\n") && inline.length <= LINE_WIDTH) return inline;
+  return `${start}${children.map((child) => `\n\t>${indent(child.slice(0, -1))}`).join("")}\n></${name}>`;
+}
+
 interface RootScope extends Scope {
   readonly tag: string;
   readonly props: readonly string[];
@@ -983,7 +1034,7 @@ interface RootScope extends Scope {
   readonly preservesRootFocus: boolean;
 }
 
-export function generateSvelteOutput(definition: ComponentDefinition, options: SvelteConversionOptions = {}): SvelteConversionOutput {
+export function generateSvelteOutput(definition: ComponentDefinition, version: string, options: SvelteConversionOptions = {}): SvelteConversionOutput {
   const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
@@ -1009,13 +1060,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
-  for (const name of importedNames) reserved.add(name);
+    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless acceptsWrite isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+  for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
-  reserved.add("formatValue");
-  reserved.add("createFormatValue");
-  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
+  // `next<N>` is a handler's numbered checked write, which shares the handler's scope with state reads.
+  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextStructural\d+$|^next\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const contextNames = new Map<ContextDeclaration, string>();
   for (const declaration of contexts) {
     const alias = declaration.as ?? declaration.name;
@@ -1061,16 +1111,17 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     code,
     types,
   };
-  const lowering = new Lowering(freshIdentifier("htmlNextAuthoredCheck"));
-  const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
+  const lowering = new Lowering("warnUnless");
+  const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, propContractsByTag: options.propContractsByTag,
     ...((css !== "" || (definition.stylesheets?.length ?? 0) > 0) && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
-    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
+    usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
-    writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
+    preformatted: false, freshIdentifier,
+    localName: (authored: string, fallback: string) => freshIdentifier(isScriptIdentifier(authored) && !reserved.has(authored) && !authored.startsWith("$") ? authored : fallback) };
   const iteratedRefs = iteratedRefNames(definition);
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
   const nestedDepthName = freshIdentifier("htmlNextDepth");
@@ -1078,8 +1129,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const generics = selectorGenerics(definition.contract.props);
   const genericParameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
   const dependentParameters = new Map(generics.map(({ from, parameter }) => [from, `NoInfer<${parameter}>`]));
-  const nativeAttributes = freshIdentifier("HtmlNextNativeAttributes");
-  const rawRest = freshIdentifier("htmlNextRest");
+  const nativeAttributes = freshIdentifier("HTMLAttributes");
+  const rawRest = freshIdentifier("restProps");
   const arms = rootArms(definition.template);
   const rootType = arms === undefined ? getDomInterface(definition.template.name) ?? "HTMLElement"
     : [...new Set(arms.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
@@ -1158,12 +1209,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const usesTargetDispatch = handlers.some((handler) => handler.steps.some((step) => step.kind === "dispatch" && step.target !== undefined));
   const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(event: Event): void {\n${handler.steps.map((step, index) => {
     const condition = step.guard === undefined ? undefined : conformingCondition(step.guard, handlerScope, lowering, context);
-    const guardName = condition === undefined ? undefined : context.freshIdentifier("htmlNextGuard");
+    const guardName = condition === undefined ? undefined : context.freshIdentifier("guard");
     const guard = condition === undefined ? "" : `const ${guardName} = ${condition.source}; if (${condition.invalid ? `(${guardName} as unknown) !== Symbol.for('html-next.invalid-result') && ` : ""}${guardName}) `;
     if (step.kind === "dispatch") {
       const declaration = target.events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
-      const detail = context.freshIdentifier(`htmlNextDetail${index}`);
+      const detail = context.freshIdentifier("detail");
       const source = step.value === undefined ? "undefined" : conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope)).source;
       if (step.target !== undefined) {
         context.refs.add(step.target);
@@ -1179,19 +1230,25 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     if (step.kind !== "set") fail("HT030", `Svelte conversion of handler step in \`${handler.name}\` is not implemented.`);
     const state = states.find((entry) => entry.name === step.writablePath[0]);
     if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
-    const next = context.freshIdentifier(`htmlNextCandidate${index}`);
-    const destinationCheck = handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, next, handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
-    const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
-      `(${next} === undefined || ${destinationCheck})`, `handler:${handler.name}:${step.path}`,
-      `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
     const destination = scope.code.get(state.name)!;
-    const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
-      : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
-        ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
-    return `  ${guard}{ const ${next}: unknown = ${read.source}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${check})`}) { ${write} } }`;
-  }).join("\n")}\n}`);
-  const usesNestedWrites = context.usesNestedBindings || handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
+    const destinationCheck = conformingLiteralWrite(step, definition) ? undefined
+      : handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, "value", handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
+    const nested = step.writablePath.length > 1;
+    const writeTo = (value: string): string => nested ? `writePath(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
+      ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${value});` : `${destination} = ${value};`;
+    const declared = declarationTypeNode(state.type, state.shape);
+    const sameKind = declared !== undefined && category(declared) === category(typeOf(step.value.ast, handlerScope).type);
+    if (destinationCheck === undefined && !read.invalid) return `  ${guard}${writeTo(nested || sameKind ? read.source : `${read.source} as typeof ${destination}`)}`;
+    // One checked write per handler reads as `next`; later ones number theirs.
+    const next = setSteps(handler) > 1 ? `next${index}` : "next";
+    const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
+    const write = [`const ${next}${read.invalid ? ": any" : ""} = ${read.source};`,
+      `if (acceptsWrite(${next}${check})) ${writeTo(nested || read.invalid || sameKind ? next : `${next} as typeof ${destination}`)}`];
+    return guard === "" ? write.map((line) => `  ${line}`).join("\n") : `  ${guard}{\n${write.map((line) => `    ${line}`).join("\n")}\n  }`;
+  }).join("\n")}\n}`)
+    // A handler that never reads its event takes no parameter.
+    .map((source) => /\bevent\b/.test(source.slice(source.indexOf("{"))) ? source : source.replace("(event: Event)", "()"));
   const focusReads: string[] = [];
   if (scope.preservesRootFocus) {
     const match = definition.template.flow;
@@ -1230,15 +1287,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     }).join(", ");
     return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ root: () => rootElement ?? null, source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: [${parameters}] });`;
   });
-  const formatBinding = freshIdentifier("htmlNextFormatValue");
-  const moduleFallbacks = lowering.moduleFallbacks(formatBinding);
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
-    'import type { Snippet } from "svelte";',
-    ...(moduleFallbacks.length === 0 ? [] : [`const formatValue = ${formatBinding};`]),
-    `import type { HTMLAttributes as ${nativeAttributes} } from "svelte/elements";`,
-    ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 || context.imports.size > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
-    ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
+    `import type { HTMLAttributes${nativeAttributes === "HTMLAttributes" ? "" : ` as ${nativeAttributes}`} } from "svelte/elements";`,
+    ...svelteImport([...(nestedDepthLimit !== undefined || contexts.length > 0 || context.imports.size > 0) ? ["getContext"] : [],
+      ...(nestedDepthLimit !== undefined || states.length > 0 || context.imports.size > 0) ? ["setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
+    RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
@@ -1286,29 +1340,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `  return untrack(() => rootElement === undefined ? (${context.initialBindingsName} as Record<string, unknown>)[name] : rootElement.getAttribute(name) ?? undefined);`,
       "}",
     ]),
-    // Svelte's spread path normalizes these names through an inherited object property.
-    // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = Object.assign(Object.create(null) as Record<string, unknown>, rest); ${nativeRoot ? `Reflect.deleteProperty(attrs, ${quote(NATIVE_BINDINGS_PROP)}); ` : ""}${initialBindingSources.length === 0 ? "" : `if (typeof document === 'undefined') for (const [name, value] of Object.entries(${context.initialBindingsName})) { if (value !== undefined) attrs[name] = value; } `}Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); Reflect.deleteProperty(attrs, ${quote(BINDING_INPUTS_PROP)}); ${hasProps ? `Reflect.deleteProperty(attrs, ${quote(LITERAL_INPUTS_PROP)}); ` : ""}${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { ${nativeRoot ? (context.rootBindings ?? []).map((name) => `Reflect.deleteProperty(attrs, ${quote(name)});`).join(" ") : ""} Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = rootAttributes(() => rest, ${quote(definition.contract.tag)}${rootAttributeOptions(nativeRoot, [...context.rootAttributeBindings], nativeRoot ? context.rootBindings ?? [] : [], initialBindingSources.length === 0 ? undefined : context.initialBindingsName)});`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
-    "let specialElement: Element | undefined;",
-    "let hadConstructor = false;",
-    "let hadProto = false;",
-    "$effect(() => {",
-    "  const element = rootElement;",
-    "  if (element === undefined) return;",
-    "  if (element !== specialElement) { specialElement = element; hadConstructor = false; hadProto = false; }",
-    "  const constructorValue: unknown = rest.constructor;",
-    "  const constructor = Object.keys(rest).includes('constructor') && constructorValue != null && constructorValue !== false;",
-    "  if (constructor) element.setAttribute('constructor', String(constructorValue));",
-    "  else if (hadConstructor) element.removeAttribute('constructor');",
-    "  hadConstructor = constructor;",
-    "  const protoValue: unknown = rest.__proto__;",
-    "  const proto = Object.keys(rest).includes('__proto__') && protoValue != null && protoValue !== false;",
-    "  if (proto) element.setAttribute('__proto__', String(protoValue));",
-    "  else if (hadProto) element.removeAttribute('__proto__');",
-    "  hadProto = proto;",
-    "});",
     ...(context.implicitOptionValueName === undefined ? [] : [
       `function ${context.implicitOptionValueName}(value: unknown): string {`,
       "  const text = String(value ?? '');",
@@ -1334,42 +1368,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  return untrack(() => classText(base, decorations));",
       "}",
     ] : []),
-    ...(context.usesDecorationAttachment ? [
-      `function ${context.decorationAttachmentName}(decorations: readonly Decoration[]) {`,
-      "  return (element: Element) => {",
-      "    for (const decoration of decorations) $effect(() => {",
-      "      const value = decoration.read();",
-      "      if (value === Symbol.for('html-next.invalid-result')) return;",
-      "      if (decoration.kind === 'class') element.classList.toggle(decoration.name, Boolean(value));",
-      "      else (element as HTMLElement).style.setProperty(decoration.name, value == null ? '' : String(value));",
-      "    });",
-      "  };",
-      "}",
-    ] : []),
-    ...(context.usesScopedSlots ? [
-      `function ${context.checkedSlotName}(slot: Snippet<[any]> | null | undefined, name: string) {`,
-      "  if (slot === null) {",
-      `    const message = 'Scoped slot \u0060' + name + '\u0060 requires a consumer <template slot="' + name + '">.';`,
-      "    throw Object.assign(new Error('HR007: ' + message), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR007', message }) });",
-      "  }",
-      "  return slot;",
-      "}",
-    ] : []),
-    ...(context.usesProperties ? [
-      `function ${context.propertyAttachmentName}(name: string, read: () => unknown) {`,
-      "  return (element: Element) => {",
-      "    let initialized = false;",
-      "    $effect(() => {",
-      "      const value = read();",
-      "      if (value === Symbol.for('html-next.invalid-result')) return;",
-      "      // Native scroll setters run while live roots are detached and have no initial layout effect.",
-      "      const first = !initialized; initialized = true;",
-      "      if (first && (name === 'scrollTop' || name === 'scrollLeft')) return;",
-      "      Reflect.set(element, name, value);",
-      "    });",
-      "  };",
-      "}",
-    ] : []),
     ...(context.usesAttributeBinding ? [
       `function ${context.bindingHelperName}(name: string, read: () => unknown, update?: (value: any) => void, initialize = false) {`,
       "  return (element: Element) => {",
@@ -1385,28 +1383,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  };",
       "}",
     ] : []),
-    ...(context.retentions.size === 0 ? [] : [
-      "function retainedValue<T>(initial: T): (candidate: unknown) => T {",
-      "  let previous = initial;",
-      "  return (candidate: unknown) => {",
-      "    if (candidate === Symbol.for('html-next.invalid-result')) return previous;",
-      "    previous = candidate as T;",
-      "    return previous;",
-      "  };",
-      "}",
-      ...(Array.from(context.retentions.values()).some((entry) => entry.initial === undefined) ? [
-        "function retainedStructuralValue(): <T>(candidate: T | symbol) => { ready: boolean; value: T } {",
-        "  let ready = false;",
-        "  let previous: unknown;",
-        "  return function<T>(candidate: T | symbol) {",
-        "    if (candidate !== Symbol.for('html-next.invalid-result')) { ready = true; previous = candidate; }",
-        "    return { ready, value: previous as T };",
-        "  };",
-        "}",
-      ] : []),
-      ...[...context.retentions].filter(([site]) => !context.localRetentions.has(site))
-        .map(([site, entry]) => `const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`};`),
-    ]),
+    ...[...context.retentions].filter(([site]) => !context.localRetentions.has(site))
+      .map(([site, entry]) => `const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`};`),
     ...(hasProps ? [
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${objectKey(prop.name)}: ${"default" in prop.contract ? literalValueSource(prop.contract.default) : "null"}`).join(", ")} };`,
       "const inputAccepted = Object.create(null) as Record<string, boolean>;",
@@ -1461,7 +1439,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       .filter((site) => !context.localHtmlSites.has(site))
       .map((site) => `const htmlSite${site} = ${retainedHtmlSource(context, site)};`),
     ...(styles.stateNames.length === 0 ? [] : [
-      HOST_STATE_TOKENS_SOURCE,
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
     ...(context.refs.size === 0 && !usesController ? [] : [
@@ -1486,16 +1463,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  return Array.isArray(recorded) ? recorded[0] : recorded;",
       "}",
     ]),
-    ...(usesNestedWrites ? [
-      `function ${context.writePathName}(root: unknown, path: readonly unknown[], value: unknown): void {`,
-      "  let target = root;",
-      "  for (const [index, key] of path.entries()) {",
-      "    if (typeof key !== 'string' && typeof key !== 'number' || target === null || typeof target !== 'object') return;",
-      "    if (index === path.length - 1) (target as Record<string | number, unknown>)[key] = value;",
-      "    else target = (target as Record<string | number, unknown>)[key];",
-      "  }",
-      "}",
-    ] : []),
     ...(usesController ? [
       ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, Parameters<typeof acceptsControllerWrite>[1]> = ${JSON.stringify(controllerStateTypes)};`] : []),
       `useComponentHost(() => import(${quote(definition.controller!)}), {`,
@@ -1516,10 +1483,22 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "});",
     ] : []),
     ...handlerSources,
-    ...lowering.fallbacks(),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
-  const moduleSources = [...moduleFallbacks, ...lowering.authoredFallbacks()];
-  return { component: `${moduleSources.length === 0 ? "" : `<script module lang="ts">\n${moduleSources.join("\n").replace(/<\/script/gi, "<\\/script")}\n</script>\n`}${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
+  const open = script.slice(0, script.indexOf("\n"));
+  let body = script.slice(open.length + 1, script.lastIndexOf("\n</script>"));
+  let template = markup;
+  // The root is a variable only for code that reads it.
+  const ROOT_ELEMENT = /^let rootElement = \$state<Element \| undefined>\(undefined\);\n?/m;
+  if (!/\brootElement\b/.test(body.replace(ROOT_ELEMENT, "")) && !/\brootElement\b/.test(template.replace("bind:this={rootElement}", ""))) {
+    body = body.replace(ROOT_ELEMENT, "");
+    template = template.replace(/\s*bind:this=\{rootElement\}/, "");
+  }
+  const rendered = [...new Set([...lowering.helpers(), ...SVELTE_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(`${body}\n${template}`))])].sort();
+  body = body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? "" : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? SVELTE_RENDER_SPECIFIER)};\n`);
+  // Svelte's convention indents the script under its tag.
+  const formatted = formatSvelteScript(body, `${definition.contract.name}.ts`).trimEnd().split("\n").map((line) => line === "" ? line : `\t${line}`).join("\n");
+  const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n`;
+  return { component, css, usesHtml: context.htmlSites > 0,
     helpers: [
       ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
@@ -1531,5 +1510,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(usesController ? ["host" as const] : []),
       ...(usesController || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
       ...(computed.length > 0 || usesController ? ["reactivity" as const] : []),
+      ...(rendered.length > 0 ? ["render" as const] : []),
     ] };
 }

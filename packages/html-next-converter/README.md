@@ -81,7 +81,10 @@ Svelte output uses Svelte 5 runes, snippets, attachments, and public lifecycle A
 components and adjacent imported CSS under `generated/svelte/`. It supports props (including generic
 and state-selected types), state/computed/handlers, named and scoped slots, native events, context, data reads, controllers and refs, native form controls, safe HTML, structural
 flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
-Svelte's normal compiler owns rendering, SSR, and hydration.
+Svelte's normal compiler owns rendering, SSR, and hydration. Components import the rendering and
+binding helpers their markup and handlers call from the shared `svelte/render.svelte.ts`, which an
+application ships once. Scripts are formatted in `sv create`'s style. Markup breaks lines inside tags,
+because Svelte renders whitespace between elements as a space.
 
 ```sh
 html-next-convert svelte 'components/**' --mode library --out-dir generated
