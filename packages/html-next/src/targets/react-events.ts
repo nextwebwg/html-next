@@ -100,6 +100,10 @@ export function useNativeEvents(bindings: readonly NativeBinding[]): (element: E
 }
 `;
 
+/** Every name the React events module may export, which a component's own identifiers must not take. */
+export const REACT_EVENTS_EXPORTS: readonly string[] = [...`${DECLARED_SOURCE}${DISPATCH_TARGETS_SOURCE}${SOURCE}${REACT_SOURCE}`
+  .matchAll(/^export (?:const|function|class) ([\w$]+)/gm)].map((match) => match[1]!);
+
 export function reactEventsArtifact(version: string, declared = false): GeneratedArtifact {
   // The header line stays first; React follows it for the hook.
   const content = nativeEventsModule(version, declared).replace(/^(\/\/[^\n]*\n)/, '$1import React from "react";\n');

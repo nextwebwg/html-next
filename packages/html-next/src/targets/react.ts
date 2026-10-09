@@ -6,7 +6,8 @@ import { parseDuration } from "../duration.js";
 import { componentName, kebabCase } from "../names.js";
 import { getDomInterface } from "../platform.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
-import { REACT_RENDER_SPECIFIER } from "./react-render.js";
+import { REACT_EVENTS_EXPORTS } from "./react-events.js";
+import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
@@ -21,7 +22,8 @@ import { parseFragment } from "parse5";
 
 /**
  * Identifiers the generated component already uses: JavaScript names, the helpers it imports, its
- * own locals, and the parameters of the callbacks it writes. Authored names avoid them.
+ * own locals, and the parameters of the callbacks it writes. Authored names avoid them. The
+ * rendering and events modules' names come from their sources, so a new helper is never missed.
  */
 const REACT_RESERVED = new Set([
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export",
@@ -36,11 +38,16 @@ const REACT_RESERVED = new Set([
   "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
   "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
   "ref", "cleanup", "binding", "attrs", "detail", "name", "keys",
-  "useLiveState", "checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", "propValidityState",
-  "selectedPropNode", "acceptsControllerWrite", "attachNativeEvents", "dispatchDeclared", "dispatchDeclaredTargets",
+  "checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", "propValidityState",
+  "selectedPropNode", "acceptsControllerWrite",
   "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
   "useComponentHost", "componentContext", "NestedDepthContext", "ScopedAttachment",
+  ...REACT_RENDER_EXPORTS, ...REACT_EVENTS_EXPORTS,
 ]);
+
+/** Names a template local (a loop item or `$with` alias) must not shadow inside the markup it scopes. */
+const REACT_LOCAL_RESERVED = new Set([...REACT_RENDER_EXPORTS, "dispatchDeclaredTargets", "htmlNextAuthoredCheck",
+  "htmlNextAuthoredCheckReported", "Symbol", "Object", "String", "Number", "Array", "Math"]);
 
 /** A generated name the component builds from an index, such as `attachEvents2`, or a private `__` name. */
 const GENERATED_NAME = /^(?:__|_|attachEvents\d|controlRef|controlValue|previousProperty|propertyRef|genericCleanup|HtmlNextContext_)/;
@@ -291,7 +298,7 @@ function localScope(scope: RenderScope, names: readonly (readonly [string, Stati
 }
 
 function localIdentifier(name: string, scope: RenderScope, state: RenderState): string {
-  if (isScriptIdentifier(name) && !["dispatchDeclaredTargets", "htmlNextAuthoredCheck", "htmlNextAuthoredCheckReported", "formatValue", "Symbol", "Object", "String", "Number", "Array", "Math", "text", "truthy", "attribute", "number", "list", "concat", "join", "math", "arithmetic"].includes(name)) return name;
+  if (isScriptIdentifier(name) && !REACT_LOCAL_RESERVED.has(name)) return name;
   let alias: string;
   do alias = `__htmlNextLocal${state.nextRetainedAlias++}`;
   while ([...scope.code.values()].includes(alias) || scope.code.has(alias));

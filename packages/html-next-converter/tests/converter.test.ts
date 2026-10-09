@@ -318,6 +318,28 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     ]);
   });
 
+  it("keeps authored React names off the shared rendering and events helpers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-names-"));
+    temporary.push(root);
+    // A `text` state once shadowed the text() helper, and an `isNumber` handler the write check it calls.
+    await writeFile(join(root, "names.html"), `<template component="x-names" status="early" summary="Helper names."><defs>
+      <state name="text" type="string" value="hi"></state><state type="number" name="count" value="1"></state>
+      <handler name="isNumber"><set name="count" expr:value="$count + 1"></set></handler>
+      <handler name="useNativeEvents"><set name="count" value="0"></set></handler>
+      </defs><section><p>Say {$text} {$count}</p><button on:click="isNumber">Go</button><button on:click="useNativeEvents">Reset</button></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    assert.match(renderToStaticMarkup(createElement(module.exports.XNames!)), /<p>Say hi 1<\/p>/);
+    // The handler's write check is the imported predicate, not the handler calling itself.
+    await typecheckReact(root, manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path)).map((artifact) => join(outDirectory, artifact.path)));
+  });
+
   it("converts native ref targets for focus and validation handlers", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-ref-actions-"));
     temporary.push(root);
