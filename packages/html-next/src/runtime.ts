@@ -745,16 +745,18 @@ function readInvocation(
     effects.push(createEffect(scope.scheduler, () => {
       let valid = true;
       // The `from` parameters subscribe, and only a change to them requests again; the others only
-      // record what they accept. A request samples every parameter as it is sent.
+      // record what they accept. A request samples every parameter as it is sent. A whole list sent
+      // as a parameter goes out item by item, so it depends on its items too.
       const parameters: Record<string, Value> = {};
       for (const parameter of data.parameters) {
         if (parameter.mode !== "from") { untracked(() => readParameter(parameter)); continue; }
         const result = readParameter(parameter);
         if (!result.valid) valid = false;
+        if (Array.isArray(result.value)) readItems(result.value);
         parameters[parameter.name] = result.value;
       }
       if (!valid) return;
-      resource.update(parameters);
+      untracked(() => resource.update(parameters));
     }, 0, active));
   }
   return { scope, passThrough, effects, explicit, propInputs };

@@ -1706,6 +1706,43 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
   });
 
+  it("requests again and passes a whole list on when it changes in place, like live", async () => {
+    const requests: string[] = [];
+    fetchStub = async (url) => {
+      requests.push(url);
+      await Promise.resolve();
+      return { ok: true, status: 200, json: async () => [], text: async () => "" };
+    };
+    const tags = `<template component="x-tags" status="early" summary="Tags.">
+      <defs><prop name="items" type="list(string)" default="[]">Items.</prop></defs><output>{$items}</output></template>`;
+    const shelf = parent(`<section><x-tags from:items="$filter.tags"></x-tags><x-tags from:items="$more"></x-tags></section>`, `
+      <state name="filter" type="object({ tags: list(string) })" value="{ tags: ['a'] }"></state>
+      <state name="more" type="list(string)" value="['x']"></state>
+      <data name="found" src="https://example.test/api/found" type="list(string)">
+        <param name="tags" from:value="$filter.tags"></param><param name="more" from:value="$more"></param></data>`);
+    // Each `from` parameter compares what it reads now with what it read for the last request.
+    const compared = [...[...graph([shelf, tags]).modules.values()].join("\n").matchAll(/readsChanged\(DQ0\.(f\d+), (f\d+)\)/g)];
+    assert.equal(compared.length, 2);
+    for (const [, last, now] of compared) assert.equal(last, now);
+    try {
+      // A parameter or prop that is a whole list depends on its contents, not only on which list it is.
+      await same([shelf, tags], [
+        (host) => { host.state.filter.tags.push("b"); },
+        (host) => { host.state.filter.tags[0] = "z"; },
+        (host) => { host.state.more.push("y"); },
+      ]);
+      const half = requests.length / 2;
+      assert.deepEqual(requests.slice(half), requests.slice(0, half));
+      assert.deepEqual(requests.slice(0, half).map((url) => new URL(url).search), [
+        "?tags=a&more=x", "?tags=a&tags=b&more=x", "?tags=z&tags=b&more=x", "?tags=z&tags=b&more=x&more=y",
+        // Reconnecting requests again.
+        "?tags=z&tags=b&more=x&more=y",
+      ]);
+    } finally {
+      fetchStub = undefined;
+    }
+  });
+
   it("writes is=, content directives and two-way bindings on invocations like live", async () => {
     const field = `<template component="x-field" status="early" summary="Field.">
       <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="$value"></template>`;
