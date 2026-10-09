@@ -294,6 +294,30 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     assert.match(renderToStaticMarkup(createElement(module.exports.XText!)), /<span[^>]*>Hello<\/span>/);
   });
 
+  it("keeps React's preformatted text, textarea defaults and non-breaking spaces exactly", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-text-"));
+    temporary.push(root);
+    await writeFile(join(root, "text.html"), `<template component="x-spacing" status="early" summary="Text spacing."><defs>
+      <state type="number" name="count" value="1"></state>
+      </defs><section><pre>first  line
+  second</pre><pre>{$count}  two
+  three</pre><textarea>a  b
+  c</textarea><p>a&nbsp;&nbsp;b</p><p>a&nbsp;&nbsp;{$count}</p><p>a
+        b   {$count}</p></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    const markup = renderToStaticMarkup(createElement(module.exports.XSpacing!));
+    assert.deepEqual([...markup.matchAll(/<(pre|textarea|p)[^>]*>([^<]*)</g)].map((match) => match[2]), [
+      "first  line\n  second", "1  two\n  three", "a  b\n  c", "a\u00a0\u00a0b", "a\u00a0\u00a01", "a b 1",
+    ]);
+  });
+
   it("converts native ref targets for focus and validation handlers", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-ref-actions-"));
     temporary.push(root);

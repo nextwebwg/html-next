@@ -90,6 +90,8 @@ interface RenderState {
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
   usesOutputValue: boolean;
+  /** Inside <pre> or <textarea>, whose text is kept exactly, as Vue keeps it. */
+  preformatted: boolean;
 }
 
 interface RenderScope extends Scope {
@@ -165,25 +167,27 @@ function literalStyle(value: string, importantStyles: Array<{ readonly name: str
 }
 
 /**
- * Authored text as JSX text, written as authored with JSX's own whitespace handling: each
- * whitespace run is one space. Text JSX would read as markup, or that starts or ends with a space a
- * formatter could move to a line edge, stays a string expression.
+ * Authored text as JSX text, written as authored with JSX's own whitespace handling: each run of
+ * ASCII whitespace is one space. Text JSX would read as markup, that starts or ends with a space a
+ * formatter could move to a line edge, or that holds other whitespace (a non-breaking space) a
+ * compiler could trim there, stays a string expression, as does preformatted text.
  */
-function jsxText(value: string): string {
-  const collapsed = value.replace(/\s+/g, " ");
-  return /[{}<>&]|^ | $/.test(collapsed) ? `{${quote(collapsed)}}` : collapsed;
+function jsxText(value: string, preformatted: boolean): string {
+  const collapsed = preformatted ? value : value.replace(/[\t\n\f\r ]+/g, " ");
+  return preformatted || /[{}<>&]|^ | $|[^\S ]/.test(collapsed) ? `{${quote(collapsed)}}` : collapsed;
 }
 
 /**
  * One text node's authored and computed parts as a template literal, without the indentation at
  * its ends: the live runtime renders them as one Text node, which a browser shapes as one run.
  */
-function jsxTextParts(segments: readonly { readonly value: string; readonly computed?: string }[]): string {
-  const parts = segments.map((segment) => segment.computed === undefined ? { text: segment.value.replace(/\s+/g, " ") } : segment);
+function jsxTextParts(segments: readonly { readonly value: string; readonly computed?: string }[], preformatted: boolean): string {
+  const parts = segments.map((segment) => segment.computed !== undefined ? segment
+    : { text: preformatted ? segment.value : segment.value.replace(/[\t\n\f\r ]+/g, " ") });
   const first = parts[0];
-  if (first !== undefined && "text" in first && /^\s*\n/.test(segments[0]!.value)) first.text = first.text.trimStart();
+  if (!preformatted && first !== undefined && "text" in first && /^[\t\f\r ]*\n/.test(segments[0]!.value)) first.text = first.text.replace(/^ /, "");
   const last = parts.at(-1);
-  if (last !== undefined && "text" in last && /\n\s*$/.test(segments.at(-1)!.value)) last.text = last.text.trimEnd();
+  if (!preformatted && last !== undefined && "text" in last && /\n[\t\f\r ]*$/.test(segments.at(-1)!.value)) last.text = last.text.replace(/ $/, "");
   return `{\`${parts.map((part) => "text" in part ? part.text.replace(/[\\`]|\$(?=\{)/g, (character) => `\\${character}`) : `\${${part.computed}}`).join("")}\`}`;
 }
 
@@ -256,12 +260,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           parts.push({ value: segment.value, computed: nullableText(lowering.text({ kind: "id", name: alias }, local), lowering) });
         } else parts.push({ value: segment.value, computed: nullableText(lowering.text(plan.ast, scope), lowering) });
       }
-      let content = jsxTextParts(parts);
+      let content = jsxTextParts(parts, state.preformatted);
       for (const part of retained.toReversed()) content = `<RetainedValue value={${part.value}} accepts={() => ${part.guard ?? "true"}} render={(${part.alias}) => <>${content}</>} />`;
       return content;
     }
     const plan = node.expressionPlan;
-    if (plan === undefined) return jsxText(node.value);
+    if (plan === undefined) return jsxText(node.value, state.preformatted);
     const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
     const text = nullableText(lowering.text(plan.ast, scope), lowering);
     if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
@@ -695,9 +699,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       ? `ref={(element) => ${name}(element, [${dynamicPaths.join(", ")}])}`
       : `ref={${name}}`);
   }
+  const preformatted = state.preformatted;
+  if (node.name === "pre" || node.name === "textarea") state.preformatted = true;
   const children = outputValue || node.name === "textarea" && control?.name === "value" ? ""
     : content ?? componentChildren.map((child) => renderNode(node.name === "select" && control?.name === "value" ? withoutAuthoredSelection(child) : child,
       scope, lowering, imports, handlers, attachments, state, undefined, component, svg && node.name !== "foreignObject")).join("");
+  state.preformatted = preformatted;
   const boundReflections = rootTag === undefined ? [] : Object.keys(state.definition.contract.props).flatMap((name) => {
     const attributeName = `data-${kebabCase(name)}`;
     if (!node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === attributeName)) return [];
@@ -822,7 +829,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
   const styles = compileComponentStylesForBuild(definition.css, definition);
   const renderState: RenderState = { definition, slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
-    nextSlotAlias: 0, nextRetainedAlias: 0, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
+    nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
     { tag: definition.contract.tag, reflections, captureRoot: true, hostState: styles.stateNames.length > 0 });
