@@ -11,7 +11,13 @@ Firefox currently parses malformed table content differently from Chromium, WebK
 which would make hydration browser-dependent. Props, state, computed values, bindings, structural
 directives and slots map to Vue's own facilities; declared events remain native
 `CustomEvent`s on the lowered root (Vue emits are reserved for `v-model` updates), and styles become
-`<style scoped>`.
+`<style scoped>`. `:host` selects the root by its tag as a class, and a component the styles select
+by tag carries that class where it is used, so Vue passes it to the child's root.
+
+Every component imports the shared `vue/host.ts` for what each one does the same way: consumer
+attributes on the root, the hydration root check, checked handler writes, and the expression and
+rendering helpers its template calls. A bundler keeps only the helpers a component imports, and an
+application ships each one once.
 
 Components declaring props import `vue/props.ts`. Invalid incoming values remain available at
 their source while the root reports validity; a later typed binding is checked separately. A
@@ -63,7 +69,9 @@ paths produce `HTC002` before any output is written, and an unsupported target v
 
 React output accepts the same quoted globs and mirrors the same source
 directories under `generated/react/`, emitting `.tsx` and adjacent plain `.css` files. The CSS is
-imported by each component; styled-components is not used. React conversion covers
+imported by each component; styled-components is not used. Components import the rendering and
+binding helpers their markup and handlers call from the shared `react/render.tsx`, which an
+application ships once; the output is formatted. React conversion covers
 static markup, props and bindings, default and named/scoped slots, state/computed/handlers,
 context, declared data, native form controls, safe HTML, and structural templates. The shared
 conformance corpus and feature-specific React fixtures compare browser behavior, server output,
@@ -73,7 +81,10 @@ Svelte output uses Svelte 5 runes, snippets, attachments, and public lifecycle A
 components and adjacent imported CSS under `generated/svelte/`. It supports props (including generic
 and state-selected types), state/computed/handlers, named and scoped slots, native events, context, data reads, controllers and refs, native form controls, safe HTML, structural
 flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
-Svelte's normal compiler owns rendering, SSR, and hydration.
+Svelte's normal compiler owns rendering, SSR, and hydration. Components import the rendering and
+binding helpers their markup and handlers call from the shared `svelte/render.svelte.ts`, which an
+application ships once. Scripts are formatted in `sv create`'s style. Markup breaks lines inside tags,
+because Svelte renders whitespace between elements as a space.
 
 ```sh
 html-next-convert svelte 'components/**' --mode library --out-dir generated

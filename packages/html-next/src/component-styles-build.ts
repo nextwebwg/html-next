@@ -19,7 +19,8 @@ import {
   styleRuleKind,
   type StyleRuleKind,
 } from "./component-styles.js";
-import type { ComponentDefinition } from "./template.js";
+import { getDomInterface } from "./platform.js";
+import type { ComponentDefinition, TemplateNode } from "./template.js";
 import { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 
 /** At-rules whose block holds style rules; name-defining rules keep their authored context. */
@@ -123,8 +124,10 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
 /**
  * Styles for a converted Vue component, emitted as `<style scoped>`. Vue's scoping already bounds
  * the region: projected content carries the consumer's scope, and Vue's own `:slotted()` reaches it.
- * A native scope preserves the descendant-only meaning of ordinary selectors and excludes nested
- * component roots. Explicit host selectors become `:scope`; Vue still owns slot scoping.
+ * A native scope keeps ordinary selectors to the component's own descendants and stops at nested
+ * component roots, as in the default build, through classes: the root carries its tag, and each
+ * component the template invokes carries its own, which Vue passes to that component's root.
+ * `:host` is `:scope`, and a component selected by tag is its class.
  */
 export function compileComponentStylesForVue(
   css: string,
@@ -140,14 +143,40 @@ export function compileComponentStylesForVue(
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, undefined, vueHostSelector);
   });
-  const scope = postcss.atRule({ name: "scope", params: `([${COMPONENT_ATTRIBUTE}~="${tag}"]) to ([${COMPONENT_ATTRIBUTE}])` });
+  const scope = postcss.atRule({ name: "scope", params: vueScope(definition) });
   for (const node of root.nodes.slice()) {
     if (node.type === "rule" || (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()))) {
       scope.append(node);
     }
   }
-  if (scope.nodes?.length) root.append(scope);
-  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names) }, definition);
+  if (scope.nodes === undefined || scope.nodes.length === 0) {
+    return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names) }, definition);
+  }
+  root.append(scope);
+  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names),
+    components: [...componentTags(definition.template)] }, definition);
+}
+
+/** The component's scope: its root, down to the roots of the components its template invokes. */
+function vueScope(definition: ComponentDefinition): string {
+  const limits = [...componentTags(definition.template)].map((name) => vueHostSelector(name));
+  return `(${vueHostSelector(definition.contract.tag)})${limits.length === 0 ? "" : ` to (${limits.join(", ")})`}`;
+}
+
+/** Components a template invokes, slot fallbacks included. */
+function componentTags(node: TemplateNode, tags = new Set<string>()): Set<string> {
+  if (node.kind === "text") return tags;
+  if (node.kind === "slot") node.fallback?.forEach((child) => componentTags(child, tags));
+  else {
+    if (node.name.includes("-") && getDomInterface(node.name) === undefined) tags.add(node.name);
+    node.children.forEach((child) => componentTags(child, tags));
+  }
+  return tags;
+}
+
+/** In Vue, a component's root is selected by its tag as a class; `namespace` keeps an authored `n|` prefix. */
+export function vueHostSelector(tag: string, namespace = ""): string {
+  return `${namespace === "" ? "" : namespace + "*"}.${tag.replace(/[^\w-]/g, (character) => `\\${character}`)}`;
 }

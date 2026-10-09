@@ -20,3 +20,44 @@ export function formatVue(source: string, filePath: string): string {
   }
   return context.formatText({ filePath, fileText: source });
 }
+
+let reactContext: ReturnType<typeof createContext> | undefined;
+
+/**
+ * Formats generated React TSX with dprint's TypeScript plugin, in React's usual double quotes and
+ * semicolons. Formatting only lays the code out: when dprint cannot (its Wasm printer can run out of
+ * memory on deeply nested render props), the component keeps its unformatted, equally valid source.
+ */
+export function formatReact(source: string, filePath: string): string {
+  if (reactContext === undefined) {
+    reactContext = createContext({ indentWidth: 2, lineWidth: 100 });
+    reactContext.addPlugin(readFileSync(require.resolve("@dprint/typescript/plugin.wasm")));
+  }
+  try {
+    return reactContext.formatText({ filePath, fileText: source });
+  } catch {
+    // ponytail: a failed Wasm instance is discarded whole; flatten the nested output if this recurs.
+    reactContext = undefined;
+    return source;
+  }
+}
+
+let svelteContext: ReturnType<typeof createContext> | undefined;
+
+/**
+ * Formats a converted Svelte component's script, or the shared Svelte module, in `sv create`'s
+ * style: tabs and single quotes. Its markup keeps the converter's own layout, which breaks lines
+ * inside tags: Svelte renders whitespace between elements as a space.
+ */
+export function formatSvelteScript(source: string, filePath: string): string {
+  if (svelteContext === undefined) {
+    svelteContext = createContext({ useTabs: true, lineWidth: 100 });
+    svelteContext.addPlugin(readFileSync(require.resolve("@dprint/typescript/plugin.wasm")), { quoteStyle: "alwaysSingle", quoteProps: "asNeeded" });
+  }
+  try {
+    return svelteContext.formatText({ filePath, fileText: source });
+  } catch {
+    svelteContext = undefined;
+    return source;
+  }
+}

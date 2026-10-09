@@ -40,6 +40,28 @@ import { formattingSource, formattingProbe } from "./formatting-fixture.js";
 
 const cases: readonly ParityCase[] = [
   {
+    name: "template text keeps spaces between siblings, non-breaking spaces and preformatted runs",
+    features: ["text", "whitespace"],
+    definitions: {
+      "x-text-spacing": `<template component="x-text-spacing"><defs><state name="count" type="number" value="1"></state>
+        <handler name="next"><set name="count" expr:value="$count + 1"></set></handler></defs><section>
+        <p class="sibling"><b>Total:</b>
+          {$count} items</p>
+        <p class="nbsp">a&nbsp;&nbsp;{$count}</p>
+        <pre>{$count}  two
+  three</pre>
+        <button on:click="next">Next</button>
+      </section></template>`,
+    },
+    invocation: `<x-text-spacing id="case"></x-text-spacing>`,
+    vueRender: `h(XTextSpacing, { id: "case" })`,
+    root: "#case",
+    // Vue renders authored text with its own whitespace handling; the rendered words and spaces match.
+    probe: `({ sibling: root.querySelector(".sibling").textContent.replace(/[\\t\\n\\f\\r ]+/g, " ").trim(), nbsp: root.querySelector(".nbsp").textContent, pre: root.querySelector("pre").textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { sibling: "Total: 2 items", nbsp: "a\u00a0\u00a02", pre: "2  two\n  three" },
+  },
+  {
     name: "SVG class rules stay inside owned scope with inherited and explicit projected fills",
     features: ["scoped styles", "SVG", "slots", "inheritance"],
     definitions: {
@@ -52,6 +74,39 @@ const cases: readonly ParityCase[] = [
     probe: `Array.from(root.querySelectorAll('rect'), node => getComputedStyle(node).fill)`,
     action: `root.setAttribute('data-probe', 'done')`,
     expectedAfter: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'],
+  },
+  {
+    name: "declared names never take a handler's step locals or the shared host's exports",
+    features: ["handlers", "checked writes", "naming"],
+    definitions: {
+      "x-step-names": `<template component="x-step-names"><defs>
+        <state name="next0" type="number" value="1"></state>
+        <state name="count" type="number" value="0"></state>
+        <state name="arithmetic" type="length" value="2px"></state>
+        <state name="preserveRootFocus" type="string" value="kept"></state>
+        <handler name="advance"><set name="next0" expr:value="$next0 + 1"></set><set name="count" expr:value="$next0 + 1"></set></handler>
+      </defs><section><output>{$next0}/{$count}/{$arithmetic + $arithmetic}/{$preserveRootFocus}</output><button on:click="advance">Go</button></section></template>`,
+    },
+    invocation: `<x-step-names id="case"></x-step-names>`,
+    vueRender: `h(XStepNames, { id: "case" })`,
+    root: "#case",
+    probe: `({ output: root.querySelector("output").textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { output: "2/3/4px/kept" },
+  },
+  {
+    name: "namespaced component type selectors keep their namespace",
+    features: ["scoped styles", "namespaces", "host"],
+    definitions: {
+      "x-ns-host": `<template component="x-ns-host"><p>Host</p><style>@namespace n "http://www.w3.org/1999/xhtml";
+        :host:is(n|x-ns-host) { border-top: 3px solid; }</style></template>`,
+    },
+    invocation: `<x-ns-host id="case"></x-ns-host>`,
+    vueRender: `h(XNsHost, { id: "case" })`,
+    root: "#case",
+    probe: `({ border: getComputedStyle(root).borderTopWidth })`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: { border: "3px" },
   },
   {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
@@ -85,7 +140,7 @@ const cases: readonly ParityCase[] = [
     invocation: `<x-boundary id="case"><span class="projected">Projected</span></x-boundary>`,
     vueRender: `h(XBoundary, { id: "case" }, { default: () => h("span", { class: "projected" }, "Projected") })`,
     root: "#case",
-    probe: `Array.from([root, root.querySelector('.owned'), root.querySelector('[data-component~=x-boundary-child]'), root.querySelector('.nested'), root.querySelector('.projected')], node => ({ box: getComputedStyle(node).boxSizing, before: getComputedStyle(node, '::before').boxSizing, after: getComputedStyle(node, '::after').boxSizing, outline: getComputedStyle(node).outlineStyle, border: getComputedStyle(node).borderTopWidth }))`,
+    probe: `Array.from([root, root.querySelector('.owned'), root.querySelector('article'), root.querySelector('.nested'), root.querySelector('.projected')], node => ({ box: getComputedStyle(node).boxSizing, before: getComputedStyle(node, '::before').boxSizing, after: getComputedStyle(node, '::after').boxSizing, outline: getComputedStyle(node).outlineStyle, border: getComputedStyle(node).borderTopWidth }))`,
     action: `root.setAttribute('data-probe', 'done')`,
     expectedAfter: [
       { box: "border-box", before: explicit ? "border-box" : "content-box", after: explicit ? "border-box" : "content-box", outline: "none", border: "0px" },
@@ -162,7 +217,8 @@ const cases: readonly ParityCase[] = [
     invocation: `<x-card id="case" class="consumer" label="Save"><strong>Now</strong></x-card>`,
     vueRender: `h(XCard, { id: "case", class: "consumer", label: "Save" }, { default: () => h("strong", "Now") })`,
     root: "#case",
-    probe: `({ tag: root.localName, label: root.getAttribute("aria-label"), className: root.className, text: root.textContent?.trim(), background: getComputedStyle(root).backgroundColor, childColor: getComputedStyle(root.querySelector("strong")).color })`,
+    // The component's own tag is Vue's styling class for :host, as data-component is live's; both are target markers.
+    probe: `({ tag: root.localName, label: root.getAttribute("aria-label"), className: [...root.classList].filter((name) => name !== "x-card").join(" "), text: root.textContent?.trim(), background: getComputedStyle(root).backgroundColor, childColor: getComputedStyle(root.querySelector("strong")).color })`,
     action: `root.setAttribute("data-probe", "untouched")`,
   },
   {
@@ -716,7 +772,7 @@ const cases: readonly ParityCase[] = [
     invocation: `<x-root-choice id="case"></x-root-choice>`,
     vueRender: `h(XRootChoice, { id: "case" })`,
     root: "#case",
-    probe: `({ tag: root.localName, dataKind: root.getAttribute("data-kind"), child: root.querySelector("p")?.textContent, className: root.querySelector("p")?.className, rootCount: document.querySelectorAll("[data-component=x-root-choice]").length, border: getComputedStyle(root).borderTopWidth, childMargin: getComputedStyle(root.querySelector("p")).marginTop })`,
+    probe: `({ tag: root.localName, dataKind: root.getAttribute("data-kind"), child: root.querySelector("p")?.textContent, className: root.querySelector("p")?.className, rootCount: root.parentElement.children.length, border: getComputedStyle(root).borderTopWidth, childMargin: getComputedStyle(root.querySelector("p")).marginTop })`,
     action: `root.querySelector("p").click()`,
     expectedAfter: { tag: "section", dataKind: "b", child: "Second", className: "second", rootCount: 1, border: "1px", childMargin: "0px" },
   },
@@ -922,16 +978,28 @@ function vueInvocation(invocation: string, definition: ComponentDefinition): str
 }
 
 /** Styling markers are target-owned implementation details, not the component's public behavior. */
-function withoutStylingMarkers(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutStylingMarkers);
+function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withoutStylingMarkers(entry, tags));
   if (value === null || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
     key,
     key === "attributes" && Array.isArray(entry)
-      ? entry.filter((attribute) => Array.isArray(attribute) &&
-        typeof attribute[0] === "string" && attribute[0] !== "data-slotted" && !attribute[0].startsWith("data-v-"))
-      : withoutStylingMarkers(entry),
+      ? entry.flatMap((attribute) => {
+        if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
+        const [name, text] = attribute as [string, string];
+        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-")) return [];
+        // Vue selects a root, or a styled child, through its component tag as a class.
+        if (name !== "class") return [attribute];
+        const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token)).join(" ");
+        return classes === "" ? [] : [[name, classes]];
+      })
+      : withoutStylingMarkers(entry, tags),
   ]));
+}
+
+/** The component tags a conformance case defines. */
+function definedTags(source: string): ReadonlySet<string> {
+  return new Set([...source.matchAll(/<template\s+component="([^"]+)"/g)].map((match) => match[1]!));
 }
 
 const knownConversionGaps = new Map<string, string>();
@@ -1328,7 +1396,8 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
                 vue.evaluate((script) => Function(script)(), program),
               ]);
               assert.deepEqual(liveResult, expectation.result, "live runtime characterization changed");
-              assert.deepEqual(withoutStylingMarkers(vueResult), withoutStylingMarkers(liveResult), "Vue browser behavior differs");
+              const tags = definedTags(testCase.source);
+              assert.deepEqual(withoutStylingMarkers(vueResult, tags), withoutStylingMarkers(liveResult, tags), "Vue browser behavior differs");
               const capturePixels = async (page: Page): Promise<Buffer> => {
                 await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
                 return page.screenshot({ animations: "disabled" });
@@ -1344,7 +1413,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
                   vue.evaluate((script) => Function(script)(), program),
                 ]);
                 assert.deepEqual(afterLive, step.result, "live runtime changed after interaction");
-                assert.deepEqual(withoutStylingMarkers(afterVue), withoutStylingMarkers(afterLive), "Vue behavior differs after interaction");
+                assert.deepEqual(withoutStylingMarkers(afterVue, tags), withoutStylingMarkers(afterLive, tags), "Vue behavior differs after interaction");
                 await assertPixelsEqual(vue, afterVuePixels, afterLivePixels, "Vue pixels differ after interaction");
               }
             } finally {

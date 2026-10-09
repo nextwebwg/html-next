@@ -12,11 +12,13 @@ import { reactHtmlArtifact as makeReactHtmlArtifact } from "./targets/react-html
 import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host.js";
 import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
+import { reactRenderArtifact as makeReactRenderArtifact } from "./targets/react-render.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
 import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
 import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
+import { svelteRenderArtifact as makeSvelteRenderArtifact } from "./targets/svelte-render.js";
 import { svelteDataArtifact as makeSvelteDataArtifact } from "./targets/svelte-data.js";
 import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
 import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
@@ -138,6 +140,11 @@ export function svelteDataArtifact(): GeneratedArtifact {
   return makeSvelteDataArtifact(GENERATOR_VERSION);
 }
 
+/** The rendering helpers converted Svelte components share; every package that emits Svelte ships it once. */
+export function svelteRenderArtifact(): GeneratedArtifact {
+  return makeSvelteRenderArtifact(GENERATOR_VERSION);
+}
+
 export function sveltePropsArtifact(): GeneratedArtifact {
   return makeSveltePropsArtifact(GENERATOR_VERSION);
 }
@@ -182,6 +189,11 @@ export function reactDepthArtifact(): GeneratedArtifact {
   return makeReactDepthArtifact(GENERATOR_VERSION);
 }
 
+/** The rendering helpers converted React components share; every package that emits React ships it once. */
+export function reactRenderArtifact(): GeneratedArtifact {
+  return makeReactRenderArtifact(GENERATOR_VERSION);
+}
+
 export { importsVueHost } from "./targets/vue-host.js";
 export { importsVueHtml } from "./targets/vue-html.js";
 export { importsVueControl } from "./targets/vue-control.js";
@@ -218,7 +230,7 @@ export function generateReactConversion(definition: ComponentDefinition, options
 }
 
 export function generateSvelteConversion(definition: ComponentDefinition, options?: SvelteConversionOptions): SvelteConversionOutput {
-  return generateSvelteOutput(inlineStylesheetSources(definition), options);
+  return generateSvelteOutput(inlineStylesheetSources(definition), GENERATOR_VERSION, options);
 }
 
 function inlineStylesheetSources(definition: ComponentDefinition): ComponentDefinition {

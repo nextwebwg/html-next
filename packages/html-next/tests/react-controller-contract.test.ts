@@ -9,8 +9,9 @@ import { JSDOM } from "jsdom";
 import { parseComponent } from "../src/source-parser.js";
 import { generateReactOutput } from "../src/targets/react.js";
 import { reactHostArtifact } from "../src/targets/react-host.js";
-import { nativeEventsModule } from "../src/targets/react-events.js";
+import { reactEventsArtifact } from "../src/targets/react-events.js";
 import { reactPropsArtifact } from "../src/targets/react-props.js";
+import { reactRenderArtifact } from "../src/targets/react-render.js";
 
 interface Host {
   state: Record<string, unknown>;
@@ -219,9 +220,10 @@ describe("React controller contract", () => {
       return module.exports;
     };
     modules.set("./props", await evaluate(reactPropsArtifact("test").content));
-    modules.set("./events", await evaluate(nativeEventsModule("test", true)));
+    modules.set("./events", await evaluate(reactEventsArtifact("test", true).content));
     modules.set("./host", await evaluate(reactHostArtifact("test").content));
     modules.set("./context", { componentContext: () => React.createContext({ value: undefined }) });
+    modules.set("./render", await evaluate(reactRenderArtifact("test").content, "tsx"));
     const generated = generateReactOutput(parseComponent(`<template component="x-probe" controller="./probe.js"><defs>
       <state name="count" type="number" value="1"></state>
       <computed name="doubled" from="$count * 2"></computed>
@@ -280,7 +282,7 @@ describe("React controller contract", () => {
       <event name="activate" type="event"></event>
       <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
     </defs><button on:click="activate"></button></template>`), "test");
-    assert.match(output.component, /dispatchDeclared\(rootRef.current, "activate", event,/);
+    assert.match(output.component, /dispatchDeclared\(\s*rootRef\.current,\s*"activate",\s*event,/);
     assert.match(output.component, /handler: \(event: Event\)/);
     assert.doesNotMatch(output.component, /SyntheticEvent/);
   });

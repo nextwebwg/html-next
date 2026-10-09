@@ -1,7 +1,8 @@
 import { typeCheckedDependencies, type CompiledExpression, type WritablePathSegment } from "../expression.js";
-import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
-import type { ComponentDefinition } from "../template.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
+import type { ComponentDefinition, HandlerDeclaration } from "../template.js";
 import { quote } from "./shared.js";
+import { conformingScalarStates, literalInitial } from "./state-roots.js";
 import type { Lowering, Scope } from "./vue-lowering.js";
 
 /** A JavaScript predicate for a declared type, used by generated event and handler code. */
@@ -129,6 +130,8 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
     if (prop === undefined) {
       const declaration = definition.declarations?.find((entry) => entry.name === root);
       if (declaration?.kind === "state" || declaration?.kind === "computed") {
+        // A conforming scalar state's own value is checked in full on every write, so reading it cannot fail.
+        if (declaration.kind === "state" && steps.length === 0 && conformingScalarStates(definition).has(root!)) return [];
         const type = declarationTypeNode(declaration.type, declaration.shape);
         return type === undefined ? [] : check(type, steps);
       }
@@ -155,4 +158,30 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
     return [`(${read} == null || (${options.join(" || ")}))`];
   });
   return checks.length === 0 ? undefined : checks.join(" && ");
+}
+
+/** A handler step that writes a literal the destination's declared type already accepts needs no check. */
+export function conformingLiteralWrite(step: Extract<HandlerDeclaration["steps"][number], { kind: "set" }>, definition: ComponentDefinition): boolean {
+  if (step.writablePath.length !== 1) return false;
+  const declaration = definition.declarations?.find((entry) => entry.kind === "state" && entry.name === step.writablePath[0]);
+  if (declaration?.kind !== "state") return false;
+  const node = declarationTypeNode(declaration.type, declaration.shape);
+  const literal = literalInitial(step.value.ast);
+  return node !== undefined && literal !== undefined && literal.value !== null && parseTypedValue(literal.value, node, "$", "value").ok;
+}
+
+export function setSteps(handler: HandlerDeclaration): number {
+  return handler.steps.filter((step) => step.kind === "set").length;
+}
+
+/** The shared host's named predicates for scalar destinations; other types check inline. */
+export const WRITE_PREDICATES: Readonly<Record<string, string>> = {
+  'typeof value === "string"': "isString",
+  '(typeof value === "number" && Number.isFinite(value))': "isNumber",
+  "Number.isInteger(value)": "isInteger",
+  'typeof value === "boolean"': "isBoolean",
+};
+
+export function writePredicate(check: string): string {
+  return WRITE_PREDICATES[check] ?? `(value: any) => ${check}`;
 }

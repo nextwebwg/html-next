@@ -28,6 +28,7 @@ import {
   svelteControlArtifact,
   svelteDataArtifact,
   svelteReactivityArtifact,
+  svelteRenderArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
@@ -39,6 +40,7 @@ import {
   reactHostArtifact,
   reactContextArtifact,
   reactDepthArtifact,
+  reactRenderArtifact,
   type DiagnosticLocation,
   type ComponentGraph,
   type TemplateNode,
@@ -491,6 +493,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
           reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
+          renderSpecifier: relativeImport(componentPath, "svelte/render.svelte.ts").replace(/\.ts$/, ""),
           importSpecifier,
           propContractsByTag,
           stylesheetSpecifier: `./${node.definition.contract.name}.css`,
@@ -513,6 +516,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           hostSpecifier: reactHelperSpecifier("host"),
           contextSpecifier: reactHelperSpecifier("context"),
           depthSpecifier: reactHelperSpecifier("depth"),
+          renderSpecifier: reactHelperSpecifier("render"),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         })).component;
       } catch (error) {
@@ -612,6 +616,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "svelte" && neededHelpers.has("reactivity")) {
     claim(svelteReactivityArtifact(), "helper");
   }
+  if (options.target === "svelte" && neededHelpers.has("render")) {
+    claim(svelteRenderArtifact(), "helper");
+  }
   if (options.target === "svelte" && neededHelpers.has("data")) {
     claim(svelteDataArtifact(), "helper");
   }
@@ -638,6 +645,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (options.target === "react" && neededHelpers.has("depth")) {
     claim(reactDepthArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("render")) {
+    claim(reactRenderArtifact(), "helper");
   }
   if (options.target === "react" && reactStyles) {
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");

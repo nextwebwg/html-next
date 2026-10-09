@@ -294,6 +294,52 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     assert.match(renderToStaticMarkup(createElement(module.exports.XText!)), /<span[^>]*>Hello<\/span>/);
   });
 
+  it("keeps React's preformatted text, textarea defaults and non-breaking spaces exactly", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-text-"));
+    temporary.push(root);
+    await writeFile(join(root, "text.html"), `<template component="x-spacing" status="early" summary="Text spacing."><defs>
+      <state type="number" name="count" value="1"></state>
+      </defs><section><pre>first  line
+  second</pre><pre>{$count}  two
+  three</pre><textarea>a  b
+  c</textarea><p>a&nbsp;&nbsp;b</p><p>a&nbsp;&nbsp;{$count}</p><p>a
+        b   {$count}</p></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    const markup = renderToStaticMarkup(createElement(module.exports.XSpacing!));
+    assert.deepEqual([...markup.matchAll(/<(pre|textarea|p)[^>]*>([^<]*)</g)].map((match) => match[2]), [
+      "first  line\n  second", "1  two\n  three", "a  b\n  c", "a\u00a0\u00a0b", "a\u00a0\u00a01", "a b 1",
+    ]);
+  });
+
+  it("keeps authored React names off the shared rendering and events helpers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-names-"));
+    temporary.push(root);
+    // A `text` state once shadowed the text() helper, and an `isNumber` handler the write check it calls.
+    await writeFile(join(root, "names.html"), `<template component="x-names" status="early" summary="Helper names."><defs>
+      <state name="text" type="string" value="hi"></state><state type="number" name="count" value="1"></state>
+      <handler name="isNumber"><set name="count" expr:value="$count + 1"></set></handler>
+      <handler name="useNativeEvents"><set name="count" value="0"></set></handler>
+      </defs><section><p>Say {$text} {$count}</p><button on:click="isNumber">Go</button><button on:click="useNativeEvents">Reset</button></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    assert.match(renderToStaticMarkup(createElement(module.exports.XNames!)), /<p>Say hi 1<\/p>/);
+    // The handler's write check is the imported predicate, not the handler calling itself.
+    await typecheckReact(root, manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path)).map((artifact) => join(outDirectory, artifact.path)));
+  });
+
   it("converts native ref targets for focus and validation handlers", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-ref-actions-"));
     temporary.push(root);
@@ -375,8 +421,8 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       entries: ["components/**"], publicRootURL: "/app/" });
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "react/data.ts" && artifact.kind === "helper"));
     const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-    assert.match(component, /source: "\.\/api\/feed", definition: "\/app\/components\/feed\.html"/);
-    assert.match(component, /debounce: 500, poll: 1500/);
+    assert.match(component, /source: "\.\/api\/feed",\s+definition: "\/app\/components\/feed\.html"/);
+    assert.match(component, /debounce: 500,\s+poll: 1500/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
     await typecheckReact(root, manifest.output.artifacts
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
@@ -605,7 +651,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
       .map((artifact) => join(outDirectory, artifact.path)));
     const component = await readFile(join(outDirectory, "react/XCard.tsx"), "utf8");
-    assert.match(component, /reason.*action.*programmatic/);
+    assert.match(component, /reason[\s\S]*action[\s\S]*programmatic/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
   });
 
@@ -1069,10 +1115,11 @@ export default function initialize(host) { host.on("connect", () => connect(host
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.doesNotMatch(source, /html-next:nested-depth/, "ordinary graphs must not pay for the recursion guard");
-    assert.deepEqual([...source.matchAll(/^import[^\n]*from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./props"]);
+    // Every component takes its root attributes and hydration check from the shared host.
+    assert.deepEqual([...source.matchAll(/from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./host", "./props"]);
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "vue/props.ts" && artifact.kind === "helper"));
     assert.match(await readFile(join(outDirectory, "vue", "props.ts"), "utf8"), /function checkedProp/);
-    assert.match(source, /<style scoped>\n@scope \(\[data-component~="x-card"\]\) to \(\[data-component\]\) \{\s+:scope \{\s+display: block;\s+\}/);
+    assert.match(source, /<style scoped>\n@scope \(\.x-card\) \{\s+:scope \{\s+display: block;\s+\}/);
     assert.equal(manifest.graph, "application");
     assert.deepEqual(manifest.entries, [{ source: "x-card.html", tag: "x-card", artifact: "vue/XCard.vue" }]);
     assert.equal(manifest.output.entry, "vue/application.ts");
@@ -1116,13 +1163,14 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.match(await readFile(join(outDirectory, "vue", "host.ts"), "utf8"), /function useComponentHost/);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
-    assert.match(source, /const double = cycleCheckedComputed\(\(\) => \{[\s\S]*return doublePrevious = count\.value \* 2/);
+    // A conforming state's own value needs no read check, so the computed reads it directly.
+    assert.match(source, /const double = cycleCheckedComputed\(\(\) => count\.value \* 2\)\n/);
     assert.match(source, /function increment\(\): void \{/);
-    assert.match(source, /const next0 = count\.value \+ 1/);
-    assert.match(source, /count\.value = next0 as never/);
+    assert.match(source, /const next = count\.value \+ 1\n/);
+    assert.match(source, /if \(acceptsWrite\(next, isNumber, '[^']*', 'increment', 'count'\)\) count\.value = next\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
-    assert.match(source, /const isCountChangeDetail = \(\s*detail: unknown,?\s*\): boolean => \(?typeof detail === 'number' && Number\.isFinite\(detail\)/);
-    assert.match(source, /:data-count="guarded"/);
+    assert.match(source, /'count-change': isNumber,/);
+    assert.match(source, /:data-count="count"/);
   });
 
   it("keeps root-relative data requests on the browser origin", async () => {

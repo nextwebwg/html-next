@@ -44,6 +44,7 @@ describe("buildComponents", () => {
         "styles/x-button.css",
         "vanilla/XButton.d.ts",
         "vanilla/XButton.js",
+        "vue/host.ts",
         "vue/props.ts",
         "vue/XButton.vue",
       ]);
