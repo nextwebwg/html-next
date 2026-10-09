@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { withPlugins } from "../src/config.js";
 import { buildApplication, createApplication, devApplication, type HtmlKitPlugin, type NavigationItem, type NavigationQuery } from "../src/index.js";
 import { write } from "./fixture.js";
 
@@ -78,4 +79,24 @@ it("builds plugin pages with the files they reference", async () => {
   const [file] = await readdir(join(result.outDir, "_htmlkit/files"));
   expect(file).toMatch(/^[0-9a-f]{16}-mark\.svg$/);
   expect(await readFile(join(result.outDir, "v/one/install/index.html"), "utf8")).toContain(`/_htmlkit/files/${file}`);
+}, 60_000);
+
+it("adds a plugin's page folders, stylesheets, and folder layout to the site's own", async () => {
+  const root = await site();
+  await write(root, "app/pages/about.html", '<template component="page-about"><h1>About</h1></template>');
+  await write(root, "app/layouts/default.html", '<template component="site-shell"><main class="site"><slot name="page"></slot></main></template>');
+  const shell = { component: join(root, "plugin/shell.html"), server: { load: () => ({ props: { links: "Docs" } }) } };
+  const docs: HtmlKitPlugin = { ...notes(root), config: () => ({ pages: [{ dir: "docs", prefix: "/docs/", layout: shell }], css: ["plugin/docs.css"] }) };
+  const options = await withPlugins({ root, css: ["@/styles/site.css"], plugins: [docs] });
+  expect(options.css).toEqual(["@/styles/site.css", "plugin/docs.css"]);
+  expect(options.pages?.map(page => page.dir)).toEqual(["app/pages", "docs"]);
+  const application = await createApplication(options);
+  try {
+    expect(application.routes.map(route => route.pattern).sort()).toEqual(["/about/", "/docs/", "/docs/hidden/", "/docs/install/", "/docs/start/"]);
+    // The site's page keeps the site's default layout; the plugin's pages get the folder's layout.
+    expect((await application.render("/about/")).html).toContain('data-component="site-shell"');
+    const install = (await application.render("/docs/install/")).html;
+    expect(install).toContain('data-component="notes-shell"');
+    expect(install).not.toContain('data-component="site-shell"');
+  } finally { await application.close(); }
 }, 60_000);

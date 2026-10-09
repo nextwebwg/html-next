@@ -70,13 +70,19 @@ export default defineConfig({
 ## Page folders
 
 `pages` can serve one folder at several URL prefixes, which is how a documentation site keeps
-versions side by side:
+versions side by side. A folder can also give its pages a layout, and `optional: true` skips a folder
+that doesn't exist:
 
 ```ts
 export default defineConfig({
-  pages: [{ dir: 'docs', prefix: '/v/current/' }, { dir: 'docs' }],
+  pages: [
+    { dir: 'app/pages' },
+    { dir: 'docs', prefix: '/docs/', layout: 'docs' },   // app/layouts/docs.html
+  ],
 });
 ```
+
+A page's own `hk:layout` wins over its folder's layout, which wins over `layoutDefaults` and `layout`.
 
 ## Plugins
 
@@ -106,9 +112,11 @@ name the `.note` file. While compiling, a plugin can call:
 - `page.href(file)` for another page's URL;
 - `page.asset(file)` to serve a file the page references, such as an image, and get its URL.
 
-A plugin's `config(options)` returns settings to merge before the site starts: page folders, a
-layout (whose loader may be an object, `{ component, server: { load } }`), or a `headScript` that
-runs before `app/head.js`. [Markupress](https://github.com/threadlabs-studio/markupress) is built
+A plugin's `config(options)` returns settings to merge before the site starts. Page folders,
+stylesheets, and routes are added to the site's own, and `app/pages` stays. Give a plugin's page
+folders their own `layout` (a name, or `{ component, server: { load } }` with an in-process loader)
+so it doesn't wrap the site's other pages. A plugin can also set a `headScript` that runs before
+`app/head.js`. [Markupress](https://github.com/threadlabs-studio/markupress) is built
 this way.
 
 ## Using HTMLKit from code

@@ -33,7 +33,14 @@ const pluginsApplied = new WeakSet<ApplicationOptions>();
 export async function withPlugins(options: ApplicationOptions): Promise<ApplicationOptions> {
   if (pluginsApplied.has(options) || options.plugins === undefined) return options;
   let merged = options;
-  for (const plugin of options.plugins) merged = { ...merged, ...await plugin.config?.(merged), plugins: options.plugins };
+  for (const plugin of options.plugins) {
+    const added = await plugin.config?.(merged) ?? {};
+    // Page folders, stylesheets, and routes add to the application's own; app/pages stays the default folder.
+    merged = { ...merged, ...added, plugins: options.plugins,
+      ...(added.pages === undefined ? {} : { pages: [...merged.pages ?? [{ dir: "app/pages", optional: true }], ...added.pages] }),
+      ...(added.css === undefined ? {} : { css: [...merged.css ?? [], ...added.css] }),
+      ...(added.routes === undefined ? {} : { routes: [...merged.routes ?? [], ...added.routes] }) };
+  }
   merged = { ...merged };
   pluginsApplied.add(merged);
   return merged;

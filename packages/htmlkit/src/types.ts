@@ -32,6 +32,10 @@ export interface PageDirectory {
   readonly dir: string;
   /** URL prefix with leading and trailing slashes; default /. */
   readonly prefix?: string;
+  /** Layout for this directory's pages unless a page names its own; a plugin scopes its layout this way. */
+  readonly layout?: string | false | RouteLayer;
+  /** Skip the directory when it doesn't exist, as the default app/pages is. */
+  readonly optional?: boolean;
 }
 
 export interface HtmlKitPlugin {

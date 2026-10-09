@@ -34,8 +34,9 @@ export async function discover(root: string, options: DiscoveryOptions) {
   }
   const pageExtension = (name: string) => [".html", ...compilers.keys()].find(extension => name.endsWith(extension) && name.length > extension.length);
   // Each route remembers its page directory's prefix, which page aliases are relative to.
-  const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string })[] = [];
-  const add = (input: RouteInput & { readonly canonical?: string }, prefix: string, order?: readonly (string | null)[]): void => {
+  const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string; readonly directoryLayout?: string | false | RouteLayer })[] = [];
+  const add = (input: RouteInput & { readonly canonical?: string }, prefix: string, order?: readonly (string | null)[],
+    directoryLayout?: string | false | RouteLayer): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
     const segments = input.pattern.slice(1, -1).split("/").filter(Boolean);
     if (segments[0] === "_htmlkit") throw new HtmlKitError("_htmlkit is reserved for generated assets.", input.component);
@@ -47,6 +48,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     const absolute = (layer: RouteLayer): RouteLayer => ({ component: resolve(root, layer.component),
       ...(layer.server === undefined ? {} : { server: typeof layer.server === "string" ? resolve(root, layer.server) : layer.server }) });
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), prefix,
+      ...(directoryLayout === undefined ? {} : { directoryLayout }),
       ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }) });
   };
   // A number and a dot ("01.guide") order a file or directory and stay out of its URL. Route
@@ -56,7 +58,8 @@ export async function discover(root: string, options: DiscoveryOptions) {
     if (prefix?.[2] === "") throw new HtmlKitError("Ordering prefix leaves an empty route segment.", source);
     return { slug: prefix?.[2] ?? name, rank: prefix?.[1] ?? null };
   };
-  const visit = async (directory: string, prefix: string, segments: string[], order: (string | null)[]): Promise<void> => {
+  const visit = async (directory: string, prefix: string, segments: string[], order: (string | null)[],
+    directoryLayout: string | false | RouteLayer | undefined): Promise<void> => {
     const files = await readdir(directory, { withFileTypes: true });
     const names = new Set(files.filter(file => file.isFile()).map(file => file.name));
     const layer = (name: string, stem: string): RouteLayer => {
@@ -70,7 +73,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       const stem = name.slice(0, -extension.length);
       const { slug, rank } = ordered(stem, join(directory, name));
       const parts = slug === "index" ? segments : [...segments, slug];
-      add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}` }, prefix, slug === "index" ? order : [...order, rank]);
+      add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}` }, prefix, slug === "index" ? order : [...order, rank], directoryLayout);
     }
     for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!file.isDirectory() || file.name.startsWith(".") || file.name.startsWith("_")) continue;
@@ -78,11 +81,11 @@ export async function discover(root: string, options: DiscoveryOptions) {
       if (parameter(slug) === undefined && !/^[A-Za-z0-9_-]+$/.test(slug)) {
         throw new HtmlKitError("Route directories must be URL slugs or [named] parameters.", join(directory, file.name));
       }
-      await visit(join(directory, file.name), prefix, [...segments, slug], [...order, rank]);
+      await visit(join(directory, file.name), prefix, [...segments, slug], [...order, rank], directoryLayout);
     }
   };
   if (options.fileRoutes !== false) {
-    for (const { dir, prefix = "/" } of options.pages ?? [{ dir: "app/pages" }]) {
+    for (const { dir, prefix = "/", layout, optional } of options.pages ?? [{ dir: "app/pages", optional: true }]) {
       if (!/^\/(?:[A-Za-z0-9_-]+\/)*$/.test(prefix)) throw new HtmlKitError("Page directory prefixes need leading and trailing slashes around URL slugs.", dir);
       const directory = resolve(root, dir);
       if (!within(root, directory)) throw new HtmlKitError("Page directories must be inside the application root.", directory);
@@ -90,9 +93,9 @@ export async function discover(root: string, options: DiscoveryOptions) {
       try { await stat(directory); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; present = false; }
       // app/pages is optional; a configured directory must exist.
-      if (!present && options.pages !== undefined) throw new HtmlKitError("Page directory does not exist.", directory);
+      if (!present && !optional) throw new HtmlKitError("Page directory does not exist.", directory);
       const segments = prefix.split("/").filter(Boolean);
-      if (present) await visit(directory, prefix, segments, segments.map(() => null));
+      if (present) await visit(directory, prefix, segments, segments.map(() => null), layout);
     }
   }
   for (const route of options.routes ?? []) add(route, "/");
@@ -138,7 +141,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     for (const alias of resource.components.get(pageDefinition(resource, route.component).contract.tag)!.aliases) {
       if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("hk:alias needs a route path with leading and trailing slashes.", route.component);
       add({ component: route.component, ...(route.server === undefined ? {} : { server: route.server }), layouts: route.layouts,
-        pattern: route.prefix + alias.slice(1), canonical: route.pattern }, route.prefix);
+        pattern: route.prefix + alias.slice(1), canonical: route.pattern }, route.prefix, undefined, route.directoryLayout);
     }
   }
   for (const prefix of Object.keys(options.layoutDefaults ?? {})) {
@@ -153,7 +156,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   const pageNames = new Map<string, { component: string; pattern: string; identity: string }>();
   const discovered: ApplicationRoute[] = [];
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
-  for (const { prefix: _prefix, ...route } of routes) {
+  for (const { prefix: _prefix, directoryLayout, ...route } of routes) {
     const { identity, resource } = await resourceOf(route.component);
     const pageName = pageDefinition(resource, route.component).contract.tag;
     const previous = pageNames.get(pageName);
@@ -163,7 +166,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     pageNames.set(pageName, { component: route.component, pattern: route.pattern, identity });
     const metadata = resource.components.get(pageName)!;
     const directory = layoutDefaults.find(([prefix]) => route.pattern.startsWith(prefix));
-    let selected = metadata.layout ?? directory?.[1] ?? options.layout;
+    let selected = metadata.layout ?? directoryLayout ?? directory?.[1] ?? options.layout;
     if (selected === undefined && route.layouts.length === 0) {
       try { await stat(resolve(root, "app/layouts/default.html")); selected = "default"; }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }

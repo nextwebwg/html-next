@@ -3,6 +3,7 @@
 ## 1.0.0-alpha.43
 
 - HTMLKit's `css` option adds global stylesheets to every page, such as `['@/styles/site.css']`. They are not scoped, so they can style built-in components, which a layout's scoped styles cannot reach; they load before the page is shown in builds and in development.
+- HTMLKit plugins compose with the site: page folders, stylesheets, and routes a plugin adds join the site's own instead of replacing them, and `app/pages` stays. A page folder can name its own `layout`, which its pages use unless they name one, so a plugin's layout no longer wraps the whole site. `optional: true` skips a folder that doesn't exist.
 - HTMLKit has built-in `<hk-breadcrumbs>` and `<hk-pager>`, unstyled and accessible like `<hk-nav>` and needing no component link. Loaders get `breadcrumbs()`, the existing pages from the home page (or `from`) down to the current one, and `pager()`, the pages before and after it in navigation order.
 
 ## 1.0.0-alpha.41
