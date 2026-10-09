@@ -60,9 +60,11 @@ for aliases and packages, and processes rebased assets through its ordinary CSS 
 Synchronous compilation diagnoses unresolved imports (HY004); it never emits a global import
 as a fallback. `NodeLoaderOptions` accepts a host CSS resolver, stylesheet reader, and asset
 URL mapper, and the returned graph lists `stylesheetInputs` for dependency watching.
-Shared resources containing `@namespace` currently produce HY004: flattening their
-stylesheet-local namespace environments would change selector matching. Plain Node hosts
-must map asset URLs to deployment URLs with `stylesheetAssetURL` when file URLs are not
+Each stylesheet keeps its own namespace environment. The tools replace authored prefixes
+with stable, URI-derived prefixes and make default namespace constraints explicit on selectors
+before combining sheets. Named declarations move to the combined stylesheet's preamble,
+including when the imported rules use layers or conditions. Namespace URIs remain identifiers;
+they are never resolved as asset URLs. Plain Node hosts must map asset URLs to deployment URLs with `stylesheetAssetURL` when file URLs are not
 served by their integration.
 
 Resolved definitions retain local `css` and separate `stylesheets`. Compatible occurrences
@@ -84,6 +86,13 @@ Defaults are explicit author CSS. For example, `:host, *, :host::before, :host::
 *::before, *::after { box-sizing: border-box; }` covers elements and pseudo-elements. `*`
 does not select pseudo-elements, and `box-sizing` is not normally inherited. Scope limits
 selector matching; an explicit `inherit` still reads the DOM parent's value.
+
+Firefox 155 has a native SVG scope-limit defect: a scoped class rule can match a rect below
+an excluded SVG subtree. It also reproduces without namespace declarations or HTML Next.
+[Mozilla bug 2080046](https://bugzilla.mozilla.org/show_bug.cgi?id=2080046) contains the reduced
+case. Namespace browser tests compare that boundary with the independent native fixture;
+Chromium and WebKit enforce the expected exclusion. A Firefox workaround is being investigated
+separately from namespace support.
 
 ## Delivery and hydration
 

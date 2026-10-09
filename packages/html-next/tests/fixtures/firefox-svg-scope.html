@@ -1,0 +1,12 @@
+<!doctype html>
+<style>
+@scope ([data-component~="x-a"]) to ([data-slotted]) {
+  *.shape { fill: rgb(1, 2, 3); }
+}
+</style>
+<div data-component="x-a">
+  <!-- Inside scope: this rectangle should receive the fill rule. -->
+  <svg><rect class="shape"></rect></svg>
+  <!-- Excluded subtree: this rectangle should keep the default black fill. -->
+  <svg id="projected" data-slotted><rect class="shape"></rect></svg>
+</div>

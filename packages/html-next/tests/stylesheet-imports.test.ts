@@ -6,7 +6,7 @@ import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild, co
 import { collectSharedStylesheets, wrapStylesheetConditions } from "../src/stylesheet-resources.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
-import { parseStylesheetForBuild } from "../src/stylesheet-resources-build.js";
+import { normalizeStylesheetNamespacesForBuild, parseStylesheetForBuild } from "../src/stylesheet-resources-build.js";
 
 describe("shared component CSS resources", () => {
   it("reads CSS escapes and case-insensitive import functions, and ignores invalid empty functions", () => {
@@ -95,10 +95,68 @@ describe("shared component CSS resources", () => {
     assert.equal(rendered.css.trim(), compileComponentGraphStylesForBuild(definitions).trim());
   });
 
-  it("diagnoses namespace imports instead of leaking their namespace environment into another component", async () => {
-    await assert.rejects(loadNodeComponents(["file:///pkg/app.html"], { readComponent: async url => ({ url, source:
-      url.endsWith(".css") ? '@namespace "http://www.w3.org/2000/svg"; rect { fill: red; }' :
-      '<template component="x-a"><div></div><style>@import "defaults.css";</style></template>' }) }), /HY004.*@namespace/);
+  it("preserves imported default and conflicting named namespaces through combined SSR delivery", async () => {
+    const files: Record<string, string> = {
+      "file:///pkg/app.html": '<template component="x-a"><div></div><style>@import "svg.css" layer(base); @import "html.css"; p { color: blue; }</style></template>',
+      "file:///pkg/svg.css": '@namespace "http://www.w3.org/2000/svg"; @namespace n "http://www.w3.org/2000/svg"; rect, .shape, n|circle { fill: red; }',
+      "file:///pkg/html.css": '@namespace n "http://www.w3.org/1999/xhtml"; n|p { color: green; }',
+    };
+    const graph = await loadNodeComponents(["file:///pkg/app.html"], { readComponent: async url => ({ url, source: files[url]! }) });
+    const definitions = [...graph.nodes.values()].map(node => node.definition);
+    const css = compileComponentGraphStylesForBuild(definitions);
+    const namespaces = [...css.matchAll(/@namespace ([^ ]+) "([^"]+)";/g)];
+    assert.equal(namespaces.length, 2);
+    assert.equal(new Set(namespaces.map(match => match[1])).size, 2);
+    assert.equal(css.slice(0, css.indexOf("@layer")).match(/@namespace/g)?.length, 2);
+    assert.doesNotMatch(css, /@namespace "/);
+    const svg = namespaces.find(match => match[2]!.endsWith("svg"))![1];
+    assert.match(css, new RegExp(`${svg}\\|rect`));
+    assert.match(css, new RegExp(`${svg}\\|\\*\\.shape`));
+    assert.match(css, /p \{ color: blue/);
+    assert.equal((await renderComponents('<x-a></x-a>', { definitions })).css.trim(), css.trim());
+  });
+
+  it("keeps namespace identifiers, attributes, nested selector functions and at-rule preludes sheet-local", () => {
+    const css = normalizeStylesheetNamespacesForBuild(`
+      @namespace url("urn:svg");
+      @namespace n "urn:old";
+      @namespace n "urn:svg";
+      @namespace a "urn:attributes";
+      n|rect[a|href][href="n|keep"] { content: "n|leave"; }
+      *|*:is(.html, n|rect):not(.skip) { fill: green; }
+      rect:has(> .shape):nth-child(2 of .shape) { fill: red; }
+      @scope (:is(:where(n|svg))) to (.limit) {
+        @supports selector(:is(:where(n|rect))) {
+          rect { fill: blue; }
+        }
+      }
+      @keyframes move { from { opacity: 0; } to { opacity: 1; } }
+    `);
+    const namespaces = [...css.matchAll(/@namespace ([^ ]+) "([^"]+)";/g)];
+    const svg = namespaces.find(match => match[2] === "urn:svg")![1];
+    const attributes = namespaces.find(match => match[2] === "urn:attributes")![1];
+    assert.ok(css.includes(`${svg}|rect[${attributes}|href][href="n|keep"]`));
+    assert.ok(css.includes(`*|*:is(.html, ${svg}|rect):not(.skip)`));
+    assert.ok(css.includes(`${svg}|rect:has(> ${svg}|*.shape):nth-child(2 of ${svg}|*.shape)`));
+    assert.ok(css.includes(`@scope (${svg}|*:is(:where(${svg}|svg))) to (${svg}|*.limit)`));
+    assert.ok(css.includes(`selector(${svg}|*:is(:where(${svg}|rect)))`));
+    assert.match(css, /content: "n\|leave"/);
+    assert.match(css, /from \{ opacity: 0; \} to \{ opacity: 1;/);
+    assert.doesNotMatch(css, /file:|@namespace url/);
+  });
+
+  it("decodes escaped namespace identifiers and leaves URI identifiers independent of asset bases", () => {
+    const css = parseStylesheetForBuild(String.raw`@namespace n url(urn\3a svg); n|rect { fill: red; }`).css;
+    assert.match(css, /@namespace ([^ ]+) "urn:svg";/);
+    const prefix = /@namespace ([^ ]+)/.exec(css)![1];
+    assert.ok(css.includes(`${prefix}|rect`));
+    assert.doesNotMatch(css, /url\(/);
+  });
+
+  it("ignores late source namespaces even when an author uses a generated-looking prefix", () => {
+    const css = normalizeStylesheetNamespacesForBuild('p { color: blue; } @namespace htmlnextns0078 "x"; htmlnextns0078|rect { fill: red; }');
+    assert.doesNotMatch(css, /@namespace/);
+    assert.match(css, /p \{ color: blue; \}/);
   });
 
   it("keeps scoped copies for incompatible conditions, opposite import orders, and intervening global overrides", () => {
