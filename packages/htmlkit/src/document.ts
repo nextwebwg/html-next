@@ -11,9 +11,9 @@ export function documentHTML(body: string, head: RenderedHead, assets = ""): str
   const charset = elements.filter(element => element.tag === "meta" && element.attributes.charset !== undefined);
   const html = (list: readonly HeadElement[]) =>
     list.map(element => `<${element.tag}${Object.entries(element.attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>`).join("");
-  // The head script precedes stylesheets, which would otherwise delay it until they load.
+  // Head scripts precede stylesheets, which would otherwise delay it until they load.
   return `<!doctype html>\n<html lang="${escapeHTML(head.lang ?? "en")}"><head>${html(charset)}` +
-    (head.script === undefined ? "" : `<script>${head.script}</script>`) + html(elements.filter(element => !charset.includes(element))) +
+    (head.scripts ?? []).map(script => `<script>${script}</script>`).join("") + html(elements.filter(element => !charset.includes(element))) +
     `<title>${escapeHTML(head.title ?? "HTMLKit")}</title>` +
     (head.description === undefined ? "" : `<meta name="description" content="${escapeHTML(head.description)}">`) +
     `${assets}</head><body>${body}</body></html>`;
