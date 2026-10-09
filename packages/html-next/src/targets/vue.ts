@@ -141,6 +141,8 @@ interface Context {
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
   usesRetainedInlineText: boolean;
+  /** Inside <pre> or <textarea>, whose text Vue keeps exactly. */
+  preformatted: boolean;
 }
 
 function referenceCheck(type: TypeNode, value: string): string {
@@ -244,7 +246,13 @@ function isComponentTag(name: string): boolean {
  */
 function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context, receivingTag?: string): string {
   return nodes.map((child, index) => {
-    const markup = renderNode(child, names, context, receivingTag);
+    let markup = renderNode(child, names, context, receivingTag);
+    // Authored indentation at the start or end of an element's text goes; a space between
+    // siblings stays, as Vue keeps it.
+    if (child.kind === "text" && child.segments !== undefined && !context.preformatted) {
+      if (index === 0 && /^\s*\n/.test(child.segments[0]!.value)) markup = markup.replace(/^ (?=.)/, "");
+      if (index === nodes.length - 1 && /\n\s*$/.test(child.segments.at(-1)!.value)) markup = markup.replace(/(?<=.) $/, "");
+    }
     return index > 0 && child.kind !== "text" && nodes[index - 1]!.kind !== "text" ? `\n${markup}` : markup;
   }).join("");
 }
@@ -395,16 +403,14 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
       return `<RetainedInlineText :segments=${bound(`[${parts.join(", ")}]`)} />`;
     }
     if (node.segments !== undefined) {
-      // Template text reads as authored, with Vue's own whitespace handling: each run is one
-      // space (Vue keeps a space but drops a newline between elements), and indentation at
-      // the ends goes. Vue keeps <pre> text exactly.
-      const parts = node.segments.map((segment) => {
+      // Template text reads as authored, with Vue's own whitespace handling: each run of ASCII
+      // whitespace is one space (Vue keeps a space but drops a newline between elements). Vue
+      // keeps <pre> and <textarea> text exactly, and so does the markup there.
+      return node.segments.map((segment) => {
         const plan = segment.expressionPlan;
-        return plan === undefined ? escapeHtml(segment.value.replace(/\s+/g, " ")).replace(/\{\{/g, "{{ '{{' }}")
+        return plan === undefined ? escapeHtml(context.preformatted ? segment.value : segment.value.replace(/[\t\n\f\r ]+/g, " ")).replace(/\{\{/g, "{{ '{{' }}")
           : `{{ ${guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template)} }}`;
-      });
-      return parts.join("").replace(/^ (?=.)/, (space) => /^\s*\n/.test(node.segments![0]!.value) ? "" : space)
-        .replace(/(?<=.) $/, (space) => /\n\s*$/.test(node.segments!.at(-1)!.value) ? "" : space);
+      }).join("");
     }
     const plan = node.expressionPlan;
     if (plan === undefined) return escapeHtml(node.value).replace(/\{\{/g, "{{ '{{' }}");
@@ -668,7 +674,10 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   attributes.unshift(...directives, ...literals);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
+  const preformatted = context.preformatted;
+  if (node.name === "pre" || node.name === "textarea") context.preformatted = true;
   const renderedChildren = content ?? renderChildren(node.children, names, context, component ? node.name : undefined);
+  context.preformatted = preformatted;
   const selectBinding = node.name === "select" && twoWayControl
     ? node.attributes.find((attribute) => attribute.kind === "attribute" && attribute.twoWay === true && attribute.name === "value")
     : undefined;
@@ -948,6 +957,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     usesHydrationControl: false,
     usesKeyedBoundary: false,
     usesRetainedInlineText: false,
+    preformatted: false,
   };
   // A root `$with` always renders one element. Keep its alias reactive in setup instead of
   // adding a v-for fragment around the component's native root.
