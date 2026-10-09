@@ -1,8 +1,28 @@
 # Changelog
 
-## 1.0.0-alpha.37
+## 1.0.0-alpha.41
 
 - The `html-next` and `html-next-convert` commands run when started through their installed `node_modules/.bin` link, as `npx`, package scripts and direct calls do on macOS and Linux. Earlier releases exited there without output or files.
+
+## 1.0.0-alpha.40
+
+- Component CSS prevents Firefox 155's scoped SVG class rules from leaking across scope limits. Live loading, graph CSS, Vite, SSR, React and Svelte keep owned, projected and nested component styling distinct through DOM moves. The compiler uses a Firefox-specific private CSS marker; shared boundary rules are delivered once per graph or live document. Author inheritance remains intact; no DOM observers or ownership attributes are added. Mozilla bug 2080046 tracks the underlying browser defect.
+
+## 1.0.0-alpha.39
+
+- Shared and inline component styles preserve stylesheet-local `@namespace` declarations in live loading, Vite builds, SSR, and framework conversion. Imported default namespaces become explicit selector constraints; conflicting named prefixes remain isolated. Firefox 155's native SVG scope-limit defect is documented with a standalone reproduction and Mozilla bug 2080046.
+
+
+## 1.0.0-alpha.38
+
+- Component styles support shared CSS with ordinary `@import`. Live loading, Node graphs, SSR, HTMLKit, native Vite builds, and framework conversion resolve nested imports before scoping, retain source-relative assets and import conditions, and reuse source fetches. Compatible uses share one delivered body; distinct layers, conditions, cascade positions, global overrides, and target scope boundaries retain separate occurrences when needed. Styles follow graph order and stay in place when instances move or remount. Synchronous compilation diagnoses unresolved imports instead of emitting global imports. Imported `@namespace` is currently HY004 because flattening it would change selector matching.
+- Component style compilation preserves conditional and layered name-defining rules, including keyframes, in source order. Zero-specificity owner and pseudo-element guards prevent Firefox scope-boundary leaks and stale root styles. Defaults remain explicit CSS; no automatic box-model reset is installed.
+
+## 1.0.0-alpha.37
+
+- Vue component styles preserve native selector boundaries: ordinary selectors match owned descendants, while root elements and their pseudo-elements require explicit `:host` selectors. Nested component roots remain outside the parent’s style scope, and Vue slot scoping is preserved.
+- Compiled components update rows inside a nested `$each` when an outer row moves, or when its item or an outer state value changes, as the live runtime does. Before, `<li $each="row, i of $rows"><b $each="n of $row.tags">{$i}</b></li>` kept each row's old `$i` after a reorder (and showed `undefined` at first), an inner row's `{$row.label}` missed writes to that row's `label`, and rows two loops deep missed state changes. Rows keep their position only when something in or below them reads it. A reorder re-runs only the moved rows' position bindings, and a count change only rows that read `loop.count` or `loop.last`.
+- Compiled lists whose rows read their position visit only the rows a reconcile moved: an append or a pop leaves every existing row alone. This adds 15 B gzip to keyed list output.
 
 ## 1.0.0-alpha.36
 
