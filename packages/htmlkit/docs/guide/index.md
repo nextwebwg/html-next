@@ -15,7 +15,7 @@ writes a static site you can host anywhere.
 
 ## Get started
 
-Use Node 22.22.2+ or 24.15+. Install HTMLKit and add its commands to `package.json`:
+Use Node 22 (22.22.2 or later) or Node 24 (24.15 or later). Install HTMLKit and add its commands to `package.json`:
 
 ```sh
 npm install @nextwebwg/htmlkit
@@ -63,8 +63,10 @@ htmlkit.config.ts optional settings
 `npm run build` writes the site to `dist/`. Upload that folder to any static host, and set the
 host's "page not found" response to `404.html`. `npm run preview` serves `dist/` locally first.
 
-The commands accept `--base /docs/` to serve the site under a path, `--out-dir`, `--port`, and
-`--host`.
+The commands take an optional project folder (`htmlkit dev site`), `--base /docs/` to serve the site
+under a path, `--origin` for absolute URLs, `--out-dir`, `--port`, and `--host`. The servers listen on
+127.0.0.1 unless you pass `--host`. `preview` serves the built files as they are; it doesn't run
+loaders.
 
 ## Next steps
 
@@ -73,4 +75,5 @@ The commands accept `--base /docs/` to serve the site under a path, `--out-dir`,
 | Add pages, dynamic URLs, and layouts | [Pages and routing](/htmlkit/routes) |
 | Load data into a page | [Loading data](/htmlkit/loaders) |
 | Add site navigation and order pages | [Navigation](/htmlkit/navigation) |
+| Move between pages without reloading | [Moving between pages](/htmlkit/client-navigation) |
 | Change settings, use plugins, or call HTMLKit from code | [Configuration](/htmlkit/configuration) |

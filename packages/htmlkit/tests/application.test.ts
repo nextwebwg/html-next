@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ describe("application platform", () => {
     await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page/);
     await write(root, "extra/products.html", '<meta name="hk:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
     await expect(discoverRoutes(root, options)).rejects.toThrow(/absent-page/);
-  });
+  }, 60_000);
 
   it("renders head bindings from loader props and merges page overrides while preserving repeatable links", async () => {
     const root = await app();
@@ -66,6 +67,7 @@ describe("application platform", () => {
     } finally { await application.close(); }
   });
   it("inlines app/head.js before stylesheets and rejects text that would end its script", async () => {
+    const prepaint = "<script>document.documentElement.dataset.prepaint = String(document.body === null);</script>";
     const root = await app();
     await write(root, "app/layouts/default.html", '<template component="app-layout"><link rel="stylesheet" href="/shared.css"><main><slot name="page"></slot></main></template>');
     await write(root, "app/layouts/default.server.ts", 'export const load = () => ({ head: { title: "Loaded", script: "injected()" } });');
@@ -74,7 +76,11 @@ describe("application platform", () => {
       const { html } = await application.render("/");
       expect(html).toContain('<head><meta charset="utf-8"><script>document.documentElement.dataset.prepaint = String(document.body === null);</script><meta name="viewport"');
       expect(html.indexOf("<script>")).toBeLessThan(html.indexOf("/shared.css"));
+      // The not-found page gets it too, rendered and built, so a saved theme never flashes there.
+      expect((await application.render("/missing/")).html).toContain(prepaint);
     } finally { await application.close(); }
+    await buildApplication({ root });
+    expect(await readFile(join(root, "dist/404.html"), "utf8")).toContain(prepaint);
     await write(root, "app/head.js", 'console.log("</SCRIPT>");');
     await expect(createApplication({ root })).rejects.toThrow("app/head.js cannot contain");
     // Without app/head.js, a loader's untyped head fields still cannot add a script.
@@ -85,7 +91,7 @@ describe("application platform", () => {
       expect(html).toContain("<title>Home &amp; kit</title>");
       expect(html).not.toContain("injected()");
     } finally { await unscripted.close(); }
-  });
+  }, 60_000);
 
   it("serves rendered pages for native Requests through application.fetch", async () => {
     const root = await app();
@@ -104,9 +110,53 @@ describe("application platform", () => {
       expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/items/one/"]);
       expect(await (await handle(new Request("http://localhost/items/one/"))).text()).toContain("kit: one");
       expect((await handle(new Request("http://localhost/missing/"))).status).toBe(404);
+      // A leading // would name another origin; it is simply not a page here.
+      expect((await handle(new Request("http://localhost//evil.example/"))).status).toBe(404);
+      expect((await handle(new Request("http://localhost/_htmlkit/pages//evil.example/payload.json"))).status).toBe(404);
       const post = await handle(new Request("http://localhost/", { method: "POST" }));
       expect([post.status, post.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
+      // Each page's payload, through the same render: its head, and each layer's invocation and state.
+      const payload = await handle(new Request("http://localhost/_htmlkit/pages/payload.json"));
+      expect([payload.status, payload.headers.get("content-type")]).toEqual([200, "application/json"]);
+      expect(await payload.json()).toMatchObject({ version: 1, modules: [], styles: [],
+        head: { lang: "en", title: "Home & kit", description: "/mark.svg" },
+        layers: [{ component: "app-layout", attributes: { brand: "HTMLKit" } }, { component: "home-page", attributes: { asset: "/mark.svg" }, state: { count: 4 } }] });
+      expect(JSON.stringify(await (await handle(new Request("http://localhost/_htmlkit/pages/items/one/payload.json"))).json())).not.toContain("owner");
+      for (const path of ["missing/payload.json", "items/payload.json", "payload.json/", "items/one/other.json"]) {
+        expect((await handle(new Request(`http://localhost/_htmlkit/pages/${path}`))).status).toBe(404);
+      }
     } finally { await application.close(); }
+  }, 60_000);
+
+  it("leaves out the payload of a page whose state JSON cannot carry exactly", async () => {
+    const root = await app();
+    await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' }, state: { count: -0 } });");
+    const result = await buildApplication({ root });
+    await expect(readFile(join(result.outDir, "_htmlkit/pages/payload.json"))).rejects.toThrow(/ENOENT/);
+    expect(JSON.parse(await readFile(join(result.outDir, "_htmlkit/pages/items/one/payload.json"), "utf8")).layers[1].component).toBe("item-page");
+    const application = await createApplication({ root });
+    try { expect((await application.fetch(new Request("http://localhost/_htmlkit/pages/payload.json"))).status).toBe(404); }
+    finally { await application.close(); }
+  }, 60_000);
+
+  it("gives each page graph with shared stylesheet imports its own stylesheet, even under one layout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-shared-css-")); roots.push(root);
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "app/layouts/default.html", '<template component="site-shell"><main><slot name="page"></slot></main><style>:host { color: rgb(1, 1, 1); }</style></template>');
+    await write(root, "app/styles/card.css", ".card { border-color: rgb(7, 7, 7); }");
+    for (const [file, tag, color] of [["index", "home-page", "rgb(2, 2, 2)"], ["guide", "guide-page", "rgb(3, 3, 3)"]]) {
+      await write(root, `app/pages/${file}.html`, `<template component="${tag}"><article class="card"><h1>${tag}</h1></article><style>@import "@/app/styles/card.css"; h1 { color: ${color}; }</style></template>`);
+    }
+    const result = await buildApplication({ root });
+    const css = async (page: string) => {
+      const html = await readFile(join(result.outDir, page), "utf8");
+      return (await Promise.all([...html.matchAll(/href="\/(_htmlkit\/[^"]+\.css)"/g)].map(match => readFile(join(result.outDir, match[1]!), "utf8")))).join("");
+    };
+    // Both graphs start with the layout; each page still links its own styles, not the last page's.
+    for (const [page, own, other] of [["index.html", "home-page", "guide-page"], ["guide/index.html", "guide-page", "home-page"]] as const) {
+      const styles = await css(page);
+      expect([styles.includes(`[data-component~=${own}]`), styles.includes(`[data-component~=${other}]`), styles.includes("#070707")]).toEqual([true, false, true]);
+    }
   }, 60_000);
 
   it("resolves @/ from the project root and links built-in components without a link", async () => {
@@ -127,6 +177,8 @@ describe("application platform", () => {
     } finally { await application.close(); }
     const result = await buildApplication({ root });
     expect(result.browserInputs.some(input => input.endsWith("controllers/card.ts"))).toBe(true);
+    // Only source files: tools read each input, and HTMLKit's virtual stylesheets have no file.
+    expect(result.browserInputs.filter(input => !existsSync(input))).toEqual([]);
     const styles = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(name => name.endsWith(".css")).map(name => readFile(join(result.outDir, "_htmlkit", name), "utf8")));
     expect(styles.join("")).toContain("#010203");
   }, 60_000);
@@ -238,6 +290,23 @@ describe("application platform", () => {
         { pathname: "/docs/items/one/", pageName: "item-page" }, { pathname: "/docs/items/two/", pageName: "item-page" }]);
     expect(manifest.pages.every((page: { browserModule: string }) => /^\/docs\/_htmlkit\/.*\.js$/.test(page.browserModule))).toBe(true);
     expect(result.browserInputs.some(path => /(?:server-worker|node-loader|jsdom|parse5|\.server\.|browser-source)/.test(path))).toBe(false);
+    // Every page module shares one client and runtime chunk, so client navigation keeps one registry.
+    const chunks = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(file => file.endsWith(".js"))
+      .map(file => readFile(join(result.outDir, "_htmlkit", file), "utf8")));
+    expect(chunks.filter(source => source.includes("hk-announcer"))).toHaveLength(1);
+    // Payloads live in the reserved _htmlkit tree and name what the page's document links.
+    const payload = JSON.parse(await readFile(join(result.outDir, "_htmlkit/pages/items/one/payload.json"), "utf8"));
+    expect(payload.modules).toEqual([manifest.pages[1].browserModule]);
+    const itemDocument = await readFile(join(result.outDir, "items/one/index.html"), "utf8");
+    expect(payload.styles).toEqual([...itemDocument.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(match => match[1]));
+    expect(payload.styles.length).toBeGreaterThan(0);
+    expect(payload.layers.map((layer: { component: string }) => layer.component)).toEqual(["items-layout", "item-page"]);
+    expect(payload.layers[1].attributes).toEqual({ label: "kit: one", tags: '["a < b","quote \\" here"]' });
+    // Shared chunks, which links on screen prefetch, never include a page's own module.
+    for (const page of manifest.pages) {
+      expect(page.chunks.length).toBeGreaterThan(0);
+      expect(page.chunks.every((chunk: string) => /^\/docs\/_htmlkit\/[^/]+\.js$/.test(chunk) && !manifest.pages.some((other: { browserModule: string }) => other.browserModule === chunk))).toBe(true);
+    }
     const server = await previewApplication({ root, port: 0 });
     try {
       expect(await (await fetch(server.url + "items/two/")).text()).toContain("kit: two");

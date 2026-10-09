@@ -25,7 +25,15 @@ export interface ApplicationOptions {
   readonly css?: readonly string[];
   /** A classic script inlined with app/head.js, before it, so it runs before first paint; plugins may set it. */
   readonly headScript?: string;
+  /**
+   * What links prefetch before a click: "interaction" (default) fetches a page's payload and module
+   * when its link is hovered, focused, or touched; "visible" also does so for links on screen; "none"
+   * prefetches nothing. A link or its ancestor overrides it with data-hk-prefetch.
+   */
+  readonly prefetch?: PrefetchPolicy;
 }
+
+export type PrefetchPolicy = "interaction" | "visible" | "none";
 
 export interface PageDirectory {
   /** Relative to the application root, which must contain it. */
@@ -67,8 +75,8 @@ export interface PageHead {
 export interface RenderedHead extends PageHead {
   /** Rendered native metadata, merged by identity; values are escaped on output. */
   readonly elements?: readonly HeadElement[];
-  /** The application's app/head.js, inlined after the charset so it runs before first paint. */
-  readonly script?: string;
+  /** A plugin's headScript, then app/head.js, each inlined after the charset so they run before first paint. */
+  readonly scripts?: readonly string[];
 }
 
 export interface HeadElement {
@@ -161,6 +169,15 @@ export interface RenderedPage {
   readonly head: RenderedHead;
   readonly body: string;
   readonly components: readonly BrowserDefinition[];
+  /** Each layer's invocation, outermost first, from which the browser renders the page from its payload. */
+  readonly layers: readonly RenderedLayer[];
+}
+export interface RenderedLayer {
+  readonly component: string;
+  /** The invocation's prop attributes, in their HTML form, defaults included. */
+  readonly attributes: Readonly<Record<string, string>>;
+  /** The loader's initial state, when it returned one. */
+  readonly state?: Readonly<Record<string, unknown>>;
 }
 export interface Application {
   readonly root: string;

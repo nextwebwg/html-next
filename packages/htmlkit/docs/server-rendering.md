@@ -81,8 +81,10 @@ explicitly reviewed.
 ## Native mechanisms and the remaining gap
 
 Native `URL`, `Request`, `Response`, `fetch`, and `AbortSignal` cover URL parsing, HTTP values,
-network reads, and cancellation. Native anchors and document navigation cover the first routing
-experience. HTML Next already provides named-slot composition, typed props/state, isolated Node
+network reads, and cancellation. Native anchors and the Navigation API carry routing; client
+navigation renders each page from its module and data payload, or its static document
+([client-navigation.md](./client-navigation.md)). A request adapter must not prefetch payloads for
+links on screen, since each would run loaders. HTML Next already provides named-slot composition, typed props/state, isolated Node
 DOM rendering, rendered continuation serialization, MutationObserver-based adoption, controller
 connection/disposal, and browser read resumption. Vite supplies module resolution, TypeScript
 transformation, asset bundling, and development watching.

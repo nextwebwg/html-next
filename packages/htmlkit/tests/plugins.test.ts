@@ -60,6 +60,37 @@ it("routes plugin pages through page directories, metadata, aliases, and a plugi
   } finally { await application.close(); }
 }, 60_000);
 
+it("keeps head scripts apart, refuses private files, and lays out an alias like its page", async () => {
+  const root = await site();
+  // Each script is its own element: joined, ASI would call the plugin's last expression with this one.
+  await write(root, "app/head.js", "(() => { document.documentElement.dataset.user = 'yes'; })();");
+  await write(root, "app/layouts/guide.html", '<template component="guide-shell"><main>Guide<slot name="page"></slot></main></template>');
+  const application = await createApplication({ root, plugins: [notes(root)], layoutDefaults: { "/install/": "guide" } });
+  try {
+    expect((await application.render("/install/")).html).toContain("<script>window.notes = true;</script><script>(() => {");
+    expect((await application.render("/install/")).html).toContain('data-component="guide-shell"');
+    expect((await application.render("/start/")).html).toContain('data-component="guide-shell"');
+  } finally { await application.close(); }
+  for (const secret of [".env", ".git/config", "docs/server.pem"]) {
+    await write(root, secret, "SECRET=1");
+    await write(root, "docs/04-secret.note", `<article><img src="@asset(${join(root, secret)})" alt=""></article>`);
+    await expect(createApplication({ root, plugins: [notes(root)] })).rejects.toThrow(/private/);
+  }
+}, 60_000);
+
+it("serves a page-wide stylesheet from outside the root in development", async () => {
+  const root = await site();
+  // A plugin's own stylesheet lives in its package, outside the site's root.
+  const outside = await mkdtemp(join(tmpdir(), "htmlkit-theme-")); roots.push(outside);
+  await write(outside, "theme.css", "html { color: rgb(1, 2, 3); }");
+  const server = await devApplication({ root, port: 0, plugins: [notes(root)], css: [join(outside, "theme.css")] });
+  try {
+    const html = await (await fetch(server.url + "v/one/install/")).text();
+    const href = /<link rel="stylesheet" href="([^"]*theme\.css)"/.exec(html)![1]!;
+    expect((await fetch(new URL(href, server.url))).status).toBe(200);
+  } finally { await server.close(); }
+}, 60_000);
+
 it("serves plugin page files and recompiles edited pages in development", async () => {
   const root = await site();
   const server = await devApplication({ root, port: 0, plugins: [notes(root)] });

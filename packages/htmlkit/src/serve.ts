@@ -1,13 +1,13 @@
 import { createServer as createHTTPServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { createServer, isRunnableDevEnvironment, normalizePath } from "vite";
 
 import { createApplication } from "./application.js";
 import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
 import { configure, globalStylesheets, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
-import { documentHTML, escapeHTML } from "./document.js";
+import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
 
@@ -86,6 +86,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   const sources = new Map<string, string>();
+  const css = globalStylesheets(options, config.root);
   let watchReady!: () => void;
   const watching = new Promise<void>(done => { watchReady = done; });
   const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base, resolve: { alias: rootAlias(config.root) },
@@ -93,22 +94,21 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
       name: "htmlkit-watch-ready", configureServer(server) { server.watcher.once("ready", watchReady); },
     }], optimizeDeps: { noDiscovery: true, include: [] },
     server: { host: options.host ?? "127.0.0.1", port: options.port ?? 3000,
-      fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../.."))] } },
+      // Page-wide stylesheets may live outside the root, as a plugin's own stylesheet does.
+      fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../..")), ...css.map(file => dirname(file)),
+        ...await Promise.all(css.map(file => realpath(dirname(file)).catch(() => dirname(file))))] } },
     logLevel: "silent" });
   // Browser modules and stylesheets for each served page, as Vite virtual modules.
-  const assets = (page: RenderedPage): string => {
+  const assets = (page: RenderedPage): PageAssets => {
     const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
     const id = `virtual:htmlkit/${graphId}`;
-    const css = globalStylesheets(options, config.root);
-    sources.set(id, browserSource(page.components, config.base, css));
+    sources.set(id, browserSource(page.components, { base: config.base, prefetch: config.prefetch }, css));
     const styles = stylesheetSources(page.components);
     for (const [id, css] of styles) sources.set(id, css);
     // Vite's HTML transformer applies its base to root-relative assets a second time.
     // This document is already composed for its deployment URL; only modules use Vite.
-    // Global stylesheets first, so component styles follow them in the cascade.
-    return [...css.map(normalizePath), ...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
-      `<script type="module" src="${escapeHTML(config.base + "@vite/client")}"></script>` +
-      `<script type="module" src="${escapeHTML(config.base + "@id/" + id)}"></script>`;
+    // Page-wide stylesheets first, so component styles follow them in the cascade.
+    return { styles: [...css.map(normalizePath), ...styles.keys()].map(id => config.base + "@fs/" + id), modules: [config.base + "@vite/client", config.base + "@id/" + id] };
   };
   let application: Application;
   try { application = await createApplication(options, vite, assets); }
@@ -126,11 +126,12 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   vite.middlewares.use((request, response, next) => {
     const pathname = requestPath(request);
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
+    const payload = pathname.startsWith(config.base + "_htmlkit/pages/");
     void (async () => {
       if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
-      if (file === undefined && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
+      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
       if (!methodAllowed(request, response)) return;
       if (file !== undefined) {
         const body = await readFile(file);

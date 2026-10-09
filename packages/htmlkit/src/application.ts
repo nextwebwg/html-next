@@ -9,29 +9,33 @@ import { renderComponents } from "@nextwebwg/html-next/server";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
 import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
-import { documentHTML, escapeHTML } from "./document.js";
+import { documentHTML, escapeHTML, pagePayload, payloadPath, type PageAssets } from "./document.js";
 import { discover, matchRoute, parameter, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
-import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, PagerLinks, RenderedHead, RenderedPage, RouteLayer, ServerModule } from "./types.js";
+import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, PagerLinks, RenderedHead, RenderedLayer, RenderedPage, RouteLayer, ServerModule } from "./types.js";
 
-function invocation(definition: ComponentDefinition, result: LoaderResult, id: string, child: string, nested: boolean): string {
+/** A loader's props as invocation attributes, in their HTML form, defaults included. */
+function invocationAttributes(definition: ComponentDefinition, result: LoaderResult): Record<string, string> {
   const props = result.props ?? {};
   for (const name of Object.keys(props)) {
     if (!Object.hasOwn(definition.contract.props, name)) throw new HtmlKitError(`Undeclared prop ${name}.`, definition.source.file);
   }
-  let attributes = ` id="${id}"${nested ? ' slot="page"' : ""}`;
+  const attributes: Record<string, string> = {};
   for (const [name, contract] of Object.entries(definition.contract.props)) {
     serializePropTarget(contract, props[name]);
     // The contract target describes lowering onto native DOM. Invocation attributes carry
     // the public prop name; writing the target name here silently loses remapped props.
     const provided = props[name] === undefined ? contract.default : props[name];
     const value = provided == null ? null : serializeTypedValue(provided, contract.type);
-    const attribute = name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-    if (value !== null) attributes += ` ${attribute}="${escapeHTML(value)}"`;
+    if (value !== null) attributes[name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()] = value;
   }
-  const tag = definition.contract.tag;
-  return `<${tag}${attributes}>${child}</${tag}>`;
+  return attributes;
+}
+
+/** The browser builds the same invocation from a page payload (client.ts). */
+function invocation(tag: string, attributes: Readonly<Record<string, string>>, id: string, child: string, nested: boolean): string {
+  return `<${tag} id="${id}"${nested ? ' slot="page"' : ""}${Object.entries(attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>${child}</${tag}>`;
 }
 
 // Built-in components need no link: a resource that uses one gets it added after its content, so
@@ -50,21 +54,36 @@ function packageResource(path: string) {
   return { url: pathToFileURL(path).href, trustRoot: pathToFileURL(directory + "/").href };
 }
 
+// Classic scripts inlined into each document head run before first paint, e.g. to apply a saved theme:
+// a plugin's headScript, then app/head.js, each in its own element so neither can break the other.
+export async function headScripts(options: ApplicationOptions, root: string): Promise<readonly string[]> {
+  const path = join(root, "app/head.js");
+  const file = existsSync(path) ? await readFile(path, "utf8") : undefined;
+  const scripts: string[] = [];
+  for (const [script, name, source] of [[options.headScript, "headScript", undefined], [file, "app/head.js", path]] as const) {
+    if (script === undefined) continue;
+    if (/<!--|<\/?script/i.test(script)) {
+      throw new HtmlKitError(`${name} cannot contain <!--, <script, or </script, which would end or nest its inline script.`, source);
+    }
+    scripts.push(script);
+  }
+  return scripts;
+}
+
+// Every page gets the head scripts, the not-found page included, so it cannot flash either.
+export function notFoundPage(scripts: readonly string[]) {
+  const head: RenderedHead = { title: "Page not found", scripts };
+  const body = "<main><h1>Page not found</h1></main>";
+  return { head, body, html: documentHTML(body, head) };
+}
+
 /** assets supplies a serving adapter's browser modules and stylesheets for fetch(). */
 export async function createApplication(input: ApplicationOptions = {}, moduleServer?: ViteDevServer,
-  assets?: (page: RenderedPage) => string): Promise<Application> {
+  assets?: (page: RenderedPage) => PageAssets): Promise<Application> {
   const options = await withPlugins(input);
   const config = configure(options);
   const { routes, sources, files } = await discover(config.root, { ...options, base: config.base });
-  // A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
-  const headPath = join(config.root, "app/head.js");
-  const fileScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
-  for (const [script, name, source] of [[options.headScript, "headScript", undefined], [fileScript, "app/head.js", headPath]] as const) {
-    if (script !== undefined && /<!--|<\/?script/i.test(script)) {
-      throw new HtmlKitError(`${name} cannot contain <!--, <script, or </script, which would end or nest its inline script.`, source);
-    }
-  }
-  const headScript = [options.headScript, fileScript].filter(script => script !== undefined).join("\n") || undefined;
+  const scripts = await headScripts(options, config.root);
   const ownsServer = moduleServer === undefined;
   const map = importMap(config.root);
   const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom", resolve: { alias: rootAlias(config.root) },
@@ -157,7 +176,8 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     const trail: NavigationItem[] = [];
     for (let i = start; i <= parts.length; i++) {
       const href = config.base + parts.slice(0, i).map(part => part + "/").join("");
-      const route = paths.get(href);
+      // The page being rendered exists even when no entries() lists it, as for a dynamic page at request time.
+      const route = paths.get(href) ?? (i === parts.length ? matchRoute(routes, href, config.base)?.route : undefined);
       if (route !== undefined && route.canonical === undefined) trail.push(item(href, route, i - start, current));
     }
     return Object.freeze(trail);
@@ -179,13 +199,14 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     },
     async render(pathname, signal = new AbortController().signal) {
       signal.throwIfAborted();
+      const notFound = () => ({ status: 404 as const, pathname, ...notFoundPage(scripts), css: "", components: [], layers: [] });
+      // A path starting with // would name another origin; no page lives there, for documents or payloads.
+      if (pathname.startsWith("//")) return notFound();
       const url = new URL(pathname, config.origin);
       if (url.origin !== config.origin || url.search || url.hash) throw new HtmlKitError("Static rendering requires an application pathname without a query or fragment.");
       const matched = matchRoute(routes, url.pathname, config.base);
       if (matched === undefined) {
-        const head = { title: "Page not found" };
-        const body = '<main><h1>Page not found</h1></main>';
-        return { status: 404, pathname, html: documentHTML(body, head), css: "", head, body, components: [] };
+        return notFound();
       }
       const { route, params } = matched;
       const layers = [...route.layouts, route];
@@ -258,29 +279,40 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         parent = Object.freeze({ ...parent, ...result.data });
         const index = results.length - 1;
         head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
-          (definition, values) => invocation(definition, values, "hk-head", "", false));
+          (definition, values) => invocation(definition.contract.tag, invocationAttributes(definition, values), "hk-head", "", false));
       }
-      if (headScript !== undefined) head = { ...head, script: headScript };
+      if (scripts.length > 0) head = { ...head, scripts };
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
+      const rendered: RenderedLayer[] = layers.map((_layer, i) => ({ component: layerDefinitions[i]!.contract.tag,
+        attributes: invocationAttributes(layerDefinitions[i]!, results[i]!), ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
       let body = "";
       for (let i = layers.length - 1; i >= 0; i--) {
         const id = `hk-layer-${i}`;
-        const result = results[i]!;
-        if (result.state !== undefined) state[`#${id}`] = result.state;
-        body = invocation(layerDefinitions[i]!, result, id, body, i > 0);
+        const layer = rendered[i]!;
+        if (layer.state !== undefined) state[`#${id}`] = layer.state;
+        body = invocation(layer.component, layer.attributes, id, body, i > 0);
       }
       const components: BrowserDefinition[] = [...graph.nodes.values()].map(node => ({ definition: node.definition,
         styles: compileComponentStylesForBuild(node.definition.css, node.definition),
         ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }) }));
-      const rendered = await renderComponents(body, { definitions: components.map(value => value.definition), url: url.href, state });
+      const output = await renderComponents(body, { definitions: components.map(value => value.definition), url: url.href, state });
       signal.throwIfAborted();
-      return { status: 200, pathname: url.pathname, body: rendered.html, css: rendered.css, head,
-        html: documentHTML(rendered.html, head), components };
+      return { status: 200, pathname: url.pathname, body: output.html, css: output.css, head,
+        html: documentHTML(output.html, head), components, layers: rendered };
     },
     // Not a method of `this`: runtimes are handed the function itself, as in Deno.serve(application.fetch).
     async fetch(request) {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
       const { pathname } = new URL(request.url);
+      // A page's payload, through the same render as its document.
+      const pages = config.base + "_htmlkit/pages/";
+      const payload = pathname.startsWith(pages) ? /^(.*\/)?payload\.json$/.exec(pathname.slice(pages.length)) : null;
+      if (payload !== null) {
+        const page = await application.render(config.base + (payload[1] ?? ""), request.signal);
+        const data = payloadPath(config.base, page.pathname) === pathname ? pagePayload(page, assets?.(page) ?? { styles: [], modules: [] }) : undefined;
+        return new Response(data === undefined || request.method === "HEAD" ? null : JSON.stringify(data),
+          { status: data === undefined ? 404 : 200, headers: { "content-type": "application/json" } });
+      }
       const page = await application.render(pathname, request.signal);
       if (page.status === 200 && !pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" } });
       return new Response(request.method === "HEAD" ? null : documentHTML(page.body, page.head, assets?.(page)),

@@ -100,8 +100,8 @@ To give a whole folder a layout, see `layoutDefaults` in [Configuration](/htmlki
 ## The page head
 
 `<title>`, `<meta>`, and `<link>` tags directly inside a page or layout component go in the document
-head. The layout's tags are defaults, and the page's tags replace them. They can use the page's
-props:
+head. A page's `<title>` and `<meta>` tags replace the layout's; stylesheet and alternate `<link>`s from
+both are kept. They can use the page's props:
 
 ```html
 <template component="page-post">

@@ -50,8 +50,8 @@ import server-only packages. `@/` is the project root.
 | `head` | `title`, `description`, or `lang` for the document head. |
 | `data` | Private values passed on to inner loaders as `parent`; never sent to the browser. |
 
-Props and state are written into the page's HTML, so **anything in them is public**. Keep secrets
-in `data` or out of the result entirely.
+Props and state are written into the page's HTML and its navigation data file, so **anything in
+them is public**. Keep secrets in `data` or out of the result entirely.
 
 ## What `load()` receives
 
@@ -93,7 +93,8 @@ from the outside in, then the page's. Each receives the `data` of the ones befor
 ## In the browser
 
 HTMLKit sends the rendered HTML, then a small script per page that lets HTML Next take over that
-HTML in place: it connects controllers and starts browser data reads, without re-rendering.
+HTML in place: it connects controllers and starts browser data reads, without re-rendering. After
+that, links to other pages render in place; see [Moving between pages](/htmlkit/client-navigation).
 
 - A component's controller can be TypeScript: write `controller="./counter.js"` next to
   `counter.ts`, and HTMLKit compiles it. Run `tsc` separately to check types.

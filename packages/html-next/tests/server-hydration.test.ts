@@ -251,5 +251,87 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
         assert.deepEqual(requests, ["/lazy.png"]);
       } finally { await browser.close(); }
     });
+
+    it(`${engine} carries a fresh rendering's props onto a kept instance without resetting its state`, async () => {
+      const first = await renderComponents('<ssr-counter id="subject" label="First">World</ssr-counter>', { definitions });
+      const [second, implicit] = await Promise.all(['<ssr-counter id="subject" label="Second">Other</ssr-counter>',
+        '<ssr-counter id="subject">Other</ssr-counter>'].map(async (html) => (await renderComponents(html, { definitions })).html));
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<main>${first.html}</main>`);
+        await page.addScriptTag({ path: bundle });
+        const result = await page.evaluate(async ({ definitionJSON, renderings }) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            registerComponentDefinitions(definitions: unknown[]): void; lowerDocument(): number;
+            adoptRenderedProps(element: Element, rendered: Element): void;
+          } }).HtmlRuntime;
+          runtime.registerComponentDefinitions(JSON.parse(definitionJSON) as unknown[]);
+          runtime.lowerDocument();
+          const root = document.querySelector("#subject")!;
+          root.querySelector("button")!.click();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const read = () => ({ label: root.getAttribute("data-label"), count: root.querySelector("span")!.textContent,
+            open: root.querySelector("aside") !== null, projected: root.querySelector("p")!.textContent, kept: document.querySelector("#subject") === root });
+          const adopt = async (html: string) => {
+            const template = document.createElement("template");
+            template.innerHTML = html;
+            runtime.adoptRenderedProps(root, template.content.querySelector("#subject")!);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            return read();
+          };
+          return { before: read(), second: await adopt(renderings[0]!), implicit: await adopt(renderings[1]!),
+            unrecorded: (() => { try { runtime.adoptRenderedProps(root, document.createElement("section")); return "adopted"; } catch (error) { return String(error); } })() };
+        }, { definitionJSON: JSON.stringify(definitions), renderings: [second, implicit] });
+        // Props follow the new rendering; state, slot content, and the root itself stay.
+        assert.deepEqual(result.before, { label: "First", count: "1", open: true, projected: "Hello World!", kept: true });
+        assert.deepEqual(result.second, { ...result.before, label: "Second" });
+        assert.deepEqual(result.implicit, { ...result.before, label: "Visits" });
+        assert.match(result.unrecorded, /HR005/);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} replaces a kept instance's projected node in its slot, styles, and rendered form`, async () => {
+      const rendered = await renderComponents('<ssr-counter id="subject"><b slot="title">T</b>world<i slot="extra">Shown</i></ssr-counter>',
+        { definitions, state: { "#subject": { open: true } } });
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<main><p id="loose">Loose</p>${rendered.html}</main>`);
+        await page.addScriptTag({ path: bundle });
+        const result = await page.evaluate(async (definitionJSON) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            registerComponentDefinitions(definitions: unknown[]): void; lowerDocument(): number; serializeRenderedForm(element: Element): string;
+            replaceProjectedNode(current: ChildNode, next: ChildNode): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; slots: Record<string, readonly Element[]> } | undefined;
+          } }).HtmlRuntime;
+          runtime.registerComponentDefinitions(JSON.parse(definitionJSON) as unknown[]);
+          runtime.lowerDocument();
+          const root = document.querySelector("#subject")!;
+          const host = runtime.getComponentHost(root)!;
+          const element = (html: string) => { const template = document.createElement("template"); template.innerHTML = html; return template.content.firstElementChild!; };
+          const title = element('<strong slot="title">New title</strong>');
+          const extra = element('<em slot="extra">New extra</em>');
+          const before = root.querySelector("b")!.hasAttribute("data-slotted");
+          runtime.replaceProjectedNode(root.querySelector("b")!, title);
+          runtime.replaceProjectedNode(root.querySelector("i")!, extra);
+          // The conditional slot renders its new node again.
+          host.state.open = false;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const closed = root.querySelector("aside");
+          host.state.open = true;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const loose = element('<p id="loose">Replaced</p>');
+          runtime.replaceProjectedNode(document.querySelector("#loose")!, loose);
+          return { before, slotted: [title.hasAttribute("data-slotted"), extra.hasAttribute("data-slotted")],
+            slots: [host.slots.title!.map((node) => node.outerHTML), host.slots.extra!.map((node) => node.localName)],
+            closed, reopened: root.querySelector("aside")?.innerHTML.replace(/<!--.*?-->|<\?.*?>/g, ""),
+            serialized: runtime.serializeRenderedForm(root).match(/<(?:b|i|strong|em)\b/g), loose: document.querySelector("#loose")!.textContent };
+        }, JSON.stringify(definitions));
+        assert.deepEqual(result, { before: true, slotted: [true, true],
+          slots: [['<strong slot="title" data-slotted="">New title</strong>'], ["em"]], closed: null,
+          reopened: '<em slot="extra" data-slotted="">New extra</em>', serialized: ["<strong", "<em"], loose: "Replaced" });
+      } finally { await browser.close(); }
+    });
   }
 });

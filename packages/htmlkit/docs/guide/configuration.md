@@ -1,6 +1,6 @@
 ---
 title: Configuration
-order: 4
+order: 5
 blurb: htmlkit.config.ts · plugins · using HTMLKit from code
 eyebrow: HTMLKit
 ---
@@ -32,12 +32,13 @@ export default defineConfig({
 | `fileRoutes` | `true` | `false` turns off page folders, so only `routes` remain. |
 | `css` | none | Page-wide stylesheets for rules such as `html` and `body`, for example `['@/styles/page.css']`. Components keep their own styles. |
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
+| `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
 
 A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`.
 
 ## `@/` and built-in components
 
-`@/` is the project root everywhere HTMLKit resolves a path:
+`@/` is the project root:
 
 ```html
 <link rel="component" href="@/components/card.html">
@@ -89,7 +90,7 @@ A page's own `hk:layout` wins over its folder's layout, which wins over `layoutD
 A plugin can add a page format and adjust options. This one makes `.note` files into pages:
 
 ```ts
-import { basename } from 'node:path';
+import { createHash } from 'node:crypto';
 import { defineConfig, type HtmlKitPlugin } from '@nextwebwg/htmlkit';
 
 const notes: HtmlKitPlugin = {
@@ -97,8 +98,9 @@ const notes: HtmlKitPlugin = {
   pages: {
     extensions: ['.note'],
     compile(source, page) {
-      // Each page needs its own component name.
-      return `<template component="note-${basename(page.file, '.note')}"><article>${source}</article></template>`;
+      // Each page needs its own valid component name; a hash of its path is both.
+      const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
+      return `<template component="note-${name}"><article>${source}</article></template>`;
     },
   },
 };

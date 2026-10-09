@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -83,6 +84,7 @@ it("renders built-in breadcrumbs and previous/next links from navigation order",
     <prop name="next" type="${item}" nullable>Next page</prop></defs>
     <main><hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs><slot name="page"></slot><hk-pager from:previous="$previous" from:next="$next"></hk-pager></main></template>`);
   await write(root, "app/layouts/default.server.ts", 'export const load = async ({ breadcrumbs, pager }) => ({ props: { crumbs: await breadcrumbs(), ...await pager() } });');
+  await write(root, "app/pages/blog/[slug].html", '<template component="page-post"><p>Post</p></template>');
   const application = await createApplication({ root, base: "/kit/" });
   try {
     const html = (await application.render("/kit/guide/install/")).body;
@@ -94,5 +96,18 @@ it("renders built-in breadcrumbs and previous/next links from navigation order",
     // The first page has no previous link and the last has no next.
     expect((await application.render("/kit/")).body).not.toContain('rel="prev"');
     expect((await application.render("/kit/about/")).body).not.toContain('rel="next"');
+    // A dynamic page without entries() renders on request; its trail still ends at it.
+    const post = /<nav aria-label="Breadcrumb"[^>]*>([\s\S]*?)<\/nav>/.exec((await application.render("/kit/blog/hello/")).body)![1]!;
+    expect(post).toMatch(/<a href="\/kit\/blog\/hello\/"[^>]*aria-current="page"[^>]*>hello<\/a>/);
   } finally { await application.close(); }
+});
+
+it("names the removed routeOrdering option and exports every built-in component", async () => {
+  const root = await mkdtemp(join(tmpdir(), "htmlkit-removed-")); roots.push(root);
+  await expect(createApplication({ root, routeOrdering: true } as never)).rejects.toThrow(/routeOrdering option was removed/);
+  // Package consumers link built-ins by specifier, through exports rather than HTMLKit's import map.
+  const require = createRequire(import.meta.url);
+  for (const file of await readdir(new URL("../components/", import.meta.url))) {
+    expect(require.resolve(`@nextwebwg/htmlkit/components/${file}`).replaceAll("\\", "/")).toMatch(new RegExp(`/components/${file}$`));
+  }
 });
