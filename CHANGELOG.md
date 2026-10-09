@@ -10,7 +10,7 @@
 
 ### Added
 
-- The optional `transitions` extension animates what `$if`, `$each`, and `$match` add, remove, and move. `$transition` takes a keyframes name (a built-in `fade`, `fly`, `scale`, or `blur`, or any `@keyframes`) with an optional duration, easing, and delay; leaving plays it in reverse. `$transition-name` gives an element an identity, so one element can morph into another. The Vite plugin builds it with `extensions: ["transitions"]`, and `html-next-check` with `--extension transitions`. Without the option the directives fail `HT024`; an unknown extension name fails `HN013`, and a malformed value `HT025`. The live runtime and Vue, React, and Svelte conversion warn and build without animation. Components that do not use the directives compile exactly as before. See the new Transitions guide.
+- The optional `transitions` extension animates what `$if`, `$each`, and `$match` add, remove, and move. `$transition` takes a keyframes name (a built-in `fade`, `fly`, `scale`, or `blur`, or any `@keyframes`) with an optional duration, easing, and delay; leaving plays it in reverse. `$transition-name` gives an element an identity, so one element can morph into another. The Vite plugin builds it with `extensions: ["transitions"]`, and `html-next-check` with `--extension transitions`. Without the option the directives fail `HT024`; an unknown extension name fails `HN013`, and a malformed value `HT025`. The live runtime and Vue, React, and Svelte conversion warn and build without animation. Components that do not use the directives compile exactly as before; the shared support every compiled component bundles grows by 4 B gzip. See the new Transitions guide.
 
 ### Changed
 
