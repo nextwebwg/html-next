@@ -25,9 +25,9 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../te
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue, vueHostSelector } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { conformingScalarStates, literalInitial } from "./state-roots.js";
+import { conformingScalarStates } from "./state-roots.js";
 import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_SPECIFIER } from "./vue-host.js";
