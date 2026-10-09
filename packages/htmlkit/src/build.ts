@@ -5,7 +5,7 @@ import type { Manifest, ManifestChunk } from "vite";
 import { createApplication } from "./application.js";
 import { browserSource, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
-import { configure, HtmlKitError, withPlugins, within } from "./config.js";
+import { configure, globalStylesheets, HtmlKitError, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { ApplicationOptions, BuildResult } from "./types.js";
@@ -66,7 +66,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     for (const pathname of routes) {
       const page = await application.render(pathname);
       pages.push(page);
-      sources.set(`virtual:htmlkit/page-${pages.length - 1}`, browserSource(page.components, config.base));
+      sources.set(`virtual:htmlkit/page-${pages.length - 1}`, browserSource(page.components, config.base, globalStylesheets(options, config.root)));
       for (const [id, css] of stylesheetSources(page.components)) sources.set(id, css);
     }
     const browserInputs = await bundleBrowser({ root: config.root, base: config.base, outDir: stage, sources });

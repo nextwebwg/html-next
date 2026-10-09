@@ -2,11 +2,11 @@ import { createServer as createHTTPServer, type IncomingMessage, type Server, ty
 import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
-import { createServer, isRunnableDevEnvironment } from "vite";
+import { createServer, isRunnableDevEnvironment, normalizePath } from "vite";
 
 import { createApplication } from "./application.js";
 import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
-import { configure, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
+import { configure, globalStylesheets, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
@@ -99,12 +99,14 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const assets = (page: RenderedPage): string => {
     const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
     const id = `virtual:htmlkit/${graphId}`;
-    sources.set(id, browserSource(page.components, config.base));
+    const css = globalStylesheets(options, config.root);
+    sources.set(id, browserSource(page.components, config.base, css));
     const styles = stylesheetSources(page.components);
     for (const [id, css] of styles) sources.set(id, css);
     // Vite's HTML transformer applies its base to root-relative assets a second time.
     // This document is already composed for its deployment URL; only modules use Vite.
-    return [...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
+    // Global stylesheets first, so component styles follow them in the cascade.
+    return [...css.map(normalizePath), ...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
       `<script type="module" src="${escapeHTML(config.base + "@vite/client")}"></script>` +
       `<script type="module" src="${escapeHTML(config.base + "@id/" + id)}"></script>`;
   };

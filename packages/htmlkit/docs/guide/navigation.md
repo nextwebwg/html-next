@@ -31,6 +31,24 @@ export async function load({ navigation }) {
 It renders an accessible `<nav>` of plain links with no styles of its own. The current page's link
 has `aria-current="page"`, and each item has a `data-depth` you can indent with CSS.
 
+## Styling
+
+Component styles are scoped to their own component, so a layout's `<style>` doesn't reach inside
+`<hk-nav>`. Style the built-in components from a global stylesheet instead:
+
+```ts
+// htmlkit.config.ts
+export default defineConfig({ css: ['@/styles/site.css'] });
+```
+
+```css
+/* styles/site.css */
+[data-component="hk-nav"] ul { list-style: none; padding: 0; }
+[data-component="hk-nav"] [data-depth="1"] { padding-inline-start: 1rem; }
+```
+
+Global stylesheets load before the page is shown, like component styles.
+
 ## Ordering pages
 
 Pages are listed alphabetically by URL. To choose the order, start file and folder names with a

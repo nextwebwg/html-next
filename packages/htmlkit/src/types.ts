@@ -18,6 +18,11 @@ export interface ApplicationOptions {
   /** Route-directory defaults, overridden by page metadata; longest prefix wins. */
   readonly layoutDefaults?: Readonly<Record<string, string | false>>;
   readonly plugins?: readonly HtmlKitPlugin[];
+  /**
+   * Global stylesheets on every page, relative to the root or starting with @/. Unlike component
+   * styles they are not scoped, so they can style built-in components such as <hk-nav>.
+   */
+  readonly css?: readonly string[];
   /** A classic script inlined with app/head.js, before it, so it runs before first paint; plugins may set it. */
   readonly headScript?: string;
 }

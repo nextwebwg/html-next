@@ -7,7 +7,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixture } from "./fixture.js";
+import { fixture, write } from "./fixture.js";
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application adoption", () => {
   let root: string;
@@ -138,5 +138,27 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       expect(page.url()).toContain("/proof/guide/quick-start/");
       expect(errors).toEqual([]);
     } finally { await browser.close(); await server?.close(); await rm(root, { recursive: true, force: true }); }
+  }, 60_000);
+});
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("global stylesheets", () => {
+  it("style built-in components on first paint in built and development pages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-global-css-"));
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "styles/site.css", '[data-component="hk-nav"] ul { list-style: none; }');
+    await write(root, "app/layouts/default.html", '<template component="css-shell"><defs><prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Pages</prop></defs><main><hk-nav from:items="$pages"></hk-nav><slot name="page"></slot></main></template>');
+    await write(root, "app/layouts/default.server.ts", "export const load = async ({ navigation }) => ({ props: { pages: await navigation() } });");
+    await write(root, "app/pages/index.html", '<template component="page-home"><h1>Home</h1></template>');
+    const options = { root, css: ["@/styles/site.css"] };
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+      const listStyle = () => page.locator('[data-component="hk-nav"] ul').evaluate(element => getComputedStyle(element).listStyleType);
+      await buildApplication(options);
+      const preview = await previewApplication({ ...options, port: 0 });
+      try { await page.goto(preview.url); expect(await listStyle()).toBe("none"); } finally { await preview.close(); }
+      const dev = await devApplication({ ...options, port: 0 });
+      try { await page.goto(dev.url); expect(await listStyle()).toBe("none"); } finally { await dev.close(); }
+    } finally { await browser.close(); await rm(root, { recursive: true, force: true }); }
   }, 60_000);
 });

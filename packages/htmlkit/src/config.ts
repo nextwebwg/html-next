@@ -43,3 +43,8 @@ export async function withPlugins(options: ApplicationOptions): Promise<Applicat
 export function rootAlias(root: string) {
   return [{ find: /^@\//, replacement: normalizePath(root) + "/" }];
 }
+
+/** The application's global stylesheets as absolute paths. */
+export function globalStylesheets(options: ApplicationOptions, root: string): readonly string[] {
+  return (options.css ?? []).map(path => resolve(root, path.startsWith("@/") ? path.slice(2) : path));
+}

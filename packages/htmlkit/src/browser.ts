@@ -19,7 +19,7 @@ export function stylesheetSources(components: readonly BrowserDefinition[]): Rea
 }
 
 /** HTML Next owns adoption, observation, reads, controllers, and teardown. */
-export function browserSource(components: readonly BrowserDefinition[], base: string): string {
+export function browserSource(components: readonly BrowserDefinition[], base: string, css: readonly string[] = []): string {
   const controlled = components.filter(component => component.controller !== undefined);
   const definitions = components.map(({ definition }) => ({ ...definition, css: definition.css ? "/* external stylesheet */" : "",
     source: { file: `${definition.contract.tag}.html` } }));
@@ -41,6 +41,7 @@ export function browserSource(components: readonly BrowserDefinition[], base: st
     });
   }
   return `import { registerComponentDefinitions, observeDocument, getComponentHost } from ${JSON.stringify(runtime)};
+${css.map(file => `import ${JSON.stringify(normalizePath(file))};`).join("\n")}
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
 ${reads.map((read, i) => `import read${i} from ${JSON.stringify(read.asset + "?url&no-inline")};`).join("\n")}
 ${controlled.map((component, index) => `import * as controller${index} from ${JSON.stringify(component.controller)};`).join("\n")}
