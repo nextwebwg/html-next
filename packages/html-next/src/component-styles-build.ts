@@ -1,3 +1,5 @@
+import { normalizeStylesheetNamespacesForBuild } from "./stylesheet-resources-build.js";
+import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 /**
  * Component style compilation for build tools, which have no DOM. It performs the same rename,
  * two-copy prune, and selector rewrite as the browser (`component-styles.ts`), over postcss.
@@ -55,7 +57,7 @@ export function compileComponentGraphStylesForBuild(definitions: readonly Compon
     }
     css.push(compileComponentStylesForBuild(definition.css, definition).css);
   }
-  return css.filter(part => part !== "").join("\n");
+  return hoistStylesheetNamespaces(css.filter(part => part !== "").join("\n"));
 }
 
 /** Snippets are opaque on the server, so scope by authored ownership instead of mutating them. */
@@ -69,7 +71,7 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   projected?: string, adopters: readonly ComponentDefinition[] = [definition]): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
-  const renamed = renameComponentPseudoClasses(css);
+  const renamed = renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css));
   const names = new Set<string>();
   const hoisted: string[] = [];
   const owners = adopters.map(owner => ({ owner, names: new Set<string>(), canonical: componentStyleNameResolver(owner, source) }));
@@ -131,7 +133,7 @@ export function compileComponentStylesForVue(
   assertResolvedStylesheet(css, source ?? definition.source.file);
   const names = new Set<string>();
   const canonical = componentStyleNameResolver(definition, source);
-  const root = postcss.parse(renameComponentPseudoClasses(css, ["host-state"]));
+  const root = postcss.parse(renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css), ["host-state"]));
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;

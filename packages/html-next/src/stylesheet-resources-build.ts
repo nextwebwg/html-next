@@ -1,3 +1,4 @@
+import { hoistStylesheetNamespaces, stylesheetNamespaceContext, rewriteNamespacePrelude } from "./stylesheet-namespaces.js";
 import postcss from "postcss";
 import { decodeCSS, type ParsedStylesheet, type StylesheetImport, type StylesheetEntry } from "./stylesheet-resources.js";
 
@@ -51,5 +52,30 @@ export function parseStylesheetForBuild(css: string): ParsedStylesheet {
       node.remove();
     } else if (!(node.type === "atrule" && (node.name.toLowerCase() === "charset" || (node.name.toLowerCase() === "layer" && node.nodes === undefined)))) allowed = false;
   });
-  return { css: root.toString(), imports };
+  return { css: normalizeStylesheetNamespacesForBuild(root.toString()), imports };
+}
+
+/** Normalize each sheet before combining it with a different namespace environment. */
+export function normalizeStylesheetNamespacesForBuild(css: string): string {
+  if (!/@namespace\b/i.test(css)) return css;
+  const root = postcss.parse(hoistStylesheetNamespaces(css));
+  let allowed = true;
+  const declarations = root.nodes.filter(node => {
+    if (node.type === "comment") return false;
+    if (node.type === "atrule" && node.name.toLowerCase() === "namespace") {
+      if (allowed) return true;
+      node.remove();
+      return false;
+    }
+    if (!(node.type === "atrule" && ["charset", "import"].includes(node.name.toLowerCase()))) allowed = false;
+    return false;
+  });
+  const context = stylesheetNamespaceContext(declarations.map(node => node.toString() + ";"));
+  for (const node of declarations) node.remove();
+  root.walkRules(rule => {
+    if (rule.parent?.type === "atrule" && /keyframes$/i.test(rule.parent.name)) return;
+    rule.selector = context.selector(rule.selector);
+  });
+  root.walkAtRules(rule => { rule.params = rewriteNamespacePrelude(rule.params, rule.name, context.selector); });
+  return context.preamble + "\n" + root.toString();
 }
