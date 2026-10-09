@@ -191,9 +191,9 @@ describe.skipIf(!enabled)("compiled SVG scope boundaries", () => {
           }, { html, one, two, layers });
           const read = () => page.evaluate(ids => ids.map(id => { const style = getComputedStyle(document.getElementById(id)!); return [style.fill, style.stroke]; }), ids);
           assert.deepEqual(await read(), expected, `${engine} ${target} layered=${layers}`);
-          await page.evaluate(() => { const own = document.getElementById('own')!; own.removeAttribute('data-html-next-owner'); document.getElementById('projection')!.append(own); });
+          await page.evaluate(() => { document.getElementById('projection')!.append(document.getElementById('own')!); });
           assert.deepEqual((await read())[0], ['rgb(0, 128, 0)', 'none'], `${engine} ${target}: move into projection`);
-          await page.evaluate(() => { const own = document.getElementById('own')!; own.setAttribute('data-html-next-owner', 'x-a'); document.querySelector('[data-component="x-a"] > svg')!.append(own); });
+          await page.evaluate(() => { document.querySelector('[data-component="x-a"] > svg')!.append(document.getElementById('own')!); });
           assert.deepEqual(await read(), expected, `${engine} ${target}: move back`);
         }
       }
