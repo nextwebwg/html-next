@@ -13,7 +13,7 @@ import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
-import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { conformingLiteralWrite, declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
@@ -173,9 +173,6 @@ const REACT_ATTRIBUTES: Readonly<Record<string, string>> = {
   minlength: "minLength", crossorigin: "crossOrigin", srcset: "srcSet",
   contenteditable: "contentEditable", colspan: "colSpan", rowspan: "rowSpan",
 };
-
-const REACT_NUMERIC_ATTRIBUTES = new Set(["tabindex", "colspan", "rowspan", "maxlength", "minlength", "size", "rows", "cols", "span", "start",
-  "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-level", "aria-posinset", "aria-setsize"]);
 
 /** Keep JavaScript lookup semantics while allowing HTML Next's absent keys in strict TSX. */
 class ReactLowering extends Lowering {
@@ -544,7 +541,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       }
       else if (!component && isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
       else if (!component && ["input", "textarea", "select"].includes(node.name) && attribute.name === "value") literals.push(`defaultValue=${quote(attribute.value)}`);
-      else literals.push(REACT_NUMERIC_ATTRIBUTES.has(attribute.name) && !component
+      else literals.push(NUMERIC_ATTRIBUTES.has(attribute.name) && !component
         ? `${reactAttribute(attribute.name, svg)}={${quote(attribute.value)} as any}`
         : `${reactAttribute(attribute.name, svg)}=${quote(attribute.value)}`);
     } else if (attribute.kind === "attribute" && attribute.target === "class") {
@@ -640,7 +637,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
         const rendered = lowering.attribute({ kind: "id", name: alias }, aliasScope, attribute.name);
         bindings.push(`${reactAttribute(attribute.name, svg)}={${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered}}`);
-      } else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${REACT_NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
+      } else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
     } else if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled property ${attribute.expression}.`);
       const value = lowering.value(attribute.expressionPlan.ast, scope);

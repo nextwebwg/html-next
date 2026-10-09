@@ -583,7 +583,10 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       const value = ast(attribute.expressionPlan, attribute.expression);
       const code = lowering.text(value, names.template);
       const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.text(value, scope));
-      styles.push(`${quote(attribute.name)}: ${guarded ?? (typeOf(value, names.template).nullable ? `(${code} ?? undefined)` : code)}`);
+      // Vue types a style value as never null. A number is the text the DOM stores, and TypeScript
+      // reads `?? undefined` after arithmetic as dead code.
+      const styleType = typeOf(value, names.template);
+      styles.push(`${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
       if (nativeControl && ["value", "checked"].includes(attribute.name)) {

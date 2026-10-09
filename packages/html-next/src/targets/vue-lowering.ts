@@ -12,7 +12,7 @@ import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import { formattingType } from "../format.js";
 import { formattingHelperSource } from "./format-source.js";
 import type { TypeNode } from "../type-system.js";
-import { quote } from "./shared.js";
+import { NUMERIC_ATTRIBUTES, quote } from "./shared.js";
 
 /** How each root name is read, and its static type, in one scope. */
 export interface Scope {
@@ -635,6 +635,11 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     const kind = category(type.type);
     if (kind === "boolean" && !BOOLEAN_ATTRIBUTES.has(name) && !isEnumeratedBoolean(name)) {
       return `${this.#wrap(node, this.condition(node, scope))} ? "" : undefined`;
+    }
+    // A number bound to an attribute typed as text is the text the DOM stores, as live writes it.
+    // Frameworks leave `data-*` attributes untyped.
+    if (kind === "number" && !NUMERIC_ATTRIBUTES.has(name) && !name.startsWith("data-") && !mayProduceInvalidResult(node, scope)) {
+      return type.nullable || type.null === true ? `${this.#wrap(node, code)}?.toString()` : `String(${code})`;
     }
     // Vue removes an attribute bound to null, but its attribute types accept only undefined.
     const plain = type.null === true ? `${this.#wrap(node, code)} ?? undefined` : code;
