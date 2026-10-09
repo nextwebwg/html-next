@@ -39,6 +39,48 @@ interface ParityCase {
 import { formattingSource, formattingProbe } from "./formatting-fixture.js";
 
 const cases: readonly ParityCase[] = [
+  {
+    name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
+    features: ["scoped styles", "delegated root", "host pseudo-elements"],
+    definitions: {
+      "x-leaf-boundary": `<template component="x-leaf-boundary"><article class="ordinary">Leaf</article></template>`,
+      "x-delegated-boundary": `<template component="x-delegated-boundary"><x-leaf-boundary></x-leaf-boundary><style>
+        :host, :host::before { box-sizing: border-box; }
+        *, *::after { box-sizing: border-box; }
+        article, .ordinary { outline: 7px solid; }
+      </style></template>`,
+    },
+    invocation: `<x-delegated-boundary id="case"></x-delegated-boundary>`,
+    vueRender: `h(XDelegatedBoundary, { id: "case" })`,
+    root: "#case",
+    probe: `({ box: getComputedStyle(root).boxSizing, before: getComputedStyle(root, '::before').boxSizing, after: getComputedStyle(root, '::after').boxSizing, outline: getComputedStyle(root).outlineStyle })`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: { box: "border-box", before: "border-box", after: "content-box", outline: "none" },
+  },
+  ...[false, true].map((explicit): ParityCase => ({
+    name: `ordinary selectors exclude roots and nested components${explicit ? " with explicit host pseudos" : ""}`,
+    features: ["scoped styles", "host", "pseudo-elements", "nested components", "slots"],
+    definitions: {
+      "x-boundary-child": `<template component="x-boundary-child"><article><span class="nested">Nested</span></article></template>`,
+      "x-boundary": `<template component="x-boundary"><article class="ordinary"><span class="owned">Owned</span><x-boundary-child></x-boundary-child><slot></slot></article>
+        <style>:host, *, *::before, *::after { box-sizing: border-box; }
+        article, .ordinary { outline: 7px solid; }
+        ${explicit ? ":host::before, :host::after { box-sizing: border-box; }" : ""}
+        :slotted(.projected) { border-top: 9px solid; }</style></template>`,
+    },
+    invocation: `<x-boundary id="case"><span class="projected">Projected</span></x-boundary>`,
+    vueRender: `h(XBoundary, { id: "case" }, { default: () => h("span", { class: "projected" }, "Projected") })`,
+    root: "#case",
+    probe: `Array.from([root, root.querySelector('.owned'), root.querySelector('[data-component~=x-boundary-child]'), root.querySelector('.nested'), root.querySelector('.projected')], node => ({ box: getComputedStyle(node).boxSizing, before: getComputedStyle(node, '::before').boxSizing, after: getComputedStyle(node, '::after').boxSizing, outline: getComputedStyle(node).outlineStyle, border: getComputedStyle(node).borderTopWidth }))`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: [
+      { box: "border-box", before: explicit ? "border-box" : "content-box", after: explicit ? "border-box" : "content-box", outline: "none", border: "0px" },
+      { box: "border-box", before: "border-box", after: "border-box", outline: "none", border: "0px" },
+      { box: "content-box", before: "content-box", after: "content-box", outline: "none", border: "0px" },
+      { box: "content-box", before: "content-box", after: "content-box", outline: "none", border: "0px" },
+      { box: "content-box", before: "content-box", after: "content-box", outline: "none", border: "9px" },
+    ],
+  })),
   ...[false, true].map((selected): ParityCase => ({
     name: `absent component values preserve native select ${selected ? "authored selection" : "first-option selection"}`,
     features: ["optional value prop", "native selection", "projected options", "change event"],

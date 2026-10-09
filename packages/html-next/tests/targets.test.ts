@@ -873,8 +873,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
     const vue = artifacts.get("vue/XFeature.vue")!;
     const style = vue.slice(vue.indexOf("<style scoped>"));
-    assert.match(style, /\[data-component~="x-feature"\] \{\n  display: block;\n\}/);
-    assert.match(style, /\[data-component~="x-feature"\]\[data-x-feature-state~="open"\] \.panel/);
+    assert.match(style, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\]\)/);
+    assert.match(style, /:scope \{\s+display: block;\s+\}/);
+    assert.match(style, /:scope\[data-x-feature-state~="open"\] \.panel/);
     assert.match(style, /:slotted\(p\)/);
     assert.match(vue, /data-component="x-feature"/);
     assert.match(vue, /:data-x-feature-state="hostState \|\| undefined"/);

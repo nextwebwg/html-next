@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.40
+## 1.0.0-alpha.41
 
 ### Breaking
 
@@ -9,21 +9,26 @@
 - `@/` is the project root in component links, controllers, stylesheet imports, and loader imports. HTML Next's Node loader accepts an application `importMap`, as its browser loader does, and HTMLKit passes `@/` through it and to Vite.
 - Ordering prefixes are a number and a dot, and always apply: `01.guide/02.install.html` routes to `/guide/install/` and orders navigation. The `routeOrdering` option is removed. A dash no longer marks an ordering prefix, so rename `01-guide` to `01.guide`; a name such as `2024-recap` keeps its URL.
 
-## 1.0.0-alpha.39
+## 1.0.0-alpha.40
 
 - HTMLKit plugins add page formats. A plugin's `pages` compiler claims file extensions such as `.md` and turns each file into an HTML Next page resource; HTMLKit then routes, orders, watches, renders, and builds those pages like `.html` pages. While compiling, a page can resolve another page's URL with `page.href` and serve a referenced file with `page.asset`. A plugin's `config()` contributes options, including a layout whose loader is a module object and a `headScript` inlined before `app/head.js`.
 - `pages` lists the page directories and the URL prefix each serves, defaulting to `app/pages` at `/`. One directory may serve several prefixes.
 - Pages can set their navigation label (`htmlkit:label`), stay out of navigation (`htmlkit:navigation` with `content="hidden"`), and add alias routes (`htmlkit:alias`). An alias never appears in navigation and marks its page's own entry current.
 
-## 1.0.0-alpha.38
+## 1.0.0-alpha.39
 
 - HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
 - The HTMLKit development server's component stylesheet links load again. Vite requests them with a `?direct` query that HTMLKit's virtual sources did not recognize, so they returned 404 and each dev page first painted without component CSS until its module injected the styles, fading any transitioned colors in.
 
-## 1.0.0-alpha.37
+## 1.0.0-alpha.38
 
 - HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.
+
+## 1.0.0-alpha.37
+
+- Vue component styles preserve native selector boundaries: ordinary selectors match owned descendants, while root elements and their pseudo-elements require explicit `:host` selectors. Nested component roots remain outside the parent’s style scope, and Vue slot scoping is preserved.
 - Compiled components update rows inside a nested `$each` when an outer row moves, or when its item or an outer state value changes, as the live runtime does. Before, `<li $each="row, i of $rows"><b $each="n of $row.tags">{$i}</b></li>` kept each row's old `$i` after a reorder (and showed `undefined` at first), an inner row's `{$row.label}` missed writes to that row's `label`, and rows two loops deep missed state changes. Rows keep their position only when something in or below them reads it. A reorder re-runs only the moved rows' position bindings, and a count change only rows that read `loop.count` or `loop.last`.
+- Compiled lists whose rows read their position visit only the rows a reconcile moved: an append or a pop leaves every existing row alone. This adds 15 B gzip to keyed list output.
 
 ## 1.0.0-alpha.36
 
