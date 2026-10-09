@@ -9,6 +9,7 @@ import { eventPasses } from "./event-filter.js";
 import { isNativeEvent } from "./freeze.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
+import { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 import {
   ABSENT,
   NONCONFORMING,
@@ -329,12 +330,48 @@ function registryFor(root: Document): DocumentRegistry {
 /** The state names each definition's `:host-state()` rules test, recorded when its styles compile. */
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
+type ComponentStyleCompiler = (css: string, definition: ComponentDefinition, source?: string,
+  adopters?: readonly ComponentDefinition[]) => CompiledComponentStyles;
+
+const sharedStyleDefinitions = new WeakMap<Document, Map<string, ComponentDefinition>>();
+
+function installSharedStyles(definition: ComponentDefinition, document: Document, compiler?: ComponentStyleCompiler): readonly string[] {
+  let definitions = sharedStyleDefinitions.get(document);
+  if (definitions === undefined) { definitions = new Map(); sharedStyleDefinitions.set(document, definitions); }
+  definitions.set(definition.contract.tag, definition);
+  if ((definition.stylesheets?.length ?? 0) === 0) return [];
+  const groups = collectSharedStylesheets([...definitions.values()]);
+  const tested = new Set<string>();
+  for (const { id, stylesheet, adopters } of groups) {
+    let carrier = [...document.head.querySelectorAll<HTMLStyleElement>("style[data-html-next-shared-styles]")]
+      .find(style => style.getAttribute("data-html-next-shared-styles") === id);
+    const added = carrier === undefined;
+    carrier ??= document.createElement("style");
+    const tags = adopters.map(owner => owner.contract.tag).join(" ");
+    if (carrier.getAttribute("data-html-next-shared-adopters") !== tags) {
+      const compiled = compiler === undefined
+        ? compileComponentStyles(stylesheet.css, adopters[0]!, document, stylesheet.url, adopters)
+        : compiler(stylesheet.css, adopters[0]!, stylesheet.url, adopters);
+      carrier.setAttribute("data-html-next-shared-styles", id);
+      carrier.setAttribute("data-html-next-shared-adopters", tags);
+      carrier.setAttribute("data-html-next-style-states", JSON.stringify(compiled.stateNamesByTag ?? { [adopters[0]!.contract.tag]: compiled.stateNames }));
+      carrier.textContent = wrapStylesheetConditions(compiled.css, stylesheet.conditions);
+    }
+    if (added) document.head.append(carrier);
+    if (adopters.includes(definition)) {
+      const names = JSON.parse(carrier.getAttribute("data-html-next-style-states") ?? "{}") as Record<string, string[]>;
+      for (const name of names[definition.contract.tag] ?? []) tested.add(name);
+    }
+  }
+  return [...tested];
+}
+
 /** Only explicitly owned style nodes participate in reuse; application CSS is never inspected. */
 function installComponentStyles(
   definition: ComponentDefinition,
   document: Document,
   carrier?: HTMLStyleElement,
-  styleCompiler?: (css: string, definition: ComponentDefinition) => CompiledComponentStyles,
+  styleCompiler?: ComponentStyleCompiler,
 ): HTMLStyleElement | HTMLLinkElement | undefined {
   const tag = definition.contract.tag;
   const existing = document.head.querySelector<HTMLStyleElement | HTMLLinkElement>(
@@ -345,16 +382,18 @@ function installComponentStyles(
     stateNamesByDefinition.set(definition, names[tag] ?? []);
     return existing;
   }
-  if (definition.css === "" && carrier === undefined) return undefined;
+  const sharedNames = installSharedStyles(definition, document, styleCompiler);
+  if (definition.css === "" && carrier === undefined && (definition.stylesheets?.length ?? 0) === 0) return undefined;
   const style = carrier ?? document.createElement("style");
   const compiled = styleCompiler === undefined
     ? compileComponentStyles(definition.css, definition, document)
     : styleCompiler(definition.css, definition);
-  stateNamesByDefinition.set(definition, compiled.stateNames);
+  const stateNames = [...new Set([...sharedNames, ...compiled.stateNames])];
+  stateNamesByDefinition.set(definition, stateNames);
   style.textContent = compiled.css;
   style.setAttribute("data-html-next-component-styles", tag);
   // Hydration needs this metadata without parsing or transforming the server's CSS again.
-  style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: compiled.stateNames }));
+  style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: stateNames }));
   document.head.append(style);
   return style;
 }
@@ -397,7 +436,7 @@ function discoverySelector(registry: DocumentRegistry): string {
  * Parses an inline `<template component>` carrier. Only a page that authors definitions in HTML
  * needs a parser, so the live entry points install one and a build-time graph never carries it.
  */
-export type InlineDefinitionParser = (carrier: Element, source: string) => ComponentDefinition;
+export type InlineDefinitionParser = (carrier: Element, source: string) => ComponentDefinition | undefined;
 export type ProjectedSlotParser = (
   carrier: HTMLTemplateElement,
   definition: ComponentDefinition,
@@ -417,7 +456,7 @@ export function installProjectedSlotParser(parse: ProjectedSlotParser): void {
   projectedSlotParser = parse;
 }
 
-function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
+function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition | undefined {
   const tag = wrapper.getAttribute("component") ?? "";
   const source = `${wrapper.ownerDocument.URL}#template[component="${tag}"][${index + 1}]`;
   if (wrapper.hasAttribute("src")) {
@@ -432,6 +471,7 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
     );
   }
   const definition = inlineDefinitionParser(wrapper, source);
+  if (definition === undefined) return undefined;
   const style = Array.from(wrapper.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style",
   );
@@ -3271,7 +3311,8 @@ function lowerScopes(
   const definitions: LiveDefinition[] = [];
   for (const element of discovered) {
     if (element.localName === "template" && element.hasAttribute("component") && !isContentOnly(element)) {
-      definitions.push(parseDefinition(element as HTMLTemplateElement, definitions.length));
+      const live = parseDefinition(element as HTMLTemplateElement, definitions.length);
+      if (live !== undefined) definitions.push(live);
     }
   }
   const newDefinitions = new Map<string, LiveDefinition>();
@@ -3536,7 +3577,7 @@ export function manageComponentLifecycle(
 export function registerComponentDefinitions(
   definitions: readonly ComponentDefinition[],
   root: Document = document,
-  styleCompiler?: (css: string, definition: ComponentDefinition) => CompiledComponentStyles,
+  styleCompiler?: ComponentStyleCompiler,
 ): void {
   const registry = registryFor(root);
   for (const definition of definitions) {
