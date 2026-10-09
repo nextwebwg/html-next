@@ -3,6 +3,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   generateComponent,
+  collectSharedStylesheets,
+  compileComponentGraphStylesForBuild,
   getDiagnosticLocation,
   withDiagnosticLocation,
   expandComponentEntries,
@@ -250,7 +252,8 @@ function displayPath(root: string, url: string): string {
   return relative(root, path).split(sep).join("/");
 }
 
-async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnostics = false): Promise<CompiledGraph> {
+async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnostics = false,
+  resolveStylesheet?: (specifier: string, parentURL: string) => Promise<string | undefined>): Promise<CompiledGraph> {
   const diagnostics: HtmlDiagnostic[] = [];
   const report = collectDiagnostics ? (diagnostic: HtmlDiagnostic): void => { diagnostics.push(diagnostic); } : undefined;
   const root = resolve(options.root ?? process.cwd());
@@ -274,13 +277,21 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   }
   const entryURLs = [...new Set([...localURLs, ...[...packageEntries.values()].flat().map((file) => pathToFileURL(file).href)])];
   if (entryURLs.length === 0) throw new Error("HTML Next requires at least one component entry or an installed HTML source package.");
-  const graph = await loadNodeComponents(entryURLs, { baseURL: pathToFileURL(`${root}${sep}`).href, collectDiagnostics });
+  const graph = await loadNodeComponents(entryURLs, { baseURL: pathToFileURL(`${root}${sep}`).href, collectDiagnostics,
+    ...(resolveStylesheet === undefined ? {} : { resolveStylesheet }),
+    stylesheetAssetURL: url => url.startsWith("file:") ? `/@fs/${fileURLToPath(url).split(sep).join("/")}${new URL(url).search}${new URL(url).hash}` : url,
+  });
   const components = new Map<string, string>();
   const publicComponents = new Map<string, string>();
   const styles = new Map<string, string>();
   const manifestComponents: HtmlNextBuildManifest["components"][number][] = [];
   const allCapabilities = new Set<string>();
   const supportImports = new Set<string>();
+  const sharedStyles = collectSharedStylesheets([...graph.nodes.values()].map(node => node.definition));
+  const combinedStyleId = `${stylePrefix}shared-graph.css`;
+  if (sharedStyles.length > 0) {
+    styles.set(`\0${combinedStyleId}`, compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition)));
+  }
   const dynamicBoundaries = new Map<string, HtmlNextDynamicBoundary>();
   const generatedNames = new Map<string, string>();
 
@@ -342,7 +353,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       const styleId = `${stylePrefix}${encodedURL}.css`;
       let module = artifact.content.replace(
         `../styles/${definition.contract.tag}.css`,
-        styleId,
+        sharedStyles.length === 0 ? styleId : combinedStyleId,
       );
       module = routeSupportImports(module, supportImports);
       components.set(resolvedComponentId(node.id), module);
@@ -410,7 +421,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     publicComponents,
     styles,
     support: supportSource(supportImports),
-    sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...installed.map((library) => library.manifest)]),
+    sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...graph.stylesheetInputs.map(url => fileURLToPath(url)), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",
       delivery,
@@ -481,14 +492,23 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
   }
   let compiled: Promise<CompiledGraph> | undefined;
   let root = options.root ?? process.cwd();
-  const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph({ ...options, root });
+  let resolveStylesheet: ((specifier: string, parentURL: string) => Promise<string | undefined>) | undefined;
+  const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph({ ...options, root }, false, resolveStylesheet);
 
   return {
     name: "html-next",
     enforce: "pre",
-    vite: { configResolved(config) { root = options.root ?? config.root; } },
+    vite: { configResolved(config) {
+      root = options.root ?? config.root;
+      const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
+      resolveStylesheet = async (specifier, parentURL) => {
+        const resolved = await cssResolver(specifier, fileURLToPath(parentURL));
+        return resolved === undefined ? undefined
+          : pathToFileURL(resolved.replace(/[?#].*$/, "")).href + (/[?#].*$/.exec(resolved)?.[0] ?? "");
+      };
+    } },
     async buildStart() {
-      compiled = compileGraph({ ...options, root });
+      compiled = compileGraph({ ...options, root }, false, resolveStylesheet);
       const current = await compiled;
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },

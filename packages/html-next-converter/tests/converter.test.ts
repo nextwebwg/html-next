@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
 
-import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
+import { compileScript, compileStyle, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
@@ -72,6 +72,44 @@ async function typecheckReact(root: string, files: readonly string[]): Promise<v
 }
 
 describe("framework converter", () => {
+  for (const target of ["react", "svelte", "vue"] as const) {
+    it(`resolves shared defaults and preserves ${target}'s component and slot boundaries`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "html-next-converter-shared-"));
+      temporary.push(root);
+      await writeFile(join(root, "package.json"), "{}");
+      await writeFile(join(root, "defaults.css"), '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: rebeccapurple; } :host, *, *::before, *::after { box-sizing: border-box; } :host-state([open]) { color: rebeccapurple; }');
+      await writeFile(join(root, "components.html"), ["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span>own</span><slot></slot></section><style>@import "defaults.css";</style></template>`).join(""));
+      const output = join(root, "out");
+      const manifest = await convertComponents({ entries: ["components.html"], target, root, outDirectory: output, mode: "library" });
+      assert.ok(manifest.sourceFiles.includes("defaults.css"));
+      const files = await Promise.all(manifest.output.artifacts.filter(file => file.kind === "component" || file.kind === "style")
+        .map(async file => ({ path: file.path, content: await readFile(join(output, file.path), "utf8") })));
+      for (const file of files) assert.doesNotMatch(file.content, /@import "defaults\.css"/);
+      const css = files.filter(file => file.path.endsWith(".css")).map(file => file.content).join("\n");
+      if (target !== "vue") {
+        assert.equal(css.match(/@namespace/g)?.length, 1);
+        assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
+        assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
+      }
+      if (target === "react") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
+      if (target === "svelte") {
+        assert.match(css, /:not\(\[data-html-next-owner~="x-a"\]\)/);
+        assert.match(css, /:not\(\[data-html-next-owner~="x-b"\]\)/);
+        for (const file of files.filter(file => file.path.endsWith(".svelte"))) assert.match(file.content, /data-html-next-owner/);
+      }
+      if (target === "vue") for (const file of files) {
+        assert.match(file.content, /box-sizing: border-box/);
+        compileVue(file.content, file.path);
+        const parsed = parseVue(file.content, { filename: file.path });
+        for (const style of parsed.descriptor.styles) {
+          assert.match(style.content, /@namespace/);
+          assert.deepEqual(compileStyle({ source: style.content, filename: file.path, id: 'namespace-test', scoped: style.scoped ?? false }).errors, []);
+        }
+      }
+      for (const tag of ["x-a", "x-b"]) assert.match(files.map(file => file.content).join("\n"), new RegExp(`data-${tag}-state`));
+    });
+  }
+
   it("preserves the state reference for an unchanged nested control write", async () => {
     const source = reactControlArtifact().content;
     const compiled = await transform(source, { loader: "ts", format: "esm" });
@@ -254,6 +292,52 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.match(renderToStaticMarkup(createElement(module.exports.XAction!)), /<button[^>]*disabled=""[^>]*formAction="\/next"[^>]*>Go<\/button>/);
     assert.match(renderToStaticMarkup(createElement(module.exports.XText!)), /<span[^>]*>Hello<\/span>/);
+  });
+
+  it("keeps React's preformatted text, textarea defaults and non-breaking spaces exactly", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-text-"));
+    temporary.push(root);
+    await writeFile(join(root, "text.html"), `<template component="x-spacing" status="early" summary="Text spacing."><defs>
+      <state type="number" name="count" value="1"></state>
+      </defs><section><pre>first  line
+  second</pre><pre>{$count}  two
+  three</pre><textarea>a  b
+  c</textarea><p>a&nbsp;&nbsp;b</p><p>a&nbsp;&nbsp;{$count}</p><p>a
+        b   {$count}</p></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    const markup = renderToStaticMarkup(createElement(module.exports.XSpacing!));
+    assert.deepEqual([...markup.matchAll(/<(pre|textarea|p)[^>]*>([^<]*)</g)].map((match) => match[2]), [
+      "first  line\n  second", "1  two\n  three", "a  b\n  c", "a\u00a0\u00a0b", "a\u00a0\u00a01", "a b 1",
+    ]);
+  });
+
+  it("keeps authored React names off the shared rendering and events helpers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-names-"));
+    temporary.push(root);
+    // A `text` state once shadowed the text() helper, and an `isNumber` handler the write check it calls.
+    await writeFile(join(root, "names.html"), `<template component="x-names" status="early" summary="Helper names."><defs>
+      <state name="text" type="string" value="hi"></state><state type="number" name="count" value="1"></state>
+      <handler name="isNumber"><set name="count" expr:value="$count + 1"></set></handler>
+      <handler name="useNativeEvents"><set name="count" value="0"></set></handler>
+      </defs><section><p>Say {$text} {$count}</p><button on:click="isNumber">Go</button><button on:click="useNativeEvents">Reset</button></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    assert.match(renderToStaticMarkup(createElement(module.exports.XNames!)), /<p>Say hi 1<\/p>/);
+    // The handler's write check is the imported predicate, not the handler calling itself.
+    await typecheckReact(root, manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path)).map((artifact) => join(outDirectory, artifact.path)));
   });
 
   it("converts native ref targets for focus and validation handlers", async () => {

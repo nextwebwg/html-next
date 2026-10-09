@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -53,6 +53,115 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     assert.equal(bundleInputs.some((path) => path.includes("/parse5/")), false);
     assert.equal(bundleInputs.some((path) => path.includes("/generated/dom-properties")), false);
   });
+
+  for (const engine of [chromium, firefox, webkit]) {
+    it(`${engine.name()} preserves stylesheet-local namespaces in runtime and combined build CSS`, async () => {
+      const instance = await engine.launch();
+      try {
+        const page = await instance.newPage();
+        // Keep the independent native reproduction separate from compiled behavior.
+        // Firefox currently leaks this rule; compiled component CSS must exclude it in every engine.
+        await page.setContent(await readFile(new URL('./fixtures/firefox-svg-scope.html', import.meta.url), 'utf8'));
+        const nativeProjectedFill = await page.evaluate(() => getComputedStyle(document.querySelector('#projected rect')!).fill);
+        if (engine !== firefox) assert.equal(nativeProjectedFill, 'rgb(0, 0, 0)');
+
+        for (const ownedMedia of ['print', 'all']) {
+          const markup = '<div><p class="shape">HTML</p><svg data-code="{"><rect class="shape"></rect><circle></circle></svg><slot></slot></div>';
+          const svg = '@namespace "http://www.w3.org/2000/svg"; @namespace n "http://www.w3.org/2000/svg"; .shape { fill: rgb(1, 2, 3); } n|circle { fill: rgb(4, 5, 6); } *|*:not(.skip):is(.shape) { stroke: rgb(7, 8, 9); }';
+          const html = '@namespace n "http://www.w3.org/1999/xhtml"; @namespace s "http://www.w3.org/2000/svg"; n|p { color: rgb(10, 11, 12); } :host:is(n|x-a) { border-top: 1px solid rgb(16, 17, 18); } @scope (s|svg[data-code="{"]) { *|circle { stroke-width: 2px; } }';
+          const source = ['x-a', 'x-b'].map(tag => `<template component="${tag}">${markup}<style>@import "inactive.css" print; @import "svg.css" layer(base); @import "html.css"; p { background-color: rgb(13, 14, 15); }</style></template>`).join('');
+          const files: Record<string, string> = { '/app.html': source, '/inactive.css': '.shape { fill: magenta; }', '/svg.css': svg, '/html.css': html };
+          const { compileComponentStylesForBuild } = await import('../src/component-styles-build.js');
+          const { parseComponent } = await import('../src/source-parser.js');
+          const inactive = compileComponentStylesForBuild('p { color: magenta; }', parseComponent('<template component="x-inactive"><div></div></template>')).css;
+          await page.unroute('https://namespace.example/**');
+          await page.route('https://namespace.example/**', route => {
+            const path = new URL(route.request().url()).pathname;
+            return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'text/html', body: path === '/' ? '<!doctype html><head><style data-html-next-component-styles="x-inactive" media="' + ownedMedia + '">' + inactive + '</style></head><body>' + source + '<x-a><svg id="projected"><rect class="shape"></rect></svg><x-b id="projected-component"></x-b><section><x-b id="nested-projected-component"></x-b></section></x-a><x-b></x-b>' : files[path]! });
+          });
+          await page.goto('https://namespace.example/');
+          await page.addScriptTag({ path: bundlePath });
+          await page.evaluate(async () => { await (window as unknown as { HtmlNextLoader: { startBrowserComponents(root: Document, options: { onError(error: unknown): void }): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents(document, { onError(error) { throw error; } }); });
+          const read = () => page.evaluate(() => {
+            const style = (selector: string) => { const element = document.querySelector(selector); if (element === null) throw new Error(selector + ': ' + document.body.innerHTML); return getComputedStyle(element); };
+            return { nestedScopeWidth: style('[data-component~="x-a"] > svg circle').strokeWidth, hostBorder: style('[data-component~="x-a"]').borderTopColor, rect: style('[data-component~="x-a"] > svg rect').fill,
+              circle: style('[data-component~="x-b"] > svg circle').fill,
+              pFill: style('[data-component~="x-a"] > p').fill,
+              pColor: style('[data-component~="x-a"] > p').color,
+              background: style('[data-component~="x-a"] > p').backgroundColor,
+              stroke: style('[data-component~="x-a"] > p').stroke,
+              projected: style('#projected rect').fill, projectedComponent: style('#projected-component svg rect').fill, nestedProjectedComponent: style('#nested-projected-component svg rect').fill };
+          });
+          const expected = { nestedScopeWidth: '2px', hostBorder: 'rgb(16, 17, 18)', rect: 'rgb(1, 2, 3)', circle: 'rgb(4, 5, 6)', pFill: 'rgb(0, 0, 0)', pColor: 'rgb(10, 11, 12)', background: 'rgb(13, 14, 15)', stroke: 'rgb(7, 8, 9)', projected: 'rgb(0, 0, 0)', projectedComponent: 'rgb(1, 2, 3)', nestedProjectedComponent: 'rgb(1, 2, 3)' };
+          assert.deepEqual(await read(), expected);
+          assert.equal(await page.locator('style[data-html-next-style-boundaries]').count(), 1);
+          if (ownedMedia === 'all') {
+            await page.evaluate(() => { document.head.querySelector<HTMLStyleElement>('style[data-html-next-component-styles="x-inactive"]')!.sheet!.disabled = true; });
+            assert.deepEqual(await read(), expected, 'disabling precompiled CSS leaves the live reset active');
+          }
+          const { loadNodeComponents } = await import('../src/node-loader.js');
+          const { compileComponentGraphStylesForBuild } = await import('../src/component-styles-build.js');
+          const graph = await loadNodeComponents(['https://namespace.example/app.html'], { readComponent: async url => ({ url, source: files[new URL(url).pathname]! }) });
+          const css = compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition));
+          await page.evaluate(css => { document.head.querySelectorAll('style[data-html-next-component-styles], style[data-html-next-shared-styles], style[data-html-next-style-boundaries]').forEach(style => style.remove()); const style = document.createElement('style'); style.textContent = css; document.head.append(style); }, css);
+          assert.deepEqual(await read(), expected);
+        }
+      } finally { await instance.close(); }
+    });
+
+    it(`${engine.name()} shares imported defaults across adopters, preserves slot and pseudo-element boundaries, and keeps CSS order after DOM moves`, async () => {
+      const browser = await engine.launch();
+      try {
+        const page = await browser.newPage();
+        const requests: string[] = [];
+        const requestTypes: string[] = [];
+        await page.route("https://shared.example/**", async route => {
+          const path = new URL(route.request().url()).pathname;
+          requests.push(path);
+          requestTypes.push(`${path}:${route.request().resourceType()}`);
+          const body = path === "/defaults.css" ? `
+            :host, *, :host::before, :host::after, *::before, *::after { box-sizing: border-box; }
+            :host-state([open]) .own { color: rgb(1, 2, 3); }
+            @media (width > 1px) { @keyframes pulse { to { opacity: .5; } } }
+          ` : `<!doctype html><head></head><body>
+            ${["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span class="own">own</span><slot></slot></section><style>@import "defaults.css";${tag === "x-a" ? ':host { box-sizing: content-box; }' : ''}</style></template>`).join("")}
+            <x-a id="a"><p id="projected">projected<span id="projected-child">child</span></p></x-a><x-b id="b"></x-b>
+          </body>`;
+          await route.fulfill({ contentType: path.endsWith(".css") ? "text/css" : "text/html", body });
+        });
+        await page.goto("https://shared.example/");
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(async () => {
+          await (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents();
+        });
+        const values = await page.evaluate(() => {
+          const read = (selector: string, pseudo?: string) => getComputedStyle(document.querySelector(selector)!, pseudo).boxSizing;
+          return { a: read("#a"), b: read("#b"), own: read("#a .own"), before: read("#a .own", "::before"),
+            projected: read("#projected"), projectedBefore: read("#projected", "::before"),
+            projectedChild: read("#projected-child"), projectedChildBefore: read("#projected-child", "::before"),
+            color: getComputedStyle(document.querySelector("#b .own")!).color,
+            shared: document.querySelectorAll("style[data-html-next-shared-styles]").length,
+            bodyCopies: [...document.querySelectorAll("style")].map(style => style.textContent).join("\n").match(/box-sizing: border-box/g)?.length,
+            conditionalKeyframes: [...document.querySelectorAll("style")].some(style => /@media[\s\S]*@keyframes pulse/.test(style.textContent ?? "")),
+          };
+        });
+        assert.deepEqual(values, { a: "content-box", b: "border-box", own: "border-box", before: "border-box",
+          projected: "content-box", projectedBefore: "content-box", projectedChild: "content-box", projectedChildBefore: "content-box",
+          color: "rgb(1, 2, 3)", shared: 1, bodyCopies: 1, conditionalKeyframes: true },
+          await page.evaluate(() => [...document.querySelectorAll("style")].map(style => style.textContent).join("\n") + document.body.innerHTML));
+        const moved = await page.evaluate(async () => {
+          const before = [...document.head.querySelectorAll("style")];
+          const content = before.map(style => style.textContent);
+          document.body.prepend(document.querySelector("#b")!);
+          await new Promise(resolve => setTimeout(resolve, 20));
+          return before.every((style, index) => document.head.querySelectorAll("style")[index] === style && style.textContent === content[index]);
+        });
+        assert.equal(moved, true);
+        // Firefox's HTML preload scanner can request an import in a template before our loader runs.
+        assert.equal(requestTypes.filter(request => request === "/defaults.css:fetch").length, 1, requestTypes.join(", "));
+      } finally { await browser.close(); }
+    });
+  }
 
   for (const engine of [chromium, firefox, webkit]) {
     it(`${engine.name()} loads component resources without promoting their metadata into the document`, async () => {

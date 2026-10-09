@@ -1114,7 +1114,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   };
   const lowering = new Lowering("warnUnless");
   const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, propContractsByTag: options.propContractsByTag,
-    ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
+    ...((css !== "" || (definition.stylesheets?.length ?? 0) > 0) && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
