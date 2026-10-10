@@ -101,7 +101,7 @@ structural directives — exercises both the runtime and the Vue target outside 
 HTML Next ranked **#3 of 15** in a six-workload reactive-primitive benchmark on
 Node 24/macOS ARM64. The [results and reproduction guide](./packages/html-next/docs/reactivity-benchmarks.md)
 includes raw timings, exclusions, measurement limits and clean-checkout commands.
-The full matrix is dev-only; CI runs a smaller regression comparison against main.
+Both the full matrix and the smaller regression comparison are manual tools for performance work.
 
 ## Install and verify
 
@@ -117,6 +117,27 @@ corepack pnpm test:consumer
 
 Playwright's pinned Chromium, Firefox, and WebKit builds are required for the browser
 gates. Install them once with `corepack pnpm exec playwright install chromium firefox webkit`.
+
+CI runs Node tests, browser regressions and installed-consumer checks only for changed packages
+and their transitive workspace consumers. Core changes affect all four packages; converter changes
+also affect the Vite plugin; HTMLKit changes stay with HTMLKit. Shared toolchain changes select all
+packages. Documentation changes run repository contracts without package suites.
+Pure shared-version changes do not widen functional test selection. Release metadata, generated
+output and installed consumers for the changed package versions are still verified.
+
+The routine target is five minutes on the parallel critical path, including setup. Browser batches
+target three minutes of tests, and long specs are split by engine and delivery mode. The automatic
+verification and publication path has a fifteen-minute execution budget: one minute for selection,
+ten for parallel checks, one for the Required result, and three for publication. GitHub runner queue time is outside that budget.
+Windows/macOS and the full Node LTS matrix use the manual Cross-platform workflow. Rendering
+benchmarks use the manual Framework rendering workflow, and
+`pnpm verify:performance --base=origin/main` runs explicitly for reactive performance work.
+The manual Converter corpus workflow runs the broad React, Vue and Svelte public-corpus sweeps
+for shared compiler changes or parity investigations. Focused framework regressions remain automatic
+in Chromium, Firefox and WebKit.
+Deno/Bun installed-consumer smoke checks run only when core or HTMLKit changes affect HTMLKit.
+Automatic npm publication waits for successful CI on the exact main commit and has its own
+three-minute cap. See [release mechanics](./packages/html-next/docs/releasing.md).
 
 ## Define a component
 

@@ -10,6 +10,10 @@
 
 - `@nextwebwg/html-next` exports `add`, `subtract`, `multiply` and `divide`, the operations expressions use, so controller code can calculate what an expression would. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects. Compiled components import the ones their expressions use from `@nextwebwg/html-next/generated-runtime`, and none for arithmetic on whole numbers (integer literals and `integer` values). Converted components import them from their shared host module as `decimalAdd`, `decimalSubtract`, `decimalMultiply`, `decimalDivide` and `decimalRemainder`, so authored names such as an `add` handler keep their names. A compiled component that uses one operation grows by about 230 B gzip, and one that uses all of them by about 290 B; the live runtime grows by 0.3 KB gzip, and an application of every converted conformance component by about 300 B in each framework. Fractional arithmetic takes about 20 to 35 ns longer per operation; whole numbers take no longer.
 
+### Changed
+
+- CI selects changed packages and their transitive consumers, keeps pure shared-version changes from widening functional tests, separates Node and packed-consumer checks, and splits browser regressions into measured parallel batches. Routine checks target five minutes; the automatic verification and publication path has a fifteen-minute execution budget. Broad converter corpora, OS/Node compatibility matrices and rendering benchmarks run manually. npm publication waits for CI to pass on the exact main commit and skips already-published releases.
+
 ## 1.0.0-alpha.41
 
 ### Breaking

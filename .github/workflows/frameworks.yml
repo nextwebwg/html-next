@@ -1,10 +1,8 @@
 name: Framework rendering
 
-# A full paired comparison runs far longer than the 15-minute CI budget, so it runs nightly against
-# the previous day's main instead of on each pull request.
+# The paired benchmark cannot fit the automatic CI budget. Run it explicitly when investigating
+# performance; it is never scheduled and never blocks a fix or release.
 on:
-  schedule:
-    - cron: "17 7 * * *"
   workflow_dispatch:
     inputs:
       base:

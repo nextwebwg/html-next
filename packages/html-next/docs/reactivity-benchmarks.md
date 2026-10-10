@@ -78,15 +78,15 @@ results**. These are diagnostic results, not a passing conformance gate or a spe
 ranking. The command returns a report; inspect its `summary` and individual cases.
 The existing focused upstream tests remain part of normal verification.
 
-## Small CI regression gate
+## Manual regression comparison
 
 ```sh
 git fetch origin main
 corepack pnpm verify:performance --base=origin/main --output=performance.json
 ```
 
-CI compares the PR with its main base SHA; a main push compares with the previous
-main SHA. It bundles both revisions with the same installed esbuild, Node and
+Run this comparison explicitly for performance changes, using the relevant base SHA.
+It is outside automatic CI. It bundles both revisions with the same installed esbuild, Node and
 lockfile, then measures only HTML Next using the same six workload definitions.
 A temporary `git archive` of the baseline source avoids changing the checked-out
 branch or requiring a separate maintained checkout. Both revisions use the same
