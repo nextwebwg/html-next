@@ -122,6 +122,8 @@ CI runs Node tests, browser regressions and installed-consumer checks only for c
 and their transitive workspace consumers. Core changes affect all four packages; converter changes
 also affect the Vite plugin; HTMLKit changes stay with HTMLKit. Shared toolchain changes select all
 packages. Documentation changes run repository contracts without package suites.
+Pure shared-version changes do not widen functional test selection. Release metadata, generated
+output and installed consumers for the changed package versions are still verified.
 
 The routine target is five minutes on the parallel critical path, including setup. Browser batches
 target three minutes of tests, and long specs are split by engine and delivery mode. The automatic
