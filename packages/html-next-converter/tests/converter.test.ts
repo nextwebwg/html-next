@@ -1164,7 +1164,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
     // A conforming state's own value needs no read check, so the computed reads it directly.
-    assert.match(source, /const double = cycleCheckedComputed\(\(\) => count\.value \* 2\)\n/);
+    assert.match(source, /const double = cycleCheckedComputed\(\(\) => decimalMultiply\(count\.value, 2\)\)\n/);
     assert.match(source, /function increment\(\): void \{/);
     assert.match(source, /  write\(count, count\.value \+ 1, isNumber, 'count in [^']*#increment'\)\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);

@@ -23,6 +23,8 @@ export default defineConfig({
   test: {
     exclude: ["**/dist/**", "**/node_modules/**"],
     include: ["packages/*/tests/**/*.test.ts", "tests/**/*.test.ts"],
+    // Compiler/consumer fixtures spawn their own builds; cap workers to avoid CPU contention.
+    maxWorkers: 2,
     testTimeout: 30_000,
   },
 });

@@ -27,6 +27,7 @@ catalog:
   anod: 0.9.1
   css-tree: 3.2.1
   cssstyle: 6.2.0
+  decimal.js: 10.6.0
   esbuild: 0.28.2
   mobx: 7.0.6
   oxlint: 1.86.0

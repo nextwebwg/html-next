@@ -139,10 +139,10 @@ a quick local check but marks the report `reduced`. The JSON report records both
 flag, the environment, and per mode the bundles, size assessment, comparisons and speed assessment,
 followed by every sweep's medians.
 
-The nightly "Framework rendering" workflow runs the gate against main as of 24 hours earlier when
-`packages/html-next/src` or `packages/html-next-unplugin/src` changed since then; it can also be run
-manually with a base commit. A full comparison exceeds the 15-minute CI budget, so pull requests do
-not run it, and it is not a release gate until its noise on hosted runners is known.
+The manual "Framework rendering" workflow compares with the requested base commit, defaulting to
+main as of 24 hours earlier, when runtime or plugin source changed. Run it to investigate a measured
+slowdown or evaluate an optimization. A full comparison exceeds the 15-minute automatic CI budget;
+it has no schedule and is not a release gate. Hosted-runner noise still needs characterization.
 
 ## Ledger
 

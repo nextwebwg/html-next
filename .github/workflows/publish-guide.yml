@@ -20,6 +20,7 @@ concurrency:
 jobs:
   deploy-site:
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - name: Start the site deploy
         env:

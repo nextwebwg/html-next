@@ -1,10 +1,24 @@
 # Changelog
 
-## 1.0.0-alpha.42
+## 1.0.0-alpha.43
 
 ### Changed
 
 - Vue, React and Svelte conversion write a handler's `<set>` as one statement. A write the converter proves satisfies its state's declared type is written plainly: a literal, a negation into a `boolean` state, a copy of a same-typed state, and a step of an `integer` state by a safe integer literal when every write keeps that state an integer (`count.value++`, `setCount((count) => count + 1)`, `count++`). Any other write is one call to the shared `write` helper, `write(count, count.value + 1, isNumber, 'count in counter.html#increment')`, which refuses an invalid result or a value of the wrong type as before. `number` arithmetic stays checked, since its result depends on the proposal's number semantics. The refusal warning now names the handler: `HR007: State count in counter.html#increment does not satisfy its declared type.` The shared helper replaces `acceptsWrite`, and the converted conformance corpus is 1.0 to 2.3% smaller.
+
+## 1.0.0-alpha.42
+
+### Breaking
+
+- Number arithmetic in expressions is decimal to the operands' precision, as the proposal now specifies. `+`, `-` and `%` give the exact decimal result at the larger operand's decimal places, and `*` at the sum of both, so `1.1 + 0.1` is `1.2`, `0.1 + 0.2` is `0.3`, `0.1 * 0.2` is `0.02` and `0.3 % 0.1` is `0`, where JavaScript gives `1.2000000000000002`, `0.30000000000000004`, `0.020000000000000004` and `0.09999999999999998`. A state stepped by `$level + 0.1` reaches exactly `9.9`. `/` keeps full double precision, whole numbers calculate as before, dimensions follow the same rule (`1.1px + 0.1px` is `1.2px`), and a result that would need more than 15 significant digits stays the double result. The live runtime, server rendering, compiled components, and Vue, React and Svelte conversion all calculate this way.
+
+### Added
+
+- `@nextwebwg/html-next` exports `add`, `subtract`, `multiply` and `divide`, the operations expressions use, so controller code can calculate what an expression would. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects. Compiled components import the ones their expressions use from `@nextwebwg/html-next/generated-runtime`, and none for arithmetic on whole numbers (integer literals and `integer` values). Converted components import them from their shared host module as `decimalAdd`, `decimalSubtract`, `decimalMultiply`, `decimalDivide` and `decimalRemainder`, so authored names such as an `add` handler keep their names. A compiled component that uses one operation grows by about 230 B gzip, and one that uses all of them by about 290 B; the live runtime grows by 0.3 KB gzip, and an application of every converted conformance component by about 300 B in each framework. Fractional arithmetic takes about 20 to 35 ns longer per operation; whole numbers take no longer.
+
+### Changed
+
+- CI selects changed packages and their transitive consumers, keeps pure shared-version changes from widening functional tests, separates Node and packed-consumer checks, and splits browser regressions into measured parallel batches. Routine checks target five minutes; the automatic verification and publication path has a fifteen-minute execution budget. Broad converter corpora, OS/Node compatibility matrices and rendering benchmarks run manually. npm publication waits for CI to pass on the exact main commit and skips already-published releases.
 
 ## 1.0.0-alpha.41
 
