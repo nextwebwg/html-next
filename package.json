@@ -30,7 +30,7 @@
     "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:consumer": "vitest run --config vitest.consumer.config.ts",
-    "test:package": "vitest run --config vitest.config.ts tests/package.test.ts",
+    "test:package": "vitest run --config vitest.package.config.ts",
     "test:targets": "vitest run --config vitest.targets.config.ts",
     "typecheck": "tsc -p tsconfig.json && pnpm --recursive --if-present typecheck",
     "verify:inner": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:generated && pnpm measure:runtime",

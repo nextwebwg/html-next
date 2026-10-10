@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.42
+
+### Changed
+
+- CI selects changed packages and their transitive consumers, separates Node and packed-consumer checks, and splits browser regressions into measured parallel batches. Routine checks target five minutes; the automatic verification and publication path has a fifteen-minute execution budget. OS/Node compatibility matrices and rendering benchmarks run manually. npm publication waits for CI to pass on the exact main commit and skips already-published releases.
+
 ## 1.0.0-alpha.41
 
 ### Breaking
