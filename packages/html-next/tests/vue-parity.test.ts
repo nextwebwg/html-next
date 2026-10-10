@@ -1156,7 +1156,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
 
   it("tracks Vue conversion of every successful live-runtime conformance example", () => {
     const successes = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successes.length, 38, "review newly added conformance examples for Vue pixel and behavior coverage");
+    assert.equal(successes.length, 39, "review newly added conformance examples for Vue pixel and behavior coverage");
     for (const testCase of successes) {
       const definition = parseComponent(conformanceScene(testCase.source).definition, testCase.name);
       const gap = knownConversionGaps.get(testCase.name);

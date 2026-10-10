@@ -3,7 +3,9 @@ import { describe, it } from "vitest";
 
 import { transform } from "esbuild";
 
-import { vueHostArtifact } from "../src/generate.js";
+import * as decimal from "../src/decimal.js";
+import { generateVueComponent, vueHostArtifact } from "../src/generate.js";
+import { parseComponent } from "../src/source-parser.js";
 
 /** The shared Vue host as a consumer receives it, with Vue itself stubbed: dispatch uses none of it. */
 async function loadHost() {
@@ -19,6 +21,24 @@ async function loadHost() {
 }
 
 describe("the shared Vue host", () => {
+  it("carries src/decimal.ts as the decimal operations converted arithmetic calls", async () => {
+    const host = await loadHost() as unknown as Record<string, (a: number, b: number) => number>;
+    const operations = [["decimalAdd", decimal.add], ["decimalSubtract", decimal.subtract], ["decimalMultiply", decimal.multiply],
+      ["decimalDivide", decimal.divide], ["decimalRemainder", decimal.remainder]] as const;
+    for (const [a, b] of [[1.1, 0.1], [0.3, 0.1], [1.25, 2], [-5.5, 2], [1e-7, 2e-7], [1, 3], [1.5e-23, 1e-24], [-1.5, 0]]) {
+      for (const [name, operate] of operations) assert.ok(Object.is(host[name]!(a!, b!), operate(a!, b!)), `${name}(${a}, ${b})`);
+    }
+  });
+
+  it("imports only the decimal operations a component's number arithmetic uses", () => {
+    const vue = (defs: string, body: string): string =>
+      generateVueComponent(parseComponent(`<template component="x-t"><defs>${defs}</defs>${body}</template>`, "x-t.html"));
+    assert.doesNotMatch(vue(`<state name="n" type="integer" value="1"></state>`, `<p>{$n + 1} {$n * 2 - 1} {$n % 2} {$n / 2}</p>`), /decimal/);
+    const fractional = vue(`<state name="level" type="number" value="0"></state>`, `<p>{$level + 0.1}</p>`);
+    assert.match(fractional, /import \{[^}]*\bdecimalAdd\b[^}]*\} from '\.\/host'/);
+    assert.doesNotMatch(fractional, /decimal(?:Subtract|Multiply|Divide|Remainder)/);
+  });
+
   it("updates a modeled prop once when one change is reported by more than one event", async () => {
     const { createDispatch } = await loadHost();
     const emitted: Array<[string, unknown]> = [];

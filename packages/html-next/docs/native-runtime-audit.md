@@ -58,6 +58,22 @@ Node 22 lacks `Intl.DurationFormat`; the isolated server worker imports FormatJS
 polyfill, which preserves native implementations where available. The browser graph does not
 import it. Standalone framework SSR consumers configure this polyfill in their own server entry.
 
+## Decimal arithmetic
+
+The proposal makes `+`, `-`, `*` and `%` on numbers [decimal to the operands' precision](https://nextwebwg.org/declarative-components/expressions#decimal-arithmetic):
+`1.1 + 0.1` is `1.2`. JavaScript's operators are binary doubles. `Number#toString` already writes
+each operand's shortest round-trip decimal, which defines its places. `toFixed` rounds the binary
+value, so `(1.005).toFixed(2)` is `"1.00"`, and `Intl.NumberFormat` rounds only for display.
+`<input type=number>` steps with a decimal type in Blink, WebKit and Gecko, but only through an
+element, and only by its step. The TC39 Decimal proposal is at Stage 1. The remaining gap is
+arithmetic on the operands' decimal values. `src/decimal.ts` fills it with scaled integers: each
+operand becomes an integer at the result's places, JavaScript combines the integers exactly, and one
+division by 10^places reads the result back. That is exact while every value stays below 10^15; past
+that the double result stands, as the proposal specifies. decimal.js is the test oracle, not a
+dependency. Finding each operand's places by rounding rather than by writing its text keeps an
+operation near 20 ns (200 ns with the text). A whole-number operand needs no search, and compiled
+components call plain operators where both operands are statically whole.
+
 ## Complete live inventory
 
 The production browser entry currently contains 164,726 attributed minified raw bytes plus 21
@@ -129,8 +145,8 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | Authored feature | Gzip bytes (level 9) | Runtime shape |
 | --- | ---: | --- |
 | Static markup | 6,875 | Cloned blocks, slot ranges, compiled-root handle and host |
-| Numeric state and handler | 6,856 | Same, with root bits and a handler |
-| Numeric computed state | 7,155 | Same, with a computed root, read-only to the controller |
+| Numeric state and handler | 7,117 | Same, with root bits, a handler, and decimal `add` |
+| Numeric computed state | 7,449 | Same, with a computed root, read-only to the controller, and decimal `add` and `multiply` |
 | Scalar and enum props | 11,353 | Same, with the live prop boundary and validity, each type compiled to its own checks |
 | Keyed list | 7,577 | Cloned blocks and `KeyedList` |
 | Declared read | 7,536 | Cloned blocks and `DataResource` |

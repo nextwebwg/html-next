@@ -1,3 +1,4 @@
+import { add, divide, multiply, remainder, subtract } from "./decimal.js";
 import { isNativeEvent } from "./freeze.js";
 import { parseExpression } from "./expression-parser.js";
 import { formatValue, formattingType } from "./format.js";
@@ -190,8 +191,14 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
   const dimensional = (op === "+" || op === "-" || op === "*" || op === "/") &&
     (typeof left !== "number" || typeof right !== "number");
   return binaryValue(op, left, right,
-    dimensional ? dimensionType(node.left, scope) : undefined, dimensional ? dimensionType(node.right, scope) : undefined);
+    dimensional ? dimensionType(node.left, scope) : undefined, dimensional ? dimensionType(node.right, scope) : undefined,
+    ARITHMETIC[op]);
 }
+
+/** The number operation behind each arithmetic operator. */
+const ARITHMETIC: Readonly<Record<string, (a: number, b: number) => number>> = {
+  "+": add, "-": subtract, "*": multiply, "/": divide, "%": remainder,
+};
 
 type Dimension = "length" | "percentage" | "duration";
 
@@ -209,8 +216,12 @@ export function negate(operand: Value, dimension: Dimension | undefined): Value 
 /**
  * A binary operator other than `and`/`or` over evaluated operands. The dimensions are the operands'
  * declared dimension types; they matter only for arithmetic on an operand that is not a number.
+ * `operate` is the arithmetic operator's number operation (`add` for `+`, from `./decimal.js`); a
+ * compiled component passes only the ones it uses, and none where both operands are integers, which
+ * JavaScript's own operators already calculate exactly.
  */
-export function binaryValue(op: string, left: Value, right: Value, leftDimension?: Dimension, rightDimension?: Dimension): Value {
+export function binaryValue(op: string, left: Value, right: Value, leftDimension?: Dimension, rightDimension?: Dimension,
+  operate?: (a: number, b: number) => number): Value {
   if (left === NONCONFORMING || right === NONCONFORMING) return NONCONFORMING;
   if (op === "=") return left === right;
   if (op === "!=") return left !== right;
@@ -234,13 +245,13 @@ export function binaryValue(op: string, left: Value, right: Value, leftDimension
       if (op === "+" || op === "-") {
         if (leftQuantity === undefined || rightQuantity === undefined ||
           leftQuantity.dimension !== rightQuantity.dimension || leftQuantity.unit !== rightQuantity.unit) return NONCONFORMING;
-        result = op === "+" ? leftQuantity.value + rightQuantity.value : leftQuantity.value - rightQuantity.value;
+        result = calculate(op, leftQuantity.value, rightQuantity.value, operate);
         unit = leftQuantity.unit;
       } else if (op === "*") {
         const quantity = leftQuantity ?? rightQuantity;
         const factor = leftQuantity === undefined ? asNumber(left) : asNumber(right);
         if (quantity === undefined || leftQuantity !== undefined && rightQuantity !== undefined || factor === ABSENT) return NONCONFORMING;
-        result = quantity.value * factor;
+        result = calculate(op, quantity.value, factor, operate);
         unit = quantity.unit;
       } else {
         const divisor = asNumber(right);
@@ -260,13 +271,15 @@ export function binaryValue(op: string, left: Value, right: Value, leftDimension
     case "<=": return a <= b;
     case ">": return a > b;
     case ">=": return a >= b;
-    case "+": return a + b;
-    case "-": return a - b;
-    case "*": return a * b;
-    case "/": return a / b;
-    case "%": return a % b;
+    case "+": case "-": case "*": case "/": case "%": return calculate(op, a, b, operate);
     default: return ABSENT;
   }
+}
+
+/** An arithmetic operator on two numbers, through its number operation when there is one. */
+function calculate(op: string, a: number, b: number, operate: ((a: number, b: number) => number) | undefined): number {
+  if (operate !== undefined) return operate(a, b);
+  return op === "+" ? a + b : op === "-" ? a - b : op === "*" ? a * b : op === "/" ? a / b : a % b;
 }
 
 function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): Value {
@@ -405,6 +418,23 @@ export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "
   }
   const name = path(node);
   return name === undefined ? undefined : scope.typeOfPath?.(name);
+}
+
+/**
+ * Whether an expression always yields a whole number: an integer literal, a value `typeOf` gives the
+ * `integer` type, or `+`, `-`, `*` or `%` of whole numbers. JavaScript calculates those exactly, so
+ * compiled arithmetic on them skips the decimal operations.
+ */
+export function wholeNumber(node: ExpressionNode, typeOf: (node: ExpressionNode) => TypeNode | undefined): boolean {
+  if (node.kind === "literal") return Number.isInteger(node.value);
+  if (node.kind === "unary") return node.op === "-" && wholeNumber(node.operand, typeOf);
+  if (node.kind === "binary") {
+    return (node.op === "+" || node.op === "-" || node.op === "*" || node.op === "%") &&
+      wholeNumber(node.left, typeOf) && wholeNumber(node.right, typeOf);
+  }
+  let type = typeOf(node);
+  if (type?.kind === "constrained") type = type.base;
+  return type?.kind === "terminal" && type.name === "integer";
 }
 
 const cache = new Map<string, CompiledExpression>();

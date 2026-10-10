@@ -124,10 +124,12 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // only while its outlet renders, host.slots lists what it renders, and a component projected into a
 // slot is created only once a slot places it.
 const staticGenerated = await generatedFixture("static-card", 6_950);
-const reactiveGenerated = await generatedFixture("reactive-counter", 6_950);
+// The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
+// imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
+const reactiveGenerated = await generatedFixture("reactive-counter", 7_150);
 const propGenerated = await generatedFixture("prop-button", 11_400);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
-const computedGenerated = await generatedFixture("computed-counter", 7_250);
+const computedGenerated = await generatedFixture("computed-counter", 7_475);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
 const dataGenerated = await generatedFixture("data-read", 7_550);
