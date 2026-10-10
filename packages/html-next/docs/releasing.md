@@ -16,7 +16,10 @@ corepack pnpm verify:release
 skew, checks the generator version, and installs a packed package in an isolated consumer. The
 consumer checks public JavaScript and declaration exports and bundles the browser entries.
 
-Merging the reviewed version change to `main` runs [the release workflow](../../../.github/workflows/release.yml).
+Merging the reviewed version change to `main` runs affected-package CI. Once CI succeeds,
+[the release workflow](../../../.github/workflows/release.yml) checks out that exact commit.
+It skips verification and publishing when every package version is already published, and has a
+three-minute job limit. Manual dispatch verifies and publishes the selected revision explicitly.
 It attempts every package in the set through npm trusted publishing with provenance. A successful
 run publishes each new version to `latest`. When rerun after a partial failure, it skips packages
 whose version already exists and publishes the missing packages; it fails if any publish fails.

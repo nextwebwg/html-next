@@ -32,6 +32,12 @@ const browserExports = [
   "./browser",
 ] as const;
 
+const selectedPackage = process.env.HTMLNEXT_PACKAGE_TEST;
+if (selectedPackage && !releaseDirectories.some((directory) => directory === selectedPackage)) {
+  throw new Error(`Unknown package test selection: ${selectedPackage}`);
+}
+const includesPackage = (...directories: string[]): boolean => !selectedPackage || directories.includes(selectedPackage);
+
 // Removing the installed consumers on Windows can outlast the default hook budget.
 afterAll(() => rmSync(workspace, { recursive: true, force: true }), 60_000);
 
@@ -62,7 +68,7 @@ function specifier(path: typeof publicExports[number]): string {
 }
 
 describe("workspace package contracts", () => {
-  it("installs HTML Next with every public export", () => {
+  it.skipIf(!includesPackage("html-next"))("installs HTML Next with every public export", () => {
     const componentsTarball = pack("html-next");
     const consumer = join(workspace, "html-next-consumer");
     mkdirSync(consumer);
@@ -174,8 +180,8 @@ describe("workspace package contracts", () => {
     );
   }, 240_000); // Windows runners have taken over 120 s for this install and bundle.
 
-  it("installs the source adapter and prepares React types through the consumer Vite config", () => {
-    const tarballs = releaseDirectories.map(pack);
+  it.skipIf(!includesPackage("html-next-converter", "html-next-unplugin"))("installs the source adapter and prepares React types through the consumer Vite config", () => {
+    const tarballs = ["html-next", "html-next-converter", "html-next-unplugin"].map(pack);
     const consumer = join(workspace, "adapter-consumer");
     mkdirSync(join(consumer, "src"), { recursive: true });
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "adapter-consumer", private: true, type: "module" }));
@@ -304,7 +310,7 @@ describe("workspace package contracts", () => {
     expect([...versions], "All published packages must share one version.").toHaveLength(1);
   });
 
-  it("builds a static application through the installed HTMLKit CLI", () => {
+  it.skipIf(!includesPackage("htmlkit"))("builds a static application through the installed HTMLKit CLI", () => {
     const consumer = join(workspace, "htmlkit-consumer");
     mkdirSync(join(consumer, "app/pages"), { recursive: true });
     mkdirSync(join(consumer, "app/layouts"), { recursive: true });

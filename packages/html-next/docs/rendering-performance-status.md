@@ -185,8 +185,9 @@ Any further performance experiment starts from this retained state and keeps mea
    objects regresses creation, so the kernel must replace per-row objects, not add to them.
 7. **Known limit.** The indexed coordinator's fast path is skipped when the live runtime's
    coordinator installs first. This costs speed only.
-8. **Nightly gate.** The "Framework rendering" workflow runs nightly, because a full comparison exceeds
-   the 15-minute CI budget. Treat it as a gate only after its noise is characterized on hosted runners.
+8. **Manual comparison.** The "Framework rendering" workflow runs only on request, because a full
+   comparison exceeds the automatic CI budget and hosted-runner noise is not characterized. Use it
+   for a concrete performance investigation or optimization; it is not a release gate.
 
 ## Working method
 
