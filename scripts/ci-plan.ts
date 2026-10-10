@@ -51,6 +51,7 @@ export function createPlan(paths: readonly string[]) {
   const packages = affectedPackages(paths);
   const node: TestJob[] = [];
   const browser: TestJob[] = [];
+  const corpus: TestJob[] = [];
   for (const directory of packages) {
     const unitFiles: string[] = [];
     const buckets: TestJob[] = [];
@@ -63,18 +64,22 @@ export function createPlan(paths: readonly string[]) {
         : source.includes("HTMLNEXT_TARGET_TEST") ? "targets" : "node";
       if (source.includes("HTMLNEXT_CONSUMER_TEST")) continue; // Packed contracts run separately.
       if (suite === "node") { unitFiles.push(file); continue; }
+      // Broad corpus sweeps repeat the focused cross-browser regressions. Keep them on demand.
+      const destination = path.endsWith("public-conformance-parity.test.ts") ? corpus : browser;
       const seconds = durations[file] ?? 20;
-      if (seconds > 180) {
+      if (seconds > 150) {
         // Public converter corpora cover every engine and both application/library delivery.
         // Partition by full test name; the first partition also owns any unlabelled test.
         const labels = path === "svelte-public-conformance-parity.test.ts"
           ? ["Chromium application", "Chromium library", "Firefox application", "Firefox library", "WebKit application", "WebKit library"]
           : ["Chromium", "Firefox", "WebKit"];
-        labels.forEach((label, index) => browser.push({
+        labels.forEach((label, index) => destination.push({
           name: `${directory} ${path} ${label}`, package: directory, suite, files: [file],
           seconds: Math.ceil(seconds / labels.length),
           pattern: index === 0 ? `${label}|^(?!.*(?:${labels.join("|")})).*$` : label,
         }));
+      } else if (destination === corpus) {
+        corpus.push({ name: `${directory} ${path}`, package: directory, suite, files: [file], seconds });
       } else {
         let bucket = buckets.find((job) => job.suite === suite && job.seconds + seconds <= 180);
         if (!bucket) {
@@ -92,7 +97,7 @@ export function createPlan(paths: readonly string[]) {
       files: unitFiles.slice(index, index + 20), seconds: 0,
     });
   }
-  return { packages, node, browser };
+  return { packages, node, browser, corpus };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -104,6 +109,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const plan = createPlan(paths);
   const outputs = {
     node: JSON.stringify({ include: plan.node }), browser: JSON.stringify({ include: plan.browser }),
+    corpus: JSON.stringify({ include: plan.corpus }),
     // The plugin's installed-consumer test also covers the converter; run it once.
     packages: JSON.stringify(plan.packages.filter((name) => name !== "html-next-converter")), has_node: String(plan.node.length > 0),
     has_browser: String(plan.browser.length > 0), has_packages: String(plan.packages.length > 0),

@@ -15,6 +15,7 @@ describe("affected CI", () => {
     expect(plan.node.every((job) => job.package === "htmlkit")).toBe(true);
     expect(plan.browser.every((job) => job.files.every((file) => file.startsWith("packages/htmlkit/")))).toBe(true);
     expect(plan.packages).toEqual(["htmlkit"]);
+    expect(plan.browser.filter((job) => job.files.includes("packages/htmlkit/tests/client-navigation.test.ts"))).toHaveLength(3);
   });
 
   it("follows transitive workspace consumers", () => {
@@ -35,11 +36,15 @@ describe("affected CI", () => {
     expect(affectedPackages(["scripts/ci-plan.ts"])).toHaveLength(4);
   });
 
-  it("keeps every browser regression and partitions long specs", () => {
+  it("keeps focused browser regressions automatic and partitions the manual corpus", () => {
     const plan = createPlan(["pnpm-lock.yaml"]);
     const files = new Set(plan.browser.flatMap((job) => job.files));
     expect(files.has("packages/html-next/tests/runtime.test.ts")).toBe(true);
-    expect(files.has("packages/html-next-converter/tests/svelte-public-conformance-parity.test.ts")).toBe(true);
+    expect([...files].some((file) => file.endsWith("public-conformance-parity.test.ts"))).toBe(false);
+    expect(plan.corpus).toHaveLength(12);
+    expect(plan.corpus.every((job) => job.files.every((file) => file.endsWith("public-conformance-parity.test.ts")))).toBe(true);
+    expect(plan.corpus.every((job) => job.seconds <= 180)).toBe(true);
+    expect(createPlan(["packages/htmlkit/src/routes.ts"]).corpus).toEqual([]);
     expect(files.has("packages/html-next-unplugin/tests/framework.test.ts")).toBe(true);
     expect(plan.browser.every((job) => job.seconds <= 180)).toBe(true);
     const runtime = plan.browser.filter((job) => job.files.includes("packages/html-next/tests/runtime.test.ts"));
@@ -67,6 +72,7 @@ describe("affected CI", () => {
         .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
       expect(values.node).toBe('{"include":[]}');
       expect(values.browser).toBe('{"include":[]}');
+      expect(values.corpus).toBe('{"include":[]}');
       expect(values.packages).toBe("[]");
       expect(values.has_node).toBe("false");
       expect(values.has_browser).toBe("false");

@@ -130,6 +130,9 @@ ten for parallel checks, one for the Required result, and three for publication.
 Windows/macOS and the full Node LTS matrix use the manual Cross-platform workflow. Rendering
 benchmarks use the manual Framework rendering workflow, and
 `pnpm verify:performance --base=origin/main` runs explicitly for reactive performance work.
+The manual Converter corpus workflow runs the broad React, Vue and Svelte public-corpus sweeps
+for shared compiler changes or parity investigations. Focused framework regressions remain automatic
+in Chromium, Firefox and WebKit.
 Deno/Bun installed-consumer smoke checks run only when core or HTMLKit changes affect HTMLKit.
 Automatic npm publication waits for successful CI on the exact main commit and has its own
 three-minute cap. See [release mechanics](./packages/html-next/docs/releasing.md).
