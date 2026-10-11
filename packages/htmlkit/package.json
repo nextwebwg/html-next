@@ -37,7 +37,7 @@
     "typescript": "catalog:",
     "vitest": "catalog:",
     "playwright": "catalog:",
-    "marked": "18.0.14",
+    "marked": "18.1.0",
     "tsx": "catalog:"
   },
   "publishConfig": {
