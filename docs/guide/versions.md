@@ -72,7 +72,7 @@ An [extension](https://nextwebwg.org/declarative-components/#extensions) is an o
 - The Vite plugin builds an extension only when its `extensions` option lists it. Otherwise, the extension's syntax is an error (`HT024`) that names the option to add.
 - The live browser runtime and Vue, React, and Svelte conversion do not build extensions. They warn and build the component without the extension.
 - An extension adds code only to components that use it.
-- HTMLKit will enable every extension. *Planned:* it needs HTMLKit to ship compiled components first.
+- HTMLKit doesn't enable extensions yet, so a component that uses `transitions` fails to build there (`HT024`). *Planned:* HTMLKit will enable every extension.
 
 The first extension, `transitions`, is at the Incubation stage: these tools implement it.
 
