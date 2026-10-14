@@ -321,6 +321,52 @@ describe("application platform", () => {
     } finally { await server.close(); }
   }, 60_000);
 
+  it("nests each folder's _layout.html inside its parents' layouts, under the selected layout", async () => {
+    const root = await app();
+    const shell = (tag: string) => `<template component="${tag}"><defs><prop name="trail" type="string" required>Trail</prop></defs><div data-trail="{$trail}"><slot name="page"></slot></div></template>`;
+    await write(root, "app/layouts/admin.html", '<template component="admin-shell"><main><slot name="page"></slot></main></template>');
+    await write(root, "app/layouts/admin.server.ts", "export const load = () => ({ data: { owner: 'admin' } });");
+    await write(root, "app/pages/docs/_layout.html", shell("docs-shell"));
+    await write(root, "app/pages/docs/_layout.server.ts", "export const load = ({ parent }) => ({ props: { trail: parent.owner }, data: { section: 'docs' } });");
+    await write(root, "app/pages/docs/index.html", '<template component="docs-page"><p>Docs home</p></template>');
+    await write(root, "app/pages/docs/guide/_layout.html", shell("guide-shell"));
+    await write(root, "app/pages/docs/guide/_layout.server.ts", "export const load = ({ parent }) => ({ props: { trail: parent.owner + '/' + parent.section }, data: { chapter: 'guide' } });");
+    await write(root, "app/pages/docs/guide/intro.html", '<template component="intro-page"><defs><prop name="trail" type="string" required>Trail</prop></defs><p>Intro {$trail}</p></template>');
+    await write(root, "app/pages/docs/guide/intro.server.ts", "export const load = ({ parent }) => ({ props: { trail: [parent.owner, parent.section, parent.chapter].join('/') } });");
+    await write(root, "app/pages/docs/guide/admin.html", '<template component="admin-page"><meta name="hk:layout" content="admin"><p>Admin</p></template>');
+    await write(root, "app/pages/docs/guide/plain.html", '<template component="plain-page"><meta name="hk:layout" content="none"><p>Plain</p></template>');
+    const routes = await discoverRoutes(root);
+    const chain = (pattern: string) => routes.find(route => route.pattern === pattern)!.layouts.map(layer => [layer.component.slice(root.length), layer.server?.toString().slice(root.length)]);
+    expect(routes.some(route => route.pattern.includes("_layout"))).toBe(false);
+    expect(chain("/docs/guide/intro/")).toEqual([["/app/layouts/default.html", "/app/layouts/default.server.ts"],
+      ["/app/pages/docs/_layout.html", "/app/pages/docs/_layout.server.ts"], ["/app/pages/docs/guide/_layout.html", "/app/pages/docs/guide/_layout.server.ts"]]);
+    expect(chain("/docs/")).toHaveLength(2);
+    expect(chain("/")).toHaveLength(1);
+    // hk:layout replaces the outermost layout only; none drops every layout, folder layouts included.
+    expect(chain("/docs/guide/admin/").map(([component]) => component)).toEqual(["/app/layouts/admin.html", "/app/pages/docs/_layout.html", "/app/pages/docs/guide/_layout.html"]);
+    expect(chain("/docs/guide/plain/")).toEqual([]);
+    const application = await createApplication({ root });
+    try {
+      // Outer to inner, each loader receives the data of the ones before it as parent.
+      const intro = await application.render("/docs/guide/intro/");
+      expect(intro.layers.map(layer => layer.component)).toEqual(["app-layout", "docs-shell", "guide-shell", "intro-page"]);
+      const order = ["app-layout", "docs-shell", "guide-shell", "intro-page"].map(tag => intro.body.indexOf(`data-component="${tag}"`));
+      expect(order.every((position, i) => position >= 0 && (i === 0 || position > order[i - 1]!))).toBe(true);
+      expect(intro.body).toContain('data-trail="kit"');
+      expect(intro.body).toContain('data-trail="kit/docs"');
+      expect(intro.body).toContain("Intro kit/docs/guide");
+      const admin = await application.render("/docs/guide/admin/");
+      expect(admin.layers.map(layer => layer.component)).toEqual(["admin-shell", "docs-shell", "guide-shell", "admin-page"]);
+      expect(admin.body).toContain('data-trail="admin/docs"');
+      expect((await application.render("/docs/guide/plain/")).layers.map(layer => layer.component)).toEqual(["plain-page"]);
+    } finally { await application.close(); }
+    const result = await buildApplication({ root });
+    const built = await readFile(join(result.outDir, "docs/guide/intro/index.html"), "utf8");
+    for (const tag of ["app-layout", "docs-shell", "guide-shell"]) expect(built).toContain(`data-component="${tag}"`);
+    expect(built).toContain("Intro kit/docs/guide");
+    expect(existsSync(join(result.outDir, "docs/_layout/index.html"))).toBe(false);
+  }, 60_000);
+
   it("renders app/pages/404.html for every unmatched path, through its layout, in each delivery", async () => {
     const root = await app();
     await write(root, "app/pages/404.html", '<template component="not-found-page"><title>Lost</title><defs><prop name="path" type="string" required>Missing path</prop></defs><h1>Nothing at {$path}</h1></template>');

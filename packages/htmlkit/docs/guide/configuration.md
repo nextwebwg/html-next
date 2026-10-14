@@ -34,7 +34,8 @@ export default defineConfig({
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
 | `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
 
-A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`.
+A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`. Each selects the outermost
+layout; a folder's `_layout.html` nests inside it ([nested layouts](/htmlkit/routes#nested-layouts)).
 
 ## `@/` and built-in components
 

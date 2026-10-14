@@ -371,3 +371,51 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation", 
     } finally { await browser.close(); }
   });
 });
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation through nested layouts", () => {
+  let root: string;
+  let preview: ApplicationServer;
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "htmlkit-nested-layouts-"));
+    await write(root, "package.json", '{"name":"htmlkit-nested-layouts","private":true,"type":"module"}');
+    await write(root, "app/layouts/default.html", '<template component="site-shell"><div class="site"><slot name="page"></slot></div></template>');
+    await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><article><a id="to-a" href="/docs/a/">A</a></article></template>');
+    await write(root, "app/pages/docs/_layout.html", `<template component="docs-shell" controller="./shell.ts"><defs><prop name="section" type="string" required>Section</prop></defs>
+      <div class="docs"><aside from:data-section="$section">Docs</aside><slot name="page"></slot></div></template>`);
+    await write(root, "app/pages/docs/_layout.server.ts", "export const load = ({ url }) => ({ props: { section: url.pathname } });");
+    await write(root, "app/pages/docs/shell.ts", "export default function(host) { host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1); }");
+    await write(root, "app/pages/docs/a.html", '<template component="a-page"><title>A</title><article><a id="to-b" href="/docs/b/">B</a></article></template>');
+    await write(root, "app/pages/docs/b.html", '<template component="b-page"><title>B</title><article><a id="to-home" href="/">Home</a></article></template>');
+    await buildApplication({ root });
+    preview = await previewApplication({ root, port: 0 });
+  }, 120_000);
+  afterAll(async () => {
+    await preview?.close();
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  for (const [name, type] of engines) {
+    it(`${name} keeps the layouts two pages in one folder share`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const { page, errors } = await open(await browser.newContext());
+        await page.goto(preview.url + "docs/a/");
+        await page.waitForFunction(() => document.getElementById("hk-layer-1")?.dataset.connections === "1");
+        await mark(page);
+        await page.evaluate(() => { (window as unknown as { docs: Element }).docs = document.getElementById("hk-layer-1")!; });
+        await page.locator("#to-b").click();
+        await settled(page, "B");
+        expect(await page.evaluate(() => {
+          const docs = document.getElementById("hk-layer-1")!;
+          return [docs === (window as unknown as { docs: Element }).docs, docs.dataset.connections, docs.querySelector("aside")!.dataset.section,
+            document.getElementById("hk-layer-2")!.dataset.component];
+        })).toEqual([true, "1", "/docs/b/", "b-page"]);
+        // Leaving the folder drops its layout.
+        await page.locator("#to-home").click();
+        await settled(page, "Home");
+        expect(await page.evaluate(() => [document.getElementById("hk-layer-1")!.dataset.component, document.getElementById("hk-layer-2")])).toEqual(["home-page", null]);
+        expect([await marked(page), errors]).toEqual([true, []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+  }
+});
