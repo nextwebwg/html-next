@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.48
+
+### Changed
+
+- The HTMLKit guide corrects four points. The `/about` → `/about/` redirect happens in development, `preview`, and `application.fetch`, but not on a static host. `preview` takes its base path from the build. A page's head tag replaces the layout's tag with the same identity, rather than every `<meta>`. Under HTMLKit, a component using `transitions` fails to build (`HT024`), because HTMLKit doesn't enable extensions yet. It also states the default port and flag precedence.
+
 ## 1.0.0-alpha.47
 
 ### Changed
