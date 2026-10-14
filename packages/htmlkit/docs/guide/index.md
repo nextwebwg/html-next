@@ -61,7 +61,8 @@ htmlkit.config.ts optional settings
 ## Deploy
 
 `npm run build` writes the site to `dist/`. Upload that folder to any static host, and set the
-host's "page not found" response to `404.html`. `npm run preview` serves `dist/` locally first.
+host's "page not found" response to `404.html` (your [not-found page](/htmlkit/routes#the-not-found-page), when
+`app/pages/404.html` exists). `npm run preview` serves `dist/` locally first.
 
 The commands take an optional project folder (`htmlkit dev site`), `--base /docs/` to serve the site
 under a path, `--origin` for absolute URLs, `--out-dir`, `--port`, and `--host`. The servers listen on

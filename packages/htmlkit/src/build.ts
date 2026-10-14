@@ -63,7 +63,9 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     if (await exists(join(stage, "_htmlkit"))) throw new HtmlKitError("Public asset collision: _htmlkit is reserved for generated assets.");
     const pages = [];
     const sources = new Map<string, string>();
-    for (const pathname of routes) {
+    // The not-found page renders like a page, through its layouts, and becomes 404.html.
+    const notFoundIndex = application.notFound === undefined ? -1 : routes.length;
+    for (const pathname of notFoundIndex < 0 ? routes : [...routes, config.base + "404/"]) {
       const page = await application.render(pathname);
       pages.push(page);
       for (const [id, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch,
@@ -80,13 +82,14 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     const manifest = JSON.parse(await readFile(join(stage, "_htmlkit/vite-manifest.json"), "utf8")) as Manifest;
     const bundles = new Map(Object.values(manifest).filter(chunk => chunk.isEntry).map(chunk => [chunk.name, chunk]));
     const delivery = [];
+    let notFoundHTML = notFoundPage(await headScripts(options, config.root)).html;
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]!;
       const path = join(stage, decodeURIComponent(page.pathname.slice(config.base.length)), "index.html");
-      if (await exists(path)) throw new HtmlKitError(`Public asset collision with route ${page.pathname}.`, path);
+      if (i !== notFoundIndex && await exists(path)) throw new HtmlKitError(`Public asset collision with route ${page.pathname}.`, path);
       const entry = bundles.get(`page-${i}`);
       if (entry === undefined) throw new HtmlKitError(`Missing browser bundle for ${page.pathname}.`);
-      const route = matchRoute(application.routes, page.pathname, config.base)!.route;
+      const route = i === notFoundIndex ? application.notFound! : matchRoute(application.routes, page.pathname, config.base)!.route;
       // Vite's manifest includes CSS from the entry and its shared static imports.
       const styles = new Set<string>();
       const seen = new Set<ManifestChunk>();
@@ -99,8 +102,10 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       collect(entry);
       // Shared chunks, which links on screen may prefetch; the entry holds the page's own content.
       const chunks = [...seen].filter(chunk => chunk !== entry).map(chunk => config.base + chunk.file);
-      delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
       const assets = { styles: [...styles], modules: [config.base + entry.file] };
+      // Served at any missing path, so it has no route, manifest entry, or payload; its asset URLs are absolute.
+      if (i === notFoundIndex) { notFoundHTML = documentHTML(page.body, page.head, assets); continue; }
+      delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, documentHTML(page.body, page.head, assets));
       const payload = pagePayload(page, assets);
@@ -112,7 +117,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     }
     await rm(join(stage, "_htmlkit/vite-manifest.json"));
     if (await exists(join(stage, "404.html"))) throw new HtmlKitError("Public asset collision: 404.html is generated.");
-    await writeFile(join(stage, "404.html"), notFoundPage(await headScripts(options, config.root)).html);
+    await writeFile(join(stage, "404.html"), notFoundHTML);
     await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify({ version: 1, base: config.base, routes, pages: delivery }, null, 2) + "\n");
     const previous = await exists(config.outDir);
     if (previous) await rename(config.outDir, backup);

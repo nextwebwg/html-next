@@ -34,8 +34,9 @@ export async function discover(root: string, options: DiscoveryOptions) {
   }
   const pageExtension = (name: string) => [".html", ...compilers.keys()].find(extension => name.endsWith(extension) && name.length > extension.length);
   // Each route remembers its page directory's prefix, which page aliases are relative to.
-  const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string; readonly directoryLayout?: string | false | RouteLayer })[] = [];
-  const add = (input: RouteInput & { readonly canonical?: string }, prefix: string, order?: readonly (string | null)[],
+  const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string; readonly directoryLayout?: string | false | RouteLayer;
+    readonly notFound?: true })[] = [];
+  const add = (input: RouteInput & { readonly canonical?: string; readonly notFound?: true }, prefix: string, order?: readonly (string | null)[],
     directoryLayout?: string | false | RouteLayer): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
     const segments = input.pattern.slice(1, -1).split("/").filter(Boolean);
@@ -49,7 +50,8 @@ export async function discover(root: string, options: DiscoveryOptions) {
       ...(layer.server === undefined ? {} : { server: typeof layer.server === "string" ? resolve(root, layer.server) : layer.server }) });
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), prefix,
       ...(directoryLayout === undefined ? {} : { directoryLayout }),
-      ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }) });
+      ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }),
+      ...(input.notFound ? { notFound: true as const } : {}) });
   };
   // A number and a dot ("01.guide") order a file or directory and stay out of its URL. Route
   // segments cannot contain dots, so the prefix is never part of a name.
@@ -73,7 +75,10 @@ export async function discover(root: string, options: DiscoveryOptions) {
       const stem = name.slice(0, -extension.length);
       const { slug, rank } = ordered(stem, join(directory, name));
       const parts = slug === "index" ? segments : [...segments, slug];
-      add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}` }, prefix, slug === "index" ? order : [...order, rank], directoryLayout);
+      // A 404 page at the root of the application's pages is the not-found page, not a /404/ route.
+      const notFound = parts.length === 1 && parts[0] === "404";
+      add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}`, ...(notFound ? { notFound: true as const } : {}) },
+        prefix, slug === "index" ? order : [...order, rank], directoryLayout);
     }
     for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!file.isDirectory() || file.name.startsWith(".") || file.name.startsWith("_")) continue;
@@ -102,7 +107,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
 
   // A plugin page links to another page's first static URL, and serves the files it references.
   const pageURLs = new Map<string, string>();
-  for (const route of routes) if (route.params.length === 0 && !pageURLs.has(route.component)) pageURLs.set(route.component, base + route.pattern.slice(1));
+  for (const route of routes) if (route.params.length === 0 && !route.notFound && !pageURLs.has(route.component)) pageURLs.set(route.component, base + route.pattern.slice(1));
   const realRoot = await realpath(root);
   const sources = new Map<string, string>();
   const files = new Map<string, string>();
@@ -140,7 +145,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   // Page aliases are further routes for the same page, relative to its page directory. The loop
   // also reaches the aliases it appends, which it skips.
   for (const route of routes) {
-    if (route.canonical !== undefined) continue;
+    if (route.canonical !== undefined || route.notFound) continue;
     const { resource } = await resourceOf(route.component);
     for (const alias of resource.components.get(pageDefinition(resource, route.component).contract.tag)!.aliases) {
       if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("hk:alias needs a route path with leading and trailing slashes.", route.component);
@@ -159,8 +164,9 @@ export async function discover(root: string, options: DiscoveryOptions) {
   }
   const pageNames = new Map<string, { component: string; pattern: string; identity: string }>();
   const discovered: ApplicationRoute[] = [];
+  let notFound: ApplicationRoute | undefined;
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
-  for (const { prefix: _prefix, directoryLayout, ...route } of routes) {
+  for (const { prefix: _prefix, directoryLayout, notFound: isNotFound, ...route } of routes) {
     const { identity, resource } = await resourceOf(route.component);
     const pageName = pageDefinition(resource, route.component).contract.tag;
     const previous = pageNames.get(pageName);
@@ -194,10 +200,12 @@ export async function discover(root: string, options: DiscoveryOptions) {
       if (servers.length > 1) throw new HtmlKitError("Choose one layout .server.ts or .js loader.", component);
       layouts = [{ component, ...(servers[0] === undefined ? {} : { server: servers[0] }) }];
     }
-    discovered.push({ ...route, layouts, pageName, ...(metadata.label === undefined ? {} : { label: metadata.label }),
-      ...(metadata.hidden ? { hidden: true } : {}) });
+    const discoveredRoute = { ...route, layouts, pageName, ...(metadata.label === undefined ? {} : { label: metadata.label }),
+      ...(metadata.hidden ? { hidden: true } : {}) };
+    if (isNotFound) notFound = discoveredRoute;
+    else discovered.push(discoveredRoute);
   }
-  return { routes: discovered, sources, files };
+  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), sources, files };
 }
 export function matchRoute(routes: readonly ApplicationRoute[], pathname: string, base: string) {
   if (!pathname.startsWith(base)) return undefined;

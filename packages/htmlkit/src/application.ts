@@ -82,7 +82,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
   assets?: (page: RenderedPage) => PageAssets): Promise<Application> {
   const options = await withPlugins(input);
   const config = configure(options);
-  const { routes, sources, files } = await discover(config.root, { ...options, base: config.base });
+  const { routes, notFound: notFoundRoute, sources, files } = await discover(config.root, { ...options, base: config.base });
   const scripts = await headScripts(options, config.root);
   const ownsServer = moduleServer === undefined;
   const map = importMap(config.root);
@@ -190,7 +190,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     return Object.freeze({ ...(index > 0 ? { previous: items[index - 1]! } : {}), ...(index < items.length - 1 ? { next: items[index + 1]! } : {}) });
   };
   const application: Application = {
-    ...config, routes, navigation, files,
+    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), navigation, files,
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
@@ -205,10 +205,10 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const url = new URL(pathname, config.origin);
       if (url.origin !== config.origin || url.search || url.hash) throw new HtmlKitError("Static rendering requires an application pathname without a query or fragment.");
       const matched = matchRoute(routes, url.pathname, config.base);
-      if (matched === undefined) {
-        return notFound();
-      }
-      const { route, params } = matched;
+      // Unmatched paths render app/pages/404.html through its layouts, or the built-in page.
+      if (matched === undefined && notFoundRoute === undefined) return notFound();
+      const { route, params } = matched ?? { route: notFoundRoute!, params: {} };
+      const status = matched === undefined ? 404 as const : 200 as const;
       const layers = [...route.layouts, route];
       // Vite owns module caching and dependency invalidation. Per-render results never enter
       // a shared cache; HTML Next owns the DOM worker and declarative component semantics.
@@ -297,7 +297,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }) }));
       const output = await renderComponents(body, { definitions: components.map(value => value.definition), url: url.href, state });
       signal.throwIfAborted();
-      return { status: 200, pathname: url.pathname, body: output.html, css: output.css, head,
+      return { status, pathname: url.pathname, body: output.html, css: output.css, head,
         html: documentHTML(output.html, head), components, layers: rendered };
     },
     // Not a method of `this`: runtimes are handed the function itself, as in Deno.serve(application.fetch).
@@ -309,7 +309,8 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const payload = pathname.startsWith(pages) ? /^(.*\/)?payload\.json$/.exec(pathname.slice(pages.length)) : null;
       if (payload !== null) {
         const page = await application.render(config.base + (payload[1] ?? ""), request.signal);
-        const data = payloadPath(config.base, page.pathname) === pathname ? pagePayload(page, assets?.(page) ?? { styles: [], modules: [] }) : undefined;
+        const data = page.status === 200 && payloadPath(config.base, page.pathname) === pathname
+          ? pagePayload(page, assets?.(page) ?? { styles: [], modules: [] }) : undefined;
         return new Response(data === undefined || request.method === "HEAD" ? null : JSON.stringify(data),
           { status: data === undefined ? 404 : 200, headers: { "content-type": "application/json" } });
       }
