@@ -24,7 +24,7 @@ export const NATIVE_BINDINGS_PROP = "\0html-next:native-bindings";
 const INTERNAL_PROPS = [ROOT_OWNER_PROP, DECORATIONS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP, SLOTS_PROP];
 
 /** Helpers a component calls by these names; the expression helpers come from its lowering. */
-export const SVELTE_RENDER_COMPONENTS = ["formatValue", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean", "rootAttributes",
+export const SVELTE_RENDER_COMPONENTS = ["formatValue", "isString", "isNumber", "isInteger", "isBoolean", "rootAttributes",
   "retainedValue", "retainedStructuralValue", "writePath", "checkedSlot", "setProperty",
   "decorate", "hostStateTokens"] as const;
 

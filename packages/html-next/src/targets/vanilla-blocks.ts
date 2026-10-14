@@ -14,6 +14,7 @@ import {
   expressionFormattingType,
   mathArity,
   typeCheckedDependencies,
+  wholeNumber,
   type CompiledExpression,
   type ExpressionNode,
   type Scope as TypeScope,
@@ -456,6 +457,8 @@ function aliasSource(scope: Scope, entry: AliasEntry): string {
 const read = (scope: Scope, source: string): string => scope.record === undefined ? source : `rec(${scope.record}, ${source})`;
 
 const ARITHMETIC = new Set(["+", "-", "*", "/"]);
+/** The decimal operation `binaryValue` receives for each operator that rounds to its operands' places. */
+const DECIMAL: Readonly<Record<string, string>> = { "+": "add", "-": "subtract", "*": "multiply", "%": "remainder" };
 
 /** Source for a build-time dimension, which the shared helpers test against `undefined`. */
 const dimensionSource = (dimension: string | undefined): string => dimension === undefined ? "undefined" : JSON.stringify(dimension);
@@ -560,11 +563,14 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const arithmetic = ARITHMETIC.has(node.op);
       const leftDimension = arithmetic ? dimensionType(node.left, scope.types) : undefined;
       const rightDimension = arithmetic ? dimensionType(node.right, scope.types) : undefined;
-      const dimensions = leftDimension === undefined && rightDimension === undefined ? ""
+      const whole = (operand: ExpressionNode): boolean =>
+        wholeNumber(operand, (read) => declaredExpressionType({ ast: read }, scope.types));
+      const decimal = DECIMAL[node.op] !== undefined && !(whole(node.left) && whole(node.right)) ? DECIMAL[node.op] : undefined;
+      const dimensions = leftDimension === undefined && rightDimension === undefined ? decimal === undefined ? "" : ", undefined, undefined"
         : `, ${dimensionSource(leftDimension)}, ${dimensionSource(rightDimension)}`;
       return {
-        ...none(key, `binaryValue(${JSON.stringify(node.op)}, ${left.source}, ${right.source}${dimensions})`),
-        ...merge(left, right), fails: fails || dimensions !== "",
+        ...none(key, `binaryValue(${JSON.stringify(node.op)}, ${left.source}, ${right.source}${dimensions}${decimal === undefined ? "" : `, ${decimal}`})`),
+        ...merge(left, right), fails: fails || leftDimension !== undefined || rightDimension !== undefined,
       };
     }
     case "conditional": {
@@ -2463,6 +2469,8 @@ export function emitBlocks(
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
+  // Decimal operations are `binaryValue`'s last argument; their names are also common authored names.
+  helpers.push(...Object.values(DECIMAL).filter((name) => `${source}\n${stateSpec}`.includes(`, ${name})`)));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
   const specs = blocks.flatMap((block) => built(block) && block.spec !== 5 ? [`const T${block.id} = ${JSON.stringify(block.spec)};`] : []);

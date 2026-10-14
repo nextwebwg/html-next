@@ -433,6 +433,39 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    // The proposal's own example: steps of 0.1 reach exactly 9.9, which JavaScript's doubles never do.
+    name: "number arithmetic is decimal to the operands' precision: 0.1 steps reach exactly 9.9",
+    source: scene({
+      defs:
+        `<state name="level" type="number" value="0"></state>` +
+        `<state name="width" type="length" value="1.1px"></state>` +
+        `<handler name="raise"><set name="level" expr:value="$level + 0.1" $if="$level < 9.9"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="raise" from:disabled="$level = 9.9">Raise</button>` +
+        `<output $value="$level"></output>` +
+        `<i $value="concat($level * 3, ' ', $level - 0.05, ' ', $level % 0.3, ' ', 1.25 * 2, ' ', 0.1 * 0.2, ' ', ` +
+        `1 / 3, ' ', $width + 0.1px, ' ', $width * $level)"></i></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { level: r.querySelector('output').textContent, ` +
+        `full: r.querySelector('button').disabled, values: r.querySelector('i').textContent };`,
+      result: { level: "0", full: false, values: "0 -0.05 0 2.5 0.02 0.3333333333333333 1.2px 0px" },
+      after: [
+        {
+          action: `const b = document.querySelector('#b button'); for (let i = 0; i < 3; i++) b.click();`,
+          result: { level: "0.3", full: false, values: "0.9 0.25 0 2.5 0.02 0.3333333333333333 1.2px 0.33px" },
+        },
+        {
+          // The guard stops at 9.9; with doubles the level would pass 9.89999999999998 and step on.
+          action: `const b = document.querySelector('#b button'); for (let i = 0; i < 100; i++) b.click();`,
+          result: { level: "9.9", full: true, values: "29.7 9.85 0 2.5 0.02 0.3333333333333333 1.2px 10.89px" },
+        },
+      ],
+    },
+  },
+  {
     name: "$if truthiness: '' / 0 / [] / false are falsy; non-empty string and non-zero are truthy",
     source: scene({
       root:
@@ -705,6 +738,35 @@ const successes: ConformanceCase[] = [
         `styleInHead: document.head.querySelector('style') !== null, ` +
         `isButton: q('#b') instanceof HTMLButtonElement };`,
       result: { defsLeft: 0, styleInHead: true, isButton: true },
+    },
+  },
+  {
+    // Converters write integer steps, copies, negations and literals plainly. `total` also takes the
+    // string `wrong` writes, so its own step keeps the write check too, which refuses the string.
+    name: "handler writes satisfy each state's declared type, and a nonconforming write leaves the state",
+    source: scene({
+      defs:
+        `<state name="count" type="integer" value="0"></state><state name="total" type="number" value="0.5"></state>` +
+        `<state name="copy" type="number" value="0"></state><state name="open" type="boolean" value="false"></state>` +
+        `<state name="label" type="string" value="a"></state>` +
+        `<handler name="step"><set name="count" expr:value="$count + 2"></set><set name="count" expr:value="$count - 1"></set>` +
+        `<set name="total" expr:value="$total + 1"></set><set name="copy" expr:value="$count"></set>` +
+        `<set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set></handler>` +
+        `<handler name="wrong"><set name="total" expr:value="$label"></set></handler>`,
+      root:
+        `<div class:open="$open"><button type="button" class="step" on:click="step">Step</button>` +
+        `<button type="button" class="wrong" on:click="wrong">Wrong</button>` +
+        `<output>{concat($count, '/', $total, '/', $copy, '/', $label)}</output></div>`,
+      use: `<x-t id="writes"></x-t>`,
+    }),
+    expect: {
+      probe: `return [q('#writes output').textContent, q('#writes').classList.contains('open')];`,
+      result: ["0/0.5/0/a", false],
+      after: [
+        { action: `document.querySelector('#writes .step').click();`, result: ["1/1.5/1/b", true] },
+        { action: `document.querySelector('#writes .wrong').click();`, result: ["1/1.5/1/b", true] },
+        { action: `document.querySelector('#writes .step').click();`, result: ["2/2.5/2/b", false] },
+      ],
     },
   },
 ];

@@ -83,6 +83,8 @@ npm install @nextwebwg/html-next
 | `@nextwebwg/html-next/forms` | Build native form requests with validation, encoding, and cancellation. |
 | `@nextwebwg/html-next/validation` | Use the shared validity model. |
 
+`@nextwebwg/html-next` also exports `add`, `subtract`, `multiply`, and `divide`, the number arithmetic expressions use: `add(0.1, 0.2)` is `0.3`, as `$a + $b` would be, where JavaScript gives `0.30000000000000004`. A controller that calculates a value an expression also calculates gets the same result from them. Each is a separate function, so a bundle keeps only the ones it calls. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects.
+
 Importing `forms` pulls in no component runtime. Generated native components import the helpers their features need; generated Vue, React, and Svelte components use their target framework without an HTML Next runtime dependency.
 
 ## Built in the open
