@@ -95,6 +95,21 @@ describe("direct-extend Vanilla generation", () => {
     assert.deepEqual(inputs.filter((path) => forbidden.test(path)), []);
   });
 
+  it("imports only the decimal operations its arithmetic uses, and none for whole numbers", async () => {
+    const decimal = /(?:^|\/)src\/decimal\.ts$/;
+    const whole = vanilla(component(`<state name="count" type="integer" value="1"></state>`,
+      `<p from:title="$count * 2 - 1">{$count + 1} {$count % 2} {$count / 2}</p>`, false));
+    assert.doesNotMatch(whole, /\b(?:add|subtract|multiply|divide|remainder)\b/);
+    assert.deepEqual((await bundle(whole)).inputs.filter((path) => decimal.test(path)), []);
+    const fractional = vanilla(component(`<state name="level" type="number" value="0"></state>
+      <handler name="add"><set name="level" expr:value="$level + 0.1"></set></handler>`,
+      `<button on:click="add">{$level}</button>`, false));
+    assert.match(fractional, /import \{[^}]*\badd\b[^}]*\} from "@nextwebwg\/html-next\/generated-runtime";/);
+    const { text } = await bundle(fractional);
+    assert.match(text, /function add\(/);
+    assert.doesNotMatch(text, /function (?:subtract|multiply|remainder)\(/);
+  });
+
   it("compiles every component without the general runtime", () => {
     // What the parser accepts compiles; anything it rejects never reaches the generator.
     for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="$x"></p>')]) {
@@ -450,6 +465,31 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { (kept as { name: unknown }).name = 5; host.state.user.age = 2; },
       (host) => { host.state.selected = null; host.state.rows = host.state.rows.toReversed(); },
     ]);
+  });
+
+  it("calculates decimal arithmetic like the general runtime, stepping by 0.1 to exactly 9.9", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(number)" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="level" type="number" value="0"></state>
+      <state name="count" type="integer" value="7"></state>
+      <state name="width" type="length" value="1.1px"></state>
+      <handler name="step"><set name="level" expr:value="$level + 0.1" $if="$level < 9.9"></set></handler>`, `
+      <section><button id="step" on:click="step">Step</button><output $value="$level"></output><b $if="$level = 9.9">full</b>
+        <p>{$level * 3} {$level - 0.05} {$level % 0.3} {$level / 3} {$count + 1} {$count % 2} {$width + 0.1px} {$width * $level}</p>
+      </section>`);
+    const click = (root: Element, times: number): void => {
+      for (let index = 0; index < times; index += 1) (root.querySelector("#step") as HTMLElement).click();
+    };
+    const run = await same(text, [
+      ({ root }) => { click(root, 3); },
+      ({ root }) => { click(root, 100); },
+      (host) => { host.state.level = 0.7; host.state.width = "0.7px"; },
+    ]);
+    assert.match(run.snapshots[1]!, /<output>0\.3<\/output>.*<p>0\.9 0\.25 0 0\.09999999999999999 8 1 1\.2px 0\.33px<\/p>/s);
+    assert.match(run.snapshots[2]!, /<output>9\.9<\/output><!--html-next:start--><b>full<\/b>/);
+    assert.match(run.snapshots[3]!, /<p>2\.1 0\.65 0\.1 0\.2333333333333333 8 1 0\.8px 0\.49px<\/p>/);
   });
 
   it("binds styles, URLs, properties, mixed text, SVG and class overwrites like the general runtime", async () => {

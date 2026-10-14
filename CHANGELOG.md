@@ -1,10 +1,36 @@
 # Changelog
 
-## 1.0.0-alpha.42
+## 1.0.0-alpha.44
 
 ### Changed
 
 - The quick-start guide is shorter. `counter.html` is followed directly by the component each framework generates, with one line and a setup link per framework, so switching frameworks changes the code right under the switch. The paragraphs between the source and the output and the separate "Use what you built" section are removed.
+
+## 1.0.0-alpha.43
+
+### Changed
+
+- Vue, React and Svelte conversion write a handler's `<set>` as one plain statement whenever the converter proves its value satisfies the state's declared type, with no runtime check: a literal, a negation into a `boolean` state, a copy of a same-typed state, a `number` state stepped by a number literal, an `integer` state stepped by a safe integer, and any write to an untyped state. The quick-start counter's `$count + 1` is `count.value = decimalAdd(count.value, 1)`, `setCount((count) => decimalAdd(count, 1))` and `count = decimalAdd(count, 1)`; an `integer` counter is `count.value++`, `setCount((count) => count + 1)` and `count++`. A stepped state must never be absent, so no controller and no unproven write may write it. Any other write is one call to the shared `write` helper, `write(total, label.value, isNumber, 'writes.html', 'wrong', 'total')`, which replaces `acceptsWrite` and its temporary variable. The converted conformance corpus has 2 checked writes per framework instead of 9 or 10, and is 0.9 to 2.0% smaller gzipped.
+
+### Fixed
+
+- A converted handler write of the wrong type warns as the live runtime does, `` writes.html: HR007: State `total` does not satisfy its declared type. ``, once per authored write: per file, handler and state path. Converted components previously shared one warning across files that used the same handler and state names.
+- A converted handler write of a number that is not finite is an invalid result, as in the live runtime: the state keeps its value and nothing warns.
+- React conversion accepts any value written to an untyped state, as the live runtime and the other frameworks do. It previously refused a value of another kind than the state's initial value.
+
+## 1.0.0-alpha.42
+
+### Breaking
+
+- Number arithmetic in expressions is decimal to the operands' precision, as the proposal now specifies. `+`, `-` and `%` give the exact decimal result at the larger operand's decimal places, and `*` at the sum of both, so `1.1 + 0.1` is `1.2`, `0.1 + 0.2` is `0.3`, `0.1 * 0.2` is `0.02` and `0.3 % 0.1` is `0`, where JavaScript gives `1.2000000000000002`, `0.30000000000000004`, `0.020000000000000004` and `0.09999999999999998`. A state stepped by `$level + 0.1` reaches exactly `9.9`. `/` keeps full double precision, whole numbers calculate as before, dimensions follow the same rule (`1.1px + 0.1px` is `1.2px`), and a result that would need more than 15 significant digits stays the double result. The live runtime, server rendering, compiled components, and Vue, React and Svelte conversion all calculate this way.
+
+### Added
+
+- `@nextwebwg/html-next` exports `add`, `subtract`, `multiply` and `divide`, the operations expressions use, so controller code can calculate what an expression would. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects. Compiled components import the ones their expressions use from `@nextwebwg/html-next/generated-runtime`, and none for arithmetic on whole numbers (integer literals and `integer` values). Converted components import them from their shared host module as `decimalAdd`, `decimalSubtract`, `decimalMultiply`, `decimalDivide` and `decimalRemainder`, so authored names such as an `add` handler keep their names. A compiled component that uses one operation grows by about 230 B gzip, and one that uses all of them by about 290 B; the live runtime grows by 0.3 KB gzip, and an application of every converted conformance component by about 300 B in each framework. Fractional arithmetic takes about 20 to 35 ns longer per operation; whole numbers take no longer.
+
+### Changed
+
+- CI selects changed packages and their transitive consumers, keeps pure shared-version changes from widening functional tests, separates Node and packed-consumer checks, and splits browser regressions into measured parallel batches. Routine checks target five minutes; the automatic verification and publication path has a fifteen-minute execution budget. Broad converter corpora, OS/Node compatibility matrices and rendering benchmarks run manually. npm publication waits for CI to pass on the exact main commit and skips already-published releases.
 
 ## 1.0.0-alpha.41
 

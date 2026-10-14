@@ -38,6 +38,7 @@ const selected = new Set([
   "$html sanitizes: <script>, on* handlers, and javascript: URLs are stripped and do not execute",
   "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
   "dimensional arithmetic scales numeric parts and preserves written units",
+  "number arithmetic is decimal to the operands' precision: 0.1 steps reach exactly 9.9",
   "$if truthiness: '' / 0 / [] / false are falsy; non-empty string and non-zero are truthy",
   "invalid structural expressions keep the last rendered region until a valid update",
   "initially invalid structural expressions render nothing until a valid update",
@@ -59,6 +60,7 @@ const selected = new Set([
   "bind: renders its initial state; declared on: bindings are consumed",
   "reactive declarations seed once: state initializes, computed evaluates, data is pending",
   ".property binding resolves through the generated DOM contract",
+  "handler writes satisfy each state's declared type, and a nonconforming write leaves the state",
 ]);
 const shared = cases.filter((testCase) => selected.has(testCase.name) && "probe" in testCase.expect);
 assert.equal(shared.length, selected.size, "Every selected public case must still exist");

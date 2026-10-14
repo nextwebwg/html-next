@@ -5,8 +5,10 @@ name: Release
 # repository and workflow configured as its trusted publisher on npmjs.com. Trusted publishing
 # cannot create a package, so a new package name needs one manual first publish.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
     branches: [main]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -19,20 +21,40 @@ concurrency:
 
 jobs:
   publish:
+    # Automatic publication uses only the exact main commit whose affected tests passed.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: versions
+        name: Check for unpublished package versions
+        run: |
+          pending=false
+          for directory in html-next html-next-converter html-next-unplugin htmlkit; do
+            package=$(node -p "const p = require('./packages/$directory/package.json'); p.name + '@' + p.version")
+            if ! npm view "$package" version >/dev/null 2>&1; then pending=true; fi
+          done
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.versions.outputs.pending == 'true'
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       # Trusted publishing needs npm 11.5.1 or newer.
-      - run: npm install --global --ignore-scripts npm@11.6.2 corepack@0.34.0
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify:release
+      - if: steps.versions.outputs.pending == 'true'
+        run: npm install --global --ignore-scripts npm@11.6.2 corepack@0.34.0
+      - if: steps.versions.outputs.pending == 'true'
+        run: corepack enable
+      - if: steps.versions.outputs.pending == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.versions.outputs.pending == 'true'
+        run: pnpm verify:release
       - name: Publish the shared version of every package
+        if: steps.versions.outputs.pending == 'true'
         run: |
           mkdir -p .release
           # One package's failure must not hide the others: attempt every package, record each

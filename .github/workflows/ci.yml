@@ -12,69 +12,41 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Selection and Required each get one minute; parallel checks get ten, leaving three to publish.
+# Routine checks target five minutes including setup; no automatic job can run past fifteen.
 jobs:
-  verify:
-    name: Node ${{ matrix.node }}
+  changes:
+    name: Affected packages
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ["22.22.2", "24"]
+    timeout-minutes: 1
+    outputs:
+      node: ${{ steps.plan.outputs.node }}
+      browser: ${{ steps.plan.outputs.browser }}
+      packages: ${{ steps.plan.outputs.packages }}
+      has_node: ${{ steps.plan.outputs.has_node }}
+      has_browser: ${{ steps.plan.outputs.has_browser }}
+      has_packages: ${{ steps.plan.outputs.has_packages }}
+      playwright: ${{ steps.plan.outputs.playwright }}
+      generated: ${{ steps.plan.outputs.generated }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: "24"
           package-manager-cache: false
-      - run: npm install --global --ignore-scripts --force corepack@0.34.0
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify:pr
+      # Selection uses only Node builtins: no dependency install or browser-version job.
+      - id: plan
+        env:
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/ci-plan.ts
 
-  playwright:
-    name: Playwright version
+  repository:
+    name: Repository contracts
+    needs: changes
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: pnpm-lock.yaml
-          sparse-checkout-cone-mode: false
-      # The catalog entry, the version every package installs.
-      - id: version
-        run: |
-          version=$(grep -A2 '^    playwright:$' pnpm-lock.yaml | sed -n 's/^      version: //p')
-          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No Playwright catalog version in pnpm-lock.yaml"; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-  browser:
-    name: Browser ${{ matrix.suite }}
-    needs: playwright
-    runs-on: ubuntu-latest
-    # Playwright's image for the locked version carries the browsers and their OS libraries, so no
-    # step waits on Ubuntu's apt mirrors (14 minutes for 115 MB on 2026-10-07) or Playwright's CDN.
-    # pwuser shares the runner's uid 1001; Firefox refuses to run as root with a HOME it doesn't own.
-    container:
-      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
-      options: --user 1001 --ipc=host --init
-    # Each check stays within the Threadlabs 15-minute budget. Parity specs launch their own
-    # browsers, so each runner keeps one spec active and the parity suite is sharded instead.
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # Parity shards are balanced by measured spec time (vitest.targets.config.ts), about 8.5 minutes each.
-        include:
-          - { suite: runtime and consumers, command: pnpm test:browser --exclude 'packages/htmlkit/**' && pnpm test:consumer }
-          # HTMLKit builds and serves applications for each engine, so it runs beside the runtime suite.
-          - { suite: HTMLKit, command: pnpm test:browser packages/htmlkit }
-          - { suite: framework parity 1/6, command: pnpm test:targets --shard=1/6 }
-          - { suite: framework parity 2/6, command: pnpm test:targets --shard=2/6 }
-          - { suite: framework parity 3/6, command: pnpm test:targets --shard=3/6 }
-          - { suite: framework parity 4/6, command: pnpm test:targets --shard=4/6 }
-          - { suite: framework parity 5/6, command: pnpm test:targets --shard=5/6 }
-          - { suite: framework parity 6/6, command: pnpm test:targets --shard=6/6 }
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -84,12 +56,90 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: ${{ matrix.command }}
+      - run: pnpm lint && pnpm exec tsc -p tsconfig.json
+      - run: pnpm exec vitest run tests/ci.test.ts
+      - run: pnpm --filter @nextwebwg/html-next check:release
+      - if: needs.changes.outputs.generated == 'true'
+        run: pnpm check:generated
+
+  verify:
+    name: Test ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.has_node == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.node) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - env:
+          CI_JOB: ${{ toJSON(matrix) }}
+        run: node scripts/ci-run.ts
+
+  browser:
+    name: Browser ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.has_browser == 'true'
+    runs-on: ubuntu-latest
+    # The locked image includes all three engines and OS libraries; avoid apt/CDN installs.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.changes.outputs.playwright }}-noble
+      options: --user 1001 --ipc=host --init
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.browser) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - env:
+          CI_JOB: ${{ toJSON(matrix) }}
+        run: node scripts/ci-run.ts
+
+  packages:
+    name: Packed ${{ matrix.package }}
+    needs: changes
+    if: needs.changes.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.changes.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@nextwebwg/${{ matrix.package }}...' build
+      - env:
+          HTMLNEXT_PACKAGE_TEST: ${{ matrix.package }}
+        run: pnpm test:package
 
   runtimes:
     name: Deno and Bun runtime
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.packages), 'htmlkit')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -99,14 +149,12 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      # Deno 2.8 added the node:worker_threads markAsUncloneable that jsdom's undici imports.
+      - run: pnpm --filter '@nextwebwg/htmlkit...' build
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      # An installed consumer, as users run it; inside the workspace Bun applies tsconfig paths to source.
-      - name: Install the packed packages in a consumer
+      - name: Install the affected application packages in a consumer
         run: |
           mkdir -p "$RUNNER_TEMP/packs" "$RUNNER_TEMP/consumer"
           (cd packages/html-next && pnpm pack --pack-destination "$RUNNER_TEMP/packs")
@@ -118,33 +166,26 @@ jobs:
       - working-directory: ${{ runner.temp }}/consumer
         run: deno run -A runtime-smoke.mjs && bun runtime-smoke.mjs
 
-  performance:
-    name: Reactive performance against main
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: npm install --global --ignore-scripts --force corepack@0.34.0
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - name: Compare the six representative reactive workloads
-        env:
-          PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: pnpm verify:performance --base="$PERFORMANCE_BASE"
-
   required:
     name: Required
     if: always()
-    needs: [verify, browser, runtimes, performance]
+    needs: [changes, repository, verify, browser, packages, runtimes]
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
-      - run: test "${{ needs.verify.result }}" = success
-      - run: test "${{ needs.browser.result }}" = success
-      - run: test "${{ needs.runtimes.result }}" = success
-      - run: test "${{ needs.performance.result }}" = success
+      # Only an empty selection may skip a matrix. Fail closed on planner failure/cancellation.
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'JS'
+          const results = JSON.parse(process.env.RESULTS);
+          for (const name of ['changes', 'repository']) {
+            if (results[name].result !== 'success') process.exit(1);
+          }
+          for (const [name, flag] of [['verify', 'has_node'], ['browser', 'has_browser'], ['packages', 'has_packages']]) {
+            const expected = results.changes.outputs[flag] === 'true' ? 'success' : 'skipped';
+            if (results[name].result !== expected) process.exit(1);
+          }
+          const runtimes = JSON.parse(results.changes.outputs.packages).includes('htmlkit') ? 'success' : 'skipped';
+          if (results.runtimes.result !== runtimes) process.exit(1);
+          JS

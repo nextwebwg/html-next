@@ -1,0 +1,53 @@
+name: Converter corpus
+
+# Focused regressions cover all three engines in CI. Run the broad public corpora explicitly
+# when changing shared compiler semantics or investigating a parity failure.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      corpus: ${{ steps.plan.outputs.corpus }}
+      playwright: ${{ steps.plan.outputs.playwright }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - id: plan
+        run: node scripts/ci-plan.ts
+
+  corpus:
+    name: ${{ matrix.name }}
+    needs: selection
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.selection.outputs.playwright }}-noble
+      options: --user 1001 --ipc=host --init
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.selection.outputs.corpus) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - env:
+          CI_JOB: ${{ toJSON(matrix) }}
+        run: node scripts/ci-run.ts
