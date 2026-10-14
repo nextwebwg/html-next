@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { convertComponents } from "../src/index.js";
@@ -66,7 +66,8 @@ const fixtures = [
     expectedText: ["Closed", "Open"],
     click: "button",
     probe: async (page: Page) => ({
-      className: await page.locator("div").getAttribute("class"),
+      // Svelte scopes the root's styles by its tag as a class, a target styling marker.
+      className: await page.locator("div").evaluate((element) => [...element.classList].filter((name) => name !== "x-style").join(" ")),
       tone: await page.locator("div").evaluate((element) => (element as HTMLElement).style.getPropertyValue("--tone")),
       hostState: await page.locator("div").getAttribute("data-x-style-state"),
       output: await page.locator("output").textContent(),
@@ -102,9 +103,8 @@ mount(Component, { target: document.querySelector("main") });`);
         const bundle = join(outDirectory, "svelte.js");
         await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
           target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")], nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
-        const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
         outputs.set(`${fixture.name}:${mode}`, { bundle,
-          css: style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8") });
+          css: svelteStyles(outDirectory) });
       }
     }
     liveBundle = join(directory, "live.js");

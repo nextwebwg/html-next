@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { compileSvelteFile, sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
-import { compile } from "svelte/compiler";
 
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { convertComponents } from "../src/index.js";
@@ -27,7 +26,7 @@ const source = `<template component="x-safe-html" status="early" summary="Safe d
 
 async function observe(page: Page): Promise<{ readonly behavior: Record<string, unknown>; readonly pixels: Buffer }> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
-  const root = page.locator("div[data-component]");
+  const root = page.locator("main > div");
   const behavior = await root.evaluate((element) => ({
     safeText: element.querySelector(".unsafe")?.textContent,
     scripts: element.querySelectorAll("script").length,
@@ -55,15 +54,14 @@ describe.skipIf(!enabled)("Svelte safe-HTML parity", () => {
       const component = manifest.components[0]!;
       const path = join(outDirectory, component.artifact);
       await writeFile(join(outDirectory, "svelte", `${component.name}.js`),
-        compile(await readFile(path, "utf8"), { filename: path, generate: "client" }).js.code);
+        await compileSvelteFile(path));
       const entry = join(outDirectory, "entry.js");
       await writeFile(entry, `import { mount } from "svelte"; import Component from "./svelte/${component.name}.js";
 mount(Component, { target: document.querySelector("main") });`);
       const bundle = join(outDirectory, "svelte.js");
       await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"],
         loader: { ".css": "empty" }, plugins: [sveltePlugin("client")], nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
-      const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
-      outputs.set(mode, { bundle, css: style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8") });
+      outputs.set(mode, { bundle, css: svelteStyles(outDirectory) });
     }
   });
 

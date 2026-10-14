@@ -63,9 +63,9 @@ reset even when a precompiled sheet also includes one, because that sheet can be
 or disabled independently.
 
 Definition-specific root identities stay with their compiled CSS. Native CSS
-matching and inheritance handle insertion, movement and removal. Svelte's existing ownership
-selectors mark its projection regions; Vue's built-in scoped selectors already distinguish
-owned and projected nodes. No new observer or element ownership marker is introduced.
+matching and inheritance handle insertion, movement and removal. Vue's scope attributes and
+Svelte's hash class distinguish owned and projected nodes. No new observer or element ownership
+marker is introduced.
 
 A sequential local Playwright Firefox stress probe used 50 definitions, 1,000 component roots
 and 24,000 SVG rects. Across 20 measured alternating samples, initial DOM insertion plus forced

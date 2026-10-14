@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
@@ -42,23 +42,17 @@ describe.skipIf(!enabled)("Svelte projected context parity", () => {
     for (const mode of ["application", "library", "libraries"] as const) {
       const outDirectory = join(directory, mode);
       let appSource: string;
-      let css = "";
       if (mode === "libraries") {
         const provider = await convertComponents({ mode: "library", target: "svelte", root: directory,
           outDirectory: join(outDirectory, "provider"), entries: ["components/steps.html"] });
         const reader = await convertComponents({ mode: "library", target: "svelte", root: directory,
           outDirectory: join(outDirectory, "reader"), entries: ["components/step.html"] });
-        css = (await Promise.all([provider, reader].flatMap((manifest, index) => manifest.output.artifacts
-          .filter((artifact) => artifact.kind === "style").map((artifact) =>
-            readFile(join(outDirectory, index === 0 ? "provider" : "reader", artifact.path), "utf8"))))).join("\n");
         appSource = `<script>import XSteps from "./provider/${provider.components[0]!.artifact}";
 import XStep from "./reader/${reader.components[0]!.artifact}";</script>
 <main data-component="x-app"><XSteps id="outer"><XStep id="outer-one" number={1}>Outer one</XStep><XStep id="outer-two" number={2}>Outer two</XStep>
 <XSteps id="inner"><XStep id="inner-one" number={1}>Inner one</XStep><XStep id="inner-two" number={2}>Inner two</XStep></XSteps></XSteps></main>`;
       } else {
         const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["components/**"] });
-        css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
-          .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
         appSource = `<script>import XApp from "./${manifest.components.find((component) => component.tag === "x-app")!.artifact}";</script><XApp />`;
       }
       await writeFile(join(outDirectory, "App.svelte"), appSource);
@@ -76,7 +70,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /id="outer-one"[^>]*data-active="yes"|data-active="yes"[^>]*id="outer-one"/);
-      outputs.set(mode, { bundle, markup, css });
+      outputs.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
     }
     liveBundle = join(directory, "live.js");
     await build({
