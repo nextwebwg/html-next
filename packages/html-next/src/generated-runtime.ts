@@ -4,7 +4,7 @@ import { fail } from "./diagnostics.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
-import { isNativeEvent } from "./freeze.js";
+import { isNativeEvent, isPlatformObject } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
@@ -352,7 +352,7 @@ const readonlyViews = new WeakMap<object, Map<string, object>>();
 
 /** A read-only view for the controller, as live's host gives one: reads track, writes warn by path. */
 export function readonlyView(spec: GeneratedStateSpec, value: unknown, path: string): unknown {
-  if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+  if (value === null || typeof value !== "object" || isPlatformObject(value)) return value;
   const target = raw(value) as object;
   let views = readonlyViews.get(target);
   if (views === undefined) readonlyViews.set(target, views = new Map());
@@ -1402,6 +1402,8 @@ export function bindRootControl(instance: GeneratedInstance, child: GeneratedIns
 
 /** A handler's `<set>`: checks the destination's declared type, then writes through the host's facades. */
 export function setState(instance: GeneratedInstance, path: readonly (string | number)[], value: unknown, key: string, label: string): void {
+  // A number that is not finite is an invalid result, as ordinary invalid input: no write, no warning.
+  if (typeof value === "number" && !Number.isFinite(value)) return;
   const { n: names, t: types } = instance.S;
   let type = types[names.indexOf(path[0] as string)]!;
   for (let index = 1; index < path.length; index += 1) type = compactTypeAt(type, path[index]!);
@@ -1603,7 +1605,7 @@ export function attachGeneratedController(
     Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
       left.every((item, index) => same(item, right[index]));
   const wrap = (value: unknown, type: CompactType, parent: Facade | undefined, key: PropertyKey): unknown => {
-    if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+    if (value === null || typeof value !== "object" || isPlatformObject(value)) return value;
     const target = raw(value) as object;
     const first = facades.get(target);
     let facade = first;

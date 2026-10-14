@@ -1,4 +1,4 @@
-import { isNativeEvent } from "./freeze.js";
+import { isPlatformObject } from "./freeze.js";
 import { NONCONFORMING, type Scope, type Value } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 import { fail } from "./diagnostics.js";
@@ -822,13 +822,13 @@ export function notifyPropertyDelete(target: object, key: PropertyKey, had: bool
   if (had) trigger(objectSubscribers.get(target)?.get(key));
 }
 
-/** The canonical reactive proxy for a mutable object; primitives, frozen values and events stay as they are. */
+/** The canonical reactive proxy for a mutable object; primitives, frozen values, events and nodes stay as they are. */
 function wrap(value: Value): Value {
   if (value === null || typeof value !== "object") return value;
   const cached = proxyCache.get(value);
   if (cached !== undefined) return cached as Value;
   // Already a proxy: storage is plain, so this is rare enough for a second lookup.
-  if (plainTargets.has(value) || isNativeEvent(value) || Object.isFrozen(value)) return value;
+  if (plainTargets.has(value) || isPlatformObject(value) || Object.isFrozen(value)) return value;
   const proxy = new Proxy(value, reactiveHandler);
   proxyCache.set(value, proxy);
   plainTargets.set(proxy, value);

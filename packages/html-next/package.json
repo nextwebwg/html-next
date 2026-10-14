@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next",
-  "version": "1.0.0-alpha.44",
+  "version": "1.0.0-alpha.46",
   "description": "Reference runtime and tools for HTML Next: Declarative HTML Components, validity on any element, and HTML Forms request construction.",
   "license": "MIT",
   "keywords": [
@@ -103,12 +103,12 @@
     "report:reactivity:suite": "tsx scripts/report-reactive-suite.ts"
   },
   "dependencies": {
-    "@dprint/formatter": "^0.5.1",
+    "@dprint/formatter": "^0.6.0",
     "@dprint/typescript": "^0.96.1",
     "@formatjs/intl-durationformat": "0.11.1",
     "dprint-plugin-malva": "^0.16.0",
     "dprint-plugin-markup": "^0.27.5",
-    "jsdom": "30.0.1",
+    "jsdom": "30.1.2",
     "parse5": "catalog:",
     "postcss": "catalog:",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2"

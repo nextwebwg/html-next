@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.45
+## 1.0.0-alpha.47
 
 ### Changed
 
@@ -13,6 +13,22 @@
 ### Fixed
 
 - A compiled component renders what changed between its construction and its first connection, such as a list of objects its parent binds to it, which reaches it after construction. It rendered nothing for those changes until the next one.
+
+## 1.0.0-alpha.46
+
+### Changed
+
+- `@nextwebwg/html-next` depends on jsdom 30.1.2 (was 30.0.1) for server rendering and @dprint/formatter 0.6 (was 0.5) for formatting generated components.
+
+### Fixed
+
+- A DOM node in state, such as an event's `target`, an element from `$ref`, or a node held in data, is stored and read as it is in the live runtime and compiled components, as native events already are. It was wrapped in a reactive proxy, and reading a native property through it (`$$event.target.textContent`) threw in browsers, which reject a proxy as a native getter's receiver.
+
+## 1.0.0-alpha.45
+
+### Fixed
+
+- A handler `<set>` whose value is a number that is not finite is an invalid result in the live runtime and compiled components, as in Vue, React and Svelte conversion: the state keeps its value and nothing warns. `<set name="count" expr:value="$$event.target.valueAsNumber">` on an emptied `<input type=number>` previously warned `` HR007: State `count` does not satisfy its declared type. ``, which remains the warning for a value of the wrong type.
 
 ## 1.0.0-alpha.44
 
