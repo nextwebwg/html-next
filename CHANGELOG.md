@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0-alpha.43
+
+### Changed
+
+- Vue, React and Svelte conversion write a handler's `<set>` as one plain statement whenever the converter proves its value satisfies the state's declared type, with no runtime check: a literal, a negation into a `boolean` state, a copy of a same-typed state, a `number` state stepped by a number literal, an `integer` state stepped by a safe integer, and any write to an untyped state. The quick-start counter's `$count + 1` is `count.value = decimalAdd(count.value, 1)`, `setCount((count) => decimalAdd(count, 1))` and `count = decimalAdd(count, 1)`; an `integer` counter is `count.value++`, `setCount((count) => count + 1)` and `count++`. A stepped state must never be absent, so no controller and no unproven write may write it. Any other write is one call to the shared `write` helper, `write(total, label.value, isNumber, 'writes.html', 'wrong', 'total')`, which replaces `acceptsWrite` and its temporary variable. The converted conformance corpus has 2 checked writes per framework instead of 9 or 10, and is 0.9 to 2.0% smaller gzipped.
+
+### Fixed
+
+- A converted handler write of the wrong type warns as the live runtime does, `` writes.html: HR007: State `total` does not satisfy its declared type. ``, once per authored write: per file, handler and state path. Converted components previously shared one warning across files that used the same handler and state names.
+- A converted handler write of a number that is not finite is an invalid result, as in the live runtime: the state keeps its value and nothing warns.
+- React conversion accepts any value written to an untyped state, as the live runtime and the other frameworks do. It previously refused a value of another kind than the state's initial value.
+
 ## 1.0.0-alpha.42
 
 ### Breaking
