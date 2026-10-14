@@ -9,7 +9,7 @@ import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
 import { renderedFormMark, serverMark, serverRanges } from "./rendered-form.js";
-import { regionEnd } from "./generated-hydration.js";
+import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   createComputed,
@@ -1328,6 +1328,38 @@ export function adoptInvoke(
     : (factory as unknown as AdoptingFactory)(adopted, input, root), root.ownerDocument.createTextNode(""), options, html, follow, stops);
 }
 
+/** A compiled root's host, as `getComponentHost` gives it, for code that holds the root. */
+export function generatedHost(element: Element): { readonly root: Element; readonly state: Record<string, unknown> } | undefined {
+  return ((element as RuntimeElement)[lifecycleKey]?.h as { H?: { readonly root: Element; readonly state: Record<string, unknown> } } | undefined)?.H;
+}
+
+/**
+ * Puts `next` in `current`'s place, in the DOM and in the projection of the compiled component that
+ * projects `current`, as the live runtime's `replaceProjectedNode` does: the component's slots and
+ * host list `next` from then on, and a slot that renders again inserts it.
+ */
+export function replaceProjectedNode(current: ChildNode, next: ChildNode): void {
+  follows(current, next);
+  current.replaceWith(next);
+}
+
+/**
+ * Carries a fresh rendering's props onto a compiled root a page keeps, through the prop channel, as
+ * the live runtime's `adoptRenderedProps` does: `rendered` is that component's root in the new
+ * rendering, made by its factory or rendered by a server. Props it left implicit return to their defaults.
+ */
+export function adoptRenderedProps(element: Element, rendered: Element): void {
+  const kept = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  const props = kept?.B;
+  if (kept === undefined || props === undefined) return;
+  const names = Object.keys(props.D.props);
+  const fresh = ((rendered as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined)?.B;
+  const record = fresh !== undefined ? { explicit: [...fresh.x], props: Object.fromEntries(names.map((name, index) => [name, fresh.v[fresh.n.length + index]])) }
+    : renderedInstanceRecord(rendered, kept.S.g);
+  if (record === undefined) fail("HR005", "The rendered element records no props for this element's component.");
+  props.u!(Object.fromEntries(names.map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+}
+
 /** A control's write into state is not checked against the declared type, as live's is not. */
 let trusted = false;
 
@@ -1738,6 +1770,8 @@ export function attachGeneratedController(
       render(-1);
     } else {
       started = true;
+      // What changed after construction, such as a parent's bound value, renders now that it is connected.
+      if (dirty) job.schedule();
       if (controller !== undefined) void Promise.resolve(controller(host as never)).then((result) => {
         if (typeof result !== "function") return;
         if (gone) (result as () => void)();

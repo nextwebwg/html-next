@@ -2,15 +2,17 @@
 
 HTMLKit renders every page as a static document. After the first page hydrates, links to other
 pages of the application render in place, as in Nuxt: HTMLKit loads the next page's module and its
-data payload, renders its layers in the browser exactly as the server does, keeps the layouts both
-pages share, and swaps the rest. A page the payload cannot render loads from its static HTML
+data payload, renders its layers in the browser as the server does, keeps the layouts both pages
+share, and swaps the rest. A page the payload cannot render loads from its static HTML
 instead. This is tooling documentation; the component language is specified by the
 [Declarative HTML Components proposal](https://nextwebwg.org/declarative-components/).
 
 The owner's direction was Nuxt-like routing, with Next.js as a second reference, and then Nuxt-style
-data payloads with the whole-HTML fetch as the fallback. The implementation is `src/client.ts`
-(shared by every page module), `pagePayload` in `src/document.ts`, and two HTML Next runtime
-functions, `adoptRenderedProps` and `replaceProjectedNode`.
+data payloads with the whole-HTML fetch as the fallback. Pages ship their components compiled to
+direct DOM code (`generateComponent(…, { hydrate: true })`), not the live runtime. The implementation
+is `src/client.ts` (shared by every page module), `browserSources` in `src/browser.ts`, `pagePayload`
+in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functions:
+`adoptRenderedProps`, `replaceProjectedNode`, and `generatedHost`.
 
 ## Native audit
 
@@ -28,7 +30,7 @@ functions, `adoptRenderedProps` and `replaceProjectedNode`.
 | Fetch the next page's data or HTML | `fetch`, `Response.json()`, `DOMParser` | All |
 | Load the next page's components | dynamic `import()`; the module map shares one runtime instance | All |
 | Render without running anything | An inert document from `document.implementation.createHTMLDocument()` | All |
-| Adopt the new DOM and connect controllers | HTML Next's `observeDocument` (a `MutationObserver`) | All |
+| Adopt server DOM and connect controllers | Compiled components bind server nodes in place; the document's one `MutationObserver` connects them | All |
 | Prefetch without running anything | `fetch` for data; `<link rel="modulepreload">` and `<link rel="prefetch">` for code and styles | modulepreload: all; prefetch: Chromium and Firefox |
 | Links on screen, at idle | `IntersectionObserver`, `requestIdleCallback` (a timer where missing) | IntersectionObserver: all; requestIdleCallback: Chromium and Firefox |
 | Touch intent | `touchstart` (passive) | All |
@@ -60,25 +62,26 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
 
 ### The remaining gap
 
-1. **One registry per document.** Each page module used to register its definitions and call
-   `observeDocument`, which throws when called twice. Page modules now call `page()` in the shared
-   `client.ts`, which registers each page's definitions and controllers and starts observation and
-   navigation once. A tag keeps one definition per document: HTML Next accepts an identical
-   redefinition and refuses a different one (`HR001`), which falls back to a document load.
+1. **One registry per document.** Page modules call `page()` in the shared `client.ts`, which
+   registers each page's compiled components by tag, adopts the first page's server DOM, and starts
+   navigation once. Pages that share a component share its compiled module, so a tag keeps one
+   factory per document; a page that defines a tag differently throws, as HTML Next's `HR001` does,
+   which falls back to a document load.
 2. **Which layers persist, and their new props.** Layers are the `hk-layer-N` roots. From the
    outermost, a layer whose root renders the same component (`data-component`) as the next page's
    layer at that depth persists. The page layer is always replaced, and so is everything below the
    first layer that differs. A persisted layer keeps its DOM, state, and controller, but its loader
-   may compute new props, such as `<hk-nav>`'s `current` item. HTML Next gains
-   `adoptRenderedProps(element, rendered)`, which reads a rendered root's continuation record and
-   applies its props through the `updateComponentProps` channel.
+   may compute new props, such as `<hk-nav>`'s `current` item. `adoptRenderedProps(element, rendered)`
+   reads the props of the layer's new rendering (a root its factory made, or a server root's
+   continuation record) and applies them through the compiled prop channel, as the live runtime's
+   function of that name does.
 3. **Replacing the page inside a kept layout.** The page is projected into its layout's `page` slot.
    HTML Next records projected nodes when it hydrates, so a plain `replaceWith` left the layout
    projecting the old page: the new page missed `data-slotted` (so the layout's `:slotted()` styles
    did not reach it), `host.slots` and the rendered form still listed the old page, and a slot that
-   rendered again would bring the old page back. The parity tests found this. HTML Next gains
-   `replaceProjectedNode(current, next)`, which puts the new node in the old one's place in the
-   projection too, with a regression test in each engine.
+   rendered again would bring the old page back. The parity tests found this.
+   `replaceProjectedNode(current, next)` puts the new node in the old one's place in the projection
+   too, as the live runtime's function of that name does.
 4. **Head metadata.** `meta` and `link` elements that came from server documents are diffed with
    `isEqualNode`: shared ones stay, others are removed and added. Elements scripts add are left alone.
    New stylesheets load before the swap; component styles are scoped, so only the next page's global
@@ -88,7 +91,7 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
 ## Chosen approach: payloads, with the HTML as the fallback
 
 The owner chose Nuxt-style payloads over fetching each page's HTML. A page's module already holds its
-component definitions, including all of its static markup, so the HTML repeats what the module
+compiled components, including all of their static markup, so the HTML repeats what the module
 carries. The payload carries only what the module cannot: the data.
 
 ### Payload format and location
@@ -132,21 +135,22 @@ links on screen.
 
 ### Rendering a payload
 
-1. Import the page's module, which registers its definitions and controllers. A conflicting
-   definition throws here, before anything renders.
-2. In an inert document, build the layers' invocations from the payload, as `application.ts` builds
-   them; lower them with HTML Next without connecting anything; give each layer its state; let
-   structural updates settle and lower again; serialize with `serializeRenderedForm`. These are the
-   steps of HTML Next's server worker, run by the same runtime.
-3. Swap as before: kept layouts take the new props through `adoptRenderedProps`, the first changed
-   layer replaces the old one through `replaceProjectedNode`, and HTML Next adopts the new DOM as it
-   adopts server HTML, so controllers connect once and declared reads start.
+1. Import the page's module, which registers its compiled components. A component that conflicts
+   with one the document has throws here, before anything renders.
+2. Make each layer with its component's factory, from the payload's invocation attributes as
+   `application.ts` writes them (props by their attribute names, the rest as root attributes),
+   innermost first, each page in its layout's `page` slot. Give each layer its loader's state
+   through its host, then let the updates render. Nothing connects yet: a compiled root renders at
+   construction and connects when it enters the document.
+3. Swap as before: kept layouts take the new props through `adoptRenderedProps`, and the first
+   changed layer replaces the old one through `replaceProjectedNode`. The new layers connect there,
+   so controllers run once and declared reads start. Server HTML from the fallback is adopted in
+   place, as the first page was.
 
-Every layer renders, kept layouts included: a page may read its layouts' context, and the kept
-layouts' new props come from their fresh rendering. Rendering live in place, without serializing,
-would save the serializer (1.2 KB gzip) and a parse, but HTML Next has no way to give an un-lowered
-invocation its initial state before its controller connects; the serialized form is the existing,
-tested server-to-browser contract.
+Every layer renders, kept layouts included: the kept layouts' new props come from their fresh
+rendering, which is then discarded. A page reads its layout's context once it connects inside it.
+The rendered markup matches the server's, attribute for attribute; a created root writes its
+attributes in its own order, which the parity test sorts.
 
 ### Fallback to the HTML
 
@@ -161,7 +165,7 @@ Alternatives considered:
 | --- | --- | --- |
 | Transfer per navigation, docs proof, gzip | 0.48 KB of data | 1.4 to 4.6 KB of HTML |
 | New output | A payload per page, and a dev route | None |
-| Next page's DOM | Rendered in the browser by the server's steps | Server markup |
+| Next page's DOM | Rendered in the browser by its compiled components | Server markup |
 | Same result as a document load | Proven by parity tests in each engine and mode | By construction |
 
 Swapping the whole body (Turbo) would lose layout state; morphing (idiomorph) would diff every node
@@ -202,24 +206,27 @@ request would run that page's loaders.
 
 ## Measurements
 
-Bundle size, from a production build (`esbuild --minify` for the parts, Vite for the pages):
+JavaScript per page, gzip -9 of the page's module and every chunk it imports, from
+`pnpm --filter @nextwebwg/htmlkit measure:delivery` on HTMLKit's examples. The live column is the
+same pages delivered with the live runtime and serialized definitions, client navigation included:
 
-| | gzip |
-| --- | --- |
-| `client.ts`, bundled with the runtime | 2.9 KB |
-| `serializeRenderedForm` in the runtime | 1.2 KB |
-| `adoptRenderedProps`, `lowerDocument`, `replaceProjectedNode` in the runtime | 96 B, 71 B, 68 B |
-| First page of the docs proof (page module and shared chunks) | 41.6 KB without client navigation, 44.0 KB with the HTML design, 46.1 KB now (+10.8%) |
-| First page of the test fixture | 41.9 KB, 44.3 KB, 46.4 KB (+10.8%) |
+| Page | Live runtime | Compiled |
+| --- | ---: | ---: |
+| basic `/` | 50,169 B | 19,322 B |
+| basic `/items/one/` | 49,734 B | 18,966 B |
+| docs proof `/` | 50,328 B | 23,473 B |
+| docs proof `/guide/usage/` (largest) | 53,825 B | 26,740 B |
+| docs proof `/reference/counter/` | 50,804 B | 24,307 B |
 
-These were measured before #193's shared stylesheets enlarged the runtime. On that base, the client
-and its runtime functions add 4.4 KB gzip to a 43.1 KB runtime (+10.2%).
+A page's module holds its components' compiled code, static markup included, and the
+`generated-runtime` helpers they use; pages share the chunks of the components and helpers they
+have in common.
 
 A page whose components import shared stylesheets gets one stylesheet for its whole graph, named
 for the graph; client navigation loads it like any other new stylesheet, and the browser tests
 check it.
 
-Transfer per navigation on the docs proof, gzip. The page's module is needed either way, unless it is
+Transfer per navigation on the docs proof, gzip, measured with the live-runtime delivery. The page's module is needed either way, unless it is
 already loaded:
 
 | Page | Payload | HTML | Module |
@@ -228,7 +235,8 @@ already loaded:
 | `/guide/usage/` (largest) | 482 B | 4,614 B | 4,694 B |
 | All 13 pages | 6.3 KB | 35.7 KB | 34.1 KB |
 
-Navigation time on the docs proof between two guide pages that share a layout: the median of 20, on
+Navigation time on the docs proof between two guide pages that share a layout, measured with the
+live-runtime delivery: the median of 20, on
 `htmlkit preview` over loopback, with both modules already loaded. Client navigation is click to
 `navigatesuccess`, which includes the fetch, styles, rendering, swap, and controller connection.
 Document navigation is the new document's navigation start to `DOMContentLoaded`, which excludes
@@ -241,8 +249,8 @@ The machine was under heavy load; repeated runs varied by a few milliseconds.
 | Firefox 155 | 9 ms | 5 ms | 7 ms | 24 ms |
 | WebKit 26.6 | 8 ms | 6 ms | 7 ms | 26 ms |
 
-Instrumented, rendering a payload (registering, lowering, settling, serializing) took about 1 ms in
-each engine. Loopback hides network time, which is where the payload saves: about 2–4 KB less per
+Instrumented, rendering a payload with the live runtime (registering, lowering, settling,
+serializing) took about 1 ms in each engine. Loopback hides network time, which is where the payload saves: about 2–4 KB less per
 navigation here.
 
 ## Limits

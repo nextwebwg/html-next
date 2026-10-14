@@ -1,22 +1,18 @@
 /**
  * HTMLKit's browser side, shared by every page module in a document. Each page module registers
- * its components here; the first one starts HTML Next's document observation and client
- * navigation. A navigation loads the next page's module and payload, renders its layers with HTML
- * Next as the server does, and swaps only the layers that changed. Anything the payload cannot
- * render falls back to the page's static HTML. docs/client-navigation.md records the design.
+ * its components, compiled to direct DOM code, here; the first one adopts the server-rendered page
+ * and starts client navigation. A navigation loads the next page's module and payload, renders its
+ * layers with their factories as the server renders them, and swaps only the layers that changed.
+ * Anything the payload cannot render falls back to the page's static HTML, which the components
+ * adopt in place. docs/client-navigation.md records the design.
  */
-import type { ComponentDefinition } from "@nextwebwg/html-next";
-import type { adoptRenderedProps, ComponentHost, getComponentHost, lowerDocument, observeDocument, registerComponentDefinitions,
-  replaceProjectedNode, serializeRenderedForm } from "@nextwebwg/html-next/runtime";
+import type { adoptRenderedProps, generatedHost, replaceProjectedNode } from "@nextwebwg/html-next/generated-runtime";
 
+/** The compiled-runtime functions navigation uses, from the one runtime instance every page module shares. */
 export interface Runtime {
-  readonly registerComponentDefinitions: typeof registerComponentDefinitions;
-  readonly observeDocument: typeof observeDocument;
-  readonly getComponentHost: typeof getComponentHost;
   readonly adoptRenderedProps: typeof adoptRenderedProps;
-  readonly lowerDocument: typeof lowerDocument;
-  readonly serializeRenderedForm: typeof serializeRenderedForm;
   readonly replaceProjectedNode: typeof replaceProjectedNode;
+  readonly generatedHost: typeof generatedHost;
 }
 export interface ClientOptions {
   readonly base: string;
@@ -25,7 +21,12 @@ export interface ClientOptions {
   readonly manifest?: string;
 }
 type Prefetch = "interaction" | "visible" | "none";
-type Controller = { readonly default: (host: ComponentHost) => void | (() => void) };
+/**
+ * A compiled component: its factory, which adopts a server-rendered root given as its third
+ * argument, and the invocation attribute each of its props is written as.
+ */
+export type Component = readonly [factory: (options: object, html?: Record<string, string>, root?: Element) => Element,
+  props: Readonly<Record<string, string>>];
 /** The JSON that document.ts's pagePayload writes. */
 interface Payload {
   readonly version: 1;
@@ -37,36 +38,33 @@ interface Payload {
     readonly state?: Readonly<Record<string, unknown>> }[];
 }
 
-const definitions = new Map<string, ComponentDefinition>();
-const controllers: Record<string, Controller> = {};
-const styleStates: Record<string, readonly string[]> = {};
-const compiledStyles = (_css: string, definition: ComponentDefinition) => ({ css: "", stateNames: styleStates[definition.contract.tag] ?? [] });
+const components = new Map<string, Component>();
 let started = false;
 
-/** Each page module calls this once, when it is first imported. */
-export function page(runtime: Runtime, options: ClientOptions, pageDefinitions: readonly ComponentDefinition[],
-  pageControllers: Readonly<Record<string, Controller>>, pageStyleStates: Readonly<Record<string, readonly string[]>>): void {
-  // A document keeps one definition and controller per tag (HTML Next's HR001). A page that
-  // redefines a tag fails here, before its DOM is inserted, and loads as a document instead.
-  for (const [tag, controller] of Object.entries(pageControllers)) {
-    if ((controllers[tag] ?? controller) !== controller) throw new Error(`HTMLKit: <${tag}> already has another controller in this document.`);
+/**
+ * Adopts the server-rendered components within `root`, outermost first: each adopts the components its
+ * template invokes, and a root projected into another (a page in its layout) is adopted here.
+ */
+function adopt(root: ParentNode): void {
+  for (const element of [...root instanceof Element ? [root] : [], ...root.querySelectorAll("[data-html-next-instance]")]) {
+    if (!element.hasAttribute("data-html-next-instance")) continue;
+    const component = components.get(element.getAttribute("data-component")!.split(" ")[0]!);
+    if (component === undefined) element.removeAttribute("data-html-next-instance");
+    else component[0]({}, undefined, element);
   }
-  Object.assign(styleStates, pageStyleStates);
-  runtime.registerComponentDefinitions(pageDefinitions, document, compiledStyles);
-  for (const definition of pageDefinitions) definitions.set(definition.contract.tag, definition);
-  Object.assign(controllers, pageControllers);
+}
+
+/** Each page module calls this once, when it is first imported. */
+export function page(runtime: Runtime, options: ClientOptions, pageComponents: Readonly<Record<string, Component>>): void {
+  // A document keeps one component per tag, as HTML Next's registry does (HR001). A page that
+  // redefines a tag fails here, before its DOM is inserted, and loads as a document instead.
+  for (const [tag, component] of Object.entries(pageComponents)) {
+    if ((components.get(tag)?.[0] ?? component[0]) !== component[0]) throw new Error(`HTMLKit: <${tag}> already has another definition in this document.`);
+  }
+  for (const [tag, component] of Object.entries(pageComponents)) components.set(tag, component);
   if (started) return;
   started = true;
-  const initialized = new WeakSet<ComponentHost>();
-  runtime.observeDocument(document, { onConnect(element, definition) {
-    const controller = controllers[definition.contract.tag];
-    if (!controller) return;
-    if (typeof controller.default !== "function") throw new Error(`Controller for ${definition.contract.tag} must export a default function`);
-    const host = runtime.getComponentHost(element)!;
-    if (initialized.has(host)) return;
-    initialized.add(host);
-    return controller.default(host);
-  } });
+  adopt(document);
   // ponytail: links stay document navigations without NavigateEvent.sourceElement (Chrome 135, Firefox 147,
   // Safari 26.2), which carries the per-link opt-outs; earlier Navigation API versions would skip them.
   if ("navigation" in window && "sourceElement" in NavigateEvent.prototype) navigate(runtime, options);
@@ -81,13 +79,15 @@ const loaded = async (url: string, signal?: AbortSignal): Promise<Response> => {
   return response;
 };
 
+/** A page to swap in: its head, and its layers' roots, outermost first. */
+interface Rendered { readonly next: Document; readonly layers: readonly Element[]; readonly adopt: boolean }
+
 /**
- * Renders a payload's layers as the server does (application.ts and HTML Next's server worker):
- * the same invocations, lowered without connecting, with each loader's state, then serialized. The
- * live document adopts the result as it adopts server HTML. Every layer renders, kept layouts
- * included, so a page reads its layouts' context and kept layouts get their new props.
+ * Renders a payload's layers as the server does (application.ts): the same invocations, through each
+ * component's factory, each page nested in its layout's `page` slot, with each loader's state. Every
+ * layer renders, kept layouts included, so a kept layout gets its new props from its rendering.
  */
-async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Document> {
+async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Rendered> {
   if (payload.version !== 1 || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
   const next = document.implementation.createHTMLDocument("");
   const append = (parent: Element, tag: string, attributes: Readonly<Record<string, string>>) => {
@@ -100,26 +100,31 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Doc
   if (payload.head.description !== undefined) append(next.head, "meta", { name: "description", content: payload.head.description });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
-  runtime.registerComponentDefinitions([...definitions.values()], next, compiledStyles);
-  let parent = next.body;
-  payload.layers.forEach((layer, index) => {
-    parent = append(parent, layer.component, { id: `hk-layer-${index}`, ...index === 0 ? {} : { slot: "page" }, ...layer.attributes });
-  });
-  runtime.lowerDocument(next, { connect: false });
-  payload.layers.forEach(({ state }, index) => {
-    if (state === undefined) return;
-    const root = layer(next, index);
-    const host = root === null ? undefined : runtime.getComponentHost(root);
-    if (host === undefined) throw new Error(`HTMLKit cannot give layer ${index} its state.`);
-    Object.assign(host.state, state);
-  });
-  // As the server does: let structural updates settle, then lower what they added.
-  await new Promise(done => setTimeout(done));
-  runtime.lowerDocument(next, { connect: false });
-  next.body.innerHTML = runtime.serializeRenderedForm(next.body);
   next.title = payload.head.title;
   next.documentElement.lang = payload.head.lang;
-  return next;
+  // Innermost first: each layer is projected into its layout's `page` slot, as its invocation is on the server.
+  const layers: Element[] = [];
+  for (let index = payload.layers.length - 1; index >= 0; index -= 1) {
+    const { component: tag, attributes: authored, state } = payload.layers[index]!;
+    const component = components.get(tag);
+    if (component === undefined) throw new Error(`HTMLKit cannot render <${tag}>: no page module defines it.`);
+    const attributes: Record<string, string> = { id: `hk-layer-${index}`, ...index === 0 ? {} : { slot: "page" } };
+    const html: Record<string, string> = {};
+    for (const [name, value] of Object.entries(authored)) {
+      const prop = component[1][name];
+      if (prop === undefined) attributes[name] = value; else html[prop] = value;
+    }
+    const root = component[0]({ attributes, ...layers.length === 0 ? {} : { slots: { page: [layers[0]] } } }, html);
+    if (state !== undefined) {
+      const host = runtime.generatedHost(root);
+      if (host === undefined) throw new Error(`HTMLKit cannot give layer ${index} its state.`);
+      Object.assign(host.state, state);
+    }
+    layers.unshift(root);
+  }
+  // As the server does: let the state's updates render.
+  await new Promise(done => setTimeout(done));
+  return { next, layers, adopt: false };
 }
 
 function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: ClientOptions): void {
@@ -214,7 +219,10 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   const html = async (url: URL, signal: AbortSignal) => {
     const response = await loaded(url.pathname + url.search, signal);
     if (!response.headers.get("content-type")?.startsWith("text/html")) throw new Error(`HTMLKit cannot render ${url.href} in place.`);
-    return new DOMParser().parseFromString(await response.text(), "text/html");
+    const next = new DOMParser().parseFromString(await response.text(), "text/html");
+    const layers: Element[] = [];
+    for (let index = 0, root = layer(next, 0); root !== null; root = layer(next, ++index)) layers.push(root);
+    return { next, layers, adopt: true };
   };
   const payload = async (url: URL, signal: AbortSignal) => {
     const cached = prefetched.get(url.pathname);
@@ -234,12 +242,12 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     clearTimeout(intended);
     try {
       // The payload carries data, not markup; a page it cannot render loads from its HTML.
-      const next = await payload(url, signal).catch(error => {
+      const { next, layers, adopt: hydrate } = await payload(url, signal).catch(error => {
         if (signal.aborted) throw error;
         console.warn("HTMLKit renders this page from its HTML:", error);
         return html(url, signal);
       });
-      if (layer(next, 0) === null || layer(document, 0) === null) throw new Error(`HTMLKit cannot render ${url.href} in place: it has no layers.`);
+      if (layers.length === 0 || layer(document, 0) === null) throw new Error(`HTMLKit cannot render ${url.href} in place: it has no layers.`);
       // Head metadata both documents share stays; the rest is removed or added at the swap.
       const kept = new Set<Element>();
       const added: Element[] = [];
@@ -266,15 +274,14 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         // Layouts persist while each depth renders the same component: they keep their DOM, state,
         // and controllers, and take the new rendering's props. The page layer is always replaced.
         let index = 0;
-        let incoming = layer(next, 0)!;
-        let deeper = layer(next, 1);
-        while (deeper !== null && layer(document, index)?.getAttribute("data-component") === incoming.getAttribute("data-component")) {
-          runtime.adoptRenderedProps(layer(document, index)!, incoming);
-          incoming = deeper;
-          deeper = layer(next, ++index + 1);
+        while (index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component")) {
+          runtime.adoptRenderedProps(layer(document, index)!, layers[index]!);
+          index += 1;
         }
         // A page sits in its layout's slot; the layout projects the new page as it did the old one.
-        runtime.replaceProjectedNode(layer(document, index)!, incoming);
+        runtime.replaceProjectedNode(layer(document, index)!, layers[index]!);
+        // Server markup from the fallback is adopted in place, as the first page was.
+        if (hydrate) adopt(layers[index]!);
         rendered = url.pathname;
         announcer.textContent = document.title;
         watch();

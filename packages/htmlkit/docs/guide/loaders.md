@@ -92,13 +92,15 @@ from the outside in, then the page's. Each receives the `data` of the ones befor
 
 ## In the browser
 
-HTMLKit sends the rendered HTML, then a small script per page that lets HTML Next take over that
-HTML in place: it connects controllers and starts browser data reads, without re-rendering. After
-that, links to other pages render in place; see [Moving between pages](/htmlkit/client-navigation).
+HTMLKit sends the rendered HTML, then a script per page with the page's components compiled to
+direct DOM code. They take over that HTML in place: controllers connect and browser data reads
+start, without re-rendering, and whatever a reader typed before the script ran stays. A page ships
+only the HTML Next code its components use. After that, links to other pages render in place; see
+[Moving between pages](/htmlkit/client-navigation).
 
 - A component's controller can be TypeScript: write `controller="./counter.js"` next to
   `counter.ts`, and HTMLKit compiles it. Run `tsc` separately to check types.
 - Component styles become regular stylesheets that load before the page is shown.
 - Files in `public/` are copied unchanged. `_htmlkit/` and `404.html` are reserved names.
-- `document` fires `hk:ready` once HTML Next is watching the page.
+- `document` fires `hk:ready` once the page's components have taken over its HTML.
 - After any change in development, open pages reload.

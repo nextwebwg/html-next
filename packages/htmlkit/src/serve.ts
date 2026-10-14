@@ -5,7 +5,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { createServer, isRunnableDevEnvironment, normalizePath } from "vite";
 
 import { createApplication } from "./application.js";
-import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
+import { browserPlugin, browserSources, stylesheetSources } from "./browser.js";
 import { configure, globalStylesheets, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
@@ -102,7 +102,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const assets = (page: RenderedPage): PageAssets => {
     const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
     const id = `virtual:htmlkit/${graphId}`;
-    sources.set(id, browserSource(page.components, { base: config.base, prefetch: config.prefetch }, css));
+    for (const [module, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch }, id, css)) sources.set(module, source);
     const styles = stylesheetSources(page.components);
     for (const [id, css] of styles) sources.set(id, css);
     // Vite's HTML transformer applies its base to root-relative assets a second time.

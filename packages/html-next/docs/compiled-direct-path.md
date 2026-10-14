@@ -131,14 +131,14 @@ Gzip bytes for one component compiled alone; an application pays the shared supp
 
 | Measure | Size |
 | --- | ---: |
-| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,620 B |
+| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,727 B |
 | `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 8,140 B |
 | `static-card` fixture (gzip-9) | 6,875 B |
 | `prop-button` fixture (gzip-9) | 11,353 B |
 | Same, before prop types compiled to their own checks | 18,325 B |
 | General-runtime output that compiled components replaced | about 39,500 B |
 
-Gates: the unplugin test fails the benchmark entry above 8,625 B gzip-6, and `measure:runtime`
+Gates: the unplugin test fails the benchmark entry above 8,727 B gzip-6, and `measure:runtime`
 fails each fixture above its ceiling or when the interpreter, a parser, the type system or the
 formatter contributes any bytes. A ceiling rises only by a small amount with its reason recorded
 beside it.

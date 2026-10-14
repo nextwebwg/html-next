@@ -134,7 +134,9 @@ const propGenerated = await generatedFixture("prop-button", 11_450);
 const computedGenerated = await generatedFixture("computed-counter", 7_550);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
-const dataGenerated = await generatedFixture("data-read", 7_625);
+// +5 B: a root renders, at its first connection, what changed after its construction while it waited
+// detached, such as a parent's bound list of objects; until then such a change never rendered.
+const dataGenerated = await generatedFixture("data-read", 7_630);
 const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B

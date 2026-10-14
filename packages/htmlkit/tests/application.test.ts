@@ -290,6 +290,9 @@ describe("application platform", () => {
         { pathname: "/docs/items/one/", pageName: "item-page" }, { pathname: "/docs/items/two/", pageName: "item-page" }]);
     expect(manifest.pages.every((page: { browserModule: string }) => /^\/docs\/_htmlkit\/.*\.js$/.test(page.browserModule))).toBe(true);
     expect(result.browserInputs.some(path => /(?:server-worker|node-loader|jsdom|parse5|\.server\.|browser-source)/.test(path))).toBe(false);
+    // Pages ship their components compiled to direct DOM code and the helpers those use, not the live interpreter.
+    expect(result.browserInputs.some(path => /html-next[/\\](?:src|dist)[/\\]generated-runtime\.(?:ts|js)$/.test(path))).toBe(true);
+    expect(result.browserInputs.filter(path => /html-next[/\\](?:src|dist)[/\\](?:runtime|live|parser|source-parser|graph)\.(?:ts|js)$/.test(path))).toEqual([]);
     // Every page module shares one client and runtime chunk, so client navigation keeps one registry.
     const chunks = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(file => file.endsWith(".js"))
       .map(file => readFile(join(result.outDir, "_htmlkit", file), "utf8")));

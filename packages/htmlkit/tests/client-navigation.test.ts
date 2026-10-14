@@ -268,11 +268,23 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
   } finally { await context.close(); }
 }
 
-/** The layers a page shows once its read has loaded, without the hydration record that only server HTML carries. */
+/**
+ * The layers a page shows once its read has loaded, without the hydration record that only server HTML
+ * carries. Each element's attributes are in name order: a compiled component created in the browser
+ * writes the same attributes as the server's renderer, in its own order.
+ */
 async function layers(page: Page) {
   await page.getByText("Loaded data", { exact: true }).waitFor();
   return page.evaluate(() => ({
-    markup: [0, 1].map(index => document.getElementById(`hk-layer-${index}`)!.outerHTML.replace(/ data-html-next-instance="[^"]*"/g, "")),
+    markup: [0, 1].map(index => {
+      const copy = document.getElementById(`hk-layer-${index}`)!.cloneNode(true) as Element;
+      for (const element of [copy, ...copy.querySelectorAll("*")]) {
+        const attributes = [...element.attributes].map(({ name, value }) => [name, value] as const).sort(([a], [b]) => a < b ? -1 : 1);
+        for (const [name] of attributes) element.removeAttribute(name);
+        for (const [name, value] of attributes) element.setAttribute(name, value);
+      }
+      return copy.outerHTML.replace(/ data-html-next-instance="[^"]*"/g, "");
+    }),
     connections: document.getElementById("hk-layer-1")!.dataset.connections, value: document.querySelector("input")!.value,
   }));
 }

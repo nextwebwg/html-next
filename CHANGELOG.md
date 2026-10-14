@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-alpha.47
+
+### Changed
+
+- HTMLKit pages ship their components compiled to direct DOM code instead of the live runtime and serialized definitions. Each page's module imports only its compiled components and the `generated-runtime` helpers they use, and pages share the modules of the components they have in common. The first page's components adopt the server-rendered DOM in place, so what a reader typed before startup, focus and selection survive, then controllers connect and reads start. Client navigation renders each payload's layers with the components' factories, with the same markup as a document load, keeps shared layouts with their state and controllers, and adopts the HTML fallback in place. On HTMLKit's examples, each page ships 19.0 to 26.7 KB of gzip JavaScript instead of 49.7 to 53.8 KB (`pnpm --filter @nextwebwg/htmlkit measure:delivery`).
+
+### Added
+
+- `@nextwebwg/html-next/generated-runtime` exports `replaceProjectedNode`, `adoptRenderedProps` and `generatedHost` for compiled roots, as the live runtime's `replaceProjectedNode`, `adoptRenderedProps` and `getComponentHost` serve live ones. `adoptRenderedProps` takes the new rendering's root from a factory or from server HTML.
+
+### Fixed
+
+- A compiled component renders what changed between its construction and its first connection, such as a list of objects its parent binds to it, which reaches it after construction. It rendered nothing for those changes until the next one.
+
 ## 1.0.0-alpha.46
 
 ### Changed

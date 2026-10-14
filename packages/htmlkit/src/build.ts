@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import type { Manifest, ManifestChunk } from "vite";
 
 import { createApplication, headScripts, notFoundPage } from "./application.js";
-import { browserSource, stylesheetSources } from "./browser.js";
+import { browserSources, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
 import { configure, globalStylesheets, HtmlKitError, withPlugins, within } from "./config.js";
 import { documentHTML, pagePayload, payloadPath } from "./document.js";
@@ -66,8 +66,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     for (const pathname of routes) {
       const page = await application.render(pathname);
       pages.push(page);
-      sources.set(`virtual:htmlkit/page-${pages.length - 1}`, browserSource(page.components,
-        { base: config.base, prefetch: config.prefetch, manifest: config.base + "_htmlkit/manifest.json" }, globalStylesheets(options, config.root)));
+      for (const [id, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch,
+        manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length - 1}`, globalStylesheets(options, config.root))) sources.set(id, source);
       for (const [id, css] of stylesheetSources(page.components)) sources.set(id, css);
     }
     const browserInputs = await bundleBrowser({ root: config.root, base: config.base, outDir: stage, sources });

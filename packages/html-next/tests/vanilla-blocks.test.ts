@@ -1575,6 +1575,28 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     assert.ok(handle.o.length <= baseline + 2 * 10 * 3, `${handle.o.length} owners after 40 rounds (${baseline} at start)`);
   });
 
+  it("renders, once connected, what changed while its root waited detached", async () => {
+    // A bound list of objects has no attribute text, so the child first takes it through its prop channel.
+    const list = `<template component="x-list" status="early" summary="List."><defs>
+      <prop name="items" type="list(object({ label: string }))" required>Items.</prop></defs><ul><li $each="item of $items">{$item.label}</li></ul></template>`;
+    const compiled = graph([`<template component="x-holder" status="early" summary="Holder."><defs>
+      <state name="items" type="list(object({ label: string }))" value="[{ label: 'a' }, { label: 'b' }]"></state></defs><div><x-list from:items="$items"></x-list></div></template>`, list]);
+    const { text: code } = await bundle(compiled.entry, false, compiled.modules);
+    const { window } = new JSDOM("<!doctype html><body></body>");
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
+      try { vi.stubGlobal(key, (window as unknown as Record<string, unknown>)[key]); } catch { /* read-only global */ }
+    }
+    const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// detached`).toString("base64")}`) as Record<string, unknown>;
+    const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as () => Element;
+    const root = factory();
+    // The child's update is due while nothing is connected; it renders when the root connects.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.document.body.append(root);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(Array.from(root.querySelectorAll("li"), (row) => row.textContent), ["a", "b"]);
+  });
+
   it("fails a <context> no ancestor provides with live's HR009", async () => {
     const step = `<template component="x-step" status="early" summary="Step.">
       <defs><context name="count" from="x-shape" as="active"></context></defs><li>{$active}</li></template>`;
