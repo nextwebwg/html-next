@@ -55,6 +55,53 @@ export interface HtmlKitPlugin {
     readonly extensions: readonly string[];
     compile(source: string, page: PageContext): string | Promise<string>;
   };
+  /** Runs before HTMLKit reads any page: once per build, and once when the development server starts. */
+  readonly buildStart?: (context: BuildStartContext) => void | Promise<void>;
+  /**
+   * Runs after a build writes every page, asset, and the manifest to its staging directory, before the
+   * output replaces outDir. A throw fails the build and leaves the previous output in place.
+   */
+  readonly buildEnd?: (context: BuildEndContext) => void | Promise<void>;
+}
+
+export interface BuildStartContext {
+  readonly command: "build" | "dev";
+  /** The absolute application root. */
+  readonly root: string;
+  readonly base: string;
+}
+
+export interface BuildEndContext {
+  readonly root: string;
+  readonly base: string;
+  /** The staging directory, which becomes outDir once every buildEnd hook succeeds. */
+  readonly outDir: string;
+  readonly routes: readonly ApplicationRoute[];
+  /** Each built page's deployment pathname, as in the manifest's routes; 404.html is not one. */
+  readonly pages: readonly string[];
+  /**
+   * Write a file at a path relative to the output, such as sitemap.xml. Refuses a path outside the
+   * output, in the reserved _htmlkit directory, or at a file that already exists.
+   */
+  writeFile(path: string, contents: string | Uint8Array): Promise<void>;
+}
+
+/** _htmlkit/manifest.json, the build's public route manifest. version changes only with an incompatible format. */
+export interface BuildManifest {
+  readonly version: 1;
+  readonly base: string;
+  /** Each page's deployment pathname, in build order. */
+  readonly routes: readonly string[];
+  readonly pages: readonly ManifestPage[];
+}
+
+export interface ManifestPage {
+  readonly pathname: string;
+  readonly pageName: string;
+  /** The page's own browser module URL. */
+  readonly browserModule: string;
+  /** URLs of the shared modules the page imports. */
+  readonly chunks: readonly string[];
 }
 
 export interface PageContext {
