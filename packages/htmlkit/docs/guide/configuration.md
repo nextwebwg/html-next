@@ -1,7 +1,7 @@
 ---
 title: Configuration
 order: 5
-blurb: htmlkit.config.ts · plugins · using HTMLKit from code
+blurb: htmlkit.config.ts · plugins · build hooks · build manifest · using HTMLKit from code
 eyebrow: HTMLKit
 ---
 
@@ -121,6 +121,101 @@ folders their own `layout` (a name, or `{ component, server: { load } }` with an
 so it doesn't wrap the site's other pages. A plugin can also set a `headScript` that runs before
 `app/head.js`. [Markupress](https://github.com/threadlabs-studio/markupress) is built
 this way.
+
+### Build hooks
+
+`buildStart` and `buildEnd` run steps around a build, such as generating data before it or writing a
+sitemap after it:
+
+```ts
+import { defineConfig, type HtmlKitPlugin } from '@nextwebwg/htmlkit';
+import { generateApi } from './scripts/generate-api.ts';
+
+const site: HtmlKitPlugin = {
+  name: 'site',
+  async buildStart({ root }) {
+    await generateApi(root);   // writes app/data/api.json, which loaders read
+  },
+  async buildEnd({ pages, writeFile }) {
+    const origin = 'https://example.com';
+    await writeFile('sitemap.txt', pages.map(pathname => origin + pathname).join('\n'));
+  },
+};
+
+export default defineConfig({ plugins: [site] });
+```
+
+`buildStart(context)` runs before HTMLKit reads any page, so pages, data, and assets it generates
+are part of the build. It runs once per `htmlkit build`, and once when `htmlkit dev` starts; editing
+a file doesn't rerun it. Its context has:
+
+| Field | Value |
+| --- | --- |
+| `command` | `'build'` or `'dev'` |
+| `root` | The absolute project root. |
+| `base` | The `base` option, such as `/docs/`. |
+
+`buildEnd(context)` runs once the build has written every page, asset, and the
+[manifest](#build-manifest), and before the new output replaces `outDir`. Its context has:
+
+| Field | Value |
+| --- | --- |
+| `root`, `base` | As in `buildStart`. |
+| `outDir` | The directory being built, which becomes `outDir` when every `buildEnd` succeeds. |
+| `routes` | Every route, as `createApplication` lists them. |
+| `pages` | Each built page's URL path, such as `/docs/guide/`. `404.html` isn't one. |
+| `writeFile(path, contents)` | Writes a string or bytes at a path relative to the output. |
+
+`writeFile` refuses a path outside the output, a path in `_htmlkit/`, and a file that already
+exists, so a plugin can't replace a page, a public file, or another plugin's file.
+
+Plugins run each hook in the order they're listed. If a hook throws, the build fails with an error
+that names the plugin and the hook, and the previous `outDir` stays as it was. `htmlkit preview`
+and `createApplication` don't run either hook.
+
+## Build manifest
+
+`htmlkit build` writes `_htmlkit/manifest.json`, which lists the site's pages for tools such as a
+link checker or a coverage report. Read it with `readManifest(outDir)`, which returns a typed
+`BuildManifest`:
+
+```ts
+import { readManifest } from '@nextwebwg/htmlkit';
+
+const { base, routes, pages } = await readManifest('dist');
+```
+
+```json
+{
+  "version": 1,
+  "base": "/docs/",
+  "routes": ["/docs/", "/docs/guide/"],
+  "pages": [
+    {
+      "pathname": "/docs/",
+      "pageName": "home-page",
+      "browserModule": "/docs/_htmlkit/page-0-BxfIu_Pn.js",
+      "chunks": ["/docs/_htmlkit/client-Cq3Rt8aZ.js"]
+    }
+  ]
+}
+```
+
+| Field | Value |
+| --- | --- |
+| `version` | The format version, `1`. |
+| `base` | The `base` the site was built for. |
+| `routes` | Each page's URL path, including `base`, in build order. `404.html` isn't listed. |
+| `pages` | One entry per route, in the same order. |
+| `pages[].pathname` | The page's URL path. |
+| `pages[].pageName` | The page's component name. |
+| `pages[].browserModule` | The URL of the page's own browser module. |
+| `pages[].chunks` | URLs of the shared modules the page imports. |
+
+These fields are stable. A release may add fields at version `1`, so ignore fields you don't use.
+`version` changes only when a field is removed, renamed, or changes meaning, and `readManifest`
+refuses a version it doesn't know. File names inside `_htmlkit/` change from build to build; read
+them from the manifest.
 
 ## Using HTMLKit from code
 

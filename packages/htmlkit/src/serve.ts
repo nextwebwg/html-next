@@ -5,8 +5,9 @@ import { dirname, extname, join, resolve } from "node:path";
 import { createServer, isRunnableDevEnvironment, normalizePath } from "vite";
 
 import { createApplication } from "./application.js";
+import { readManifest } from "./build.js";
 import { browserPlugin, browserSources, stylesheetSources } from "./browser.js";
-import { configure, globalStylesheets, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
+import { configure, globalStylesheets, HtmlKitError, rootAlias, runHook, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
@@ -40,8 +41,7 @@ export async function previewApplication(input: ServerOptions = {}): Promise<App
   const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   // Read deployment metadata, never loaders or page source. The same tree works on a static host.
-  const manifest = JSON.parse(await readFile(join(config.outDir, "_htmlkit/manifest.json"), "utf8")) as { base: string };
-  const base = manifest.base;
+  const { base } = await readManifest(config.outDir);
   const output = await realpath(config.outDir);
   const server = createHTTPServer((request, response) => { void (async () => {
     if (!methodAllowed(request, response)) return;
@@ -85,6 +85,8 @@ export async function previewApplication(input: ServerOptions = {}): Promise<App
 export async function devApplication(input: ServerOptions = {}): Promise<ApplicationServer> {
   const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
+  // Once, before Vite watches, so generated files don't trigger a reload; edits don't rerun it.
+  await runHook(options, "buildStart", { command: "dev", root: config.root, base: config.base });
   const sources = new Map<string, string>();
   // Vite refuses to serve a Windows 8.3 short name such as RUNNER~1, so page-wide stylesheets go by their real paths.
   const css = await Promise.all(globalStylesheets(options, config.root).map(file => realpath(file).catch(() => file)));
