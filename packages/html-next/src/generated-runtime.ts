@@ -1370,6 +1370,8 @@ export function bindRootControl(instance: GeneratedInstance, child: GeneratedIns
 
 /** A handler's `<set>`: checks the destination's declared type, then writes through the host's facades. */
 export function setState(instance: GeneratedInstance, path: readonly (string | number)[], value: unknown, key: string, label: string): void {
+  // A number that is not finite is an invalid result, as ordinary invalid input: no write, no warning.
+  if (typeof value === "number" && !Number.isFinite(value)) return;
   const { n: names, t: types } = instance.S;
   let type = types[names.indexOf(path[0] as string)]!;
   for (let index = 1; index < path.length; index += 1) type = compactTypeAt(type, path[index]!);
