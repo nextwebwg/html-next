@@ -1103,7 +1103,8 @@ function runHandler(
     }
     if (step.kind === "set") {
       const next = evalConforming(step.value, scope, context.definition);
-      if (next === NONCONFORMING) continue;
+      // A number that is not finite is an invalid result, as ordinary invalid input: no write, no warning.
+      if (next === NONCONFORMING || typeof next === "number" && !Number.isFinite(next)) continue;
       const path = resolveWritablePath(scope, step.writablePath);
       if (path === undefined) continue;
       if (!conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) {
