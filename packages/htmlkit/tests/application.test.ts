@@ -321,6 +321,45 @@ describe("application platform", () => {
     } finally { await server.close(); }
   }, 60_000);
 
+  it("renders app/pages/404.html for every unmatched path, through its layout, in each delivery", async () => {
+    const root = await app();
+    await write(root, "app/pages/404.html", '<template component="not-found-page"><title>Lost</title><defs><prop name="path" type="string" required>Missing path</prop></defs><h1>Nothing at {$path}</h1></template>');
+    await write(root, "app/pages/404.server.ts", "export const load = ({ url }) => ({ props: { path: url.pathname } });");
+    const application = await createApplication({ root });
+    try {
+      // The not-found page is no route: it is not served at /404/, listed, or linked from navigation.
+      expect(application.routes.some(route => route.pattern === "/404/")).toBe(false);
+      expect(application.notFound?.pageName).toBe("not-found-page");
+      expect((await application.navigation()).some(item => item.pageName === "not-found-page")).toBe(false);
+      const missing = await application.render("/nowhere/");
+      expect(missing.status).toBe(404);
+      expect(missing.body).toContain("Nothing at /nowhere/");
+      expect(missing.body).toContain('data-component="app-layout"');
+      expect(missing.head.title).toBe("Lost");
+      expect((await application.render("/404/")).status).toBe(404);
+      const response = await application.fetch(new Request("http://localhost/nowhere/"));
+      expect(response.status).toBe(404);
+      expect(await response.text()).toContain("Nothing at /nowhere/");
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/pages/nowhere/payload.json"))).status).toBe(404);
+    } finally { await application.close(); }
+    const result = await buildApplication({ root });
+    expect(result.routes).not.toContain("/404/");
+    expect(existsSync(join(result.outDir, "404/index.html"))).toBe(false);
+    const document = await readFile(join(result.outDir, "404.html"), "utf8");
+    expect(document).toContain("<title>Lost</title>");
+    expect(document).toContain('data-component="app-layout"');
+    // A static host serves 404.html at any missing path, so its modules are absolute.
+    expect(document).toMatch(/<script type="module" src="\/_htmlkit\/[^"]+\.js"><\/script>/);
+    const manifest = JSON.parse(await readFile(join(result.outDir, "_htmlkit/manifest.json"), "utf8"));
+    expect(manifest.routes).not.toContain("/404/");
+    const server = await previewApplication({ root, port: 0 });
+    try {
+      const gone = await fetch(server.url + "gone/deeper/");
+      expect(gone.status).toBe(404);
+      expect(await gone.text()).toContain("<title>Lost</title>");
+    } finally { await server.close(); }
+  }, 60_000);
+
   it("requires entries and detects conflicting parameterized route patterns", async () => {
     const root = await app();
     await write(root, "app/pages/items/[slug].server.ts", "export const load = () => ({});");

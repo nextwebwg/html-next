@@ -2,6 +2,10 @@
 
 ## 1.0.0-alpha.48
 
+### Added
+
+- HTMLKit renders `app/pages/404.html` for every URL that matches no page, through its layouts and with status 404, in development, `preview`, and `application.fetch`, and `htmlkit build` writes it to `404.html`. It is not a route: `/404/` is not served, listed in navigation, or included in the manifest. `Application.notFound` exposes it. Without the file, the built-in "Page not found" page is unchanged.
+
 ### Changed
 
 - The HTMLKit guide corrects four points. The `/about` → `/about/` redirect happens in development, `preview`, and `application.fetch`, but not on a static host. `preview` takes its base path from the build. A page's head tag replaces the layout's tag with the same identity, rather than every `<meta>`. Under HTMLKit, a component using `transitions` fails to build (`HT024`), because HTMLKit doesn't enable extensions yet. It also states the default port and flag precedence.

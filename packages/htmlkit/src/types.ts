@@ -184,6 +184,8 @@ export interface Application {
   readonly base: string;
   readonly outDir: string;
   readonly routes: readonly ApplicationRoute[];
+  /** app/pages/404.html, which renders every unmatched path with status 404; it is not a route. */
+  readonly notFound?: ApplicationRoute;
   /** Files that plugin pages reference through PageContext.asset, by deployment-relative path. */
   readonly files: ReadonlyMap<string, string>;
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */

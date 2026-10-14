@@ -98,6 +98,22 @@ To use another layout for one page, name it; `content="none"` uses no layout:
 
 To give a whole folder a layout, see `layoutDefaults` in [Configuration](/htmlkit/configuration).
 
+## The not-found page
+
+`app/pages/404.html` is the page for any URL that matches no page. It renders through its layout like
+any other page, with status 404, in development, `preview`, and `application.fetch`. `npm run build`
+writes it to `404.html`. It is not a route: `/404/` is not one of the site's pages, and navigation
+doesn't list it. Its loader receives the requested URL, except in the built `404.html`, which a static
+host serves for every missing path. Without the file, HTMLKit serves a plain "Page not found" page.
+
+```html
+<template component="page-not-found">
+  <title>Page not found</title>
+  <h1>This page doesn't exist</h1>
+  <p><a href="/">Go to the home page</a></p>
+</template>
+```
+
 ## The page head
 
 `<title>`, `<meta>`, and `<link>` tags directly inside a page or layout component go in the document
