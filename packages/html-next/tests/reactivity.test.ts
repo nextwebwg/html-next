@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { JSDOM } from "jsdom";
 
 import { evaluate, NONCONFORMING, type Value } from "../src/expression.js";
 import {
@@ -185,6 +186,16 @@ describe("reactive scope", () => {
     scope.set("event", next);
     scope.scheduler.flush();
     assert.deepEqual(seen, [event, next]);
+  });
+
+  it("stores DOM nodes without proxying them, so their native getters keep working", () => {
+    // A node from another window: its native getters reject a proxy as their receiver.
+    const node = new JSDOM("<p>Ada</p>").window.document.querySelector("p")!;
+    const scope = new ReactiveScope([["node", node as unknown as Value], ["holder", { node } as unknown as Value]]);
+    assert.equal(scope.get("node"), node);
+    assert.equal((scope.get("holder") as { node: Value }).node, node);
+    assert.equal(evaluate("$holder.node.textContent", scope), "Ada");
+    assert.equal(evaluate("$node.nodeName", scope), "P");
   });
 
   it("keeps a computed null until its first valid result, then retains its last valid result", () => {

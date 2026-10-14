@@ -6,7 +6,7 @@ import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { eventPasses } from "./event-filter.js";
-import { isNativeEvent } from "./freeze.js";
+import { isPlatformObject } from "./freeze.js";
 import { encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
 import { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
@@ -3773,7 +3773,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     return true;
   };
   const wrap = (value: unknown, path: string, readonly: boolean): unknown => {
-    if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+    if (value === null || typeof value !== "object" || isPlatformObject(value)) return value;
     let paths = nested.get(value);
     if (paths === undefined) nested.set(value, paths = new Map());
     const known = paths.get(path);

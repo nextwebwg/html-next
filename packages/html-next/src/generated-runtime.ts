@@ -4,7 +4,7 @@ import { fail } from "./diagnostics.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
-import { isNativeEvent } from "./freeze.js";
+import { isNativeEvent, isPlatformObject } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
@@ -352,7 +352,7 @@ const readonlyViews = new WeakMap<object, Map<string, object>>();
 
 /** A read-only view for the controller, as live's host gives one: reads track, writes warn by path. */
 export function readonlyView(spec: GeneratedStateSpec, value: unknown, path: string): unknown {
-  if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+  if (value === null || typeof value !== "object" || isPlatformObject(value)) return value;
   const target = raw(value) as object;
   let views = readonlyViews.get(target);
   if (views === undefined) readonlyViews.set(target, views = new Map());
@@ -1571,7 +1571,7 @@ export function attachGeneratedController(
     Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
       left.every((item, index) => same(item, right[index]));
   const wrap = (value: unknown, type: CompactType, parent: Facade | undefined, key: PropertyKey): unknown => {
-    if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+    if (value === null || typeof value !== "object" || isPlatformObject(value)) return value;
     const target = raw(value) as object;
     const first = facades.get(target);
     let facade = first;
