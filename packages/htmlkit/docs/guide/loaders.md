@@ -87,7 +87,8 @@ without `entries()`.
 
 ## Layout loaders
 
-A layout can have a loader too, such as `app/layouts/default.server.ts`. Layout loaders run first,
+A layout can have a loader too, such as `app/layouts/default.server.ts` or a folder's
+`_layout.server.ts`. Layout loaders run first,
 from the outside in, then the page's. Each receives the `data` of the ones before it as `parent`.
 
 ## In the browser

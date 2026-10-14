@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.49
+
+### Added
+
+- HTMLKit nests layouts from the page tree. A folder's `_layout.html` wraps every page in that folder and below it, inside its parent folders' layouts, with an optional `_layout.server.ts` loader; loaders run from the outside in and pass `data` on as `parent`. The layout a page selects (`hk:layout`, a `pages` entry's `layout`, `layoutDefaults`, the `layout` option, or `app/layouts/default.html`) stays outermost, with the folder layouts inside it, and `none` or `false` renders the page with no layouts. Client navigation between pages that share folder layouts keeps them, with their state and controllers.
+
 ## 1.0.0-alpha.48
 
 ### Added

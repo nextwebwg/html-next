@@ -96,7 +96,42 @@ To use another layout for one page, name it; `content="none"` uses no layout:
 </template>
 ```
 
-To give a whole folder a layout, see `layoutDefaults` in [Configuration](/htmlkit/configuration).
+To give a whole folder a layout, add a `_layout.html` to it ([below](#nested-layouts)), or see
+`layoutDefaults` in [Configuration](/htmlkit/configuration).
+
+## Nested layouts
+
+A `_layout.html` in a folder of `app/pages` wraps every page in that folder and in the folders below it.
+Each folder's layout sits inside its parent folder's layout, and the site's layout is outermost:
+
+```text
+app/layouts/default.html          site-shell
+app/pages/docs/_layout.html       docs-shell, inside site-shell
+app/pages/docs/guide/_layout.html guide-shell, inside docs-shell
+app/pages/docs/guide/intro.html   /docs/guide/intro/, inside guide-shell
+```
+
+A folder layout is a layout like any other: one component with a `<slot name="page">`. The `_` keeps
+it from being a page, so `/docs/_layout/` is not a URL. A `_layout.server.ts` beside it is its
+[loader](/htmlkit/loaders#layout-loaders). Loaders run from the outside in, so `intro.html`'s loader
+receives the `data` of `default`, `docs`, and `guide` as `parent`.
+
+The layout a page selects only replaces the outermost one, and folder layouts always nest inside it:
+
+| The page's layout | Layers for `/docs/guide/intro/` |
+| --- | --- |
+| None selected, with `app/layouts/default.html` | `default` → `docs` → `guide` → page |
+| None selected, without `default.html` | `docs` → `guide` → page |
+| `hk:layout="admin"`, or `admin` from a `pages` entry's `layout`, `layoutDefaults`, or the `layout` option | `admin` → `docs` → `guide` → page |
+| `none` or `false`, from any of these | page alone |
+
+The outermost layout is chosen in this order: `hk:layout`, then the `pages` entry's `layout`, then
+`layoutDefaults`, then the `layout` option, then `app/layouts/default.html`. Pages added through the
+`routes` option are outside the page tree, so they take only their own `layouts`.
+
+During client navigation, the layouts two pages share stay in place, with their state and controllers,
+and take the new page's loader props. Going from `/docs/guide/intro/` to `/docs/guide/setup/` keeps
+all three layouts; going to `/blog/` keeps only `default`.
 
 ## The not-found page
 
