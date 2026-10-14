@@ -299,8 +299,8 @@ describe("official target compilers", () => {
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
     compileVue(vue, "XTypedHandlers.vue");
-    assert.match(vue, /  write\(count, concat\(count\.value\), isNumber, 'count in <source>#badNumber'\)\n/);
-    assert.match(vue, /write\(\n\s+\(next\) => \(items\.value\[index\.value\]\.name = next\),\n\s+7,\n\s+isString,\n\s+'items\[\$index\]\.name in <source>#badField',\n/);
+    assert.match(vue, /  write\(count, concat\(count\.value\), isNumber, '<source>', 'badNumber', 'count'\)\n/);
+    assert.match(vue, /write\(\n\s+\(next\) => \(items\.value\[index\.value\]\.name = next\),\n\s+7,\n\s+isString,\n\s+'<source>',\n\s+'badField',\n\s+'items\[\$index\]\.name',\n/);
   });
 
   it("writes proven values plainly and checks the rest in Vue, React and Svelte", async () => {
@@ -308,10 +308,12 @@ describe("official target compilers", () => {
       <state name="count" type="integer" value="0"></state><state name="total" type="number" value="0.5"></state>
       <state name="copy" type="number" value="0"></state><state name="open" type="boolean" value="false"></state>
       <state name="label" type="string" value="a"></state><state name="loose" type="integer" value="0"></state>
+      <state name="level" type="number" value="1.5"></state><state name="note" value="Ada"></state>
       <handler name="step"><set name="count" expr:value="$count + 1"></set><set name="count" expr:value="$count - 3"></set>
         <set name="total" expr:value="$total + 1"></set><set name="copy" expr:value="$count"></set>
         <set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set>
-        <set name="loose" expr:value="$loose + 1"></set></handler>
+        <set name="loose" expr:value="$loose + 1"></set><set name="level" expr:value="$level + 0.1"></set>
+        <set name="note" expr:value="5"></set></handler>
       <handler name="wrong"><set name="total" expr:value="$label"></set><set name="loose" expr:value="$total"></set></handler>
     </defs><button on:click="step">{$count}</button></template>`, "writes.html");
     const vue = generateVueComponent(definition);
@@ -320,26 +322,30 @@ describe("official target compilers", () => {
     await transform(react, { loader: "tsx", format: "esm" });
     const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
     const expected = {
-      // An integer state every write keeps an integer steps plainly; a copy, a negation and a literal write plainly.
+      // An integer state every write keeps an integer steps plainly; a present number state steps by a
+      // literal with decimal arithmetic; a copy, a negation, a literal and any write to an untyped
+      // state write plainly.
       plain: [
         ["count.value++", "setCount((count) => count + 1);", "count++;"],
         ["count.value -= 3", "setCount((count) => count - 3);", "count -= 3;"],
+        ["level.value = decimalAdd(level.value, 0.1)", "setLevel((level) => decimalAdd(level, 0.1));", "level = decimalAdd(level, 0.1);"],
         ["copy.value = count.value", "setCopy(getCount());", "copy = count;"],
         ["open.value = !open.value", "setOpen(!getOpen());", "open = !open;"],
         ["label.value = 'b'", 'setLabel("b");', "label = 'b';"],
+        ["note.value = 5", "setNote(5 as never);", "note = 5;"],
       ],
-      // Number arithmetic waits on the proposal's number semantics; a string is refused by a number state;
-      // `loose` takes a number, which may be fractional, so its own integer step stays checked too.
+      // `total` and `loose` also take unproven writes, so their own steps may find them absent or
+      // fractional and stay checked; a string is refused by a number state.
       checked: [
-        ["write(total, total.value + 1, isNumber, 'total in writes.html#step')",
-          'write(setTotal, getTotal() + 1, isNumber, "total in writes.html#step");',
-          "write((next) => (total = next), total + 1, isNumber, 'total in writes.html#step');"],
-        ["write(loose, loose.value + 1, isInteger, 'loose in writes.html#step')",
-          'write(setLoose, getLoose() + 1, isInteger, "loose in writes.html#step");',
-          "write((next) => (loose = next), loose + 1, isInteger, 'loose in writes.html#step');"],
-        ["write(total, label.value, isNumber, 'total in writes.html#wrong')",
-          'write(setTotal, getLabel(), isNumber, "total in writes.html#wrong");',
-          "write((next) => (total = next), label, isNumber, 'total in writes.html#wrong');"],
+        ["write(total, decimalAdd(total.value, 1), isNumber, 'writes.html', 'step', 'total')",
+          'write(setTotal, decimalAdd(getTotal(), 1), isNumber, "writes.html", "step", "total");',
+          "write((next) => (total = next), decimalAdd(total, 1), isNumber, 'writes.html', 'step', 'total');"],
+        ["write(loose, loose.value + 1, isInteger, 'writes.html', 'step', 'loose')",
+          'write(setLoose, getLoose() + 1, isInteger, "writes.html", "step", "loose");',
+          "write((next) => (loose = next), loose + 1, isInteger, 'writes.html', 'step', 'loose');"],
+        ["write(total, label.value, isNumber, 'writes.html', 'wrong', 'total')",
+          'write(setTotal, getLabel(), isNumber, "writes.html", "wrong", "total");',
+          "write((next) => (total = next), label, isNumber, 'writes.html', 'wrong', 'total');"],
       ],
     };
     for (const lines of [...expected.plain, ...expected.checked]) {
@@ -349,7 +355,8 @@ describe("official target compilers", () => {
 
   it("refuses a handler write of the wrong type once per authored write, and skips invalid results", async () => {
     const { code } = await transform(expressionHelpersSource(), { loader: "ts", format: "cjs" });
-    const module = { exports: {} as { write: (to: unknown, value: unknown, check?: (value: unknown) => boolean, at?: string) => void; isNumber: (value: unknown) => boolean } };
+    type Write = (to: unknown, value: unknown, check?: (value: unknown) => boolean, file?: string, handler?: string, path?: string) => void;
+    const module = { exports: {} as { write: Write; isNumber: (value: unknown) => boolean } };
     new Function("module", "exports", code)(module, module.exports);
     const { write, isNumber } = module.exports;
     const count = { value: 1 };
@@ -358,18 +365,24 @@ describe("official target compilers", () => {
     const warn = console.warn;
     console.warn = (message: unknown) => warnings.push(message);
     try {
-      write(count, "2", isNumber, "count in x.html#bad");
-      write(count, "3", isNumber, "count in x.html#bad");
+      write(count, "2", isNumber, "x.html", "bad", "count");
+      write(count, "3", isNumber, "x.html", "bad", "count");
+      // Another authored write of the same state, and the same write in another file, each warn once.
+      write(count, "4", isNumber, "x.html", "other", "count");
+      write(count, "5", isNumber, "y.html", "bad", "count");
+      // A number that is not finite is an invalid result, as in the live runtime: nothing written, no warning.
       write(count, Symbol.for("html-next.invalid-result"));
-      write((value: unknown) => set.push(value), Number.POSITIVE_INFINITY, isNumber, "count in x.html#overflow");
-      write(count, undefined, isNumber, "count in x.html#absent");
-      write((value: unknown) => set.push(value), 4, isNumber, "count in x.html#good");
+      write((value: unknown) => set.push(value), Number.POSITIVE_INFINITY, isNumber, "x.html", "overflow", "count");
+      write((value: unknown) => set.push(value), Number.NaN);
+      write(count, undefined, isNumber, "x.html", "absent", "count");
+      write((value: unknown) => set.push(value), 4, isNumber, "x.html", "good", "count");
     } finally { console.warn = warn; }
     assert.deepEqual(count, { value: undefined });
     assert.deepEqual(set, [4]);
     assert.deepEqual(warnings, [
-      "HR007: State count in x.html#bad does not satisfy its declared type.",
-      "HR007: State count in x.html#overflow does not satisfy its declared type.",
+      "x.html: HR007: State `count` does not satisfy its declared type.",
+      "x.html: HR007: State `count` does not satisfy its declared type.",
+      "y.html: HR007: State `count` does not satisfy its declared type.",
     ]);
   });
 

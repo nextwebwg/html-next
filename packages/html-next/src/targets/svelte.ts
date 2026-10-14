@@ -12,7 +12,7 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
-import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, writeCheck } from "./type-guards.js";
+import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { formatSvelteScript } from "./vue-format.js";
@@ -1232,15 +1232,15 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     const destination = scope.code.get(state.name)!;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
     const proven = !read.invalid && provenWrite(step, definition);
-    const destinationCheck = proven ? undefined
-      : handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, "value", handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
+    const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(declarationTypeNode(state.type, state.shape),
+      step.writablePath, 1, "value", handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context)));
     const nested = step.writablePath.length > 1;
     const writeTo = (value: string): string => nested ? `writePath(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
       ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${value})` : `${destination} = ${value}`;
     const declared = declarationTypeNode(state.type, state.shape);
     const sameKind = declared !== undefined && category(declared) === category(typeOf(step.value.ast, handlerScope).type);
     if (destinationCheck === undefined && !read.invalid) {
-      return `  ${guard}${(proven ? increment(step, destination) : undefined) ?? writeTo(nested || sameKind ? read.source : `${read.source} as typeof ${destination}`)};`;
+      return `  ${guard}${(proven ? increment(step, definition, destination) : undefined) ?? writeTo(nested || sameKind || declared === undefined ? read.source : `${read.source} as typeof ${destination}`)};`;
     }
     // A \`$state\` variable is written through a setter; a path below it, through \`writePath\`.
     return `  ${guard}${lowering.use("write")}((next) => ${nested ? writeTo("next") : `(${writeTo("next")})`}, ${read.source}${writeCheck(destinationCheck, definition, handler, step)});`;

@@ -741,8 +741,8 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    // Converters write integer steps, copies, negations and literals plainly; number arithmetic
-    // and a string written to a number state keep the write check, which refuses the string.
+    // Converters write integer steps, copies, negations and literals plainly. `total` also takes the
+    // string `wrong` writes, so its own step keeps the write check too, which refuses the string.
     name: "handler writes satisfy each state's declared type, and a nonconforming write leaves the state",
     source: scene({
       defs:

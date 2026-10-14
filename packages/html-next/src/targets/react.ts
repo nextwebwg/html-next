@@ -15,7 +15,7 @@ import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, selfStep, writeCheck } from "./type-guards.js";
+import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
@@ -1180,8 +1180,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const value = lowering.value(step.value.ast, handlerScope);
         const mayBeInvalid = mayProduceInvalidResult(step.value.ast, handlerScope);
         const proven = !mayBeInvalid && provenWrite(step, definition);
-        const destinationCheck = proven ? undefined
-          : handlerDestinationCheck(handlerScope.types.get(state.name)?.type, step.writablePath, 1, "value", handlerScope, lowering);
+        // An untyped state accepts any value, as in the live runtime, whatever its initial value's type.
+        const declared = declarationTypeNode(state.type, state.shape);
+        const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(declared, step.writablePath, 1, "value", handlerScope, lowering));
         const destination = handlerScope.types.get(state.name)?.type;
         const current = valueNames.get(state.name)!;
         const path = `[${step.writablePath.slice(1).map((segment) => typeof segment === "object"
@@ -1192,13 +1193,15 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           : `{ const path = ${path}; ${setter}((previous) => writeStatePath(previous, path, ${written}), path); }`;
         const unknown = destination === undefined || category(destination) === "unknown";
         if (destinationCheck === undefined && !mayBeInvalid) {
-          // A value of the state's own kind writes as it is; another kind is cast.
-          const self = proven ? selfStep(step) : undefined;
+          // A value of the state's own kind writes as it is; another kind is cast. React types an untyped
+          // state by its initial value, which any other kind would contradict.
+          const self = proven ? selfStep(step, definition) : undefined;
           const write = step.writablePath.length > 1 ? setPath(value)
-            : self !== undefined ? `${setter}((${current}) => ${current} ${self.op} ${self.amount})`
+            : self !== undefined ? `${setter}((${current}) => ${self.decimal
+              ? `${lowering.use(self.op === "+" ? "decimalAdd" : "decimalSubtract")}(${current}, ${self.amount})` : `${current} ${self.op} ${self.amount}`})`
             : (unknown ? `${setter}(() => ${value} as typeof ${current})`
               : category(destination) === category(typeOf(step.value.ast, handlerScope).type) ? `${setter}(${value})`
-              : `${setter}(${value} as typeof ${current})`);
+              : `${setter}(${value} as ${declared === undefined ? "never" : `typeof ${current}`})`);
           return `    ${guard}${write}${write.endsWith("}") ? "" : ";"}`;
         }
         const to = step.writablePath.length > 1 ? `(next) => ${setPath("next")}` : unknown ? `(next) => ${setter}(() => next)` : setter;

@@ -171,12 +171,13 @@ function scalarType(definition: ComponentDefinition, name: string): string | und
   return node?.kind === "terminal" && SCALAR_TYPES.includes(node.name) ? node.name : undefined;
 }
 
-/** `$state + n`, `n + $state` or `$state - n` over a safe integer literal `n`. */
-function integerStep(node: ExpressionNode): { readonly state: string; readonly op: "+" | "-"; readonly amount: number } | undefined {
+/** `$state + n`, `n + $state` or `$state - n` over a number literal `n` no larger than a safe integer. */
+function literalStep(node: ExpressionNode): { readonly state: string; readonly op: "+" | "-"; readonly amount: number } | undefined {
   if (node.kind !== "binary" || (node.op !== "+" && node.op !== "-")) return undefined;
   const [state, amount] = node.left.kind === "id" ? [node.left, node.right] : node.op === "+" ? [node.right, node.left] : [];
-  if (state?.kind !== "id" || amount?.kind !== "literal" || amount.dimension !== undefined || !Number.isSafeInteger(amount.value)) return undefined;
-  return { state: state.name, op: node.op, amount: amount.value as number };
+  if (state?.kind !== "id" || amount?.kind !== "literal" || amount.dimension !== undefined || typeof amount.value !== "number" ||
+    !(Math.abs(amount.value) <= Number.MAX_SAFE_INTEGER)) return undefined;
+  return { state: state.name, op: node.op, amount: amount.value };
 }
 
 const proofs = new WeakMap<ComponentDefinition, { readonly copyable: ReadonlySet<string>; readonly present: ReadonlySet<string> }>();
@@ -222,39 +223,54 @@ function provenValue(step: SetStep, definition: ComponentDefinition, copyable: R
     const source = scalarType(definition, value.name);
     return copyable.has(value.name) && (source === type || (source === "integer" && type === "number"));
   }
-  // Integer arithmetic gives the same integer under any number semantics the proposal settles on;
-  // `number` arithmetic may not, so it stays checked. A safe integer step cannot overflow to Infinity.
-  const arithmetic = integerStep(value);
-  return arithmetic !== undefined && (type === "integer" || type === "number") &&
-    present.has(arithmetic.state) && scalarType(definition, arithmetic.state) === "integer";
+  // A finite value stepped by a literal no larger than a safe integer stays finite: a double only
+  // overflows past 2^1023, where one step changes nothing. An integer stepped by a safe integer stays
+  // an integer; decimal arithmetic on a number gives a number.
+  const arithmetic = literalStep(value);
+  if (arithmetic === undefined || !present.has(arithmetic.state)) return false;
+  const source = scalarType(definition, arithmetic.state);
+  return type === "integer" ? source === "integer" && Number.isSafeInteger(arithmetic.amount)
+    : type === "number" && (source === "integer" || source === "number");
 }
 
 /**
  * A handler step whose written value the converter proves satisfies its state's declared type, so
  * it writes plainly: a conforming literal, a negation into a boolean state, a copy of a same-typed
- * state, or an always-present integer state plus or minus a safe integer literal. The caller still
- * checks a value that may be an invalid result.
+ * state, or an always-present number state plus or minus a number literal (an integer state, by a
+ * safe integer, to stay one). The caller still checks a value that may be an invalid result.
  */
 export function provenWrite(step: SetStep, definition: ComponentDefinition): boolean {
   const { copyable, present } = writeProofs(definition);
   return provenValue(step, definition, copyable, present);
 }
 
-/** `$state ± n` written to that same state: the step's operator and amount. */
-export function selfStep(step: SetStep): { readonly op: "+" | "-"; readonly amount: number } | undefined {
-  const arithmetic = integerStep(step.value.ast);
-  return arithmetic !== undefined && step.writablePath.length === 1 && arithmetic.state === step.writablePath[0] ? arithmetic : undefined;
+/**
+ * `$state ± n` written to that same state: the step's operator and amount, and whether it is decimal
+ * arithmetic (a `number` state) rather than JavaScript's (an `integer` state).
+ */
+export function selfStep(step: SetStep, definition: ComponentDefinition): { readonly op: "+" | "-"; readonly amount: number; readonly decimal: boolean } | undefined {
+  const arithmetic = literalStep(step.value.ast);
+  return arithmetic === undefined || step.writablePath.length !== 1 || arithmetic.state !== step.writablePath[0] ? undefined
+    : { ...arithmetic, decimal: scalarType(definition, arithmetic.state) !== "integer" };
 }
 
-/** `$state ± n` written to that same state, as `state++` or `state += n`. */
-export function increment(step: SetStep, target: string): string | undefined {
-  const self = selfStep(step);
-  return self === undefined ? undefined : self.amount === 1 ? `${target}${self.op}${self.op}` : `${target} ${self.op}= ${self.amount}`;
+/** An integer state's `$state ± n` written to itself, as `state++` or `state += n`. */
+export function increment(step: SetStep, definition: ComponentDefinition, target: string): string | undefined {
+  const self = selfStep(step, definition);
+  return self === undefined || self.decimal ? undefined : self.amount === 1 ? `${target}${self.op}${self.op}` : `${target} ${self.op}= ${self.amount}`;
 }
 
-/** A checked write's predicate and its authored location, as `write`'s trailing arguments. */
+/** A handler write's destination check, or none when the destination accepts any value. */
+export function refusing(check: string | undefined): string | undefined {
+  return check === "true" ? undefined : check;
+}
+
+/**
+ * A checked write's predicate and its authored location, as `write`'s trailing arguments: the file,
+ * handler and state path, which the live runtime's warning names and reports once.
+ */
 export function writeCheck(check: string | undefined, definition: ComponentDefinition, handler: HandlerDeclaration, step: SetStep): string {
-  return check === undefined ? "" : `, ${writePredicate(check)}, ${quote(`${step.path} in ${definition.source.file}#${handler.name}`)}`;
+  return check === undefined ? "" : `, ${writePredicate(check)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
 }
 
 /** The shared host's named predicates for scalar destinations; other types check inline. */

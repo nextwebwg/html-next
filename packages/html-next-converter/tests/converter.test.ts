@@ -203,7 +203,7 @@ describe("framework converter", () => {
 
   it("converts every successful shared conformance definition to React in both graph modes", async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 39, "review new successful conformance cases for React coverage");
+    assert.equal(successful.length, 40, "review new successful conformance cases for React coverage");
     const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -321,10 +321,11 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
   it("keeps authored React names off the shared rendering and events helpers", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-names-"));
     temporary.push(root);
-    // A `text` state once shadowed the text() helper, and an `isNumber` handler the write check it calls.
+    // A `text` state once shadowed the text() helper, and an `isNumber` handler the write check it calls
+    // (a product may overflow, so its write stays checked).
     await writeFile(join(root, "names.html"), `<template component="x-names" status="early" summary="Helper names."><defs>
       <state name="text" type="string" value="hi"></state><state type="number" name="count" value="1"></state>
-      <handler name="isNumber"><set name="count" expr:value="$count + 1"></set></handler>
+      <handler name="isNumber"><set name="count" expr:value="$count * 2"></set></handler>
       <handler name="useNativeEvents"><set name="count" value="0"></set></handler>
       </defs><section><p>Say {$text} {$count}</p><button on:click="isNumber">Go</button><button on:click="useNativeEvents">Reset</button></section></template>`);
     const outDirectory = join(root, "out");
@@ -1166,7 +1167,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
     // A conforming state's own value needs no read check, so the computed reads it directly.
     assert.match(source, /const double = cycleCheckedComputed\(\(\) => decimalMultiply\(count\.value, 2\)\)\n/);
     assert.match(source, /function increment\(\): void \{/);
-    assert.match(source, /  write\(count, count\.value \+ 1, isNumber, 'count in [^']*#increment'\)\n/);
+    // A present number state stepped by a literal stays a finite number, so it writes plainly.
+    assert.match(source, /  count\.value = decimalAdd\(count\.value, 1\)\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
     assert.match(source, /'count-change': isNumber,/);
     assert.match(source, /:data-count="count"/);

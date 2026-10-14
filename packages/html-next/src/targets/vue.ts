@@ -36,7 +36,7 @@ import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
 import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
-import { handlerDestinationCheck, increment, provenWrite, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
+import { handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
@@ -734,11 +734,10 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
       const proven = !mayBeInvalid && provenWrite(step, context.definition);
-      const destinationCheck = proven ? undefined
-        : handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
-          step.writablePath, 1, "value", local.script, lowering);
+      const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
+        step.writablePath, 1, "value", local.script, lowering));
       if (destinationCheck === undefined && !mayBeInvalid) {
-        lines.push(`  ${guard}${(proven ? increment(step, target) : undefined) ?? `${target} = ${value}`};`);
+        lines.push(`  ${guard}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${value}`};`);
       } else {
         // A state's ref takes the write itself; a path below it is written through a setter.
         const to = /^[\w$]+\.value$/.test(target) ? target.slice(0, -".value".length) : `(next) => (${target} = next)`;
