@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { compileSvelteFile, sveltePlugin } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { compile } from "svelte/compiler";
 
@@ -48,7 +48,7 @@ describe.skipIf(!enabled)("Svelte selected-prop parity", () => {
       const component = manifest.components[0]!;
       const componentPath = join(outDirectory, component.artifact);
       await writeFile(join(outDirectory, "svelte", `${component.name}.js`),
-        compile(await readFile(componentPath, "utf8"), { filename: componentPath, generate: "client" }).js.code);
+        await compileSvelteFile(componentPath));
       const wrapper = `<script lang="ts">
 import Component from "./svelte/${component.name}.js";
 let selected = $state<{ kind: string; value: unknown }>({ kind: "number", value: 2 });

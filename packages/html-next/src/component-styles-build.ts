@@ -35,7 +35,7 @@ export function compileComponentStylesForBuild(
   adopters?: readonly ComponentDefinition[],
   includeBoundaryReset = true,
 ): CompiledComponentStyles {
-  const compiled = compileStyles(css, definition, source, undefined, adopters, includeBoundaryReset);
+  const compiled = compileStyles(css, definition, source, adopters, includeBoundaryReset);
   return adopters === undefined ? withImportedStateNames(compiled, definition) : compiled;
 }
 
@@ -47,7 +47,7 @@ function withImportedStateNames(compiled: CompiledComponentStyles, definition: C
 /** One shared body, with selector tests resolved independently for every adopting contract. */
 export function compileSharedComponentStylesForBuild(css: string, adopters: readonly ComponentDefinition[], source?: string, includeBoundaryReset = true): CompiledComponentStyles {
   if (adopters.length === 0) return { css: "", stateNames: [] };
-  return compileStyles(css, adopters[0]!, source, undefined, adopters, includeBoundaryReset);
+  return compileStyles(css, adopters[0]!, source, adopters, includeBoundaryReset);
 }
 
 /** Delivers a closed graph in definition order, interleaving imports and local overrides. */
@@ -64,15 +64,8 @@ export function compileComponentGraphStylesForBuild(definitions: readonly Compon
   return hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body);
 }
 
-/** Snippets are opaque on the server, so scope by authored ownership instead of mutating them. */
-export function compileComponentStylesForSvelte(css: string, definition: ComponentDefinition): CompiledComponentStyles {
-  const projected = (definition.slots?.length ?? 0) === 0 ? undefined
-    : `:not([${SVELTE_OWNER_ATTRIBUTE}~="${definition.contract.tag}"])`;
-  return withImportedStateNames(compileStyles(css, definition, undefined, projected), definition);
-}
-
 function compileStyles(css: string, definition: ComponentDefinition, source?: string,
-  projected?: string, adopters: readonly ComponentDefinition[] = [definition], includeBoundaryReset = true): CompiledComponentStyles {
+  adopters: readonly ComponentDefinition[] = [definition], includeBoundaryReset = true): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
   const renamed = renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css));
@@ -82,8 +75,8 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
 
   const selector = (input: string): string => {
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
-      rewriteComponentSelector(input, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical, projected)))].join(", ");
-    return projected === undefined && styleRuleKind(input) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
+      rewriteComponentSelector(input, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical)))].join(", ");
+    return styleRuleKind(input) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
   };
 
   const rewrite = (rule: Rule): void => {
@@ -117,7 +110,7 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   const own = compile("own");
   const slotted = compile("slotted");
   for (const owner of owners) for (const name of owner.names) names.add(name);
-  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), projected, includeBoundaryReset), stateNames: Array.from(names),
+  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
 }
 
@@ -134,18 +127,62 @@ export function compileComponentStylesForVue(
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
+  return compileClassScopedStyles(css, definition, source, ["host-state"], (selector) => selector);
+}
+
+/**
+ * Styles for a converted Svelte component, emitted as its `<style>`, in Vue's native scope. Each
+ * selector is `:global()`, so Svelte keeps rules for markup it cannot see, such as sanitized HTML.
+ * In a component with slots the scope also holds content a consumer projects, which Svelte's hash
+ * class tells apart: Svelte puts it on the component's own markup, and projected content carries the
+ * consumer's. There a subject carries one test Svelte scopes: `:where(*)` for the component's own
+ * markup (or the owner attribute, for its sanitized HTML), and `:not(:scope, * *)` for what
+ * `:slotted()` selects, which is neither. A `:host` subject is the scope root and needs no test, and
+ * the scope has limits only when a subject can be below it. Keyframes keep their names.
+ */
+export function compileComponentStylesForSvelte(
+  css: string,
+  definition: ComponentDefinition,
+  source?: string,
+): CompiledComponentStyles {
+  const projects = (definition.slots?.length ?? 0) > 0;
+  const owner = projects && usesHtml(definition.template) ? `[${SVELTE_OWNER_ATTRIBUTE}~="${definition.contract.tag}"]` : undefined;
+  const slotted = new Set<object>();
+  let hashed = false;
+  let descends = false;
+  const compiled = compileClassScopedStyles(css, definition, source, ["slotted", "host-state"], (selector, rule) => {
+    if (selector.includes(SLOTTED) || (rule.parent !== undefined && slotted.has(rule.parent))) slotted.add(rule);
+    return postcss.list.comma(selector.replaceAll(SLOTTED, "")).map((complex) => {
+      const scoped = svelteSelector(complex, !projects ? undefined : slotted.has(rule) ? "projected" : "own", owner);
+      hashed ||= scoped.tested;
+      descends ||= !scoped.root;
+      return scoped.selector;
+    }).join(", ");
+  }, (root) => root.walkAtRules(/keyframes$/i, (rule) => {
+    if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
+  }), () => descends);
+  return hashed ? { ...compiled, hashed } : compiled;
+}
+
+const SLOTTED = ":where([--slotted])";
+
+function compileClassScopedStyles(css: string, definition: ComponentDefinition, source: string | undefined,
+  renames: readonly ("slotted" | "host-state")[], target: (selector: string, rule: Rule) => string,
+  prepare?: (root: postcss.Root) => void, limited = (): boolean => true): CompiledComponentStyles {
   const tag = definition.contract.tag;
   if (css.trim() === "") return withImportedStateNames({ css: "", stateNames: [] }, definition);
   assertResolvedStylesheet(css, source ?? definition.source.file);
   const names = new Set<string>();
   const canonical = componentStyleNameResolver(definition, source);
-  const root = postcss.parse(renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css), ["host-state"]));
+  const root = postcss.parse(renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css), renames));
+  prepare?.(root);
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, undefined, vueHostSelector);
+    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", tagClassSelector), rule);
   });
-  const scope = postcss.atRule({ name: "scope", params: vueScope(definition) });
+  const limits = limited() ? [...componentTags(definition.template)] : [];
+  const scope = postcss.atRule({ name: "scope", params: classScope(definition.contract.tag, limits) });
   for (const node of root.nodes.slice()) {
     if (node.type === "rule" || (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()))) {
       scope.append(node);
@@ -155,14 +192,49 @@ export function compileComponentStylesForVue(
     return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names) }, definition);
   }
   root.append(scope);
-  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names),
-    components: [...componentTags(definition.template)] }, definition);
+  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), components: limits }, definition);
 }
 
-/** The component's scope: its root, down to the roots of the components its template invokes. */
-function vueScope(definition: ComponentDefinition): string {
-  const limits = [...componentTags(definition.template)].map((name) => vueHostSelector(name));
-  return `(${vueHostSelector(definition.contract.tag)})${limits.length === 0 ? "" : ` to (${limits.join(", ")})`}`;
+/** One complex selector as `:global()`, with any test of its subject's ownership before its pseudo-element. */
+function svelteSelector(complex: string, owned: "own" | "projected" | undefined, owner: string | undefined): { selector: string; tested: boolean; root: boolean } {
+  const { start, pseudo } = subjectCompound(complex);
+  const subject = complex.slice(start, pseudo);
+  const root = /:scope(?![\w-])/.test(subject);
+  const test = owned === "projected" ? `:not(:scope, * *${owner === undefined ? "" : `, ${owner}`})`
+    : owned === undefined || root ? "" : `:where(*${owner === undefined ? "" : `, :global(${owner})`})`;
+  return { selector: `:global(${complex.slice(0, pseudo)}${subject === "" ? "*" : ""})${test}${complex.slice(pseudo)}`, tested: test !== "", root };
+}
+
+/** Where a complex selector's last compound starts, and where its pseudo-element starts (or its end). */
+function subjectCompound(selector: string): { start: number; pseudo: number } {
+  let start = 0;
+  let pseudo = -1;
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < selector.length; index += 1) {
+    const character = selector[index]!;
+    if (character === "\\") { index += 1; continue; }
+    if (quote !== "") { if (character === quote) quote = ""; continue; }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(" || character === "[") depth += 1;
+    else if (character === ")" || character === "]") depth -= 1;
+    else if (depth > 0) continue;
+    else if (/[\s>+~]/.test(character)) { start = index + 1; pseudo = -1; }
+    else if (character === ":" && pseudo === -1 && /^::|^:(?:before|after|first-line|first-letter)(?![\w-])/i.test(selector.slice(index))) pseudo = index;
+  }
+  return { start, pseudo: pseudo === -1 ? selector.length : pseudo };
+}
+
+/** Whether a template renders sanitized HTML (`$html`), slot fallbacks included. */
+function usesHtml(node: TemplateNode): boolean {
+  if (node.kind === "text") return false;
+  if (node.kind === "slot") return (node.fallback ?? []).some(usesHtml);
+  return node.attributes.some((attribute) => attribute.kind === "directive" && attribute.name === "html") || node.children.some(usesHtml);
+}
+
+/** The component's scope: its root, down to the roots of the components it invokes that limit it. */
+function classScope(tag: string, limits: readonly string[]): string {
+  return `(${tagClassSelector(tag)})${limits.length === 0 ? "" : ` to (${limits.map((name) => tagClassSelector(name)).join(", ")})`}`;
 }
 
 /** Components a template invokes, slot fallbacks included. */
@@ -176,7 +248,7 @@ function componentTags(node: TemplateNode, tags = new Set<string>()): Set<string
   return tags;
 }
 
-/** In Vue, a component's root is selected by its tag as a class; `namespace` keeps an authored `n|` prefix. */
-export function vueHostSelector(tag: string, namespace = ""): string {
+/** In Vue and Svelte, a component's root is selected by its tag as a class; `namespace` keeps an authored `n|` prefix. */
+export function tagClassSelector(tag: string, namespace = ""): string {
   return `${namespace === "" ? "" : namespace + "*"}.${tag.replace(/[^\w-]/g, (character) => `\\${character}`)}`;
 }
