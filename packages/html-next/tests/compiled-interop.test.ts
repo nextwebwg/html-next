@@ -210,4 +210,37 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     await flush();
     assert.equal(server.firstElementChild!.outerHTML, element.outerHTML);
   });
+
+  it("skips a handler's non-finite number silently, and warns once for a wrong type, compiled and live", async () => {
+    const take = parseComponent(`<template component="x-take" status="early" summary="Take.">
+      <defs><state name="count" type="number" value="1"></state>
+      <handler name="take"><set name="count" expr:value="$$event.detail"></set></handler></defs>
+      <b on:take="take">{$count}</b></template>`, "file:///take.html");
+    const { runtime, document } = await load(take);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const compiled = runtime.factory();
+    const live = document.createElement("x-take");
+    document.body.append(compiled, live);
+    runtime.registerComponentDefinitions([take]);
+    runtime.lowerDocument(document);
+    await flush();
+    const roots = [compiled, document.body.lastElementChild!];
+    const send = async (detail: unknown): Promise<string[]> => {
+      for (const root of roots) root.dispatchEvent(new CustomEvent("take", { detail }));
+      await flush();
+      return roots.map((root) => root.textContent!);
+    };
+    // Not finite is an invalid result, as ordinary invalid input: the state keeps its value and nothing warns.
+    assert.deepEqual(await send(Number.NaN), ["1", "1"]);
+    assert.deepEqual(await send(Number.POSITIVE_INFINITY), ["1", "1"]);
+    assert.equal(warn.mock.calls.length, 0);
+    // A wrong type is an authored mistake: the state keeps its value and each runtime warns once for the write.
+    assert.deepEqual(await send("2"), ["1", "1"]);
+    assert.deepEqual(await send("3"), ["1", "1"]);
+    assert.deepEqual(warn.mock.calls.map(([message]) => String(message).match(/HR007: .*/)?.[0]), [
+      "HR007: State `count` does not satisfy its declared type.",
+      "HR007: State `count` does not satisfy its declared type.",
+    ]);
+    assert.deepEqual(await send(4), ["4", "4"]);
+  });
 });
