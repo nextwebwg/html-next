@@ -52,7 +52,7 @@ Run `npm run dev` and open the URL it prints. Edit the page and the browser relo
 app/
   pages/          one file per page; the folder structure is the URL structure
   layouts/        shared shells, such as default.html
-  components/     your own components
+  components/     your own components (a convention; link them with href="@/app/components/…")
   head.js         optional script that runs before the page first paints
 public/           files copied as-is, such as favicon.ico
 htmlkit.config.ts optional settings
@@ -65,9 +65,10 @@ host's "page not found" response to `404.html` (your [not-found page](/htmlkit/r
 `app/pages/404.html` exists). `npm run preview` serves `dist/` locally first.
 
 The commands take an optional project folder (`htmlkit dev site`), `--base /docs/` to serve the site
-under a path, `--origin` for absolute URLs, `--out-dir`, `--port`, and `--host`. The servers listen on
-127.0.0.1 unless you pass `--host`. `preview` serves the built files as they are; it doesn't run
-loaders.
+under a path, `--origin` for absolute URLs, `--out-dir`, `--port`, and `--host`. Flags override the
+same settings in `htmlkit.config.ts`. The servers listen on 127.0.0.1, port 3000, unless you pass
+`--host` or `--port`. `preview` serves the built files as they are: it doesn't run loaders, and it
+takes the base path from the build, so build with the `--base` you deploy under.
 
 ## Next steps
 

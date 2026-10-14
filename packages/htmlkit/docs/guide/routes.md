@@ -20,7 +20,8 @@ Every file in `app/pages` is a page, and its path is its URL:
 A few rules cover the rest:
 
 - `index.html` is its folder's page.
-- URLs end with a slash; HTMLKit redirects `/about` to `/about/`.
+- URLs end with a slash. The development server, `preview`, and `application.fetch` redirect
+  `/about` to `/about/`. A static host decides for itself, so check its trailing-slash setting.
 - Files and folders starting with `_` or `.` are not pages, so keep helpers there or in `app/components`.
 - A number and a dot at the start of a name, as in `01.guide/`, orders [navigation](/htmlkit/navigation)
   and never appears in the URL.
@@ -116,8 +117,10 @@ host serves for every missing path. Without the file, HTMLKit serves a plain "Pa
 ## The page head
 
 `<title>`, `<meta>`, and `<link>` tags directly inside a page or layout component go in the document
-head. A page's `<title>` and `<meta>` tags replace the layout's; stylesheet and alternate `<link>`s from
-both are kept. They can use the page's props:
+head. A page's tag replaces a layout's tag with the same identity: the `<title>`, a `<meta>` with the
+same `name` or `property`, the canonical `<link>`, and an alternate `<link>` with the same `hreflang`.
+A page's `og:image` tags replace the layout's as a set. Every other `<link>`, such as a stylesheet, is
+kept from both. Only `<title>`, `<meta>`, and `<link>` may go in the head. They can use the page's props:
 
 ```html
 <template component="page-post">
@@ -163,6 +166,6 @@ allow it with a `'sha256-…'` hash of its text.
   supported yet.
 - Pages, layouts, and components link other components with
   `<link rel="component" href="…">`. `@/` is the project root, so
-  `href="@/components/card.html"` works from anywhere.
+  `href="@/app/components/card.html"` works from anywhere.
 - Outside HTMLKit, the regular HTML Next loader ignores page metadata, so the same component files
   still work there.
