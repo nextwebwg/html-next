@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
@@ -79,8 +79,6 @@ describe.skipIf(!enabled)("Svelte declared data parity", () => {
       const manifest = await convertComponents({
         mode, target: "svelte", root: directory, outDirectory, entries: ["components/**"], publicRootURL: "/app/",
       });
-      const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
-        .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
       const component = manifest.components[0]!;
       const app = join(outDirectory, "App.svelte");
       await writeFile(app, `<script>import XDataCycle from "./${component.artifact}";</script><XDataCycle id="case" />`);
@@ -102,7 +100,7 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /<output class="pending">true<\/output>/);
-      results.set(mode, { bundle, markup, css });
+      results.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
     }
     };
     await compileScene("lifecycle", source, outputs);

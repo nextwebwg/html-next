@@ -214,18 +214,16 @@ export function guardComponentPseudoElements(selector: string): string {
 
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
 export function assembleComponentStyles(tag: string | readonly string[], own: string, slotted: string, hoisted: string,
-  projectedBoundary = `[${PROJECTED_ATTRIBUTE}]`, includeBoundaryReset = true): string {
+  includeBoundaryReset = true): string {
   const tags = typeof tag === "string" ? [tag] : tag;
   const root = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"]`).join(", ");
   const scoped = own.trim() !== "" || slotted.trim() !== "";
   const identities = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"] { ${SCOPE_OWNER}: "${name}" !important; }`).join("\n");
-  const projected = projectedBoundary === `[${PROJECTED_ATTRIBUTE}]` ? ""
-    : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) { :where(${projectedBoundary}) { ${SCOPE_OWNER}: projected !important; } }`;
   return [
     hoisted,
     scoped && includeBoundaryReset ? COMPONENT_STYLE_BOUNDARIES : "",
-    scoped ? `@supports (-moz-appearance: none) {\n${identities}${projected === "" ? "" : "\n" + projected}\n}` : "",
-    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], ${projectedBoundary}) {\n${own}\n}`,
+    scoped ? `@supports (-moz-appearance: none) {\n${identities}\n}` : "",
+    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]) {\n${own}\n}`,
     slotted.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) {\n${slotted}\n}`,
   ].filter((part) => part !== "").join("\n");
 }
@@ -278,8 +276,10 @@ export interface CompiledComponentStyles {
   /** The props and state the state attribute must carry, in first-use order. */
   readonly stateNames: readonly string[];
   readonly stateNamesByTag?: Readonly<Record<string, readonly string[]>>;
-  /** Vue: the components the template invokes, which bound the scope and carry their tag as a class. */
+  /** Vue and Svelte: the components the template invokes, which bound the scope and carry their tag as a class. */
   readonly components?: readonly string[];
+  /** Svelte: whether a selector tests Svelte's hash class, which Svelte then puts on the component's markup. */
+  readonly hashed?: boolean;
 }
 
 type RuleContainer = CSSStyleSheet | CSSGroupingRule;
@@ -349,7 +349,7 @@ export function compileComponentStyles(
   const own = compile("own");
   const slotted = compile("slotted");
   for (const owner of owners) for (const name of owner.names) names.add(name);
-  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), undefined, includeBoundaryReset), stateNames: Array.from(names),
+  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
 }
 

@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
 
 import { compileScript, compileStyle, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
+import { compile as compileSvelte } from "svelte/compiler";
 import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
@@ -86,16 +87,17 @@ describe("framework converter", () => {
         .map(async file => ({ path: file.path, content: await readFile(join(output, file.path), "utf8") })));
       for (const file of files) assert.doesNotMatch(file.content, /@import "defaults\.css"/);
       const css = files.filter(file => file.path.endsWith(".css")).map(file => file.content).join("\n");
-      if (target !== "vue") {
+      if (target === "react") {
         assert.equal(css.match(/@namespace/g)?.length, 1);
         assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
         assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
       }
       if (target === "react") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
-      if (target === "svelte") {
-        assert.match(css, /:not\(\[data-html-next-owner~="x-a"\]\)/);
-        assert.match(css, /:not\(\[data-html-next-owner~="x-b"\]\)/);
-        for (const file of files.filter(file => file.path.endsWith(".svelte"))) assert.match(file.content, /data-html-next-owner/);
+      if (target === "svelte") for (const file of files) {
+        assert.match(file.content, /box-sizing: border-box/);
+        const compiled = compileSvelte(file.content, { filename: file.path });
+        assert.match(compiled.css?.code ?? "", /@namespace htmlnextns[0-9a-f]+\s+"http:\/\/www\.w3\.org\/2000\/svg";[\s\S]*@scope/);
+        assert.deepEqual(compiled.warnings.filter((warning) => warning.code.startsWith("css_")), []);
       }
       if (target === "vue") for (const file of files) {
         assert.match(file.content, /box-sizing: border-box/);

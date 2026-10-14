@@ -34,11 +34,12 @@ ${expressionHelpersSource()}
 
 /**
  * The root's attributes, as one spread: the consumer's, without the props converted components pass
- * each other, plus the root's \`data-component\` token. A root that is another component forwards
- * its native bindings to it. An attachment writes \`constructor\` and \`__proto__\`, which Svelte's
- * spread reads through the prototype.
+ * each other, and \`scope\`, the classes that scope the component's styles and its parent's, before
+ * the consumer's. A root that is another component forwards its native bindings to it. An
+ * attachment registers the root and writes \`constructor\` and \`__proto__\`, which Svelte's spread
+ * reads through the prototype.
  */
-export function rootAttributes(rest: () => Record<string, unknown>, tag: string, options: { forwardBindings?: boolean; omit?: readonly string[]; clientOmit?: readonly string[]; server?: () => Record<string, unknown> } = {}): () => Record<string, unknown> {
+export function rootAttributes(rest: () => Record<string, unknown>, options: { scope?: string; forwardBindings?: boolean; omit?: readonly string[]; clientOmit?: readonly string[]; server?: () => Record<string, unknown> } = {}): () => Record<string, unknown> {
   const attach = createAttachmentKey();
   const prototype = prototypeAttributes(rest);
   const attrs = $derived.by(() => {
@@ -50,7 +51,7 @@ export function rootAttributes(rest: () => Record<string, unknown>, tag: string,
     } else {
       for (const name of [...(options.clientOmit ?? []), "constructor", "__proto__"]) Reflect.deleteProperty(attrs, name);
     }
-    attrs["data-component"] = [props["data-component"], tag].filter(Boolean).join(" ");
+    if (options.scope !== undefined) attrs.class = [options.scope, props.class];
     attrs[attach] = prototype;
     // The attachment key is a symbol, which Svelte's element types leave out.
     return attrs as Record<string, unknown>;
@@ -58,8 +59,17 @@ export function rootAttributes(rest: () => Record<string, unknown>, tag: string,
   return () => attrs;
 }
 
+const roots = new WeakSet<Element>();
+
+/** The root of the converted component an element is part of: the element or its nearest ancestor that is one. */
+export function componentRoot(element: Element | null): Element | null {
+  while (element !== null && !roots.has(element)) element = element.parentElement;
+  return element;
+}
+
 function prototypeAttributes(rest: () => Record<string, unknown>) {
   return (element: Element) => {
+    roots.add(element);
     for (const name of ["constructor", "__proto__"]) {
       let written = false;
       $effect(() => {
