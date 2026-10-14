@@ -57,6 +57,9 @@ catalogs:
     cssstyle:
       specifier: 6.2.0
       version: 6.2.0
+    decimal.js:
+      specifier: 10.6.0
+      version: 10.6.0
     esbuild:
       specifier: 0.28.2
       version: 0.28.2
@@ -219,6 +222,9 @@ importers:
       anod:
         specifier: 'catalog:'
         version: 0.9.1
+      decimal.js:
+        specifier: 'catalog:'
+        version: 10.6.0
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2

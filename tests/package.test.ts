@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,12 @@ const browserExports = [
   "./browser",
 ] as const;
 
+const selectedPackage = process.env.HTMLNEXT_PACKAGE_TEST;
+if (selectedPackage && !releaseDirectories.some((directory) => directory === selectedPackage)) {
+  throw new Error(`Unknown package test selection: ${selectedPackage}`);
+}
+const includesPackage = (...directories: string[]): boolean => !selectedPackage || directories.includes(selectedPackage);
+
 // Removing the installed consumers on Windows can outlast the default hook budget.
 afterAll(() => rmSync(workspace, { recursive: true, force: true }), 60_000);
 
@@ -50,12 +56,19 @@ function pack(packageDirectory: string): string {
   return isAbsolute(packed!) ? packed! : join(workspace, packed!);
 }
 
+// Runs an installed bin the way a consumer does: through npm's node_modules/.bin link (a command shim on Windows).
+function runBin(consumer: string, name: string, args: readonly string[] = []): string {
+  const bin = join(consumer, "node_modules/.bin", useCommandShell ? `${name}.cmd` : name);
+  if (!useCommandShell) expect(lstatSync(bin).isSymbolicLink()).toBe(true);
+  return execFileSync(bin, args, { cwd: consumer, encoding: "utf8", shell: useCommandShell });
+}
+
 function specifier(path: typeof publicExports[number]): string {
   return path === "." ? componentsPackage : `${componentsPackage}/${path.slice(2)}`;
 }
 
 describe("workspace package contracts", () => {
-  it("installs HTML Next with every public export", () => {
+  it.skipIf(!includesPackage("html-next"))("installs HTML Next with every public export", () => {
     const componentsTarball = pack("html-next");
     const consumer = join(workspace, "html-next-consumer");
     mkdirSync(consumer);
@@ -129,7 +142,7 @@ describe("workspace package contracts", () => {
       `${publicExports
         .filter((path) => path !== "./browser")
         .map((path) => `import ${JSON.stringify(specifier(path))};`)
-        .join("\n")}\nconst { renderComponents } = await import("@nextwebwg/html-next/server");\nconst { parseComponent } = await import("@nextwebwg/html-next");\nconst rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });\nif (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");\nprocess.stdout.write("ok");\n`,
+        .join("\n")}\nconst { renderComponents } = await import("@nextwebwg/html-next/server");\nconst { parseComponent, add, subtract, multiply, divide } = await import("@nextwebwg/html-next");\nconst compiled = await import("@nextwebwg/html-next/generated-runtime");\nif (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");\nconst rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });\nif (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");\nprocess.stdout.write("ok");\n`,
     );
     expect(
       execFileSync(process.execPath, [nodeEntry], { cwd: consumer, encoding: "utf8" }),
@@ -165,10 +178,10 @@ describe("workspace package contracts", () => {
       ],
       { cwd: root, shell: useCommandShell },
     );
-  }, 120_000);
+  }, 240_000); // Windows runners have taken over 120 s for this install and bundle.
 
-  it("installs the source adapter and prepares React types through the consumer Vite config", () => {
-    const tarballs = releaseDirectories.map(pack);
+  it.skipIf(!includesPackage("html-next-converter", "html-next-unplugin"))("installs the source adapter and prepares React types through the consumer Vite config", () => {
+    const tarballs = ["html-next", "html-next-converter", "html-next-unplugin"].map(pack);
     const consumer = join(workspace, "adapter-consumer");
     mkdirSync(join(consumer, "src"), { recursive: true });
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "adapter-consumer", private: true, type: "module" }));
@@ -187,7 +200,12 @@ describe("workspace package contracts", () => {
         { cwd: consumer, encoding: "utf8" });
       expect(JSON.parse(output)).toEqual({ diagnostics: [] });
     }
+    expect(JSON.parse(runBin(consumer, "html-next-check", ["controls.html", "--json"]))).toEqual({ diagnostics: [] });
     expect(readdirSync(consumer, { recursive: true }).map(String).sort()).toEqual(filesBeforeCheck);
+    runBin(consumer, "html-next", ["build", "controls.html", "--out-dir", "bin-build"]);
+    expect(existsSync(join(consumer, "bin-build/vanilla/UiLabel.js"))).toBe(true);
+    runBin(consumer, "html-next-convert", ["vue", "controls.html", "--mode", "library", "--out-dir", "bin-vue"]);
+    expect(existsSync(join(consumer, "bin-vue/vue/UiLabel.vue"))).toBe(true);
     const invalid = join(consumer, "invalid.html");
     writeFileSync(invalid, '<template component="ui-invalid">\n  <ui-missing></ui-missing>\n</template>');
     const failedCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--json"], { cwd: consumer, encoding: "utf8" });
@@ -239,8 +257,7 @@ describe("workspace package contracts", () => {
     manifest.dependencies["@example/source-controls"] = "1.0.0";
     writeFileSync(join(consumer, "package.json"), JSON.stringify(manifest));
     writeFileSync(join(consumer, "vite.config.mjs"), `import htmlNext from "@nextwebwg/html-next-unplugin/vite"; import react from "@vitejs/plugin-react"; export default { plugins: [htmlNext({ target: "react" }), react()] };`);
-    const cli = join(consumer, "node_modules/@nextwebwg/html-next-unplugin/dist/cli.js");
-    execFileSync(process.execPath, [cli], { cwd: consumer, encoding: "utf8" });
+    runBin(consumer, "html-next-sync");
     expect(readFileSync(join(consumer, "src/html-next.d.ts"), "utf8")).toContain('declare module "@example/source-controls"');
     writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label="Ready" />;');
     writeFileSync(join(consumer, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true,
@@ -256,7 +273,7 @@ describe("workspace package contracts", () => {
     const libraryManifest = JSON.parse(readFileSync(join(library, "package.json"), "utf8")) as { exports: Record<string, unknown> };
     libraryManifest.exports["."] = { "html-next": "./components/" };
     writeFileSync(join(library, "package.json"), JSON.stringify(libraryManifest));
-    execFileSync(process.execPath, [cli], { cwd: consumer, encoding: "utf8" });
+    runBin(consumer, "html-next-sync");
     execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8" });
     // The packed adapter also supports zero-config native consumption of the same folder.
     // Model strict dependency installation: the app has no direct core dependency.
@@ -293,19 +310,19 @@ describe("workspace package contracts", () => {
     expect([...versions], "All published packages must share one version.").toHaveLength(1);
   });
 
-  it("builds a static application through the installed HTMLKit CLI", () => {
+  it.skipIf(!includesPackage("htmlkit"))("builds a static application through the installed HTMLKit CLI", () => {
     const consumer = join(workspace, "htmlkit-consumer");
     mkdirSync(join(consumer, "app/pages"), { recursive: true });
     mkdirSync(join(consumer, "app/layouts"), { recursive: true });
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "htmlkit-consumer", private: true, type: "module" }));
     execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", pack("html-next"), pack("htmlkit")], { cwd: consumer, shell: useCommandShell });
-    writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/", routeOrdering: true });');
-    writeFileSync(join(consumer, "app/layouts/default.html"), '<link rel="component" href="@nextwebwg/htmlkit/components/navigation.html"><template component="packed-shell"><title>Layout default</title><defs><prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs><main><htmlkit-navigation from:items="$navigation"></htmlkit-navigation><slot name="page"></slot></main></template>');
+    writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/" });');
+    writeFileSync(join(consumer, "app/layouts/default.html"), '<link rel="component" href="@nextwebwg/htmlkit/components/nav.html"><template component="packed-shell"><title>Layout default</title><defs><prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs><main><hk-nav from:items="$navigation"></hk-nav><slot name="page"></slot></main></template>');
     writeFileSync(join(consumer, "app/layouts/default.server.ts"), 'export const load = async ({ navigation }) => ({ props: { navigation: await navigation() } });');
-    writeFileSync(join(consumer, "app/pages/01-index.html"), '<meta name="htmlkit:page" content="packed-page"><template component="packed-label"><title>Helper default</title><strong>Packaged helper</strong></template><template component="packed-page"><title $value="$label"></title><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="$label"></h1><packed-label></packed-label></section></template>');
-    writeFileSync(join(consumer, "app/pages/01-index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
+    writeFileSync(join(consumer, "app/pages/01.index.html"), '<meta name="hk:page" content="packed-page"><template component="packed-label"><title>Helper default</title><strong>Packaged helper</strong></template><template component="packed-page"><title $value="$label"></title><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="$label"></h1><packed-label></packed-label></section></template>');
+    writeFileSync(join(consumer, "app/pages/01.index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
     const installed = join(consumer, "node_modules/@nextwebwg/htmlkit");
-    const output = execFileSync(process.execPath, [join(installed, "dist/cli.js"), "build"], { cwd: consumer, encoding: "utf8" });
+    const output = runBin(consumer, "htmlkit", ["build"]);
     expect(output).toContain("Generated 1 pages");
     const html = readFileSync(join(consumer, "dist/index.html"), "utf8");
     expect(html).toContain("Installed platform");

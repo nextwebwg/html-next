@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 
+import { JSDOM, VirtualConsole } from "jsdom";
+
+import { parseBrowserComponent } from "../src/browser-source.js";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -672,6 +675,37 @@ describe("parseComponent", () => {
     expectDiagnostic("HT005", `<template component="demo-paths" status="early" summary="Paths."><defs><state type="number" name="count" value="0"></state></defs><input bind:value="$count + 1"></template>`);
   });
 
+  it("writes through $each, $with, and $match aliases of state paths", () => {
+    const parse = (body: string) => parseComponent(`<template component="x-alias" status="early" summary="Aliases."><defs>
+      <state name="draft" type="object({ owner: object({ name: string }), plan: string })" value="{ owner: { name: 'Ada' }, plan: 'free' }"></state>
+      <state name="rows" type="list(object({ label: string }))" value="[]"></state>
+      <state name="tags" type="list(string)" value="[]"></state>
+      <prop name="title" type="string">Title.</prop></defs><section>${body}</section></template>`);
+    const writes = (node: unknown): unknown[] => {
+      if (node === null || typeof node !== "object") return [];
+      const own = (node as { twoWay?: boolean }).twoWay === true ? [(node as unknown as { writablePath: unknown }).writablePath] : [];
+      return [...own, ...Object.values(node).flatMap(writes)];
+    };
+    const loopIndex = { kind: "index", item: "row", expression: { kind: "member", object: { kind: "id", name: "loop" }, key: "index" } };
+    assert.deepEqual(writes(parse(`<div $with="$draft.owner as owner"><input bind:value="owner.name"></div>` +
+      `<template $match="$draft as d"><input $when="$d.plan" bind:value="d.plan"><i $else></i></template>` +
+      `<p $each="row of $rows"><input bind:value="row.label"></p>` +
+      `<p $each="row, i of $rows"><b $each="n of [1]"><input bind:value="row.label"></b></p>`).template), [
+      ["draft", "owner", "name"],
+      ["draft", "plan"],
+      ["rows", loopIndex, "label"],
+      ["rows", { kind: "index", item: "row", expression: { kind: "id", name: "i" } }, "label"],
+    ]);
+    const refused = (body: string, reason: RegExp) => assert.throws(() => parse(body), (error: unknown) =>
+      error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT005" && reason.test(error.diagnostic.message));
+    refused(`<p $each="row of $rows"><b $each="n of [1]"><input bind:value="row.label"></b></p>`, /name that loop's index/);
+    refused(`<p $each="row of $rows" $where="$row.label"><input bind:value="row.label"></p>`, /\$where`, `\$sort`, or `\$limit` list/);
+    refused(`<p $each="row, i of $rows"><input bind:value="i"></p>`, /`i` is a loop index/);
+    refused(`<div $with="$title as draft"><input bind:value="draft.plan"></div>`, /`draft` stands for `\$title`, which is not a writable state path/);
+    refused(`<p $each="t of ['a']"><input bind:value="t"></p>`, /not declared state/);
+    refused(`<p $each="t of $tags"><input bind:value="t"></p>`, /`t` is a whole loop item; bind one of its fields/);
+  });
+
   it("parses state-rooted two-way bindings, flow, content, refs, and events", () => {
     const definition = parseComponent(
       `<template component="demo-example" status="early" summary="Bindings.">` +
@@ -995,5 +1029,43 @@ describe("ref-targeted dispatch", () => {
   it("rejects invalid and unknown targets", () => {
     for (const target of ["", "#customer", "missing"]) expectDiagnostic("HC023", source(target));
     assert.doesNotThrow(() => parseComponent(source("customer", '<ul $each="item of [1, 2]"><li $ref="customer"></li></ul>')));
+  });
+});
+
+describe("preformatted whitespace", () => {
+  // Shiki's code blocks separate `.line` spans with "\n" text nodes that hold no other text.
+  const source = `<template component="x-code"><section>
+    <pre class="shiki"><code><span class="line">a</span>
+<span class="line">b</span><template $if="true"> </template><slot>
+</slot></code></pre>
+    <p><b>x</b> <i>y</i></p><listing><b>l</b>
+<b>m</b></listing><textarea>
+  </textarea></section></template>`;
+  it("keeps whitespace-only text inside pre, listing and textarea in parse5 and browser parsing", () => {
+    const { document } = new JSDOM(source).window;
+    for (const { template } of [parseComponent(source), parseBrowserComponent(document.querySelector("template")!, "code.html")]) {
+      const [pre, p, listing, textarea] = template.children as ElementNode[];
+      const code = pre!.children[0] as ElementNode;
+      assert.deepEqual(code.children.map((child) => child.kind === "text" ? child.value : child.kind), ["element", "\n", "element", "element", "slot"]);
+      assert.deepEqual((code.children[3] as ElementNode).children, [{ kind: "text", value: " " }]);
+      assert.deepEqual((code.children[4] as { fallback: unknown }).fallback, [{ kind: "text", value: "\n" }]);
+      // Outside a preformatted element, whitespace-only text between elements is still dropped.
+      assert.equal(p!.children.length, 2);
+      assert.deepEqual(listing!.children[1], { kind: "text", value: "\n" });
+      assert.deepEqual(textarea!.children, [{ kind: "text", value: "  " }]);
+    }
+  });
+});
+
+describe("browser-parsed components", () => {
+  it("warns in the console when a bare keyword spells a name in scope", () => {
+    const warnings: string[] = [];
+    const virtualConsole = new VirtualConsole();
+    virtualConsole.on("warn", (message: string) => warnings.push(message));
+    const { document } = new JSDOM(`<template component="x-count" status="early" summary="Count.">
+      <defs><state name="count" type="number" value="1"></state></defs>
+      <p from:title="count" from:data-mode="compact">{$count + 1}</p></template>`, { virtualConsole }).window;
+    parseBrowserComponent(document.querySelector("template")!, "count.html");
+    assert.deepEqual(warnings, ["count.html: HT022: `count` is a keyword, not a reference; did you mean `$count`? (in `count`)"]);
   });
 });

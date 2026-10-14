@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
 
-import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
+import { compileScript, compileStyle, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
+import { compile as compileSvelte } from "svelte/compiler";
 import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
@@ -72,6 +73,45 @@ async function typecheckReact(root: string, files: readonly string[]): Promise<v
 }
 
 describe("framework converter", () => {
+  for (const target of ["react", "svelte", "vue"] as const) {
+    it(`resolves shared defaults and preserves ${target}'s component and slot boundaries`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "html-next-converter-shared-"));
+      temporary.push(root);
+      await writeFile(join(root, "package.json"), "{}");
+      await writeFile(join(root, "defaults.css"), '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: rebeccapurple; } :host, *, *::before, *::after { box-sizing: border-box; } :host-state([open]) { color: rebeccapurple; }');
+      await writeFile(join(root, "components.html"), ["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span>own</span><slot></slot></section><style>@import "defaults.css";</style></template>`).join(""));
+      const output = join(root, "out");
+      const manifest = await convertComponents({ entries: ["components.html"], target, root, outDirectory: output, mode: "library" });
+      assert.ok(manifest.sourceFiles.includes("defaults.css"));
+      const files = await Promise.all(manifest.output.artifacts.filter(file => file.kind === "component" || file.kind === "style")
+        .map(async file => ({ path: file.path, content: await readFile(join(output, file.path), "utf8") })));
+      for (const file of files) assert.doesNotMatch(file.content, /@import "defaults\.css"/);
+      const css = files.filter(file => file.path.endsWith(".css")).map(file => file.content).join("\n");
+      if (target === "react") {
+        assert.equal(css.match(/@namespace/g)?.length, 1);
+        assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
+        assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
+      }
+      if (target === "react") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
+      if (target === "svelte") for (const file of files) {
+        assert.match(file.content, /box-sizing: border-box/);
+        const compiled = compileSvelte(file.content, { filename: file.path });
+        assert.match(compiled.css?.code ?? "", /@namespace htmlnextns[0-9a-f]+\s+"http:\/\/www\.w3\.org\/2000\/svg";[\s\S]*@scope/);
+        assert.deepEqual(compiled.warnings.filter((warning) => warning.code.startsWith("css_")), []);
+      }
+      if (target === "vue") for (const file of files) {
+        assert.match(file.content, /box-sizing: border-box/);
+        compileVue(file.content, file.path);
+        const parsed = parseVue(file.content, { filename: file.path });
+        for (const style of parsed.descriptor.styles) {
+          assert.match(style.content, /@namespace/);
+          assert.deepEqual(compileStyle({ source: style.content, filename: file.path, id: 'namespace-test', scoped: style.scoped ?? false }).errors, []);
+        }
+      }
+      for (const tag of ["x-a", "x-b"]) assert.match(files.map(file => file.content).join("\n"), new RegExp(`data-${tag}-state`));
+    });
+  }
+
   it("preserves the state reference for an unchanged nested control write", async () => {
     const source = reactControlArtifact().content;
     const compiled = await transform(source, { loader: "ts", format: "esm" });
@@ -165,7 +205,7 @@ describe("framework converter", () => {
 
   it("converts every successful shared conformance definition to React in both graph modes", async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 36, "review new successful conformance cases for React coverage");
+    assert.equal(successful.length, 40, "review new successful conformance cases for React coverage");
     const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -256,6 +296,53 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     assert.match(renderToStaticMarkup(createElement(module.exports.XText!)), /<span[^>]*>Hello<\/span>/);
   });
 
+  it("keeps React's preformatted text, textarea defaults and non-breaking spaces exactly", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-text-"));
+    temporary.push(root);
+    await writeFile(join(root, "text.html"), `<template component="x-spacing" status="early" summary="Text spacing."><defs>
+      <state type="number" name="count" value="1"></state>
+      </defs><section><pre>first  line
+  second</pre><pre>{$count}  two
+  three</pre><textarea>a  b
+  c</textarea><p>a&nbsp;&nbsp;b</p><p>a&nbsp;&nbsp;{$count}</p><p>a
+        b   {$count}</p></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    const markup = renderToStaticMarkup(createElement(module.exports.XSpacing!));
+    assert.deepEqual([...markup.matchAll(/<(pre|textarea|p)[^>]*>([^<]*)</g)].map((match) => match[2]), [
+      "first  line\n  second", "1  two\n  three", "a  b\n  c", "a\u00a0\u00a0b", "a\u00a0\u00a01", "a b 1",
+    ]);
+  });
+
+  it("keeps authored React names off the shared rendering and events helpers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-names-"));
+    temporary.push(root);
+    // A `text` state once shadowed the text() helper, and an `isNumber` handler the write check it calls
+    // (a product may overflow, so its write stays checked).
+    await writeFile(join(root, "names.html"), `<template component="x-names" status="early" summary="Helper names."><defs>
+      <state name="text" type="string" value="hi"></state><state type="number" name="count" value="1"></state>
+      <handler name="isNumber"><set name="count" expr:value="$count * 2"></set></handler>
+      <handler name="useNativeEvents"><set name="count" value="0"></set></handler>
+      </defs><section><p>Say {$text} {$count}</p><button on:click="isNumber">Go</button><button on:click="useNativeEvents">Reset</button></section></template>`);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
+    const bundle = await build({
+      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
+      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
+    });
+    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    assert.match(renderToStaticMarkup(createElement(module.exports.XNames!)), /<p>Say hi 1<\/p>/);
+    // The handler's write check is the imported predicate, not the handler calling itself.
+    await typecheckReact(root, manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path)).map((artifact) => join(outDirectory, artifact.path)));
+  });
+
   it("converts native ref targets for focus and validation handlers", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-ref-actions-"));
     temporary.push(root);
@@ -337,8 +424,8 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       entries: ["components/**"], publicRootURL: "/app/" });
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "react/data.ts" && artifact.kind === "helper"));
     const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-    assert.match(component, /source: "\.\/api\/feed", definition: "\/app\/components\/feed\.html"/);
-    assert.match(component, /debounce: 500, poll: 1500/);
+    assert.match(component, /source: "\.\/api\/feed",\s+definition: "\/app\/components\/feed\.html"/);
+    assert.match(component, /debounce: 500,\s+poll: 1500/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
     await typecheckReact(root, manifest.output.artifacts
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
@@ -567,7 +654,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
       .map((artifact) => join(outDirectory, artifact.path)));
     const component = await readFile(join(outDirectory, "react/XCard.tsx"), "utf8");
-    assert.match(component, /reason.*action.*programmatic/);
+    assert.match(component, /reason[\s\S]*action[\s\S]*programmatic/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
   });
 
@@ -1031,10 +1118,11 @@ export default function initialize(host) { host.on("connect", () => connect(host
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.doesNotMatch(source, /html-next:nested-depth/, "ordinary graphs must not pay for the recursion guard");
-    assert.deepEqual([...source.matchAll(/^import[^\n]*from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./props"]);
+    // Every component takes its root attributes and hydration check from the shared host.
+    assert.deepEqual([...source.matchAll(/from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./host", "./props"]);
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "vue/props.ts" && artifact.kind === "helper"));
     assert.match(await readFile(join(outDirectory, "vue", "props.ts"), "utf8"), /function checkedProp/);
-    assert.match(source, /<style scoped>\n\[data-component~="x-card"\] \{\n  display: block;\n\}/);
+    assert.match(source, /<style scoped>\n@scope \(\.x-card\) \{\s+:scope \{\s+display: block;\s+\}/);
     assert.equal(manifest.graph, "application");
     assert.deepEqual(manifest.entries, [{ source: "x-card.html", tag: "x-card", artifact: "vue/XCard.vue" }]);
     assert.equal(manifest.output.entry, "vue/application.ts");
@@ -1078,13 +1166,14 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.match(await readFile(join(outDirectory, "vue", "host.ts"), "utf8"), /function useComponentHost/);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
-    assert.match(source, /const double = cycleCheckedComputed\(\(\) => \{[\s\S]*return doublePrevious = count\.value \* 2/);
+    // A conforming state's own value needs no read check, so the computed reads it directly.
+    assert.match(source, /const double = cycleCheckedComputed\(\(\) => decimalMultiply\(count\.value, 2\)\)\n/);
     assert.match(source, /function increment\(\): void \{/);
-    assert.match(source, /const next0 = count\.value \+ 1/);
-    assert.match(source, /count\.value = next0 as never/);
+    // A present number state stepped by a literal stays a finite number, so it writes plainly.
+    assert.match(source, /  count\.value = decimalAdd\(count\.value, 1\)\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
-    assert.match(source, /const isCountChangeDetail = \(\s*detail: unknown,?\s*\): boolean => \(?typeof detail === 'number' && Number\.isFinite\(detail\)/);
-    assert.match(source, /:data-count="guarded"/);
+    assert.match(source, /'count-change': isNumber,/);
+    assert.match(source, /:data-count="count"/);
   });
 
   it("keeps root-relative data requests on the browser origin", async () => {

@@ -1,4 +1,5 @@
 export { defineContract, serializePropTarget } from "./contract-platform.js";
+export { add, divide, multiply, subtract } from "./decimal.js";
 export { getDiagnosticLocation, HtmlDiagnosticAggregateError, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type DiagnosticLocation, type HtmlDiagnostic } from "./diagnostics.js";
 export {
   generateComponent,
@@ -22,6 +23,7 @@ export {
   svelteControlArtifact,
   svelteDataArtifact,
   svelteReactivityArtifact,
+  svelteRenderArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
@@ -33,6 +35,7 @@ export {
   reactHostArtifact,
   reactContextArtifact,
   reactDepthArtifact,
+  reactRenderArtifact,
   type GeneratedArtifact,
 } from "./generate.js";
 export { LANGUAGE_EXTENSIONS, TRANSITIONS_EXTENSION, transitionElements } from "./transition-syntax.js";
@@ -77,7 +80,8 @@ export {
   PROJECTED_ATTRIBUTE,
   stateAttribute,
 } from "./component-styles.js";
-export { compileComponentStylesForBuild, compileComponentStylesForVue } from "./component-styles-build.js";
+export { compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
+export { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 export {
   NATIVE_FLAG,
   validate,

@@ -2,6 +2,9 @@ export const controllerParitySource = `<template component="x-controlled" status
   <prop name="amount" type="number" default="5">Controller prop.</prop>
   <prop name="tone" type="string" default="plain">A prop no effect reads.</prop>
   <computed name="flat" from="$count * 0"></computed>
+  <state name="items" type="list(object({ name: string }))" value='[{ "name": "a" }, { "name": "b" }]'></state>
+  <handler name="renameSecond"><set name="items.1.name" value="z"></set></handler>
+  <handler name="renameFirst"><set name="items.0.name" value="q"></set></handler>
   <state name="receivers" type="list(number)" value="[1,2]"></state>
   <handler name="sendOne"><dispatch target="button" event="saved" expr:value="{ reason: 'action' }"></dispatch></handler>
   <handler name="sendAll"><dispatch target="receivers" event="saved" expr:value="{ reason: 'action' }"></dispatch></handler>
@@ -13,7 +16,7 @@ export const controllerParitySource = `<template component="x-controlled" status
   <event name="quantity" type="number"></event>
   <event name="incremented" type="number"></event>
   <event name="labels" type="keyword+"></event>
-</defs><section on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><button class="same-nested" type="button" on:click="sameNested">Same</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></section>
+</defs><section on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><button class="same-nested" type="button" on:click="sameNested">Same</button><button class="rename-second" type="button" on:click="renameSecond">Second</button><button class="rename-first" type="button" on:click="renameFirst">First</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></section>
 <style>:host { display: block; width: 180px; padding: 4px; background: rgb(240 245 250); font: 16px/24px Arial, sans-serif; }</style></template>
 <template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="$hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="$receiver" from:data-hits="$hits"></span></template>`;
 export const controllerParityModule = `function connect(host) {
@@ -39,13 +42,17 @@ export const controllerParityModule = `function connect(host) {
   // Unchanged values notify nothing: a computed that recomputes to 0, another prop, a value written back.
   const stopFlat = host.effect(() => { window.trace.flatEffects = (window.trace.flatEffects ?? 0) + 1; void host.state.flat; });
   const stopAmount = host.effect(() => { window.trace.amountEffects = (window.trace.amountEffects ?? 0) + 1; void host.props.amount.value; });
+  // A computed that stays NaN, and a read of one path that writes elsewhere in its list leave alone.
+  const nan = host.computed(() => host.state.count * 0 / 0);
+  const stopNaN = host.effect(() => { window.trace.nanEffects = (window.trace.nanEffects ?? 0) + 1; void nan.get(); });
+  const stopFirst = host.effect(() => { window.trace.firstEffects = (window.trace.firstEffects ?? 0) + 1; void host.state.items[0].name; });
   const stopClick = host.effect(() => {
     const button = host.refs.button;
-    const click = () => { local.update((value) => value + 1); host.state.count += 1; host.state.nested = host.state.nested; };
+    const click = () => { local.update((value) => value + 1); host.state.count += 1; host.state.nested = host.state.nested; host.state.items.push({ name: "c" }); };
     button.addEventListener("click", click);
     return () => button.removeEventListener("click", click);
   });
-  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopNested(); stopFlat(); stopAmount(); stopClick(); window.trace.disconnects++; };
+  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopNested(); stopFlat(); stopAmount(); stopNaN(); stopFirst(); stopClick(); window.trace.disconnects++; };
   if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
   return cleanup;
 }

@@ -17,7 +17,6 @@
 
 import { ABSENT, NONCONFORMING, toText, type Value } from "./expression.js";
 import { documentState } from "./generated-lifecycle.js";
-import { NESTED } from "./keyed.js";
 import type { ReactiveScheduler } from "./reactivity.js";
 
 interface Coordinator {
@@ -68,25 +67,14 @@ export function transitionStyles(css: string): void {
 /**
  * Holds a compiled instance's flushes whose changes reach what decides a participating region.
  * The scheduler's microtask calls `this.flush()`, so the instance's flush runs through the hold
- * first, and neither the scheduler nor the shared controller carries transition code. A root whose
- * value was replaced since the last flush sets its bit; a write that replaced none reached below a
- * root, the nested bit, as the instance's own change bits count them.
+ * first, and the scheduler carries no transition code. The instance's pending change bits say what
+ * the flush will render: a bit per replaced root, and the nested bit for any write below a root.
  */
-export function holdTransitions(instance: { readonly q: ReactiveScheduler; readonly v?: unknown[] }, mask: number): void {
-  const { q: scheduler, v: values = [] } = instance;
-  let seen = values.slice();
+export function holdTransitions(instance: { readonly q: ReactiveScheduler; readonly d: () => number }, mask: number): void {
+  const { q: scheduler, d: pending } = instance;
   const flush = scheduler.flush.bind(scheduler);
-  const run = (): void => {
-    flush();
-    seen = values.slice();
-  };
   scheduler.flush = () => {
-    let changed = 0;
-    for (let index = 0; index < values.length; index += 1) {
-      if (values[index] !== seen[index]) changed |= index < 29 ? 1 << index : 1 << 29;
-    }
-    const reached = ((changed === 0 ? NESTED : changed) & mask) !== 0;
-    if (!reached || !hold(run)) run();
+    if ((pending() & mask) === 0 || !hold(flush)) flush();
   };
 }
 
@@ -150,7 +138,18 @@ export function transitionRowsChanged(list: RowList, before: readonly Node[] | u
   }
 }
 
-// Keywords the property reads as itself rather than as a name.
+/** A bound `style` attribute on a participating element, written without dropping its view-transition properties. */
+export function writeTransitionStyle(element: Element & ElementCSSInlineStyle, value: string | null): void {
+  const { style } = element;
+  const name = style.getPropertyValue("view-transition-name");
+  const cls = style.getPropertyValue("view-transition-class");
+  if (value === null) element.removeAttribute("style");
+  else element.setAttribute("style", value);
+  style.setProperty("view-transition-name", name);
+  style.setProperty("view-transition-class", cls);
+}
+
+// Keywords the property reads as itself rather than as a name, in any case.
 const KEYWORDS = new Set(["none", "auto", "match-element", "initial", "inherit", "unset", "revert", "revert-layer", "default"]);
 
 /**
@@ -160,6 +159,6 @@ const KEYWORDS = new Set(["none", "auto", "match-element", "initial", "inherit",
 export function transitionName(value: Value): string {
   if (value === ABSENT || value === NONCONFORMING || value === null || value === "") return "match-element";
   const text = toText(value);
-  if (KEYWORDS.has(text)) return `hn-${text}`;
+  if (KEYWORDS.has(text.toLowerCase())) return `hn-${text}`;
   return typeof CSS === "undefined" ? text : CSS.escape(text);
 }

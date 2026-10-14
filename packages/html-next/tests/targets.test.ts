@@ -9,20 +9,29 @@ import { promisify } from "node:util";
 import { describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
-import { build, transform } from "esbuild";
+import { build, transform, type Plugin } from "esbuild";
 import { createSSRApp, type Component } from "vue";
 import { renderToString } from "@vue/server-renderer";
 import { createElement } from "react";
 import { renderToString as renderReactToString } from "react-dom/server";
 import { JSDOM } from "jsdom";
 
-import { generateComponent, generateReactComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { generateSvelteOutput } from "../src/targets/svelte.js";
+import { generateComponent, generateReactComponent, generateVueComponent, reactRenderArtifact, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
+import { expressionHelpersSource } from "../src/targets/vue-lowering.js";
 import { formattingSource } from "./formatting-fixture.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+
+/** Resolves a converted component's shared helper imports to the modules a build ships beside it. */
+const vueHelpers: Plugin = { name: "generated-helpers", setup(bundler) {
+  const artifacts: Record<string, () => { readonly content: string }> = { host: vueHostArtifact, props: vuePropsArtifact, html: vueHtmlArtifact, control: vueControlArtifact, render: reactRenderArtifact };
+  bundler.onResolve({ filter: /^\.\/(?:host|props|html|control|render)$/ }, (args) => ({ path: args.path.slice(2), namespace: "generated-helper" }));
+  bundler.onLoad({ filter: /.*/, namespace: "generated-helper" }, (args) => ({ contents: artifacts[args.path]!().content, loader: args.path === "render" ? "tsx" : "ts", resolveDir: packageRoot }));
+} };
 const run = promisify(execFile);
 
 // The component name is derived from `tag` and the native root inferred from `template`;
@@ -115,7 +124,7 @@ describe("official target compilers", () => {
       else if (!inline) valueSource = source;
       const compiled = compileVue(source, "XRowText.vue");
       const bundle = await build({ stdin: { contents: compiled, loader: "ts", resolveDir: packageRoot },
-        bundle: true, write: false, platform: "node", format: "cjs", packages: "external" });
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external", plugins: [vueHelpers] });
       const module = { exports: {} as { default: Component } };
       new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
       const app = createSSRApp(module.exports.default);
@@ -124,7 +133,8 @@ describe("official target compilers", () => {
       const html = await renderToString(app);
       assert.equal(instances, 1, `${inline ? "inline" : "$value"}: row text needs no component instance`);
       assert.doesNotMatch(source, /RetainedInlineText|inlineTextSegment|\.join\(''\)/);
-      const expected = text?.startsWith("Hello") ? "Hello  1Ada!Hello  2Bea?!" : text === "{$row.id}{$row.id}" ? "1122" : "AdaBea";
+      // Template text follows Vue's whitespace handling: an authored run of spaces renders as one.
+      const expected = text?.startsWith("Hello") ? "Hello 1Ada!Hello 2Bea?!" : text === "{$row.id}{$row.id}" ? "1122" : "AdaBea";
       assert.equal(new JSDOM(html).window.document.querySelector("ul")?.textContent, expected);
     }
   });
@@ -136,7 +146,7 @@ describe("official target compilers", () => {
     for (const target of ["vue", "react"] as const) {
       const generated = target === "vue" ? compileVue(generateVueComponent(definition), "XFormatCache.vue") : generateReactComponent(definition);
       const bundle = await build({ stdin: { contents: generated, loader: target === "vue" ? "ts" : "tsx", resolveDir: packageRoot },
-        bundle: true, write: false, platform: "node", format: "cjs", packages: "external" });
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external", plugins: [vueHelpers] });
       const module = { exports: {} as { default: Component & ((props: object) => ReturnType<typeof createElement>) } };
       new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
       const constructor = Intl.NumberFormat;
@@ -156,7 +166,7 @@ describe("official target compilers", () => {
     const definition = parseComponent(formattingSource);
     const directory = await mkdtemp(join(packageRoot, ".vue-ssr-"));
     try {
-      const artifacts = generateComponent(definition);
+      const artifacts = [...generateComponent(definition), vueHostArtifact()];
       for (const artifact of artifacts) {
         const file = join(directory, artifact.path);
         await mkdir(dirname(file), { recursive: true });
@@ -167,7 +177,7 @@ describe("official target compilers", () => {
       assert.deepEqual(parsed.errors, []);
       const script = compileScript(parsed.descriptor, { id: "formatting", inlineTemplate: true, templateOptions: { ssr: true } });
       const bundle = await build({ stdin: { contents: script.content, loader: "ts", resolveDir: join(directory, "vue") },
-        bundle: true, write: false, platform: "node", format: "cjs", packages: "external", loader: { ".css": "empty" } });
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external", loader: { ".css": "empty" }, plugins: [vueHelpers] });
       const module = { exports: {} as { default: Component } };
       new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
       const [vue, native] = await Promise.all([
@@ -289,8 +299,91 @@ describe("official target compilers", () => {
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
     compileVue(vue, "XTypedHandlers.vue");
-    assert.match(vue, /typeof next0 === 'number'/);
-    assert.match(vue, /typeof next0 === 'string'/);
+    assert.match(vue, /  write\(count, concat\(count\.value\), isNumber, '<source>', 'badNumber', 'count'\)\n/);
+    assert.match(vue, /write\(\n\s+\(next\) => \(items\.value\[index\.value\]\.name = next\),\n\s+7,\n\s+isString,\n\s+'<source>',\n\s+'badField',\n\s+'items\[\$index\]\.name',\n/);
+  });
+
+  it("writes proven values plainly and checks the rest in Vue, React and Svelte", async () => {
+    const definition = parseComponent(`<template component="x-writes"><defs>
+      <state name="count" type="integer" value="0"></state><state name="total" type="number" value="0.5"></state>
+      <state name="copy" type="number" value="0"></state><state name="open" type="boolean" value="false"></state>
+      <state name="label" type="string" value="a"></state><state name="loose" type="integer" value="0"></state>
+      <state name="level" type="number" value="1.5"></state><state name="note" value="Ada"></state>
+      <handler name="step"><set name="count" expr:value="$count + 1"></set><set name="count" expr:value="$count - 3"></set>
+        <set name="total" expr:value="$total + 1"></set><set name="copy" expr:value="$count"></set>
+        <set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set>
+        <set name="loose" expr:value="$loose + 1"></set><set name="level" expr:value="$level + 0.1"></set>
+        <set name="note" expr:value="5"></set></handler>
+      <handler name="wrong"><set name="total" expr:value="$label"></set><set name="loose" expr:value="$total"></set></handler>
+    </defs><button on:click="step">{$count}</button></template>`, "writes.html");
+    const vue = generateVueComponent(definition);
+    compileVue(vue, "XWrites.vue");
+    const react = generateReactComponent(definition);
+    await transform(react, { loader: "tsx", format: "esm" });
+    const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
+    const expected = {
+      // An integer state every write keeps an integer steps plainly; a present number state steps by a
+      // literal with decimal arithmetic; a copy, a negation, a literal and any write to an untyped
+      // state write plainly.
+      plain: [
+        ["count.value++", "setCount((count) => count + 1);", "count++;"],
+        ["count.value -= 3", "setCount((count) => count - 3);", "count -= 3;"],
+        ["level.value = decimalAdd(level.value, 0.1)", "setLevel((level) => decimalAdd(level, 0.1));", "level = decimalAdd(level, 0.1);"],
+        ["copy.value = count.value", "setCopy(getCount());", "copy = count;"],
+        ["open.value = !open.value", "setOpen(!getOpen());", "open = !open;"],
+        ["label.value = 'b'", 'setLabel("b");', "label = 'b';"],
+        ["note.value = 5", "setNote(5 as never);", "note = 5;"],
+      ],
+      // `total` and `loose` also take unproven writes, so their own steps may find them absent or
+      // fractional and stay checked; a string is refused by a number state.
+      checked: [
+        ["write(total, decimalAdd(total.value, 1), isNumber, 'writes.html', 'step', 'total')",
+          'write(setTotal, decimalAdd(getTotal(), 1), isNumber, "writes.html", "step", "total");',
+          "write((next) => (total = next), decimalAdd(total, 1), isNumber, 'writes.html', 'step', 'total');"],
+        ["write(loose, loose.value + 1, isInteger, 'writes.html', 'step', 'loose')",
+          'write(setLoose, getLoose() + 1, isInteger, "writes.html", "step", "loose");',
+          "write((next) => (loose = next), loose + 1, isInteger, 'writes.html', 'step', 'loose');"],
+        ["write(total, label.value, isNumber, 'writes.html', 'wrong', 'total')",
+          'write(setTotal, getLabel(), isNumber, "writes.html", "wrong", "total");',
+          "write((next) => (total = next), label, isNumber, 'writes.html', 'wrong', 'total');"],
+      ],
+    };
+    for (const lines of [...expected.plain, ...expected.checked]) {
+      lines.forEach((line, index) => assert.ok([vue, react, svelte][index]!.includes(`${line}\n`), `${["Vue", "React", "Svelte"][index]}: ${line}`));
+    }
+  });
+
+  it("refuses a handler write of the wrong type once per authored write, and skips invalid results", async () => {
+    const { code } = await transform(expressionHelpersSource(), { loader: "ts", format: "cjs" });
+    type Write = (to: unknown, value: unknown, check?: (value: unknown) => boolean, file?: string, handler?: string, path?: string) => void;
+    const module = { exports: {} as { write: Write; isNumber: (value: unknown) => boolean } };
+    new Function("module", "exports", code)(module, module.exports);
+    const { write, isNumber } = module.exports;
+    const count = { value: 1 };
+    const set: unknown[] = [];
+    const warnings: unknown[] = [];
+    const warn = console.warn;
+    console.warn = (message: unknown) => warnings.push(message);
+    try {
+      write(count, "2", isNumber, "x.html", "bad", "count");
+      write(count, "3", isNumber, "x.html", "bad", "count");
+      // Another authored write of the same state, and the same write in another file, each warn once.
+      write(count, "4", isNumber, "x.html", "other", "count");
+      write(count, "5", isNumber, "y.html", "bad", "count");
+      // A number that is not finite is an invalid result, as in the live runtime: nothing written, no warning.
+      write(count, Symbol.for("html-next.invalid-result"));
+      write((value: unknown) => set.push(value), Number.POSITIVE_INFINITY, isNumber, "x.html", "overflow", "count");
+      write((value: unknown) => set.push(value), Number.NaN);
+      write(count, undefined, isNumber, "x.html", "absent", "count");
+      write((value: unknown) => set.push(value), 4, isNumber, "x.html", "good", "count");
+    } finally { console.warn = warn; }
+    assert.deepEqual(count, { value: undefined });
+    assert.deepEqual(set, [4]);
+    assert.deepEqual(warnings, [
+      "x.html: HR007: State `count` does not satisfy its declared type.",
+      "x.html: HR007: State `count` does not satisfy its declared type.",
+      "y.html: HR007: State `count` does not satisfy its declared type.",
+    ]);
   });
 
   it("uses a root $ref as the controller's root handle without duplicate Vue refs", () => {
@@ -321,6 +414,7 @@ describe("official target compilers", () => {
     try {
       await writeFile(join(directory, "XOptional.ts"), compileVue(vue, "XOptional.vue"));
       await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await writeFile(join(directory, "host.ts"), vueHostArtifact().content);
       await writeFile(join(directory, "consumer.ts"), [
         'import XOptional from "./XOptional";',
         'type Props = InstanceType<typeof XOptional>["$props"];',
@@ -361,6 +455,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     try {
       await writeFile(join(directory, "component.ts"), compileVue(checked, "XConcatTypes.vue"));
       await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await writeFile(join(directory, "host.ts"), vueHostArtifact().content);
       await run("corepack", [
         "pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck",
         "--target", "ES2023", "--module", "ESNext", "--moduleResolution", "Bundler", "--lib", "ES2023,DOM",
@@ -383,13 +478,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     compileVue(vue, "XField.vue");
     assert.match(vue, /modelValue: \{ type: null as unknown as PropType<string \| null \| undefined> \}/);
     assert.match(vue, /'update:modelValue': \[value: string\]\n/);
-    assert.match(vue, /<input\s+data-component="x-field"/);
+    // An unstyled root is the native control itself, marked by nothing but its own attributes.
+    assert.match(vue, /<input\s+v-bind="nativeAttrs\(\$attrs\)"/);
     assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(vue, /@input="model = readBoundControl\(/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
     // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
     const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="$value"><slot></slot></select>')).get("vue/XChoice.vue")!;
-    assert.match(select, /<select\s+data-component="x-choice"/);
+    assert.match(select, /<select\s+v-bind="nativeAttrs\(\$attrs\)"/);
     assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(select, /@change="model = readBoundControl\(/);
     assert.match(select, /<SelectedOptions\s+:value="model"\s+:multiple="false"\s+:native-property="false"/);
@@ -428,7 +524,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     compileVue(vue, "XConsumer.vue");
     assert.match(vue, /<template #row="\{ item \}">/);
     assert.match(vue, /\{\{ text\(item\?\.name\) \}\}/);
-    assert.match(vue, /\{\{ guarded \}\}/);
+    // A conforming state's own value needs no read check, so the consumer's text reads it directly.
+    assert.match(vue, /<i>\{\{ heading \}\}<\/i>/);
   });
 
   it("keeps logical operators readable in Vue attribute values", () => {
@@ -481,8 +578,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /checkedProps\.value\.size && 'size'/);
     assert.match(vue, /`size=\$\{encodeURIComponent\(checkedProps\.value\.size\)\}`/);
     assert.match(vue, /function flip\(\): void \{/);
-    assert.match(vue, /const next0 = !open\.value/);
-    assert.match(vue, /open\.value = next0 as never/);
+    // A negation always writes a boolean, so a boolean state takes it unchecked.
+    assert.match(vue, /  open\.value = !open\.value\n/);
     assert.match(vue, /<ul v-if="open">/);
     assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
     assert.match(vue, /sortBy\(\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)/);
@@ -494,7 +591,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /@click="flip"/);
     assert.match(vue, /:class="\{ compact: checkedProps\.size === 'sm' \}"/);
     assert.match(vue, /:style="\{ '--gap': checkedProps\.size \?\? undefined \}"/);
-    assert.match(vue, /<XBadge :tone="checkedProps\.size"><slot name="badge">none<\/slot><\/XBadge>/);
+    assert.match(vue, /<XBadge class="x-badge" :tone="checkedProps\.size"><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.doesNotMatch(vue, /defineExpose|installMethods/);
     assert.match(vue, /useComponentHost\(\(\) => import\('\.\/x-feature\.js'\), \{\n  root,\n  dispatch,/);
@@ -619,13 +716,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const render = (props: Record<string, unknown>): Promise<string> =>
       module.renderToString(module.createSSRApp({ render: () => module.h(module.default, props, { default: () => "Go" }) }))
         .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
-    assert.equal(await render({}), '<button data-component="x-action" class="action" type="button">Go</button>');
-    assert.equal(await render({ as: "a", href: "/next" }), '<a data-component="x-action" class="action" href="/next" data-as="a" data-href="/next">Go</a>');
+    // The scoped styles select the root as `:host`, so each arm's root carries the tag as a class.
+    assert.equal(await render({}), '<button class="x-action action" type="button">Go</button>');
+    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" href="/next" data-as="a" data-href="/next">Go</a>');
     const listed = await render({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] });
     assert.match(listed, /data-tags="red, blue"/);
     assert.match(listed, /data-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
-    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a data-component="x-action" class="action" data-as="a" data-disabled="true" data-href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-as="a" data-disabled="true" data-href="/next">Go</a>');
     assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
@@ -694,6 +792,26 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
     assert.doesNotMatch(module, /manageComponentLifecycle|const definition/);
     assert.match(module, /document\.createElement\("article"\)/);
+  });
+
+  it("compiles two-way bindings through $each and $with aliases to their state paths in Vue, React and Svelte", async () => {
+    const definition = parseComponent(`<template component="x-alias-writes" status="experimental" summary="Alias writes.">
+      <defs><state name="draft" type="object({ owner: object({ name: string }) })" value="{ owner: { name: 'Ada' } }"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state></defs>
+      <section><div $with="$draft.owner as owner"><input bind:value="owner.name"></div>
+        <ul><li $each="row of $rows" $key="$row.id"><input bind:value="row.label"></li></ul></section>
+    </template>`);
+    const vue = generateVueComponent(definition);
+    compileVue(vue, "XAliasWrites.vue");
+    const react = generateReactComponent(definition);
+    await transform(react, { loader: "tsx", format: "esm" });
+    assert.match(vue, /draft\.owner\.name = readBoundControl\(/);
+    assert.match(vue, /rows\[loop\.index\]\.label = readBoundControl\(/);
+    assert.match(react, /\["owner", "name"\]/);
+    assert.match(react, /\[loop\.index, "label"\]/);
+    const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
+    assert.match(svelte, /writePath\(draft, \["owner", "name"\]/);
+    assert.match(svelte, /writePath\(rows, \[loop\.index, "label"\]/);
   });
 
   it("compiles numeric two-way controls directly through the shared control writer", () => {
@@ -843,19 +961,25 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const artifacts = generated(featureSource);
     const css = artifacts.get("styles/x-feature.css")!;
     assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\], \[data-slotted\]\)/);
-    assert.match(css, /:scope \{ display: block; \}/);
-    assert.match(css, /:scope\[data-x-feature-state~="open"\] \.panel/);
-    assert.match(css, /:scope\[data-x-feature-state~="size=sm"\] h2/);
+    assert.match(css, /:scope:where\(\[data-component~="x-feature"\]\) \{ display: block; \}/);
+    assert.match(css, /:scope:where\(\[data-component~="x-feature"\]\)\[data-x-feature-state~="open"\] \.panel/);
+    assert.match(css, /:scope:where\(\[data-component~="x-feature"\]\)\[data-x-feature-state~="size=sm"\] h2/);
     assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\]\) \{\n:where\(\[data-slotted\], \[data-slotted\] \*\):is\(p\)/);
     assert.match(css, /:is\(x-badge, :where\(\[data-component~="x-badge"\]\)\)/);
     assert.doesNotMatch(css, /data-component-root/);
 
     const vue = artifacts.get("vue/XFeature.vue")!;
     const style = vue.slice(vue.indexOf("<style scoped>"));
-    assert.match(style, /\[data-component~="x-feature"\] \{\n  display: block;\n\}/);
-    assert.match(style, /\[data-component~="x-feature"\]\[data-x-feature-state~="open"\] \.panel/);
+    // Vue's scoped styles sit in a native scope rooted at the root's tag class and bounded by each
+    // invoked component's tag class, which Vue passes to that component's root.
+    assert.match(style, /@scope \(\.x-feature\) to \(\.x-badge\)/);
+    assert.match(style, /:scope \{\s+display: block;\s+\}/);
+    assert.match(style, /:scope\[data-x-feature-state~="open"\] \.panel/);
     assert.match(style, /:slotted\(p\)/);
-    assert.match(vue, /data-component="x-feature"/);
+    assert.match(style, /:is\(x-badge, \.x-badge\)/);
+    assert.match(vue, /<section\s+class="x-feature panel"/);
+    assert.match(vue, /<XBadge class="x-badge" /);
+    assert.doesNotMatch(vue, /data-component/);
     assert.match(vue, /:data-x-feature-state="hostState \|\| undefined"/);
 
     const vanilla = artifacts.get("vanilla/XFeature.js")!;

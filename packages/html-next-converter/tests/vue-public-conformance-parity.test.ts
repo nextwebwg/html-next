@@ -65,16 +65,28 @@ function consumer(invocation: string, tag: string, componentName: string, props:
   return children.length === 1 ? children[0]! : `[${children.join(", ")}]`;
 }
 
-function withoutStylingMarkers(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutStylingMarkers);
+function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withoutStylingMarkers(entry, tags));
   if (value === null || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
     key,
     key === "attributes" && Array.isArray(entry)
-      ? entry.filter((attribute) => Array.isArray(attribute) &&
-        typeof attribute[0] === "string" && attribute[0] !== "data-slotted" && !attribute[0].startsWith("data-v-"))
-      : withoutStylingMarkers(entry),
+      ? entry.flatMap((attribute) => {
+        if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
+        const [name, text] = attribute as [string, string];
+        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-")) return [];
+        // Vue selects a root, or a styled child, through its component tag as a class.
+        if (name !== "class") return [attribute];
+        const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token)).join(" ");
+        return classes === "" ? [] : [[name, classes]];
+      })
+      : withoutStylingMarkers(entry, tags),
   ]));
+}
+
+/** The component tags a conformance case defines. */
+function definedTags(source: string): ReadonlySet<string> {
+  return new Set([...source.matchAll(/<template\s+component="([^"]+)"/g)].map((match) => match[1]!));
 }
 
 async function capturePixels(page: Page): Promise<Buffer> {
@@ -205,14 +217,15 @@ export const render = () => renderToString(createSSRApp({ render: () => ${consum
                 requiresHydration ? Promise.resolve(undefined) : hydrated.evaluate((script) => Function(script)(), program),
               ]);
               assert.deepEqual(liveResult, testCase.expect.result, "live runtime characterization changed");
-              assert.deepEqual(withoutStylingMarkers(vueResult), withoutStylingMarkers(liveResult), "public Vue browser behavior differs");
-              if (!requiresHydration) assert.deepEqual(withoutStylingMarkers(serverResult), withoutStylingMarkers(liveResult), `public Vue server behavior differs: ${serverDOM}`);
+              const tags = definedTags(testCase.source);
+              assert.deepEqual(withoutStylingMarkers(vueResult, tags), withoutStylingMarkers(liveResult, tags), "public Vue browser behavior differs");
+              if (!requiresHydration) assert.deepEqual(withoutStylingMarkers(serverResult, tags), withoutStylingMarkers(liveResult, tags), `public Vue server behavior differs: ${serverDOM}`);
               await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "public Vue rendered pixels differ", live);
               await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue server-rendered pixels differ", live);
               await hydrated.evaluate(() => { window.hydrateVue = true; });
               await hydrated.addScriptTag({ path: output.bundle });
               const hydratedResult = await hydrated.evaluate((script) => Function(script)(), program);
-              assert.deepEqual(withoutStylingMarkers(hydratedResult), withoutStylingMarkers(liveResult),
+              assert.deepEqual(withoutStylingMarkers(hydratedResult, tags), withoutStylingMarkers(liveResult, tags),
                 `public Vue hydrated behavior differs: before=${serverDOM} after=${await hydrated.locator("main").evaluate((root) => root.innerHTML)} warnings=${warnings.join(" | ")}`);
               await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue hydrated pixels differ", live);
               for (const step of testCase.expect.after ?? []) {
@@ -224,8 +237,8 @@ export const render = () => renderToString(createSSRApp({ render: () => ${consum
                   hydrated.evaluate((script) => Function(script)(), program),
                 ]);
                 assert.deepEqual(liveAfter, step.result, "live runtime changed after interaction");
-                assert.deepEqual(withoutStylingMarkers(vueAfter), withoutStylingMarkers(liveAfter), "Vue browser behavior differs after interaction");
-                assert.deepEqual(withoutStylingMarkers(hydratedAfter), withoutStylingMarkers(liveAfter), "Vue hydrated behavior differs after interaction");
+                assert.deepEqual(withoutStylingMarkers(vueAfter, tags), withoutStylingMarkers(liveAfter, tags), "Vue browser behavior differs after interaction");
+                assert.deepEqual(withoutStylingMarkers(hydratedAfter, tags), withoutStylingMarkers(liveAfter, tags), "Vue hydrated behavior differs after interaction");
                 await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "Vue pixels differ after interaction", live);
                 await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "Vue hydrated pixels differ after interaction", live);
               }

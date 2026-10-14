@@ -1,24 +1,32 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { generateComponent, type ComponentDefinition, type TemplateNode } from "@nextwebwg/html-next";
 import { normalizePath, type Plugin } from "vite";
+import type { ClientOptions } from "./client.js";
 import type { BrowserDefinition } from "./types.js";
+import { collectSharedStylesheets, compileComponentGraphStylesForBuild, generateComponent, type ComponentDefinition } from "@nextwebwg/html-next";
 
 const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/generated-runtime"));
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]generated-runtime\.js$/, "/src/generated-runtime.ts");
 // Workspace source execution can test the same entry before packages have been built.
 const runtime = import.meta.url.endsWith(".ts") && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
-
-function stylesheetId(component: BrowserDefinition): string {
-  return normalizePath(fileURLToPath(component.definition.source.file)) + ".htmlkit.css";
-}
+const client = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./client.ts" : "./client.js", import.meta.url));
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
   const sources = new Map<string, string>();
+  const shared = collectSharedStylesheets(components.map(component => component.definition));
+  if (shared.length > 0) {
+    // One stylesheet holds the page's whole graph, so it is named for the graph: pages that share a
+    // first component (their layout) would otherwise overwrite each other's styles.
+    const files = components.map(component => component.definition.source.file);
+    const graph = createHash("sha256").update(files.join("\0")).digest("hex").slice(0, 16);
+    sources.set(`${normalizePath(fileURLToPath(files[0]!))}.${graph}.htmlkit-shared.css`,
+      compileComponentGraphStylesForBuild(components.map(component => component.definition)));
+    return sources;
+  }
   for (const component of components) {
     if (component.styles.css === "") continue;
-    const id = stylesheetId(component);
+    const id = normalizePath(fileURLToPath(component.definition.source.file)) + ".htmlkit.css";
     sources.set(id, (sources.get(id) ?? "") + component.styles.css);
   }
   return sources;
@@ -30,25 +38,14 @@ function componentId(definition: ComponentDefinition): string {
   return `virtual:htmlkit/component/${definition.contract.tag}-${source}.js`;
 }
 
-/** A component without behavior: nothing in it reads, writes or listens, so its server DOM is final. */
-function inert({ definition, controller }: BrowserDefinition): boolean {
-  // A root that is another component's invocation shares that component's root, which adopts it.
-  if (controller !== undefined || (definition.declarations?.length ?? 0) > 0 || Object.keys(definition.contract.props).length > 0 ||
-    definition.template.name.includes("-")) return false;
-  const still = (node: TemplateNode): boolean => node.kind === "text" ? node.expressionPlan === undefined && node.segments === undefined
-    : node.kind === "slot" ? node.nameExpression === undefined && node.flow === undefined && (node.props?.length ?? 0) === 0 && (node.fallback ?? []).every(still)
-    : node.flow === undefined && (node.events?.length ?? 0) === 0 && node.ref === undefined &&
-      node.attributes.every((attribute) => attribute.kind === "literal") && node.children.every(still);
-  return still(definition.template);
-}
-
 /**
- * Each component compiled to direct DOM code that adopts its server-rendered root, and the page's
- * entry, `entry`, which adopts each server root a parent did not, in document order. A page ships
- * only the generated-runtime helpers its components use; its controllers, stylesheets and declared
- * reads are imported by the components that own them.
+ * A page's browser modules: each component compiled to direct DOM code that also adopts its
+ * server-rendered root, and the page's entry, `entry`, which registers them with client.ts. A page
+ * ships only the generated-runtime helpers its components use; controllers and declared reads are
+ * imported by the components that own them, and the page's stylesheets by its entry.
  */
-export function browserSources(components: readonly BrowserDefinition[], base: string, entry: string): ReadonlyMap<string, string> {
+export function browserSources(components: readonly BrowserDefinition[], options: ClientOptions, entry: string, css: readonly string[] = []): ReadonlyMap<string, string> {
+  const { base } = options;
   const sources = new Map<string, string>();
   const invocations = new Map(components.map(({ definition }) => [definition.contract.tag, { module: componentId(definition), definition }]));
   for (const component of components) {
@@ -71,27 +68,23 @@ export function browserSources(components: readonly BrowserDefinition[], base: s
     let module = generateComponent(definition, { invocations, hydrate: true })
       .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)!.content
       .replace('"@nextwebwg/html-next/generated-runtime"', JSON.stringify(runtime))
-      // Each source file's component styles are one stylesheet module, which its components import.
-      .replace(`import "../styles/${definition.contract.tag}.css";`, component.styles.css === "" ? "" : `import ${JSON.stringify(stylesheetId(component))};`)
+      // The page's entry imports its stylesheets: one for the page's graph, or one per source file.
+      .replace(`import "../styles/${definition.contract.tag}.css";`, "")
       .replaceAll(/"\\u0000htmlkit-read-(\d+)([^"]*)"/g, (_, index: string, suffix: string) => `read${index} + ${JSON.stringify(suffix)}`);
     if (reads.length > 0) module = `${reads.join("\n")}\n${module}`;
     sources.set(componentId(definition), module);
   }
-  // A component without behavior keeps its server DOM: the page imports it only through a component that invokes it.
-  const factories = components.filter((component) => !inert(component))
-    .map(({ definition }, index) => [definition.contract.tag, `create${definition.contract.name} as c${index}`, componentId(definition)] as const);
-  // The page's stylesheets, a component without behavior's among them, are the entry's.
-  sources.set(entry, `${[...stylesheetSources(components).keys()].map((id) => `import ${JSON.stringify(id)};`).join("\n")}
-${factories.map(([, name, id]) => `import { ${name} } from ${JSON.stringify(id)};`).join("\n")}
-const factories = { ${factories.map(([tag], index) => `${JSON.stringify(tag)}: c${index}`).join(", ")} };
-// Outer roots first: each adopts the components its template invokes; a root projected into another is adopted here.
-for (const root of document.querySelectorAll("[data-html-next-instance]")) {
-  if (!root.hasAttribute("data-html-next-instance")) continue;
-  const adopt = factories[root.getAttribute("data-component").split(" ")[0]];
-  if (adopt === undefined) root.removeAttribute("data-html-next-instance");
-  else adopt({}, undefined, root);
-}
-document.dispatchEvent(new Event("htmlkit:ready"));
+  // Each component's factory and the invocation attribute each prop is written as (application.ts),
+  // which client navigation renders a payload's layers with.
+  const registered = components.map(({ definition }, index) => `${JSON.stringify(definition.contract.tag)}: [c${index}, ${JSON.stringify(Object.fromEntries(
+    Object.keys(definition.contract.props).map((name) => [name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase(), name])))}]`);
+  const functions = "adoptRenderedProps, replaceProjectedNode, generatedHost";
+  sources.set(entry, `import { ${functions} } from ${JSON.stringify(runtime)};
+import { page } from ${JSON.stringify(client)};
+${css.map(file => `import ${JSON.stringify(normalizePath(file))};`).join("\n")}
+${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
+${components.map(({ definition }, index) => `import { create${definition.contract.name} as c${index} } from ${JSON.stringify(componentId(definition))};`).join("\n")}
+page({ ${functions} }, ${JSON.stringify(options)}, { ${registered.join(", ")} });
 `);
   return sources;
 }
@@ -99,10 +92,12 @@ document.dispatchEvent(new Event("htmlkit:ready"));
 export function browserPlugin(sources: ReadonlyMap<string, string>, inputs?: Set<string>): Plugin {
   return {
     name: "htmlkit-browser",
-    resolveId(id) { if (sources.has(id)) return id.endsWith(".css") ? id : `\0${id}`; },
-    load(id) { return sources.get(id.startsWith("\0") ? id.slice(1) : id); },
+    // Vite adds ?direct when a document <link> requests a stylesheet; keep the query for its CSS plugin.
+    resolveId(id) { const path = id.split("?")[0]!; if (sources.has(path)) return path.endsWith(".css") ? id : `\0${id}`; },
+    load(id) { return sources.get((id.startsWith("\0") ? id.slice(1) : id).split("?")[0]!); },
     generateBundle() {
-      if (inputs !== undefined) for (const id of this.getModuleIds()) if (!id.startsWith("\0")) inputs.add(id);
+      // Virtual stylesheets keep their ids for Vite's CSS plugin; report only source files.
+      if (inputs !== undefined) for (const id of this.getModuleIds()) if (!id.startsWith("\0") && !sources.has(id.split("?")[0]!)) inputs.add(id);
     },
   };
 }

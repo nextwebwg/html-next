@@ -426,7 +426,7 @@ function reflectValidity(el: Element, state: ManagedValidity): void {
       el.removeAttribute("aria-invalid");
       ariaMirrors.delete(el);
     }
-  } else if (!el.hasAttribute("aria-invalid") || ariaMirrors.has(el)) {
+  } else if ((!el.hasAttribute("aria-invalid") || ariaMirrors.has(el)) && el.getAttribute("aria-invalid") !== "true") {
     el.setAttribute("aria-invalid", "true");
     ariaMirrors.add(el);
   }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -18,10 +18,11 @@ const source = `<template component="x-shelf" controller="./shelf-controller.js"
   <defs>
     <state name="open" type="boolean" value="false"></state>
     <state name="count" type="number" value="0"></state>
+    <state name="tint" type="string" value="''"></state>
     <state name="items" type="list(object({ id: string, label: string }))" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
   </defs>
   <section>
-    <aside $if="$open" $transition="fly 300ms">Panel</aside>
+    <aside $if="$open" $transition="fly 300ms" from:style="$tint">Panel</aside>
     <output $value="$count"></output>
     <ul><li $each="item of $items" $key="$item.id" $transition="fade 300ms">{$item.label}</li></ul>
   </section>
@@ -51,6 +52,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
   let directory = "";
   let bundle = "";
   let live = "";
+  let gallery = "";
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-transitions-"));
@@ -64,6 +66,29 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
     bundle = join(directory, "entry.js");
     await build({
       entryPoints: [join(directory, "entry.ts")], outfile: bundle, bundle: true, format: "iife", platform: "browser",
+      target: ["es2022"], loader: { ".css": "empty" },
+      define: { "import.meta.url": JSON.stringify("https://example.test/generated/component.js") },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+    // The guide's morph example, as written.
+    const guide = await readFile(new URL("../../../docs/guide/transitions.md", import.meta.url), "utf8");
+    const morph = /## Morph one element into another[\s\S]*?```html\n([\s\S]*?)```/.exec(guide)![1]!;
+    for (const artifact of generateComponent(parseComponent(`<template component="x-gallery" controller="./gallery-controller.js" status="early" summary="Morph fixture.">
+      <defs>
+        <state name="photos" type="list(object({ id: string }))" value="[{ id: 'a' }, { id: 'b' }]"></state>
+        <state name="selected" type="unknown" value="null"></state>
+      </defs>
+      <section>${morph}</section>
+    </template>`, "x-gallery.html"), { extensions: ["transitions"] })) {
+      await mkdir(join(directory, artifact.path, ".."), { recursive: true });
+      await writeFile(join(directory, artifact.path), artifact.content);
+    }
+    await writeFile(join(directory, "vanilla", "gallery-controller.js"), "export default function controller(host) { window.gallery = host; }\n");
+    await writeFile(join(directory, "gallery.ts"), `import { createXGallery } from "./vanilla/XGallery.js";
+      document.querySelector("main").append(createXGallery());`);
+    gallery = join(directory, "gallery.js");
+    await build({
+      entryPoints: [join(directory, "gallery.ts")], outfile: gallery, bundle: true, format: "iife", platform: "browser",
       target: ["es2022"], loader: { ".css": "empty" },
       define: { "import.meta.url": JSON.stringify("https://example.test/generated/component.js") },
       alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
@@ -93,7 +118,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
       const { page, close } = await open(type);
       try {
         const result = await page.evaluate(async () => {
-          type Host = { state: { open: boolean; count: number; items: { id: string; label: string }[] } };
+          type Host = { state: { open: boolean; count: number; tint: string; items: { id: string; label: string }[] } };
           const w = window as unknown as { hosts: Host[]; transitions: ViewTransition[]; played: (transition: ViewTransition) => Promise<unknown[]> };
           const [first, second] = w.hosts as [Host, Host];
           const asides = () => document.querySelectorAll("aside").length;
@@ -113,6 +138,12 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
           out.shownInside = asides();
           await settle();
 
+          // A bound style attribute keeps the transition's own properties.
+          first.state.tint = "color: red";
+          await tick();
+          const aside = document.querySelector("aside")!;
+          out.styled = [aside.style.color, aside.style.getPropertyValue("view-transition-name"), aside.style.getPropertyValue("view-transition-class").startsWith("hn-t")];
+
           first.state.open = false;
           out.leaving = await w.played(await next());
           await settle();
@@ -131,6 +162,14 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
           out.pushed = await w.played(await next());
           await settle();
 
+          // A row pushed in the same task as a root no region reads still animates.
+          const beforeBoth = w.transitions.length;
+          first.state.items.push({ id: "e", label: "E" });
+          first.state.count = 6;
+          await Promise.resolve();
+          out.pushedWithRoot = [w.transitions.length - beforeBoth, await w.played(w.transitions.at(-1)!)];
+          await settle();
+
           // A nested write that adds, removes and moves nothing skips its transition.
           first.state.items[0]!.label = "Z";
           const edit = await next();
@@ -145,11 +184,13 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
         assert.equal(result.transitionsForOneTask, 1);
         assert.equal(result.shownInside, 2);
         assert.deepEqual(result.arriving, [["::view-transition-new", "hn-fly", 300, "normal"], ["::view-transition-new", "hn-fly", 300, "normal"]]);
+        assert.deepEqual(result.styled, ["red", "match-element", true]);
         assert.deepEqual(result.leaving, [["::view-transition-old", "hn-fly", 300, "reverse"]]);
         assert.deepEqual(result.unrelated, [0, "5"]);
         // Moved rows animate as the browser's own move; the moving rows' names carry no keyframes.
         assert.deepEqual(result.moving, []);
         assert.deepEqual(result.pushed, [["::view-transition-new", "hn-fade", 300, "normal"]]);
+        assert.deepEqual(result.pushedWithRoot, [1, [["::view-transition-new", "hn-fade", 300, "normal"]]]);
         assert.deepEqual(result.edit, ["skipped", "Z"]);
         assert.equal(result.sheetsAfter, 1);
         assert.deepEqual(result.names, [["match-element", true], ["match-element", true]]);
@@ -177,6 +218,39 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
         assert.ok(groups.every((duration) => duration === 300), JSON.stringify(groups));
       } finally {
         await close();
+      }
+    });
+
+    it(`${name}: morphs a list item into the element that takes its name, as the guide shows`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.setContent("<style>img { display: block; width: 20px; height: 20px; }</style><main></main>");
+        await page.addScriptTag({ content: instrument });
+        await page.addScriptTag({ path: gallery });
+        await page.waitForFunction(() => (window as unknown as { gallery?: unknown }).gallery !== undefined);
+        const result = await page.evaluate(async () => {
+          const w = window as unknown as { gallery: { state: { photos: { id: string }[]; selected: unknown } }; transitions: ViewTransition[] };
+          const morph = async (): Promise<unknown[]> => {
+            await Promise.resolve();
+            const transition = w.transitions.at(-1)!;
+            const outcome = await transition.ready.then(() => document.documentElement.getAnimations({ subtree: true })
+              .some((animation) => (animation.effect as KeyframeEffect | null)?.pseudoElement === "::view-transition-group(a)"), (error: Error) => error.name);
+            await transition.finished.catch(() => {});
+            return [outcome, document.querySelectorAll("img").length, document.querySelector(".hero") !== null];
+          };
+          const { state } = w.gallery;
+          state.selected = state.photos[0];
+          const opened = await morph();
+          state.selected = null;
+          return [opened, await morph(), w.transitions.length];
+        });
+        assert.deepEqual(result, [[true, 2, true], [true, 2, false], 2]);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
       }
     });
 

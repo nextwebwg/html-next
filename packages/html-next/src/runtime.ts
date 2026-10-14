@@ -9,6 +9,7 @@ import { eventPasses } from "./event-filter.js";
 import { isNativeEvent } from "./freeze.js";
 import { encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
+import { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 import {
   ABSENT,
   NONCONFORMING,
@@ -50,6 +51,7 @@ import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
   compileComponentStyles,
+  COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
   markProjectedRoot,
   stateAttribute,
@@ -153,7 +155,12 @@ interface RuntimeInstance {
   /** The root element in the document; effects tied to the root read it, so they follow a replacement. */
   readonly rootElement: ReactiveSignal<Element | undefined>;
   /** Every projected node and its slot, rendered or not (for serialization). */
-  projection?: { readonly nodes: readonly Node[]; readonly slotNames: WeakMap<Node, string> };
+  projection?: {
+    readonly nodes: readonly Node[];
+    readonly slotNames: WeakMap<Node, string>;
+    /** Puts `next` in `current`'s place, in its slot, wherever this instance records its projection. */
+    readonly replace: (current: Node, next: Node) => void;
+  };
   /**
    * Instances sharing this instance's root because this component delegates its root to them.
    * They are not separately discoverable, so this instance carries their lifecycle.
@@ -332,12 +339,59 @@ function registryFor(root: Document): DocumentRegistry {
 /** The state names each definition's `:host-state()` rules test, recorded when its styles compile. */
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
+type ComponentStyleCompiler = (css: string, definition: ComponentDefinition, source?: string,
+  adopters?: readonly ComponentDefinition[], includeBoundaryReset?: boolean) => CompiledComponentStyles;
+
+/** Shared platform-workaround rules are independent of authored import conditions and layers. */
+function installStyleBoundaries(document: Document): void {
+  if (document.head.querySelector("style[data-html-next-style-boundaries]") !== null) return;
+  // Owned build sheets may be conditional or disabled independently of live styles.
+  const style = document.createElement("style");
+  style.setAttribute("data-html-next-style-boundaries", "");
+  style.textContent = COMPONENT_STYLE_BOUNDARIES;
+  document.head.append(style);
+}
+
+const sharedStyleDefinitions = new WeakMap<Document, Map<string, ComponentDefinition>>();
+
+function installSharedStyles(definition: ComponentDefinition, document: Document, compiler?: ComponentStyleCompiler): readonly string[] {
+  let definitions = sharedStyleDefinitions.get(document);
+  if (definitions === undefined) { definitions = new Map(); sharedStyleDefinitions.set(document, definitions); }
+  definitions.set(definition.contract.tag, definition);
+  if ((definition.stylesheets?.length ?? 0) === 0) return [];
+  const groups = collectSharedStylesheets([...definitions.values()]);
+  const tested = new Set<string>();
+  for (const { id, stylesheet, adopters } of groups) {
+    let carrier = [...document.head.querySelectorAll<HTMLStyleElement>("style[data-html-next-shared-styles]")]
+      .find(style => style.getAttribute("data-html-next-shared-styles") === id);
+    const added = carrier === undefined;
+    carrier ??= document.createElement("style");
+    const tags = adopters.map(owner => owner.contract.tag).join(" ");
+    if (carrier.getAttribute("data-html-next-shared-adopters") !== tags) {
+      const compiled = compiler === undefined
+        ? compileComponentStyles(stylesheet.css, adopters[0]!, document, stylesheet.url, adopters, false)
+        : compiler(stylesheet.css, adopters[0]!, stylesheet.url, adopters, false);
+      if (compiled.css !== "") installStyleBoundaries(document);
+      carrier.setAttribute("data-html-next-shared-styles", id);
+      carrier.setAttribute("data-html-next-shared-adopters", tags);
+      carrier.setAttribute("data-html-next-style-states", JSON.stringify(compiled.stateNamesByTag ?? { [adopters[0]!.contract.tag]: compiled.stateNames }));
+      carrier.textContent = wrapStylesheetConditions(compiled.css, stylesheet.conditions);
+    }
+    if (added) document.head.append(carrier);
+    if (adopters.includes(definition)) {
+      const names = JSON.parse(carrier.getAttribute("data-html-next-style-states") ?? "{}") as Record<string, string[]>;
+      for (const name of names[definition.contract.tag] ?? []) tested.add(name);
+    }
+  }
+  return [...tested];
+}
+
 /** Only explicitly owned style nodes participate in reuse; application CSS is never inspected. */
 function installComponentStyles(
   definition: ComponentDefinition,
   document: Document,
   carrier?: HTMLStyleElement,
-  styleCompiler?: (css: string, definition: ComponentDefinition) => CompiledComponentStyles,
+  styleCompiler?: ComponentStyleCompiler,
 ): HTMLStyleElement | HTMLLinkElement | undefined {
   const tag = definition.contract.tag;
   const existing = document.head.querySelector<HTMLStyleElement | HTMLLinkElement>(
@@ -348,16 +402,19 @@ function installComponentStyles(
     stateNamesByDefinition.set(definition, names[tag] ?? []);
     return existing;
   }
-  if (definition.css === "" && carrier === undefined) return undefined;
+  const sharedNames = installSharedStyles(definition, document, styleCompiler);
+  if (definition.css === "" && carrier === undefined && (definition.stylesheets?.length ?? 0) === 0) return undefined;
   const style = carrier ?? document.createElement("style");
   const compiled = styleCompiler === undefined
-    ? compileComponentStyles(definition.css, definition, document)
-    : styleCompiler(definition.css, definition);
-  stateNamesByDefinition.set(definition, compiled.stateNames);
+    ? compileComponentStyles(definition.css, definition, document, undefined, undefined, false)
+    : styleCompiler(definition.css, definition, undefined, undefined, false);
+  if (compiled.css !== "") installStyleBoundaries(document);
+  const stateNames = [...new Set([...sharedNames, ...compiled.stateNames])];
+  stateNamesByDefinition.set(definition, stateNames);
   style.textContent = compiled.css;
   style.setAttribute("data-html-next-component-styles", tag);
   // Hydration needs this metadata without parsing or transforming the server's CSS again.
-  style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: compiled.stateNames }));
+  style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: stateNames }));
   document.head.append(style);
   return style;
 }
@@ -400,7 +457,7 @@ function discoverySelector(registry: DocumentRegistry): string {
  * Parses an inline `<template component>` carrier. Only a page that authors definitions in HTML
  * needs a parser, so the live entry points install one and a build-time graph never carries it.
  */
-export type InlineDefinitionParser = (carrier: Element, source: string) => ComponentDefinition;
+export type InlineDefinitionParser = (carrier: Element, source: string) => ComponentDefinition | undefined;
 export type ProjectedSlotParser = (
   carrier: HTMLTemplateElement,
   definition: ComponentDefinition,
@@ -420,7 +477,7 @@ export function installProjectedSlotParser(parse: ProjectedSlotParser): void {
   projectedSlotParser = parse;
 }
 
-function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
+function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition | undefined {
   const tag = wrapper.getAttribute("component") ?? "";
   const source = `${wrapper.ownerDocument.URL}#template[component="${tag}"][${index + 1}]`;
   if (wrapper.hasAttribute("src")) {
@@ -435,6 +492,7 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
     );
   }
   const definition = inlineDefinitionParser(wrapper, source);
+  if (definition === undefined) return undefined;
   const style = Array.from(wrapper.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style",
   );
@@ -695,16 +753,18 @@ function readInvocation(
     effects.push(createEffect(scope.scheduler, () => {
       let valid = true;
       // The `from` parameters subscribe, and only a change to them requests again; the others only
-      // record what they accept. A request samples every parameter as it is sent.
+      // record what they accept. A request samples every parameter as it is sent. A whole list sent
+      // as a parameter goes out item by item, so it depends on its items too.
       const parameters: Record<string, Value> = {};
       for (const parameter of data.parameters) {
         if (parameter.mode !== "from") { untracked(() => readParameter(parameter)); continue; }
         const result = readParameter(parameter);
         if (!result.valid) valid = false;
+        if (Array.isArray(result.value)) readItems(result.value);
         parameters[parameter.name] = result.value;
       }
       if (!valid) return;
-      resource.update(parameters);
+      untracked(() => resource.update(parameters));
     }, 0, active));
   }
   return { scope, passThrough, effects, explicit, propInputs };
@@ -1579,7 +1639,15 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        block.scope.set("loop", locals.loop!);
+        // A row's loop fields change one by one, so a reader of one that holds does not run again;
+        // a row whose position and count hold writes nothing.
+        const rowScope = block.scope;
+        const next = locals.loop as Record<string, Value>;
+        const plain = untracked(() => rowScope.read("loop")) as Record<string, Value>;
+        if (plain.index !== next.index || plain.first !== next.first || plain.last !== next.last || plain.count !== next.count) {
+          const loop = untracked(() => rowScope.get("loop")) as Record<string, Value>;
+          loop.index = next.index!; loop.first = next.first!; loop.last = next.last!; loop.count = next.count!;
+        }
       }
       next.set(key, block);
       ordered?.push(block);
@@ -2608,7 +2676,7 @@ function installPropReflection(instance: RuntimeInstance): void {
       const serialized = value === undefined || value === ABSENT || value === null
         ? null : reflectedPropValue(value, selected);
       if (serialized === null) root.removeAttribute(attributeName);
-      else root.setAttribute(attributeName, serialized);
+      else if (root.getAttribute(attributeName) !== serialized) root.setAttribute(attributeName, serialized);
     }, 2));
   }
 
@@ -2671,6 +2739,14 @@ function prepareRuntimeInvocation(
   }
   const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
   const projected = hydration ? children : Array.from(invocation.childNodes);
+  const replaceProjected = (current: Node, next: Node): void => {
+    for (const nodes of [children, projected]) {
+      const index = nodes.indexOf(current);
+      if (index >= 0) nodes[index] = next;
+    }
+    const slot = projectedSlotNames.get(current);
+    if (slot !== undefined) projectedSlotNames.set(next, slot);
+  };
   // A projected component invocation lowers to its own root, perhaps only once a slot renders it.
   // The projection follows that root, so a slot that renders again inserts it, not the invocation
   // element lowering replaced. A later root switch calls the same rebind with the new root.
@@ -2678,12 +2754,7 @@ function prepareRuntimeInvocation(
     if (node.nodeType !== 1 || !(node as Element).localName.includes("-")) continue;
     let current: Node = node;
     whenLowered(node as Element, (root) => {
-      for (const nodes of [children, projected]) {
-        const index = nodes.indexOf(current);
-        if (index >= 0) nodes[index] = root;
-      }
-      const slot = projectedSlotNames.get(current);
-      if (slot !== undefined) projectedSlotNames.set(root, slot);
+      replaceProjected(current, root);
       current = root;
     });
   }
@@ -2702,7 +2773,7 @@ function prepareRuntimeInvocation(
     owned: renderOwned(),
     rootNode,
     rootElement: createSignal<Element | undefined>(undefined),
-    projection: { nodes: projected, slotNames: projectedSlotNames },
+    projection: { nodes: projected, slotNames: projectedSlotNames, replace: replaceProjected },
   };
   if (Object.keys(definition.contract.props).length > 0) {
     instance.effects.push(createEffect(scope.scheduler, () => {
@@ -3100,7 +3171,8 @@ function lowerScopes(
   const definitions: LiveDefinition[] = [];
   for (const element of discovered) {
     if (element.localName === "template" && element.hasAttribute("component") && !isContentOnly(element)) {
-      definitions.push(parseDefinition(element as HTMLTemplateElement, definitions.length));
+      const live = parseDefinition(element as HTMLTemplateElement, definitions.length);
+      if (live !== undefined) definitions.push(live);
     }
   }
   const newDefinitions = new Map<string, LiveDefinition>();
@@ -3365,7 +3437,7 @@ export function manageComponentLifecycle(
 export function registerComponentDefinitions(
   definitions: readonly ComponentDefinition[],
   root: Document = document,
-  styleCompiler?: (css: string, definition: ComponentDefinition) => CompiledComponentStyles,
+  styleCompiler?: ComponentStyleCompiler,
 ): void {
   const registry = registryFor(root);
   for (const definition of definitions) {
@@ -3492,6 +3564,40 @@ export function updateComponentProps(
   else applyComponentProps(instance, props);
 }
 
+/**
+ * Replaces a node in the document, as a framework changes the content it passes a kept component:
+ * when a live component projects `current` into a slot, `next` takes its place there too, so the
+ * slot renders it again, `host.slots` and the rendered form list it, and slotted styles reach it.
+ */
+export function replaceProjectedNode(current: ChildNode, next: ChildNode): void {
+  for (let element = current.parentElement; element !== null; element = element.parentElement) {
+    const instance = runtimeInstance(element);
+    const owner = instance === undefined ? undefined
+      : [instance, ...instance.delegates].find((candidate) => candidate.projection?.nodes.includes(current));
+    if (owner === undefined) continue;
+    owner.projection!.replace(current, next);
+    markProjectedRoot(next);
+    break;
+  }
+  current.replaceWith(next);
+}
+
+/**
+ * Carries a fresh server rendering's props onto a live instance that a framework keeps, through
+ * the same channel as `updateComponentProps`: `rendered` is that component's root in the new
+ * server output, not yet hydrated. The instance keeps its DOM, state, and controller; props the
+ * rendering left implicit return to their defaults.
+ */
+export function adoptRenderedProps(element: Element, rendered: Element): void {
+  const instance = runtimeInstance(element);
+  const record = instance === undefined ? undefined : renderedInstanceRecord(rendered, instance.definition.contract.tag);
+  if (instance === undefined || record === undefined) {
+    fail("HR005", "The rendered element records no props for this element's component.");
+  }
+  applyComponentProps(instance, Object.fromEntries(Object.keys(instance.definition.contract.props)
+    .map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+}
+
 /** Applies props to one named instance, which a shared root makes explicit. */
 function applyComponentProps(
   instance: RuntimeInstance,
@@ -3527,7 +3633,12 @@ function applyComponentProps(
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop === undefined) continue;
-    instance.propInputs[name]!.set({ value: input === undefined ? null : input, source: "value", present: input !== undefined });
+    // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
+    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input !== undefined };
+    const previous = untracked(() => instance.propInputs[name]!.get());
+    if (previous.source !== record.source || previous.present !== record.present || !Object.is(previous.value, record.value)) {
+      instance.propInputs[name]!.set(record);
+    }
     const attributeName = `data-${kebabCase(name)}`;
     const value = next[name] as Value;
     // A bound data-* attribute is template output. Direct input still updates the prop handle,
@@ -3542,7 +3653,8 @@ function applyComponentProps(
     } else {
       instance.explicit.add(name);
       const selected = selectedPropType(contract, prop, next);
-      if (!bound) element.setAttribute(attributeName, reflectedPropValue(input, selected));
+      const reflected = reflectedPropValue(input, selected);
+      if (!bound && element.getAttribute(attributeName) !== reflected) element.setAttribute(attributeName, reflected);
     }
     if (!Object.is(untracked(() => instance.scope.get(name)), value)) instance.scope.set(name, value);
   }

@@ -1,0 +1,9 @@
+<template component="hk-breadcrumbs">
+  <defs>
+    <prop name="items" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Pages from the top of the trail to the current page.</prop>
+    <prop name="label" type="string" default="Breadcrumb">Accessible navigation name.</prop>
+  </defs>
+  <nav from:aria-label="$label">
+    <ol><li $each="item of $items"><a from:href="$item.href" from:aria-current="$item.current">{$item.label}</a></li></ol>
+  </nav>
+</template>

@@ -1,0 +1,13 @@
+<template component="hk-pager">
+  <defs>
+    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string })" nullable>The page before this one.</prop>
+    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string })" nullable>The page after this one.</prop>
+    <prop name="label" type="string" default="Pages">Accessible navigation name.</prop>
+    <prop name="previousText" type="string" default="Previous">Text before the previous page's label.</prop>
+    <prop name="nextText" type="string" default="Next">Text before the next page's label.</prop>
+  </defs>
+  <nav from:aria-label="$label">
+    <a $if="$previous" rel="prev" from:href="$previous.href"><small>{$previousText}</small> {$previous.label}</a>
+    <a $if="$next" rel="next" from:href="$next.href"><small>{$nextText}</small> {$next.label}</a>
+  </nav>
+</template>

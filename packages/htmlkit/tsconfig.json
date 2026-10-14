@@ -12,8 +12,14 @@
       "@nextwebwg/html-next/node-loader": [
         "../html-next/src/node-loader.ts"
       ],
+      "@nextwebwg/html-next/generated-runtime": [
+        "../html-next/src/generated-runtime.ts"
+      ],
       "@nextwebwg/html-next/server": [
         "../html-next/src/server.ts"
+      ],
+      "@nextwebwg/html-next/runtime": [
+        "../html-next/src/runtime.ts"
       ]
     }
   },

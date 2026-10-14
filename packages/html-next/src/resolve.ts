@@ -49,12 +49,7 @@ export class ResourceResolver implements ComponentResourceResolver {
     this.#baseURL = base.href;
     this.#applicationOrigin = application.origin;
     this.#applicationTrustRoot = originRoot(application.href);
-    this.#imports = new Map(
-      Object.entries(map.imports ?? {}).map(([key, target]) => [
-        key,
-        new URL(target, this.#baseURL).href,
-      ]),
-    );
+    this.#imports = importMapEntries(map, this.#baseURL);
   }
 
   resolveRoot(specifier: string): ResolvedResource {
@@ -94,31 +89,35 @@ export class ResourceResolver implements ComponentResourceResolver {
   }
 
   #resolveMapped(specifier: string): ResolvedResource {
-    const exact = this.#imports.get(specifier);
-    if (exact !== undefined) {
-      return Object.freeze({
-        url: exact,
-        trustRoot: mappedTrustRoot(specifier, exact),
-        mapping: specifier,
-      });
-    }
-    const prefix = Array.from(this.#imports.keys())
-      .filter((key) => key.endsWith("/") && specifier.startsWith(key))
-      .sort((left, right) => right.length - left.length)[0];
-    if (prefix === undefined) {
+    const resolved = resolveImportMap(this.#imports, specifier);
+    if (resolved === undefined) {
       fail("HL002", `Bare resource specifier \`${specifier}\` is not mapped by the application.`);
     }
-    const target = this.#imports.get(prefix)!;
-    const url = new URL(specifier.slice(prefix.length), target).href;
-    if (!within(url, target)) {
-      fail("HL003", `Mapped resource \`${specifier}\` escapes approved root \`${target}\`.`);
-    }
-    return Object.freeze({
-      url,
-      trustRoot: target,
-      mapping: prefix,
-    });
+    return resolved;
   }
+}
+
+/** Absolute import-map entries resolved against a base URL. */
+export function importMapEntries(map: ImportMapLike, baseURL: string): ReadonlyMap<string, string> {
+  return new Map(Object.entries(map.imports ?? {}).map(([key, target]) => [key, new URL(target, baseURL).href]));
+}
+
+/** Import-map matching: an exact key, else the longest "/"-terminated prefix; undefined when unmapped. */
+export function resolveImportMap(imports: ReadonlyMap<string, string>, specifier: string): ResolvedResource | undefined {
+  const exact = imports.get(specifier);
+  if (exact !== undefined) {
+    return Object.freeze({ url: exact, trustRoot: mappedTrustRoot(specifier, exact), mapping: specifier });
+  }
+  const prefix = Array.from(imports.keys())
+    .filter((key) => key.endsWith("/") && specifier.startsWith(key))
+    .sort((left, right) => right.length - left.length)[0];
+  if (prefix === undefined) return undefined;
+  const target = imports.get(prefix)!;
+  const url = new URL(specifier.slice(prefix.length), target).href;
+  if (!within(url, target)) {
+    fail("HL003", `Mapped resource \`${specifier}\` escapes approved root \`${target}\`.`);
+  }
+  return Object.freeze({ url, trustRoot: target, mapping: prefix });
 }
 
 export function isWithinTrustRoot(url: string, root: string): boolean {

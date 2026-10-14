@@ -2,7 +2,12 @@ import type { GeneratedArtifact } from "../generate.js";
 
 const SOURCE = `/** Native Svelte derived tracking, with the shared diagnostic at a recursive read. */
 export function cycleCheckedComputed<T>(compute: () => T): { get(): T } {
-  let value = $derived.by(compute);
+  // Svelte compares deriveds with ===; a box kept while the result is Object.is-equal stops NaN too.
+  let box: { readonly value: T } | undefined;
+  let value = $derived.by(() => {
+    const next = compute();
+    return box !== undefined && Object.is(box.value, next) ? box : (box = { value: next });
+  });
   let reading = false;
   return { get(): T {
     if (reading) {
@@ -12,7 +17,7 @@ export function cycleCheckedComputed<T>(compute: () => T): { get(): T } {
       });
     }
     reading = true;
-    try { return value; }
+    try { return value.value; }
     finally { reading = false; }
   } };
 }

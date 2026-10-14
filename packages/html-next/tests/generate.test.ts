@@ -156,7 +156,7 @@ describe("generateComponent", () => {
     assert.doesNotMatch(readerOutput.get("vanilla/XStep.js")!, /@nextwebwg\/html-next\/runtime/);
     assert.match(readerOutput.get("vanilla/XStep.js")!, /readContext\(I, X, \d+, "x-steps", "current"/);
     assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
-    assert.match(readerOutput.get("vue/XStep.vue")!, /inject<any>\('html-next:x-steps:current'\)/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /injectContext\('x-step', 'x-steps', 'current'\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === checkedProps\.index \? 'step' : null/);
 
@@ -194,6 +194,6 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
-    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio data-component="demo-player" controls="" v-bind="nativeAttrs\(\$attrs\)"/);
+    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio controls="" v-bind="nativeAttrs\(\$attrs\)"/);
   });
 });

@@ -1,4 +1,4 @@
-import { fail } from "./diagnostics.js";
+import { fail, type HtmlDiagnostic } from "./diagnostics.js";
 import { isIgnoredResourceMetadata } from "./resource-metadata.js";
 import type { ParsedComponentResource } from "./graph.js";
 import { parseComponentNodes, parseProjectedSlotContent } from "./parser.js";
@@ -24,6 +24,9 @@ function browserPlatform(root: Document) {
     isNativeElement,
     warnInvalidDeclaration(message: string, source: string) {
       root.defaultView?.console.warn(`${source}: HC013: ${message}`);
+    },
+    warn(diagnostic: HtmlDiagnostic) {
+      root.defaultView?.console.warn(`${diagnostic.source}: ${diagnostic.code}: ${diagnostic.message}`);
     },
     resolveDomProperty(tagName: string, propertyName: string): string | undefined {
       if (!isNativeElement(tagName)) return undefined;

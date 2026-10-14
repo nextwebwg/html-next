@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
+import { sveltePlugin } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { compile } from "svelte/compiler";
 
@@ -65,7 +66,7 @@ let n = $state<unknown>(42);
       await writeFile(entry, 'import { mount } from "svelte"; import App from "./App.js"; mount(App, { target: document.querySelector("main") });');
       const bundle = join(outDirectory, "svelte.js");
       await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"],
-        loader: { ".css": "empty" }, nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
+        loader: { ".css": "empty" }, plugins: [sveltePlugin("client")], nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
       bundles.set(mode, bundle);
     }
   });

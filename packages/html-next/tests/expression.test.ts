@@ -287,6 +287,16 @@ describe("expression: typed equality and no coercion", () => {
     assert.equal(evaluate("8% 3", s), 2);
     assert.equal(evaluate("8 % 3", s), 2);
   });
+  it("number arithmetic is decimal to the operands' precision; division keeps double precision", () => {
+    for (const [expression, expected] of [
+      ["1.1 + 0.1", 1.2], ["0.1 + 0.2", 0.3], ["0.3 - 0.1", 0.2], ["1.25 * 2", 2.5], ["0.1 * 0.2", 0.02],
+      ["0.3 % 0.1", 0], ["5.5 % 2", 1.5], ["1 / 3", 1 / 3], ["0.3 / 0.1", 2.9999999999999996], ["2 + 3 * 4", 14],
+      ["$level + 0.1", 0.3], ["($level + 0.1) * 3", 0.9], ["-$level - 0.1", -0.3],
+      ["1.1px + 0.1px", "1.2px"], ["0.1px * 3", "0.3px"], ["3 * 0.1rem", "0.3rem"], ["0.3s - 0.1s", "0.2s"], ["1px / 3", `${1 / 3}px`],
+    ] as const) {
+      assert.equal(evaluate(expression, scope({ level: 0.2 })), expected, expression);
+    }
+  });
   it("arithmetic with an absent operand propagates absent", () => {
     const s2 = scope({ cart: { total: 10 } });
     assert.equal(evaluate("$cart.total - $cart.discount", s2), ABSENT);

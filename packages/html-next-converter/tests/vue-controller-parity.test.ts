@@ -25,6 +25,7 @@ const component = `<template component="x-controlled" status="early" summary="Co
   <state type="number" name="count" value="0"></state>
   <computed name="double" from="$count * 2"></computed>
   <computed name="flat" from="$count * 0"></computed>
+  <state name="items" type="list(object({ name: string }))" value='[{ "name": "a" }, { "name": "b" }]'></state>
   <state name="arm" type="keyword" value="section"></state>
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
   <event name="helper-loaded" type="number"></event>
@@ -52,18 +53,23 @@ const controller = `function connect(host) {
   // Unchanged values notify nothing: a computed that recomputes to 0, and another prop.
   const stopFlat = host.effect(() => { window.trace.flatEffects = (window.trace.flatEffects ?? 0) + 1; void host.state.flat; });
   const stopAmount = host.effect(() => { window.trace.amountEffects = (window.trace.amountEffects ?? 0) + 1; void host.props.amount.value; });
+  // A computed that stays NaN, and a read of one path that a push elsewhere in its list leaves alone.
+  const nan = host.computed(() => host.state.count * 0 / 0);
+  const stopNaN = host.effect(() => { window.trace.nanEffects = (window.trace.nanEffects ?? 0) + 1; void nan.get(); });
+  const stopFirst = host.effect(() => { window.trace.firstEffects = (window.trace.firstEffects ?? 0) + 1; void host.state.items[0].name; });
   const stopListening = host.effect(() => {
     const root = host.root;
     const onClick = (event) => {
       if (event.target !== host.refs.button) return;
       local.update((value) => value + 1);
       host.state.count += 1;
+      host.state.items.push({ name: "c" });
       host.state.arm = host.state.arm === "section" ? "article" : "section";
     };
     root.addEventListener("click", onClick);
     return () => root.removeEventListener("click", onClick);
   });
-  const cleanup = () => { stop(); stopFlat(); stopAmount(); stopListening(); window.trace.disconnects++; };
+  const cleanup = () => { stop(); stopFlat(); stopAmount(); stopNaN(); stopFirst(); stopListening(); window.trace.disconnects++; };
   if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
   return cleanup;
 }
@@ -310,7 +316,8 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, vue].map((page) => page.waitForTimeout(50)));
         const [toneLive, toneVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(toneVue.behavior, toneLive.behavior, "another prop changes controller behavior");
-        assert.deepEqual([toneLive.behavior.trace.amountEffects, toneLive.behavior.trace.flatEffects], [amountRuns, 1]);
+        assert.deepEqual([toneLive.behavior.trace.amountEffects, toneLive.behavior.trace.flatEffects, toneLive.behavior.trace.nanEffects,
+          toneLive.behavior.trace.firstEffects], [amountRuns, 1, 1, 1]);
 
         await Promise.all([live, vue].map((page) => page.locator("#case button").click()));
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2" && document.querySelector("#case")?.localName === "section")));
@@ -427,7 +434,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
 
 declare global {
   interface Window {
-    trace: { connects: number; effects: number; effectCleanups: number; requests: number; disconnects: number; flatEffects?: number; amountEffects?: number };
+    trace: { connects: number; effects: number; effectCleanups: number; requests: number; disconnects: number; flatEffects?: number; amountEffects?: number; nanEffects?: number; firstEffects?: number };
     HtmlNextLoader: { startBrowserComponents(): Promise<unknown> };
     vueSetProps(props: Record<string, unknown>): void;
     vueApp: { unmount(): void };

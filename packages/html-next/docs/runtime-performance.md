@@ -74,8 +74,8 @@ The [reactive benchmark guide](./reactivity-benchmarks.md) records the full matr
 reproduction commands and CI measurement controls. `pnpm verify:performance`
 compares the six shared HTML Next workloads against main in fresh processes;
 it rejects demonstrated slowdowns over 10% in aggregate or 25% in any workload.
-Unstable controls produce an inconclusive failure after one retry. The Required
-CI job includes this check; the full third-party matrix remains optional.
+Unstable controls produce an inconclusive failure after one retry. Run this comparison
+explicitly for reactive performance work; it and the full third-party matrix are outside automatic CI.
 
 ## Framework rendering comparison
 
@@ -92,8 +92,8 @@ grows by more than 1 KB gzip or 5%. Recorded summaries form a ledger in `benchma
 with every entry's and control's gzip bytes; raw results stay local. To read a summary, start with
 `gated_target_met` and `vite_vs_gated_max`, then the per-control `vite_vs_*` and `live_vs_*` ratios
 and the `bundles` gzip bytes; only `full_standard` summaries confirm a result (see the
-[field reference](./framework-benchmark.md#ledger)). A nightly workflow runs the comparison; it is not
-yet a release gate.
+[field reference](./framework-benchmark.md#ledger)). The manual Framework rendering workflow runs
+the comparison; it is not a release gate.
 
 ### October 2026 owner decisions
 

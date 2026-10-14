@@ -1,7 +1,8 @@
-import { typeCheckedDependencies, type CompiledExpression, type WritablePathSegment } from "../expression.js";
-import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
-import type { ComponentDefinition } from "../template.js";
+import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode, type WritablePathSegment } from "../expression.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
+import type { ComponentDefinition, HandlerDeclaration } from "../template.js";
 import { quote } from "./shared.js";
+import { conformingScalarStates, literalInitial } from "./state-roots.js";
 import type { Lowering, Scope } from "./vue-lowering.js";
 
 /** A JavaScript predicate for a declared type, used by generated event and handler code. */
@@ -129,6 +130,8 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
     if (prop === undefined) {
       const declaration = definition.declarations?.find((entry) => entry.name === root);
       if (declaration?.kind === "state" || declaration?.kind === "computed") {
+        // A conforming scalar state's own value is checked in full on every write, so reading it cannot fail.
+        if (declaration.kind === "state" && steps.length === 0 && conformingScalarStates(definition).has(root!)) return [];
         const type = declarationTypeNode(declaration.type, declaration.shape);
         return type === undefined ? [] : check(type, steps);
       }
@@ -155,4 +158,129 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
     return [`(${read} == null || (${options.join(" || ")}))`];
   });
   return checks.length === 0 ? undefined : checks.join(" && ");
+}
+
+type SetStep = Extract<HandlerDeclaration["steps"][number], { kind: "set" }>;
+
+const SCALAR_TYPES = ["string", "number", "integer", "boolean"];
+
+/** A state's declared scalar type name; undefined for any other type, or for a name that is no state. */
+function scalarType(definition: ComponentDefinition, name: string): string | undefined {
+  const declaration = definition.declarations?.find((entry) => entry.kind === "state" && entry.name === name);
+  const node = declaration?.kind === "state" ? declarationTypeNode(declaration.type, declaration.shape) : undefined;
+  return node?.kind === "terminal" && SCALAR_TYPES.includes(node.name) ? node.name : undefined;
+}
+
+/** `$state + n`, `n + $state` or `$state - n` over a number literal `n` no larger than a safe integer. */
+function literalStep(node: ExpressionNode): { readonly state: string; readonly op: "+" | "-"; readonly amount: number } | undefined {
+  if (node.kind !== "binary" || (node.op !== "+" && node.op !== "-")) return undefined;
+  const [state, amount] = node.left.kind === "id" ? [node.left, node.right] : node.op === "+" ? [node.right, node.left] : [];
+  if (state?.kind !== "id" || amount?.kind !== "literal" || amount.dimension !== undefined || typeof amount.value !== "number" ||
+    !(Math.abs(amount.value) <= Number.MAX_SAFE_INTEGER)) return undefined;
+  return { state: state.name, op: node.op, amount: amount.value };
+}
+
+const proofs = new WeakMap<ComponentDefinition, { readonly copyable: ReadonlySet<string>; readonly present: ReadonlySet<string> }>();
+
+/**
+ * The scalar states a proven write may read. A copyable state is never null: its initial value is a
+ * conforming literal and every write is checked, which refuses null for a scalar type. Absence copies
+ * as absence in every target. A present state is also never absent, so arithmetic on it is plain
+ * arithmetic: no controller writes it, and every handler write to it is itself proven.
+ */
+function writeProofs(definition: ComponentDefinition): { readonly copyable: ReadonlySet<string>; readonly present: ReadonlySet<string> } {
+  let known = proofs.get(definition);
+  if (known !== undefined) return known;
+  const copyable = new Set([...conformingScalarStates(definition)].filter((name) => {
+    const declaration = definition.declarations!.find((entry) => entry.kind === "state" && entry.name === name);
+    return declaration?.kind === "state" && declaration.expression !== undefined && literalInitial(declaration.expression.ast)?.value !== null;
+  }));
+  const writes = (definition.declarations ?? []).flatMap((entry) => entry.kind === "handler"
+    ? entry.steps.filter((step): step is SetStep => step.kind === "set" && step.writablePath.length === 1) : []);
+  // The largest set whose writes keep each member present, assuming the others stay present.
+  let present: ReadonlySet<string> = definition.controller === undefined ? copyable : new Set();
+  for (let size = -1; size !== present.size;) {
+    size = present.size;
+    const assumed = present;
+    present = new Set([...assumed].filter((name) => writes.every((step) => step.writablePath[0] !== name ||
+      provenValue(step, definition, assumed, assumed))));
+  }
+  proofs.set(definition, known = { copyable, present });
+  return known;
+}
+
+function provenValue(step: SetStep, definition: ComponentDefinition, copyable: ReadonlySet<string>, present: ReadonlySet<string>): boolean {
+  if (step.writablePath.length !== 1) return false;
+  const declaration = definition.declarations?.find((entry) => entry.kind === "state" && entry.name === step.writablePath[0]);
+  const node = declaration?.kind === "state" ? declarationTypeNode(declaration.type, declaration.shape) : undefined;
+  if (node === undefined) return false;
+  const value = step.value.ast;
+  const literal = literalInitial(value);
+  if (literal !== undefined) return literal.value !== null && parseTypedValue(literal.value, node, "$", "value").ok;
+  const type = scalarType(definition, String(step.writablePath[0]));
+  if (value.kind === "unary" && value.op === "not") return type === "boolean";
+  if (value.kind === "id") {
+    const source = scalarType(definition, value.name);
+    return copyable.has(value.name) && (source === type || (source === "integer" && type === "number"));
+  }
+  // A finite value stepped by a literal no larger than a safe integer stays finite: a double only
+  // overflows past 2^1023, where one step changes nothing. An integer stepped by a safe integer stays
+  // an integer; decimal arithmetic on a number gives a number.
+  const arithmetic = literalStep(value);
+  if (arithmetic === undefined || !present.has(arithmetic.state)) return false;
+  const source = scalarType(definition, arithmetic.state);
+  return type === "integer" ? source === "integer" && Number.isSafeInteger(arithmetic.amount)
+    : type === "number" && (source === "integer" || source === "number");
+}
+
+/**
+ * A handler step whose written value the converter proves satisfies its state's declared type, so
+ * it writes plainly: a conforming literal, a negation into a boolean state, a copy of a same-typed
+ * state, or an always-present number state plus or minus a number literal (an integer state, by a
+ * safe integer, to stay one). The caller still checks a value that may be an invalid result.
+ */
+export function provenWrite(step: SetStep, definition: ComponentDefinition): boolean {
+  const { copyable, present } = writeProofs(definition);
+  return provenValue(step, definition, copyable, present);
+}
+
+/**
+ * `$state ± n` written to that same state: the step's operator and amount, and whether it is decimal
+ * arithmetic (a `number` state) rather than JavaScript's (an `integer` state).
+ */
+export function selfStep(step: SetStep, definition: ComponentDefinition): { readonly op: "+" | "-"; readonly amount: number; readonly decimal: boolean } | undefined {
+  const arithmetic = literalStep(step.value.ast);
+  return arithmetic === undefined || step.writablePath.length !== 1 || arithmetic.state !== step.writablePath[0] ? undefined
+    : { ...arithmetic, decimal: scalarType(definition, arithmetic.state) !== "integer" };
+}
+
+/** An integer state's `$state ± n` written to itself, as `state++` or `state += n`. */
+export function increment(step: SetStep, definition: ComponentDefinition, target: string): string | undefined {
+  const self = selfStep(step, definition);
+  return self === undefined || self.decimal ? undefined : self.amount === 1 ? `${target}${self.op}${self.op}` : `${target} ${self.op}= ${self.amount}`;
+}
+
+/** A handler write's destination check, or none when the destination accepts any value. */
+export function refusing(check: string | undefined): string | undefined {
+  return check === "true" ? undefined : check;
+}
+
+/**
+ * A checked write's predicate and its authored location, as `write`'s trailing arguments: the file,
+ * handler and state path, which the live runtime's warning names and reports once.
+ */
+export function writeCheck(check: string | undefined, definition: ComponentDefinition, handler: HandlerDeclaration, step: SetStep): string {
+  return check === undefined ? "" : `, ${writePredicate(check)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
+}
+
+/** The shared host's named predicates for scalar destinations; other types check inline. */
+export const WRITE_PREDICATES: Readonly<Record<string, string>> = {
+  'typeof value === "string"': "isString",
+  '(typeof value === "number" && Number.isFinite(value))': "isNumber",
+  "Number.isInteger(value)": "isInteger",
+  'typeof value === "boolean"': "isBoolean",
+};
+
+export function writePredicate(check: string): string {
+  return WRITE_PREDICATES[check] ?? `(value: any) => ${check}`;
 }

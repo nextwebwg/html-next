@@ -3,7 +3,7 @@
   <state name="count" type="number" value="0"></state>
   <state name="text" type="string" value="initial"></state>
 </defs><section><h1>A small application</h1><p>This page and its loader state are rendered before JavaScript runs.</p>
-<button $ref="increment" type="button">Increment</button> <output $value="$count"></output>
+<button $ref="increment" type="button">Increment</button> <output>{$count}</output>
 <p><label>Try editing before startup <input bind:value="text"></label></p>
 <a from:href="$itemURL">Open a parameterized page</a></section>
 <style>:host { padding: 2rem 0; } button, input { font: inherit; padding: .5rem .8rem; } output { padding: 1rem; } a { color: #075fbc; }</style></template>

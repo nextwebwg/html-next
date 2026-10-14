@@ -112,12 +112,12 @@ export const cases = [
  * `files` supplies the modules they import by specifier, such as controllers.
  */
 export async function compiledFixtures(format: "esm" | "iife", more = "", components: readonly ComponentDefinition[] = definitions,
-  files: Readonly<Record<string, string>> = {}): Promise<string> {
+  files: Readonly<Record<string, string>> = {}, hydrate = true): Promise<string> {
   const source = fileURLToPath(new URL("../src/", import.meta.url));
   const invocations = new Map(components.map((definition) =>
     [definition.contract.tag, { module: `./${definition.contract.name}.js`, definition }]));
   const modules = new Map(components.map((definition) => [`./${definition.contract.name}.js`,
-    generateComponent(definition, { invocations, hydrate: true }).find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)!.content]));
+    generateComponent(definition, { invocations, hydrate }).find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)!.content]));
   for (const [specifier, contents] of Object.entries(files)) modules.set(specifier, contents);
   const entry = [
     ...components.map((definition) => `import { create${definition.contract.name} } from "./${definition.contract.name}.js";`),

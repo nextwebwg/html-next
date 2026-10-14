@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
+import { compileSvelteFile, sveltePlugin } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { compile } from "svelte/compiler";
 
@@ -47,7 +48,7 @@ describe.skipIf(!enabled)("Svelte selected-prop parity", () => {
       const component = manifest.components[0]!;
       const componentPath = join(outDirectory, component.artifact);
       await writeFile(join(outDirectory, "svelte", `${component.name}.js`),
-        compile(await readFile(componentPath, "utf8"), { filename: componentPath, generate: "client" }).js.code);
+        await compileSvelteFile(componentPath));
       const wrapper = `<script lang="ts">
 import Component from "./svelte/${component.name}.js";
 let selected = $state<{ kind: string; value: unknown }>({ kind: "number", value: 2 });
@@ -61,7 +62,7 @@ let selected = $state<{ kind: string; value: unknown }>({ kind: "number", value:
       await writeFile(entry, 'import { mount } from "svelte"; import App from "./App.js"; mount(App, { target: document.querySelector("main") });');
       const bundle = join(outDirectory, "svelte.js");
       await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"],
-        loader: { ".css": "empty" }, nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
+        loader: { ".css": "empty" }, plugins: [sveltePlugin("client")], nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
       bundles.set(mode, bundle);
     }
   });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "@formatjs/intl-durationformat/polyfill.js";
 
 import { JSDOM } from "jsdom";
 import { afterEach, beforeAll, describe, it, vi } from "vitest";

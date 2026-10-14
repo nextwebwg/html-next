@@ -4,12 +4,16 @@ HTMLKit's first production adapter is static. A future request adapter should re
 manifest, layout chain, loader result contract, component graph, and HTML Next rendering/adoption
 path. Authored pages must not change when a route moves from prerendering to request-time delivery.
 Page entry names, route patterns, and browser bundle locations stay separate in both adapters.
-Named/default layout selection and `htmlkit:page` selection resolve before loader execution;
+Named/default layout selection and `hk:page` selection resolve before loader execution;
 declarative head metadata belongs to each selected component carrier, is rendered from that layer's props, and is merged by the same
 identity rules in either adapter. No browser head subscription is required for document navigation.
 This is a tooling implementation design, not a component-language specification.
 
 ## Shared work and adapter responsibilities
+
+`Application.fetch(request)` is the request entry point that a production adapter will build on.
+Today the development server serves every page through it, and CI runs it on Deno and Bun. It still
+supplies the static `prerender` context described below.
 
 The current application pipeline already separates route matching and static entry enumeration.
 `entries()` is a deployment operation; `render()` matches a concrete pathname and runs a fresh
@@ -77,8 +81,10 @@ explicitly reviewed.
 ## Native mechanisms and the remaining gap
 
 Native `URL`, `Request`, `Response`, `fetch`, and `AbortSignal` cover URL parsing, HTTP values,
-network reads, and cancellation. Native anchors and document navigation cover the first routing
-experience. HTML Next already provides named-slot composition, typed props/state, isolated Node
+network reads, and cancellation. Native anchors and the Navigation API carry routing; client
+navigation renders each page from its module and data payload, or its static document
+([client-navigation.md](./client-navigation.md)). A request adapter must not prefetch payloads for
+links on screen, since each would run loaders. HTML Next already provides named-slot composition, typed props/state, isolated Node
 DOM rendering, rendered continuation serialization, MutationObserver-based adoption, controller
 connection/disposal, and browser read resumption. Vite supplies module resolution, TypeScript
 transformation, asset bundling, and development watching.

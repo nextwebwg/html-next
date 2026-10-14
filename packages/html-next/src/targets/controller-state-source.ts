@@ -6,7 +6,10 @@ interface ControllerNamespaces {
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
-  readonly changed?: (name: string) => void;
+  /** A read below a state root, by its path from the root. */
+  readonly read?: (name: string, keys: readonly string[]) => void;
+  /** A write below a state root changed the value at this path from the root. */
+  readonly changed?: (name: string, keys: readonly string[]) => void;
 }
 
 function controllerNamespaces(options: ControllerNamespaces, source: string): {
@@ -49,12 +52,18 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     const surface = readonly ? (Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value))) : value;
     if (readonly && Array.isArray(value)) surface.length = value.length;
     const proxy = new Proxy(surface, {
-      get: (_target, key) => wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly),
+      get: (_target, key) => {
+        if (!readonly) options.read?.(name, [...keys, String(key)]);
+        return wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly);
+      },
       set: (_target, key, written) => {
         const next = unwrap(written);
         return write(name, [...keys, String(key)], next, readonly, () => {
           const previous = Reflect.get(value, key);
-          if (Reflect.set(value, key, next) && !Object.is(previous, next)) options.changed?.(name);
+          const length = Array.isArray(value) ? value.length : undefined;
+          if (Reflect.set(value, key, next) && !Object.is(previous, next)) options.changed?.(name, [...keys, String(key)]);
+          // Setting an index past the end extends the list before any write of its length.
+          if (length !== undefined && length !== (value as unknown[]).length && key !== "length") options.changed?.(name, [...keys, "length"]);
         });
       },
       has: (_target, key) => Reflect.has(value, key),
@@ -65,14 +74,14 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
         return descriptor === undefined ? undefined : readonly ? { ...descriptor, configurable: true } : descriptor;
       },
       deleteProperty: (_target, key) => write(name, [...keys, String(key)], undefined, readonly, () => {
-        if (Reflect.has(value, key) && Reflect.deleteProperty(value, key)) options.changed?.(name);
+        if (Reflect.has(value, key) && Reflect.deleteProperty(value, key)) options.changed?.(name, [...keys, String(key)]);
       }),
       defineProperty: (_target, key, descriptor) => {
         if (readonly || !("value" in descriptor) || options.acceptsState?.(name, [...keys, String(key)], descriptor.value) === false) {
           warn([name, ...keys, String(key)].join("."), readonly); return false;
         }
         const changed = Reflect.defineProperty(value, key, descriptor);
-        if (changed) options.changed?.(name);
+        if (changed) options.changed?.(name, [...keys, String(key)]);
         return changed;
       },
     });

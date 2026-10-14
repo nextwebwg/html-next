@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { parseFragment } from "parse5";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 
 import { parseComponent } from "@nextwebwg/html-next";
 import { cases, type ConformanceCase } from "../../html-next/tests/conformance/cases.js";
@@ -22,6 +22,7 @@ const baseStyle = "<style>html { color-scheme: light; } body { margin: 8px; font
 // Keep every successful public case accounted for as support lands.
 const selected = new Set([
   "HTML parser recovery keeps the first duplicate attribute",
+  "keeps whitespace-only text between elements and rows inside pre",
   "preserves SVG namespaces and camelCase attributes inside a native root",
   "keeps a single native root when $with scopes the root",
   "lowers to native root with prop :attr, passthrough attrs, and default slot",
@@ -37,6 +38,7 @@ const selected = new Set([
   "$html sanitizes: <script>, on* handlers, and javascript: URLs are stripped and do not execute",
   "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
   "dimensional arithmetic scales numeric parts and preserves written units",
+  "number arithmetic is decimal to the operands' precision: 0.1 steps reach exactly 9.9",
   "$if truthiness: '' / 0 / [] / false are falsy; non-empty string and non-zero are truthy",
   "invalid structural expressions keep the last rendered region until a valid update",
   "initially invalid structural expressions render nothing until a valid update",
@@ -45,6 +47,7 @@ const selected = new Set([
   "$each $where filters and reindexes the loop",
   "$sort with multiple keys and descending (a,-b)",
   "$match/$when/$else renders only the winning arm",
+  "bindings and bound controls write no attribute when a change leaves their result as it was",
   "$if, $with and $match keep their content while the decision holds, and rebuild it when it changes",
   "$match selects a row inside <table><tbody>, falling back to $else",
   "a structural <template> produces no wrapper element",
@@ -57,6 +60,7 @@ const selected = new Set([
   "bind: renders its initial state; declared on: bindings are consumed",
   "reactive declarations seed once: state initializes, computed evaluates, data is pending",
   ".property binding resolves through the generated DOM contract",
+  "handler writes satisfy each state's declared type, and a nonconforming write leaves the state",
 ]);
 const shared = cases.filter((testCase) => selected.has(testCase.name) && "probe" in testCase.expect);
 assert.equal(shared.length, selected.size, "Every selected public case must still exist");
@@ -81,6 +85,78 @@ const formatCases = [
 ] as const;
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
+  {
+    name: "SVG class rules stay inside owned scope while explicit slot styles and inheritance survive",
+    source: `<template component="x-svg-boundary" status="early" summary="SVG scope boundaries.">
+      <div><svg><rect class="shape" width="10" height="10"></rect></svg><slot></slot></div>
+      <style>:host { fill: green; } .shape { fill: red; } :slotted(.styled) { fill: blue; }</style>
+    </template><x-svg-boundary><svg><rect class="shape" width="10" height="10"></rect><rect class="shape styled" x="20" width="10" height="10"></rect></svg></x-svg-boundary>`,
+    expect: { probe: `return [...document.querySelectorAll('rect')].map(node => getComputedStyle(node).fill);`,
+      result: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'] },
+  },
+  {
+    name: "SVG class rules stop at the roots of components the template invokes",
+    dependencies: { "inner.html": `<template component="x-svg-inner" status="early" summary="Nested SVG."><div><svg><rect class="shape" width="10" height="10"></rect></svg></div></template>` },
+    source: `<template component="x-svg-outer" status="early" summary="SVG nesting."><div><svg><rect class="shape" width="10" height="10"></rect></svg><x-svg-inner></x-svg-inner></div>
+      <style>:host { fill: green; } .shape { fill: red; }</style></template><x-svg-outer id="case"></x-svg-outer>`,
+    expect: { probe: `return [...document.querySelectorAll('rect')].map(node => getComputedStyle(node).fill);`,
+      result: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)'] },
+  },
+  {
+    name: "namespaced component type selectors keep their namespace",
+    source: `<template component="x-ns-host" status="early" summary="Namespaced host."><p>Host</p><style>@namespace n "http://www.w3.org/1999/xhtml";
+      :host:is(n|x-ns-host) { border-top: 3px solid; }</style></template><x-ns-host id="case"></x-ns-host>`,
+    expect: { probe: `return getComputedStyle(q('#case')).borderTopWidth;`, result: "3px" },
+  },
+  {
+    name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
+    dependencies: { "leaf.html": `<template component="x-leaf-boundary" status="early" summary="Leaf."><article class="ordinary">Leaf</article></template>` },
+    source: `<template component="x-delegated-boundary" status="early" summary="Delegated root."><x-leaf-boundary></x-leaf-boundary><style>
+      :host, :host::before { box-sizing: border-box; }
+      *, *::after { box-sizing: border-box; }
+      article, .ordinary { outline: 7px solid; }
+    </style></template><x-delegated-boundary id="case"></x-delegated-boundary>`,
+    expect: { probe: `const box = (node) => node === null ? null : { box: getComputedStyle(node).boxSizing, before: getComputedStyle(node, '::before').boxSizing, after: getComputedStyle(node, '::after').boxSizing, outline: getComputedStyle(node).outlineStyle, border: getComputedStyle(node).borderTopWidth }; return box(q('#case'));`,
+      result: { box: "border-box", before: "border-box", after: "content-box", outline: "none", border: "0px" } },
+  },
+  ...[false, true].map((explicit): ConverterCase => ({
+    name: `ordinary selectors exclude roots, nested components and projected content${explicit ? " with explicit host pseudos" : ""}`,
+    dependencies: { "child.html": `<template component="x-boundary-child" status="early" summary="Nested."><article><span class="nested">Nested</span></article></template>` },
+    source: `<template component="x-boundary" status="early" summary="Style boundaries."><article class="ordinary"><span class="owned">Owned</span><x-boundary-child></x-boundary-child><slot></slot></article>
+      <style>:host, *, *::before, *::after { box-sizing: border-box; }
+      article, .ordinary, span { outline: 7px solid; }
+      ${explicit ? ":host::before, :host::after { box-sizing: border-box; }" : ""}
+      :slotted(.projected) { border-top: 9px solid; }</style></template><x-boundary id="case"><span class="projected">Projected</span></x-boundary>`,
+    expect: { probe: `const box = (node) => node === null ? null : { box: getComputedStyle(node).boxSizing, before: getComputedStyle(node, '::before').boxSizing, after: getComputedStyle(node, '::after').boxSizing, outline: getComputedStyle(node).outlineStyle, border: getComputedStyle(node).borderTopWidth }; return [q('#case'), q('#case .owned'), q('#case article'), q('#case .nested'), q('#case .projected')].map(box);`,
+      result: [
+        { box: "border-box", before: explicit ? "border-box" : "content-box", after: explicit ? "border-box" : "content-box", outline: "none", border: "0px" },
+        { box: "border-box", before: "border-box", after: "border-box", outline: "solid", border: "0px" },
+        { box: "content-box", before: "content-box", after: "content-box", outline: "none", border: "0px" },
+        { box: "content-box", before: "content-box", after: "content-box", outline: "none", border: "0px" },
+        { box: "content-box", before: "content-box", after: "content-box", outline: "none", border: "9px" },
+      ] },
+  })),
+  {
+    name: "sanitized HTML takes the component's own rules and slotted rules take only projected content",
+    source: `<template component="x-html-boundary" status="early" summary="HTML and projection."><defs><state name="markup" type="string" value="&lt;b&gt;HTML&lt;/b&gt;"></state></defs>
+      <section><p $html="$markup"></p><b class="own">Own</b><slot></slot></section>
+      <style>b { color: rgb(10, 120, 30); } :slotted(b) { text-decoration: underline; }</style></template>
+      <x-html-boundary id="case"><b class="projected">Projected</b></x-html-boundary>`,
+    expect: { probe: `return ['p b', '.own', '.projected'].map((selector) => { const node = q('#case ' + selector); return [getComputedStyle(node).color, getComputedStyle(node).textDecorationLine]; });`,
+      result: [["rgb(10, 120, 30)", "none"], ["rgb(10, 120, 30)", "none"], ["rgb(0, 0, 0)", "underline"]] },
+  },
+  {
+    name: "declared names and loop aliases never take render helper names or a handler's step locals",
+    source: `<template component="x-step-names" status="early" summary="Generated names."><defs>
+      <state name="items" value=""></state><state name="step" type="number" value="10"></state>
+      <state name="next0" type="number" value="1"></state><state name="count" type="number" value="0"></state>
+      <state name="list" type="string" value="kept"></state>
+      <handler name="advance"><set name="next0" expr:value="$next0 + 1"></set><set name="count" expr:value="$next0 + 1"></set><set name="items" expr:value="[1, 2]"></set></handler>
+      </defs><section><ul><li $each="number of $items">{$number + $step}</li></ul><output>{$next0}/{$count}/{$list}</output><button type="button" on:click="advance">Go</button></section></template><x-step-names></x-step-names>`,
+    expect: { probe: `return [qa('li').map(e => e.textContent), q('output').textContent];`, result: [[], "1/0/kept"], after: [
+      { action: `document.querySelector('button').click();`, result: [["11", "12"], "2/3/kept"] },
+    ] },
+  },
   {
     name: "one-way native controls preserve authored defaults without duplicate attributes",
     source: `<template component="x-oneway-defaults" status="early" summary="One-way control defaults."><defs>
@@ -215,11 +291,12 @@ const regressions: readonly ConverterCase[] = [
     ] },
   },
   {
-    name: "authored text preserves literal braces decoded entities and exact whitespace",
+    name: "authored text preserves literal braces, decoded entities and preformatted whitespace",
     source: `<template component="x-literal-text" status="early" summary="Literal text."><defs><state name="count" type="number" value="1"></state><handler name="next"><set name="count" value="2"></set></handler></defs><section><p class="literal" title="{count}" data-entity="&amp;amp;">  \\{count} &amp; \\&#123;count&#125; \\{#if count} &lt;b&gt;  </p><pre> first
   second </pre><span class="dynamic" $value="$count"></span><button on:click="next">Next</button></section></template><x-literal-text></x-literal-text>`,
-    expect: { probe: `return [q('p.literal').textContent, q('pre').textContent, q('p.literal').getAttribute('title'), q('p.literal').getAttribute('data-entity'), q('span.dynamic').textContent];`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "1"], after: [
-      { action: `document.querySelector('button').click();`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "2"] },
+    // Svelte drops whitespace at the start and end of a tag, as converted text follows Svelte's whitespace handling.
+    expect: { probe: `return [q('p.literal').textContent.trim(), q('pre').textContent, q('p.literal').getAttribute('title'), q('p.literal').getAttribute('data-entity'), q('span.dynamic').textContent];`, result: ["{count} & {count} {#if count} <b>", " first\n  second ", "{count}", "&amp;", "1"], after: [
+      { action: `document.querySelector('button').click();`, result: ["{count} & {count} {#if count} <b>", " first\n  second ", "{count}", "&amp;", "2"] },
     ] },
   },
   {
@@ -417,7 +494,7 @@ const regressions: readonly ConverterCase[] = [
       </defs><section class="wrapper" $match="$status as s"><button $when="$s = 'ready'" on:click="toggle">Ready</button><button $else on:click="toggle">Waiting</button></section>
       <style>:host { display: block; padding: 4px; background: rgb(238 244 250); }</style></template><x-wrapper-match id="case"></x-wrapper-match>`,
     liveSetup: `window.wrapper = document.querySelector('#case');`,
-    expect: { probe: `return [q('#case').tagName, q('#case').className, q('#case').textContent.trim(), window.wrapper ? q('#case') === window.wrapper : true];`,
+    expect: { probe: `return [q('#case').tagName, [...q('#case').classList].filter((name) => name !== 'x-wrapper-match').join(' '), q('#case').textContent.trim(), window.wrapper ? q('#case') === window.wrapper : true];`,
       result: ["SECTION", "wrapper", "Ready", true], after: [
         { action: `window.wrapper ??= document.querySelector('#case'); document.querySelector('button').click();`, result: ["SECTION", "wrapper", "Waiting", true] },
         { action: `document.querySelector('button').click();`, result: ["SECTION", "wrapper", "Ready", true] },
@@ -576,10 +653,10 @@ const regressions: readonly ConverterCase[] = [
       <style>:host { color: rgb(170 20 20); } :host(.active) { background: rgb(230 240 250); }</style></template>
       <x-primary id="case" class="outside active" label="Ready">Go</x-primary>`,
     hydrationOnlyProbe: true,
-    expect: { probe: `const e = q('#case'); return [e.localName, e.getAttribute('data-component'), e.className, e.getAttribute('data-active'), getComputedStyle(e).padding, e.textContent.trim(), e.getAttribute('data-label'), e.validity.valid, document.activeElement === e, window.changes ?? []];`,
-      result: ["button", "x-primary x-base-button", "base primary outside", null, "6px", "Go", "Ready", true, false, []], after: [
-        { action: `window.changes = []; const e = document.querySelector('#case'); e.addEventListener('change', e => window.changes.push([e.detail, e.bubbles, e.composed, e.cancelable])); e.click();`, result: ["button", "x-primary x-base-button", "base primary outside active", "", "6px", "Go", "Ready", true, true, [[true, true, false, true]]] },
-        { action: `document.querySelector('#case').click();`, result: ["button", "x-primary x-base-button", "base primary outside", null, "6px", "Go", "Ready", true, true, [[true, true, false, true], [false, true, false, true]]] },
+    expect: { probe: `const e = q('#case'); return [e.localName, [...e.classList].filter((name) => !['x-primary', 'x-base-button'].includes(name) && !name.startsWith('svelte-')).join(' '), e.getAttribute('data-active'), getComputedStyle(e).padding, e.textContent.trim(), e.getAttribute('data-label'), e.validity.valid, document.activeElement === e, window.changes ?? []];`,
+      result: ["button", "base primary outside", null, "6px", "Go", "Ready", true, false, []], after: [
+        { action: `window.changes = []; const e = document.querySelector('#case'); e.addEventListener('change', e => window.changes.push([e.detail, e.bubbles, e.composed, e.cancelable])); e.click();`, result: ["button", "base primary outside active", "", "6px", "Go", "Ready", true, true, [[true, true, false, true]]] },
+        { action: `document.querySelector('#case').click();`, result: ["button", "base primary outside", null, "6px", "Go", "Ready", true, true, [[true, true, false, true], [false, true, false, true]]] },
       ] },
   },
 
@@ -744,15 +821,28 @@ function consumer(invocation: string, tag: string, name: string, props: Readonly
   return markup;
 }
 
-function withoutStylingMarkers(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutStylingMarkers);
+function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withoutStylingMarkers(entry, tags));
   if (value === null || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
     key,
     key === "attributes" && Array.isArray(entry)
-      ? entry.filter((attribute) => Array.isArray(attribute) && !["data-slotted", "data-html-next-owner"].includes(attribute[0]))
-      : withoutStylingMarkers(entry),
+      ? entry.flatMap((attribute) => {
+        if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
+        const [name, text] = attribute as [string, string];
+        if (["data-slotted", "data-component", "data-html-next-owner"].includes(name)) return [];
+        // Svelte scopes a root, or an invoked component, by its tag as a class, and owned markup by its hash.
+        if (name !== "class") return [attribute];
+        const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token) && !/^svelte-\w+$/.test(token)).join(" ");
+        return classes === "" ? [] : [[name, classes]];
+      })
+      : withoutStylingMarkers(entry, tags),
   ]));
+}
+
+/** The component tags a conformance case defines. */
+function definedTags(testCase: { readonly source: string; readonly dependencies?: Readonly<Record<string, string>> }): ReadonlySet<string> {
+  return new Set([...[testCase.source, ...Object.values(testCase.dependencies ?? {})].join("").matchAll(/<template\s+component="([^"]+)"/g)].map((match) => match[1]!));
 }
 
 
@@ -787,8 +877,6 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
         const component = manifest.components.find((entry) => entry.tag === parsed.contract.tag)!;
         const wrapper = join(outDirectory, "App.svelte");
         await writeFile(wrapper, `<script>import ${component.name} from "./${component.artifact}";</script>\n${consumer(invocation, parsed.contract.tag, component.name, parsed.contract.props, testCase.passthrough)}`);
-        const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
-          .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
         const browserEntry = join(outDirectory, "browser.ts");
         const bundle = join(outDirectory, "svelte.js");
         await writeFile(browserEntry, `import { mount, hydrate } from "svelte";\nimport App from "./App.svelte";\nconst target = document.querySelector("main")!;\nif (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });`);
@@ -803,7 +891,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
         let serverError: string | undefined;
         try { server = (await import(pathToFileURL(serverBundle).href) as { html: string }).html; }
         catch (error) { serverError = String(error); }
-        artifacts.set(`${index}:${mode}`, { bundle, css, server, ...(serverError === undefined ? {} : { serverError }) });
+        artifacts.set(`${index}:${mode}`, { bundle, css: svelteStyles(outDirectory), server, ...(serverError === undefined ? {} : { serverError }) });
       }
     }
   }, 120_000);
@@ -825,6 +913,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
             const warnings: string[] = [];
             try {
               const { definition, invocation } = scene(testCase.source);
+              const tags = definedTags(testCase);
               const output = artifacts.get(`${index}:${mode}`)!;
               assert.equal(output.serverError, undefined, `Svelte server rendering failed: ${output.serverError}`);
               for (const page of [live, svelte, hydrated]) page.on("pageerror", (error) => errors.push(error.message));
@@ -858,8 +947,8 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
                 requiresHydration ? Promise.resolve(undefined) : hydrated.evaluate((script) => Function(script)(), program),
               ]);
               assert.deepEqual(liveResult, testCase.expect.result, "live runtime characterization changed");
-              assert.deepEqual(withoutStylingMarkers(svelteResult), withoutStylingMarkers(liveResult), "public Svelte browser behavior differs");
-              if (!requiresHydration) assert.deepEqual(withoutStylingMarkers(serverResult), withoutStylingMarkers(liveResult), "public Svelte server behavior differs");
+              assert.deepEqual(withoutStylingMarkers(svelteResult, tags), withoutStylingMarkers(liveResult, tags), "public Svelte browser behavior differs");
+              if (!requiresHydration) assert.deepEqual(withoutStylingMarkers(serverResult, tags), withoutStylingMarkers(liveResult, tags), "public Svelte server behavior differs");
               await assertPixelsEqual(svelte, await capturePixels(svelte), await capturePixels(live), "public Svelte rendered pixels differ", live);
               await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Svelte server-rendered pixels differ", live);
               if (testCase.beforeHydration !== undefined) {
@@ -867,7 +956,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
               }
               await hydrated.addScriptTag({ path: output.bundle });
               const hydratedResult = await hydrated.evaluate((script) => Function(script)(), program);
-              assert.deepEqual(withoutStylingMarkers(hydratedResult), withoutStylingMarkers(testCase.editedResult ?? liveResult), "public Svelte hydrated behavior differs");
+              assert.deepEqual(withoutStylingMarkers(hydratedResult, tags), withoutStylingMarkers(testCase.editedResult ?? liveResult, tags), "public Svelte hydrated behavior differs");
               if (testCase.editedResult !== undefined) {
                 assert.deepEqual(await live.evaluate((script) => Function(script)(), program), testCase.editedResult, "native edit characterization differs");
                 assert.deepEqual(await svelte.evaluate((script) => Function(script)(), program), testCase.editedResult, "client native edit differs");
@@ -878,8 +967,8 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
                 await Promise.all([live, svelte, hydrated].map((page) => page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))));
                 const [liveAfter, svelteAfter, hydratedAfter] = await Promise.all([live, svelte, hydrated].map((page) => page.evaluate((script) => Function(script)(), program)));
                 assert.deepEqual(liveAfter, step.result, "live runtime changed after interaction");
-                assert.deepEqual(withoutStylingMarkers(svelteAfter), withoutStylingMarkers(liveAfter), "Svelte browser behavior differs after interaction");
-                assert.deepEqual(withoutStylingMarkers(hydratedAfter), withoutStylingMarkers(liveAfter), "Svelte hydrated behavior differs after interaction");
+                assert.deepEqual(withoutStylingMarkers(svelteAfter, tags), withoutStylingMarkers(liveAfter, tags), "Svelte browser behavior differs after interaction");
+                assert.deepEqual(withoutStylingMarkers(hydratedAfter, tags), withoutStylingMarkers(liveAfter, tags), "Svelte hydrated behavior differs after interaction");
                 await assertPixelsEqual(svelte, await capturePixels(svelte), await capturePixels(live), "Svelte pixels differ after interaction", live);
                 await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "Svelte hydrated pixels differ after interaction", live);
               }

@@ -19,15 +19,15 @@ const source = `<template component="x-event-host" controller="./controller.js">
 
 describe("Svelte controller event contract", () => {
   it("lowers the native triggering event into an invocation-local handler parameter", async () => {
-    const output = generateSvelteOutput(parseComponent(source, "x-event-host.html"));
+    const output = generateSvelteOutput(parseComponent(source, "x-event-host.html"), "test");
     assert.match(output.component, /function forward\(event: Event\): void/);
-    assert.match(output.component, /const htmlNextDetail0: unknown = event;/);
+    assert.match(output.component, /const detail: unknown = event;/);
     assert.doesNotMatch(output.component, /checkedProps\['\$\$event'\]/);
     compile(output.component, { filename: "EventHost.svelte", generate: "client" });
 
     // Execute the emitted handler, including its actual argument forwarding.
-    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n\}/)![0];
-    const { code } = await transform(`let rootElement = null; const dispatchDeclared = (_root: unknown, _name: string, detail: unknown) => detail;\n${handler.replace("dispatchDeclared(rootElement", "captured = dispatchDeclared(rootElement")}\nlet captured: unknown; export { forward }; export const payload = () => captured;`, { loader: "ts", format: "esm" });
+    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n\t\}/)![0];
+    const { code } = await transform(`let rootElement = null; const dispatchDeclared = (_root: unknown, _name: string, detail: unknown) => detail;\n${handler.replace(/dispatchDeclared\(\s*rootElement/, "captured = dispatchDeclared(rootElement")}\nlet captured: unknown; export { forward }; export const payload = () => captured;`, { loader: "ts", format: "esm" });
     const emitted = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
     const event = new CustomEvent("click", { detail: 42 });
     emitted.forward(event);
@@ -35,21 +35,21 @@ describe("Svelte controller event contract", () => {
   });
 
   it("generates separate resource getters and typed state destination checks", () => {
-    const output = generateSvelteOutput(parseComponent(source, "x-event-host.html"));
-    assert.match(output.component, /computed: \{ "doubled":/);
-    assert.doesNotMatch(output.component, /computed: \{[^\n]*"search"/);
-    assert.match(output.component, /data: \{ "search":/);
+    const output = generateSvelteOutput(parseComponent(source, "x-event-host.html"), "test");
+    assert.match(output.component, /computed: \{ doubled:/);
+    assert.doesNotMatch(output.component, /computed: \{[^\n]*\bsearch\b/);
+    assert.match(output.component, /data: \{ search:/);
     assert.match(output.component, /acceptsState:/);
-    assert.match(output.component, /import \{ acceptsControllerWrite \} from "\.\/props"/);
+    assert.match(output.component, /import \{ acceptsControllerWrite \} from '\.\/props'/);
     assert.ok(output.helpers.includes("props"));
   });
 
   it("includes the typed destination helper only when controller state declares a type", () => {
     const onlyState = `<template component="x-state-host" controller="./controller.js"><defs><state name="count" type="number" value="1"></state></defs><button>Count</button></template>`;
-    const typed = generateSvelteOutput(parseComponent(onlyState));
+    const typed = generateSvelteOutput(parseComponent(onlyState), "test");
     assert.ok(typed.helpers.includes("props"));
     assert.match(typed.component, /acceptsControllerWrite/);
-    const untyped = generateSvelteOutput(parseComponent(onlyState.replace(' type="number"', "")));
+    const untyped = generateSvelteOutput(parseComponent(onlyState.replace(' type="number"', "")), "test");
     assert.ok(!untyped.helpers.includes("props"));
     assert.doesNotMatch(untyped.component, /acceptsControllerWrite/);
   });
@@ -57,7 +57,7 @@ describe("Svelte controller event contract", () => {
   it("lowers native event fields in guards and payload subsets", () => {
     const subset = source.replace('name="activate" type="event"', 'name="activate" type="number"')
       .replace('expr:value="$$event"', () => 'expr:value="$$event.detail" $if="$$event.type = \'click\'"');
-    const output = generateSvelteOutput(parseComponent(subset));
+    const output = generateSvelteOutput(parseComponent(subset), "test");
     assert.match(output.component, /event[^\n]*\.type/);
     assert.match(output.component, /event[^\n]*\.detail/);
     compile(output.component, { filename: "EventSubset.svelte", generate: "client" });
@@ -66,8 +66,8 @@ describe("Svelte controller event contract", () => {
   it("retains the outer triggering event across a nested synchronous handler invocation", async () => {
     const nested = source.replace('<dispatch event="activate" expr:value="$$event"></dispatch>',
       () => '<dispatch event="activate" expr:value="$$event"></dispatch><dispatch event="activate" expr:value="$$event"></dispatch>');
-    const output = generateSvelteOutput(parseComponent(nested));
-    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n\}/)![0];
+    const output = generateSvelteOutput(parseComponent(nested), "test");
+    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n\t\}/)![0];
     const { code } = await transform(`let rootElement = null;
       export const seen: Event[] = []; export const inner = new Event("inner");
       const dispatchDeclared = (_root: unknown, _name: string, detail: Event) => { seen.push(detail); if (seen.length === 1) forward(inner); };

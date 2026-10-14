@@ -106,18 +106,22 @@ function writeControl(element: Control, name: BoundName, value: unknown, nativeP
   }
 }
 
+/** Puts back the authored defaults a render may have overwritten; defaults already in place are not written. */
 function restoreDefault(element: Control, name: BoundName, defaults: BoundDefaults): void {
   if (name === "checked" && element instanceof HTMLInputElement) {
+    if (element.defaultChecked === (defaults.checked ?? false)) return;
     const current = element.checked;
     element.defaultChecked = defaults.checked ?? false;
     element.checked = current;
   } else if (element instanceof HTMLSelectElement) {
     const options = Array.from(element.options);
+    if (options.every((option, index) => option.defaultSelected === (defaults.options?.[index] ?? false))) return;
     const selected = options.map((option) => option.selected);
     for (const [index, option] of options.entries()) option.defaultSelected = defaults.options?.[index] ?? false;
     for (const [index, option] of options.entries()) if (!selected[index]) option.selected = false;
     for (const [index, option] of options.entries()) if (selected[index]) option.selected = true;
   } else {
+    if (element.defaultValue === (defaults.value ?? "")) return;
     const current = element.value;
     element.defaultValue = defaults.value ?? "";
     if (element.value !== current) element.value = current;

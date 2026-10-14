@@ -95,6 +95,21 @@ describe("direct-extend Vanilla generation", () => {
     assert.deepEqual(inputs.filter((path) => forbidden.test(path)), []);
   });
 
+  it("imports only the decimal operations its arithmetic uses, and none for whole numbers", async () => {
+    const decimal = /(?:^|\/)src\/decimal\.ts$/;
+    const whole = vanilla(component(`<state name="count" type="integer" value="1"></state>`,
+      `<p from:title="$count * 2 - 1">{$count + 1} {$count % 2} {$count / 2}</p>`, false));
+    assert.doesNotMatch(whole, /\b(?:add|subtract|multiply|divide|remainder)\b/);
+    assert.deepEqual((await bundle(whole)).inputs.filter((path) => decimal.test(path)), []);
+    const fractional = vanilla(component(`<state name="level" type="number" value="0"></state>
+      <handler name="add"><set name="level" expr:value="$level + 0.1"></set></handler>`,
+      `<button on:click="add">{$level}</button>`, false));
+    assert.match(fractional, /import \{[^}]*\badd\b[^}]*\} from "@nextwebwg\/html-next\/generated-runtime";/);
+    const { text } = await bundle(fractional);
+    assert.match(text, /function add\(/);
+    assert.doesNotMatch(text, /function (?:subtract|multiply|remainder)\(/);
+  });
+
   it("compiles every component without the general runtime", () => {
     // What the parser accepts compiles; anything it rejects never reaches the generator.
     for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="$x"></p>')]) {
@@ -452,6 +467,31 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("calculates decimal arithmetic like the general runtime, stepping by 0.1 to exactly 9.9", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(number)" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="level" type="number" value="0"></state>
+      <state name="count" type="integer" value="7"></state>
+      <state name="width" type="length" value="1.1px"></state>
+      <handler name="step"><set name="level" expr:value="$level + 0.1" $if="$level < 9.9"></set></handler>`, `
+      <section><button id="step" on:click="step">Step</button><output $value="$level"></output><b $if="$level = 9.9">full</b>
+        <p>{$level * 3} {$level - 0.05} {$level % 0.3} {$level / 3} {$count + 1} {$count % 2} {$width + 0.1px} {$width * $level}</p>
+      </section>`);
+    const click = (root: Element, times: number): void => {
+      for (let index = 0; index < times; index += 1) (root.querySelector("#step") as HTMLElement).click();
+    };
+    const run = await same(text, [
+      ({ root }) => { click(root, 3); },
+      ({ root }) => { click(root, 100); },
+      (host) => { host.state.level = 0.7; host.state.width = "0.7px"; },
+    ]);
+    assert.match(run.snapshots[1]!, /<output>0\.3<\/output>.*<p>0\.9 0\.25 0 0\.09999999999999999 8 1 1\.2px 0\.33px<\/p>/s);
+    assert.match(run.snapshots[2]!, /<output>9\.9<\/output><!--html-next:start--><b>full<\/b>/);
+    assert.match(run.snapshots[3]!, /<p>2\.1 0\.65 0\.1 0\.2333333333333333 8 1 0\.8px 0\.49px<\/p>/);
+  });
+
   it("binds styles, URLs, properties, mixed text, SVG and class overwrites like the general runtime", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
@@ -722,6 +762,55 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { type(control(host.root, "size"), "m", "change"); control(host.root, "colors").options[1].selected = true; control(host.root, "colors").dispatchEvent(new Event("change", { bubbles: true })); note(host, "selected"); },
       (host) => { host.state.markup = "<i onclick=\"x()\">i</i><script>bad()</script>"; host.state.rows = host.state.rows.concat([{ id: 3, label: "l3", done: true }]); host.state.size = "l3"; note(host, "markup"); },
       (host) => { type(control(host.root, "bio"), "Cy"); host.state.colors = ["blue", "red"]; note(host, "bio"); },
+    ]);
+  });
+
+  it("writes through $each, $with, and $match aliases of state like the general runtime", async () => {
+    const text = component(`
+      <state name="rows" type="list(object({ id: number, label: string, done: boolean }))" value="[]"></state>
+      <state name="draft" type="object({ owner: object({ name: string }), plan: string })" value="{ owner: { name: 'Ada' }, plan: 'free' }"></state>`, `
+      <section><p>{$draft.owner.name} {$draft.plan}</p>
+        <div $with="$draft.owner as owner"><input id="owner" bind:value="owner.name"></div>
+        <template $match="$draft as d"><select id="plan" $when="$d.plan" bind:value="d.plan"><option value="free">Free</option><option value="pro">Pro</option></select><i $else></i></template>
+        <ul><li $each="row of $rows" $key="$row.id"><input class="label" bind:value="row.label"><input class="done" type="checkbox" bind:checked="row.done"></li></ul>
+        <ol><li $each="row, i of $rows" $key="$row.id"><b $each="n of [1]"><input class="nested" bind:value="row.label"></b></li></ol>
+      </section>`);
+    const all = (host: any, selector: string): any[] => Array.from((host.root as Element).querySelectorAll(selector));
+    const type = (element: any, value: string, event = "input"): void => {
+      element.value = value;
+      element.dispatchEvent(new Event(event, { bubbles: true }));
+    };
+    const note = (host: any, label: string): void => {
+      (globalThis as any).directExtendLog.events.push(`${label} ${JSON.stringify([host.state.draft, host.state.rows])}`);
+    };
+    const result = await same(text, [
+      (host) => { host.state.rows = [1, 2].map((id) => ({ id, label: `l${id}`, done: false })); note(host, "rows"); },
+      (host) => { type(all(host, "#owner")[0], "Bea"); type(all(host, "#plan")[0], "pro", "change"); note(host, "with/match"); },
+      (host) => { type(all(host, ".label")[1], "second"); all(host, ".done")[0].click(); note(host, "each"); },
+      (host) => { type(all(host, ".nested")[0], "nested"); note(host, "nested"); },
+    ]);
+    assert.deepEqual(result.events.filter((event: string) => /^(with\/match|each|nested) /.test(event)), [
+      `with/match ${JSON.stringify([{ owner: { name: "Bea" }, plan: "pro" }, [{ id: 1, label: "l1", done: false }, { id: 2, label: "l2", done: false }]])}`,
+      `each ${JSON.stringify([{ owner: { name: "Bea" }, plan: "pro" }, [{ id: 1, label: "l1", done: true }, { id: 2, label: "second", done: false }]])}`,
+      `nested ${JSON.stringify([{ owner: { name: "Bea" }, plan: "pro" }, [{ id: 1, label: "nested", done: true }, { id: 2, label: "second", done: false }]])}`,
+    ]);
+  });
+
+  it("updates nested rows that read an outer row's position, item or outer state like the general runtime", async () => {
+    const text = component(`
+      <state name="title" type="string" value="a"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
+      <section><ul><li $each="row, i of $rows" $key="$row.id"><b $each="n of [1]">{$i}:{$row.label}</b></li></ul>
+        <ol><li $each="row, i of $rows" $key="$row.id"><p $each="n of [1]"><s $if="$row.id > 1"><b $each="m of [1]">{$i}/{$loop.count}</b></s></p><i>{$row.label} {$loop.last}</i></li></ol>
+        <dl><template $each="row of $rows"><dt $each="n of [1]">{$title}{$row.id}</dt><dd><b $each="m of [1]"><i $each="k of [1]">{$title}</i></b></dd></template></dl></section>`);
+    await same(text, [
+      (host) => { host.state.rows = [1, 2, 3].map((id) => ({ id, label: `l${id}` })); },
+      (host) => { host.state.rows = host.state.rows.toReversed(); },
+      (host) => { host.state.rows.splice(1, 1); },
+      (host) => { host.state.rows.unshift({ id: 4, label: "l4" }); },
+      (host) => { host.state.rows[2].label = "x"; host.state.title = "b"; },
+      (host) => { host.state.rows = host.state.rows.slice(1).concat(host.state.rows.slice(0, 1)); },
+      (host) => { host.state.rows.push({ id: 5, label: "l5" }); },
     ]);
   });
 
@@ -1384,6 +1473,36 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("passes a child prop on only when its value changes, like live lowering", async () => {
+    const meter = `<template component="x-meter" controller="./props-controller.js" status="early" summary="Meter.">
+      <defs><prop name="amount" type="integer" default="0">Amount.</prop></defs><meter from:value="$amount"></meter></template>`;
+    const log = (): string[] => (globalThis as any).directExtendLog.events;
+    let observer: MutationObserver | undefined;
+    try {
+      const run = await same([parent(`<section><x-meter from:amount="$count + $rows.length"></x-meter></section>`), meter], [
+        (host) => {
+          const root = host.root.querySelector("meter");
+          observer = new (root.ownerDocument.defaultView.MutationObserver)((records: MutationRecord[]) => {
+            log().push(...records.map((record) => `write ${record.attributeName}`).sort());
+          });
+          observer!.observe(root, { attributes: true });
+          // 2 + 1 is the 1 + 2 it was: the child's input, validity and reflection stay as they are.
+          host.state.count = 2;
+          host.state.rows = [1];
+        },
+        (host) => { host.state.count = 5; },
+        () => { observer?.disconnect(); },
+      ]);
+      // The equal sum logs nothing and writes nothing; the new one updates the child once.
+      assert.deepEqual(run.events.slice(4, 11), [
+        "1 state |undefined", "1 props amount=3/3/true", "1 root meter true", "1 connect true null true",
+        "1 props amount=6/6/true", "write data-amount", "write value",
+      ]);
+    } finally {
+      observer?.disconnect();
+    }
+  });
+
   it("binds invocation props by their values, after their attribute text", async () => {
     await same([parent(`
       <section><x-badge from:count="$label" from:tone="$flag ? 'warn' : 'nope'" from:open="$flag"></x-badge></section>`), badge], [
@@ -1454,6 +1573,28 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
     // Each round created and removed ten rows' listeners and component-following effects.
     assert.ok(handle.o.length <= baseline + 2 * 10 * 3, `${handle.o.length} owners after 40 rounds (${baseline} at start)`);
+  });
+
+  it("renders, once connected, what changed while its root waited detached", async () => {
+    // A bound list of objects has no attribute text, so the child first takes it through its prop channel.
+    const list = `<template component="x-list" status="early" summary="List."><defs>
+      <prop name="items" type="list(object({ label: string }))" required>Items.</prop></defs><ul><li $each="item of $items">{$item.label}</li></ul></template>`;
+    const compiled = graph([`<template component="x-holder" status="early" summary="Holder."><defs>
+      <state name="items" type="list(object({ label: string }))" value="[{ label: 'a' }, { label: 'b' }]"></state></defs><div><x-list from:items="$items"></x-list></div></template>`, list]);
+    const { text: code } = await bundle(compiled.entry, false, compiled.modules);
+    const { window } = new JSDOM("<!doctype html><body></body>");
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
+      try { vi.stubGlobal(key, (window as unknown as Record<string, unknown>)[key]); } catch { /* read-only global */ }
+    }
+    const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// detached`).toString("base64")}`) as Record<string, unknown>;
+    const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as () => Element;
+    const root = factory();
+    // The child's update is due while nothing is connected; it renders when the root connects.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.document.body.append(root);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(Array.from(root.querySelectorAll("li"), (row) => row.textContent), ["a", "b"]);
   });
 
   it("fails a <context> no ancestor provides with live's HR009", async () => {
@@ -1627,6 +1768,43 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
   });
 
+  it("requests again and passes a whole list on when it changes in place, like live", async () => {
+    const requests: string[] = [];
+    fetchStub = async (url) => {
+      requests.push(url);
+      await Promise.resolve();
+      return { ok: true, status: 200, json: async () => [], text: async () => "" };
+    };
+    const tags = `<template component="x-tags" status="early" summary="Tags.">
+      <defs><prop name="items" type="list(string)" default="[]">Items.</prop></defs><output>{$items}</output></template>`;
+    const shelf = parent(`<section><x-tags from:items="$filter.tags"></x-tags><x-tags from:items="$more"></x-tags></section>`, `
+      <state name="filter" type="object({ tags: list(string) })" value="{ tags: ['a'] }"></state>
+      <state name="more" type="list(string)" value="['x']"></state>
+      <data name="found" src="https://example.test/api/found" type="list(string)">
+        <param name="tags" from:value="$filter.tags"></param><param name="more" from:value="$more"></param></data>`);
+    // Each `from` parameter compares what it reads now with what it read for the last request.
+    const compared = [...[...graph([shelf, tags]).modules.values()].join("\n").matchAll(/readsChanged\(DQ0\.(f\d+), (f\d+)\)/g)];
+    assert.equal(compared.length, 2);
+    for (const [, last, now] of compared) assert.equal(last, now);
+    try {
+      // A parameter or prop that is a whole list depends on its contents, not only on which list it is.
+      await same([shelf, tags], [
+        (host) => { host.state.filter.tags.push("b"); },
+        (host) => { host.state.filter.tags[0] = "z"; },
+        (host) => { host.state.more.push("y"); },
+      ]);
+      const half = requests.length / 2;
+      assert.deepEqual(requests.slice(half), requests.slice(0, half));
+      assert.deepEqual(requests.slice(0, half).map((url) => new URL(url).search), [
+        "?tags=a&more=x", "?tags=a&tags=b&more=x", "?tags=z&tags=b&more=x", "?tags=z&tags=b&more=x&more=y",
+        // Reconnecting requests again.
+        "?tags=z&tags=b&more=x&more=y",
+      ]);
+    } finally {
+      fetchStub = undefined;
+    }
+  });
+
   it("writes is=, content directives and two-way bindings on invocations like live", async () => {
     const field = `<template component="x-field" status="early" summary="Field.">
       <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="$value"></template>`;
@@ -1748,6 +1926,21 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows[0].label = "X"; host.state.rows[1].id = 1; },
     ]);
     assert.deepEqual(compiled.errors, ["HR004: A keyed list produced duplicate key `1`."]);
+  });
+
+  it("keeps whitespace-only text between elements and rows inside pre", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>`, `
+      <section><p>code</p><pre><code><span class="line">a</span>
+<span class="line">b</span>
+<template $each="row of $rows" $key="$row.id"><span class="line" from:data-id="$row.id">{$row.label}</span>
+</template></code></pre></section>`);
+    const compiled = await same(text, [
+      (host) => { host.state.rows = [{ id: 1, label: "c", tags: [] }, { id: 2, label: "d", tags: [] }]; },
+    ]);
+    assert.match(compiled.snapshots[1]!.replaceAll(/<!--[^>]*-->/g, ""), /<code><span class="line">a<\/span>\n<span class="line">b<\/span>\n<span class="line" data-id="1">c<\/span>\n<span class="line" data-id="2">d<\/span>\n<\/code>/);
   });
 
   it("creates attributes and class tokens on one element in authored order", async () => {

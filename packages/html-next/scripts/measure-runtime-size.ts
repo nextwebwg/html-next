@@ -124,20 +124,26 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // only while its outlet renders, host.slots lists what it renders, and a component projected into a
 // slot is created only once a slot places it.
 const staticGenerated = await generatedFixture("static-card", 6_950);
-const reactiveGenerated = await generatedFixture("reactive-counter", 6_950);
+// The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
+// imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
+const reactiveGenerated = await generatedFixture("reactive-counter", 7_150);
 const propGenerated = await generatedFixture("prop-button", 11_400);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
-const computedGenerated = await generatedFixture("computed-counter", 7_250);
+const computedGenerated = await generatedFixture("computed-counter", 7_475);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
-const dataGenerated = await generatedFixture("data-read", 7_550);
+// +5 B: a root renders, at its first connection, what changed after its construction (see below).
+const dataGenerated = await generatedFixture("data-read", 7_555);
 const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
-// uses, 25 B for a host root that follows a root `$match` switch, as live's does, and 50 B for the
-// node methods through which keyed lists also hold rows of several nodes.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_150);
+// uses, 25 B for a host root that follows a root `$match` switch, as live's does, 50 B for the
+// node methods through which keyed lists also hold rows of several nodes, and 15 B for the reconcile
+// recording the rows it kept in place, so lists whose rows read their position visit only moved rows.
+// +5 B: a root renders, at its first connection, what changed after its construction while it waited
+// detached, such as a parent's bound list of objects; until then such a change never rendered.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_170);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];

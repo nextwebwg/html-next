@@ -41,6 +41,31 @@ describe("package loader and registry", () => {
     assert.equal(executed, false);
   });
 
+  it("resolves bare specifiers through an application import map before package resolution", async () => {
+    const files: Record<string, string> = {
+      "file:///app/pages/home.html": `<link rel="component" href="@/components/card.html"><template component="x-home" status="early" summary="Home." controller="@/controllers/home.js"><x-card></x-card></template>`,
+      "file:///app/components/card.html": `<link rel="component" href="../../outside.html"><template component="x-card" status="early" summary="Card."><p></p></template>`,
+    };
+    const resolved: string[] = [];
+    const graph = loadNodeComponents(["file:///app/pages/home.html"], {
+      baseURL: "file:///app/",
+      importMap: { imports: { "@/": "./" } },
+      resolvePackage: (specifier) => { resolved.push(specifier); throw new Error("unmapped"); },
+      readComponent: async (url) => ({ url, source: files[url]! }),
+    });
+    // A mapped prefix is the trust root of what it maps, so its components cannot link outside it.
+    await assert.rejects(graph, /escapes approved root `file:\/\/\/app\/`/);
+    files["file:///app/components/card.html"] = `<template component="x-card" status="early" summary="Card."><p></p></template>`;
+    const loaded = await loadNodeComponents(["file:///app/pages/home.html"], {
+      baseURL: "file:///app/",
+      importMap: { imports: { "@/": "./" } },
+      readComponent: async (url) => ({ url, source: files[url]! }),
+    });
+    assert.deepEqual([...loaded.nodes.values()].map(node => node.url).sort(), ["file:///app/components/card.html", "file:///app/pages/home.html"]);
+    assert.equal([...loaded.nodes.values()].find(node => node.url.endsWith("home.html"))?.controller?.url, "file:///app/controllers/home.js");
+    assert.deepEqual(resolved, []);
+  });
+
   it("registers validated entries lazily and skips custom-element-owned tags", async () => {
     const graph = await loadNodeComponents(["file:///pkg/a.html"], {
       baseURL: "file:///pkg/index.html",

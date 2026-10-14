@@ -148,23 +148,23 @@ function reflect(el: Element, state: ManagedState | undefined): void {
     state.internals.setValidity(validity.valid ? {} : flags(validity), message);
   }
 
+  // Markers already in place are not written again: toggleAttribute with its force writes only a change.
   if (validity.valid) {
     el.removeAttribute("data-invalid");
-    el.setAttribute("data-valid", "");
+    el.toggleAttribute("data-valid", true);
     if (ariaMirrors.has(el)) {
       el.removeAttribute("aria-invalid");
       ariaMirrors.delete(el);
     }
   } else {
     el.removeAttribute("data-valid");
-    el.setAttribute("data-invalid", "");
-    if (!el.hasAttribute("aria-invalid") || ariaMirrors.has(el)) {
+    el.toggleAttribute("data-invalid", true);
+    if ((!el.hasAttribute("aria-invalid") || ariaMirrors.has(el)) && el.getAttribute("aria-invalid") !== "true") {
       el.setAttribute("aria-invalid", "true");
       ariaMirrors.add(el);
     }
   }
-  if (state?.interacted === true && !validity.valid) el.setAttribute("data-user-invalid", "");
-  else el.removeAttribute("data-user-invalid");
+  el.toggleAttribute("data-user-invalid", state?.interacted === true && !validity.valid);
 }
 
 function readValueUnmanaged(el: Element): unknown {

@@ -37,7 +37,7 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 
 describe("component graph", () => {
   it("ignores resource metadata with or without head wrappers while retaining component edges", async () => {
-    const metadata = '<meta name="htmlkit:layout" content="admin">' +
+    const metadata = '<meta name="hk:layout" content="admin">' +
       '<meta name="description" content="Imported description" from:content="$missing">' +
       '<meta property="og:title" content="Imported social title">' +
       '<title $value="$missing">Imported title</title>' +

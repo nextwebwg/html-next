@@ -21,6 +21,13 @@ describe("Node component rendering", () => {
     assert.match(rendered.html, /Total: &lt;b&gt;Ada&lt;\/b&gt; due today\. \$literal costs \$1\.15\./);
     assert.match(rendered.html, /<td>&lt;b&gt;Ada&lt;\/b&gt;<\/td>/);
   });
+  it("keeps whitespace-only text between elements inside pre", async () => {
+    const definition = parseComponent(`<template component="x-code"><pre class="shiki"><code><span class="line">a</span>
+<span class="line">b</span></code></pre></template>`);
+    const rendered = await renderComponents("<x-code></x-code>", { definitions: [definition] });
+    assert.match(rendered.html, /<code><span class="line">a<\/span>\n<span class="line">b<\/span><\/code>/);
+  });
+
   it("renders native HTML and styles without installing browser globals in Node", async () => {
     const before = Object.getOwnPropertyDescriptor(globalThis, "document");
     const rendered = await renderComponents('<x-server-counter label="Visits">Hello</x-server-counter>', {

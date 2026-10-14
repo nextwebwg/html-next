@@ -9,8 +9,13 @@ import {
   isWithinTrustRoot,
   type ComponentResourceResolver,
   type ResolvedResource,
+  importMapEntries,
+  resolveImportMap,
+  type ImportMapLike,
 } from "./resolve.js";
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
+import { createStylesheetLoader } from "./stylesheet-resources.js";
+import { parseStylesheetForBuild } from "./stylesheet-resources-build.js";
 
 export interface InspectedModule {
   readonly url: string;
@@ -23,12 +28,19 @@ export interface NodeLoaderOptions {
   readonly collectDiagnostics?: boolean;
   readonly baseURL?: string;
   readonly resolvePackage?: (specifier: string, parentURL: string) => ResolvedResource;
+  /** Application import map; mapped bare specifiers resolve before package resolution, relative to baseURL. */
+  readonly importMap?: ImportMapLike;
   readonly readComponent?: (url: string) => Promise<{ readonly url: string; readonly source: string }>;
+  readonly readStylesheet?: (url: string) => Promise<{ readonly url: string; readonly source: string }>;
+  /** A host bundler can resolve CSS aliases and package paths through its own resolver. */
+  readonly resolveStylesheet?: (specifier: string, parentURL: string) => Promise<string | undefined>;
+  readonly stylesheetAssetURL?: (url: string) => string;
   readonly inspectModule?: (url: string) => Promise<InspectedModule>;
 }
 
 export interface NodeComponentGraph extends ComponentGraph {
   readonly moduleInputs: readonly string[];
+  readonly stylesheetInputs: readonly string[];
 }
 
 function directory(url: string): string {
@@ -63,9 +75,12 @@ class NodeResourceResolver implements ComponentResourceResolver {
   constructor(
     private readonly baseURL: string,
     private readonly resolvePackage: (specifier: string, parentURL: string) => ResolvedResource,
+    private readonly imports: ReadonlyMap<string, string> = new Map(),
   ) {}
 
   private resolveBare(specifier: string, parentURL: string): ResolvedResource {
+    const mapped = resolveImportMap(this.imports, specifier);
+    if (mapped !== undefined) return mapped;
     try {
       return this.resolvePackage(specifier, parentURL);
     } catch (error) {
@@ -121,9 +136,23 @@ export async function loadNodeComponents(
     url,
     source: await readFile(fileURLToPath(url), "utf8"),
   }));
+  const resolver = new NodeResourceResolver(baseURL, resolvePackage, importMapEntries(options.importMap ?? {}, baseURL));
+  const styles = createStylesheetLoader({
+    parse: parseStylesheetForBuild,
+    fetch: options.readStylesheet ?? readComponent,
+    resolve: async (specifier, parent) => {
+      const hosted = await options.resolveStylesheet?.(specifier, parent.url);
+      return hosted === undefined
+        ? resolver.resolveDependency(new URL(specifier, parent.url).href, parent.url, parent.trustRoot)
+        : { url: hosted, trustRoot: packageRoot(hosted) };
+    },
+    assertFinalURL: (resource, finalURL) => resolver.assertFinalURL(resource, finalURL),
+    ...(options.stylesheetAssetURL === undefined ? {} : { assetURL: options.stylesheetAssetURL }),
+  });
   const graph = await buildComponentGraph(rootSpecifiers, {
-    resolver: new NodeResourceResolver(baseURL, resolvePackage),
+    resolver,
     fetchComponent: readComponent,
+    prepareStyles: styles.prepare,
     ...(options.collectDiagnostics === undefined ? {} : { collectDiagnostics: options.collectDiagnostics }),
   });
 
@@ -147,6 +176,7 @@ export async function loadNodeComponents(
   return Object.freeze({
     ...graph,
     moduleInputs: Object.freeze([...moduleInputs].sort()),
+    stylesheetInputs: Object.freeze([...styles.inputs].sort()),
   });
 }
 
