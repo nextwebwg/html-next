@@ -1,14 +1,14 @@
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile, copyFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Manifest, ManifestChunk } from "vite";
 
 import { createApplication, headScripts, notFoundPage } from "./application.js";
 import { browserSources, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
-import { configure, globalStylesheets, HtmlKitError, withPlugins, within } from "./config.js";
+import { configure, globalStylesheets, HtmlKitError, runHook, withPlugins, within } from "./config.js";
 import { documentHTML, pagePayload, payloadPath } from "./document.js";
 import { matchRoute } from "./routes.js";
-import type { ApplicationOptions, BuildResult } from "./types.js";
+import type { ApplicationOptions, BuildManifest, BuildResult } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -37,6 +37,14 @@ async function canonicalDestination(path: string): Promise<string> {
   }
 }
 
+/** Read a build's _htmlkit/manifest.json, refusing a format version this HTMLKit doesn't know. */
+export async function readManifest(outDir: string): Promise<BuildManifest> {
+  const file = join(outDir, "_htmlkit/manifest.json");
+  const manifest = JSON.parse(await readFile(file, "utf8")) as BuildManifest;
+  if (manifest.version !== 1) throw new HtmlKitError(`Unsupported manifest version ${String(manifest.version)}; this HTMLKit reads version 1.`, file);
+  return manifest;
+}
+
 export async function buildApplication(input: ApplicationOptions = {}): Promise<BuildResult> {
   const options = await withPlugins(input);
   const config = configure(options);
@@ -50,6 +58,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     throw new HtmlKitError("Refusing to replace nonempty output without an HTMLKit build manifest.", config.outDir);
   }
   await mkdir(dirname(config.outDir), { recursive: true });
+  // Before any page is read, so generated pages, data, and assets are part of the build.
+  await runHook(options, "buildStart", { command: "build", root: config.root, base: config.base });
   const application = await createApplication(options);
   // Sibling staging keeps rename on the same volume. No failed render or bundle replaces dist.
   let stage: string;
@@ -118,7 +128,21 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     await rm(join(stage, "_htmlkit/vite-manifest.json"));
     if (await exists(join(stage, "404.html"))) throw new HtmlKitError("Public asset collision: 404.html is generated.");
     await writeFile(join(stage, "404.html"), notFoundHTML);
-    await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify({ version: 1, base: config.base, routes, pages: delivery }, null, 2) + "\n");
+    const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery };
+    await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify(published, null, 2) + "\n");
+    await runHook(options, "buildEnd", { root: config.root, base: config.base, outDir: stage, routes: application.routes, pages: routes,
+      async writeFile(path, contents) {
+        const target = resolve(stage, path);
+        if (isAbsolute(path) || target === stage || !within(stage, target)) throw new HtmlKitError(`Output path ${path} must be relative and inside the output.`);
+        if (within(join(stage, "_htmlkit"), target)) throw new HtmlKitError(`Output path ${path} is in _htmlkit, which is reserved for generated assets.`);
+        await mkdir(dirname(target), { recursive: true });
+        // wx refuses an existing file, so a plugin never replaces a page, an asset, or another plugin's file.
+        try { await writeFile(target, contents, { flag: "wx" }); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new HtmlKitError(`Output collision at ${path}: the build already wrote it.`);
+          throw error;
+        }
+      } });
     const previous = await exists(config.outDir);
     if (previous) await rename(config.outDir, backup);
     try { await rename(stage, config.outDir); }

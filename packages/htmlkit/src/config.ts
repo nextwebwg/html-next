@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { normalizePath } from "vite";
-import type { ApplicationOptions } from "./types.js";
+import type { ApplicationOptions, HtmlKitPlugin } from "./types.js";
 
 export class HtmlKitError extends Error {
   constructor(message: string, readonly source?: string) {
@@ -48,6 +48,19 @@ export async function withPlugins(options: ApplicationOptions): Promise<Applicat
   merged = { ...merged };
   pluginsApplied.add(merged);
   return merged;
+}
+
+/** Run each plugin's hook in order; a failure names the plugin and the hook. */
+export async function runHook<Hook extends "buildStart" | "buildEnd">(options: ApplicationOptions, hook: Hook,
+  context: Parameters<NonNullable<HtmlKitPlugin[Hook]>>[0]): Promise<void> {
+  for (const plugin of options.plugins ?? []) {
+    try { await (plugin[hook] as ((context: unknown) => unknown) | undefined)?.call(plugin, context); }
+    catch (error) {
+      const failure = new HtmlKitError(`Plugin ${plugin.name} failed in ${hook}: ${error instanceof Error ? error.message : String(error)}`);
+      failure.cause = error;
+      throw failure;
+    }
+  }
 }
 
 /** Vite's side of the import map's @/ entry, for loaders, controllers, and stylesheets. */
