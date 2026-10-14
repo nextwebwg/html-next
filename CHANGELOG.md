@@ -5,14 +5,14 @@
 ### Added
 
 - HTMLKit nests layouts from the page tree. A folder's `_layout.html` wraps every page in that folder and below it, inside its parent folders' layouts, with an optional `_layout.server.ts` loader; loaders run from the outside in and pass `data` on as `parent`. The layout a page selects (`hk:layout`, a `pages` entry's `layout`, `layoutDefaults`, the `layout` option, or `app/layouts/default.html`) stays outermost, with the folder layouts inside it, and `none` or `false` renders the page with no layouts. Client navigation between pages that share folder layouts keeps them, with their state and controllers.
+- HTMLKit plugins can run build steps. `buildStart({ command, root, base })` runs before HTMLKit reads any page, once per `htmlkit build` and once when `htmlkit dev` starts, so a generator's pages and data are part of the site. `buildEnd({ root, base, outDir, routes, pages, writeFile })` runs after the build writes every page, asset and the manifest to its staging directory, before the output replaces `outDir`. `writeFile(path, contents)` adds a file such as a sitemap or search index and refuses a path outside the output, in `_htmlkit/`, or at an existing file. A hook that throws fails the build with an error naming the plugin and hook, and the previous output stays in place.
+- `_htmlkit/manifest.json` is a documented, versioned format (`version: 1`, `base`, `routes`, and each page's `pathname`, `pageName`, `browserModule` and `chunks`), described in the configuration guide. `readManifest(outDir)` reads it, refusing an unknown version, and the package exports its `BuildManifest` and `ManifestPage` types, with `BuildStartContext` and `BuildEndContext`.
 
 ## 1.0.0-alpha.48
 
 ### Added
 
 - HTMLKit renders `app/pages/404.html` for every URL that matches no page, through its layouts and with status 404, in development, `preview`, and `application.fetch`, and `htmlkit build` writes it to `404.html`. It is not a route: `/404/` is not served, listed in navigation, or included in the manifest. `Application.notFound` exposes it. Without the file, the built-in "Page not found" page is unchanged.
-- HTMLKit plugins can run build steps. `buildStart({ command, root, base })` runs before HTMLKit reads any page, once per `htmlkit build` and once when `htmlkit dev` starts, so a generator's pages and data are part of the site. `buildEnd({ root, base, outDir, routes, pages, writeFile })` runs after the build writes every page, asset and the manifest to its staging directory, before the output replaces `outDir`. `writeFile(path, contents)` adds a file such as a sitemap or search index and refuses a path outside the output, in `_htmlkit/`, or at an existing file. A hook that throws fails the build with an error naming the plugin and hook, and the previous output stays in place.
-- `_htmlkit/manifest.json` is a documented, versioned format (`version: 1`, `base`, `routes`, and each page's `pathname`, `pageName`, `browserModule` and `chunks`), described in the configuration guide. `readManifest(outDir)` reads it, refusing an unknown version, and the package exports its `BuildManifest` and `ManifestPage` types, with `BuildStartContext` and `BuildEndContext`.
 
 ### Changed
 
