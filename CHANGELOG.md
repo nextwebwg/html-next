@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-alpha.46
+
+### Changed
+
+- `@nextwebwg/html-next` depends on jsdom 30.1.2 (was 30.0.1) for server rendering and @dprint/formatter 0.6 (was 0.5) for formatting generated components.
+
+### Fixed
+
+- A DOM node in state, such as an event's `target`, an element from `$ref`, or a node held in data, is stored and read as it is in the live runtime and compiled components, as native events already are. It was wrapped in a reactive proxy, and reading a native property through it (`$$event.target.textContent`) threw in browsers, which reject a proxy as a native getter's receiver.
+
 ## 1.0.0-alpha.45
 
 ### Fixed

@@ -300,9 +300,11 @@ describe("HTML Next unplugin", () => {
     // host root that follows a root switch, and list node methods that also serve rows of several nodes.
     // +15 B: the reconcile records the rows it kept in place, so lists whose rows read their position
     // visit only the rows that moved. +4 B: the compiled-root handle exposes its pending change
-    // bits, so a transitions hold also sees writes below a root. Ratchet this down whenever it shrinks.
+    // bits, so a transitions hold also sees writes below a root. +77 B: the platform-object check that
+    // keeps DOM nodes in state unwrapped, since a browser rejects a proxy as a native getter's receiver.
+    // Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_644, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_721, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
