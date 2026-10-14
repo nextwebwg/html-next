@@ -1,15 +1,17 @@
 # Changelog
 
+## 1.0.0-alpha.45
+
+### Fixed
+
+- A handler `<set>` whose value is a number that is not finite is an invalid result in the live runtime and compiled components, as in Vue, React and Svelte conversion: the state keeps its value and nothing warns. `<set name="count" expr:value="$$event.target.valueAsNumber">` on an emptied `<input type=number>` previously warned `` HR007: State `count` does not satisfy its declared type. ``, which remains the warning for a value of the wrong type.
+
 ## 1.0.0-alpha.44
 
 ### Changed
 
 - Converted Svelte components carry their styles in their own `<style>`, scoped by classes rather than `data-component`, as converted Vue components are: a styled component's root carries its tag as a class, the `@scope` root, and each component its template invokes carries its own, the scope's limit. Each selector is `:global()`, so Svelte keeps rules for markup it cannot see, such as sanitized HTML. In a component with slots, Svelte's hash class tells the component's own markup from content a consumer projects: ordinary selectors require it, and `:slotted()` selectors require its absence. Imported stylesheets join each component's `<style>`, so the converter no longer writes a `.css` file beside each Svelte component or a shared `svelte/shared-components.css`. A controller's `host.slots` finds its projected nodes without `data-component`.
 - The quick-start guide is shorter. `counter.html` is followed directly by the component each framework generates, with one line and a setup link per framework, so switching frameworks changes the code right under the switch. The paragraphs between the source and the output and the separate "Use what you built" section are removed.
-
-### Fixed
-
-- A handler `<set>` whose value is a number that is not finite is an invalid result in the live runtime and compiled components, as in Vue, React and Svelte conversion: the state keeps its value and nothing warns. `<set name="count" expr:value="$$event.target.valueAsNumber">` on an emptied `<input type=number>` previously warned `` HR007: State `count` does not satisfy its declared type. ``, which remains the warning for a value of the wrong type.
 
 ## 1.0.0-alpha.43
 
