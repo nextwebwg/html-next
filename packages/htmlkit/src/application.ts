@@ -13,7 +13,7 @@ import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type 
 import { breadth, discover, matchRoute, parameter, redirectLocation, redirectStatuses, redirectTable, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
-import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RenderedPage, RouteLayer, ServerModule } from "./types.js";
+import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationNode, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RenderedPage, RouteLayer, ServerModule } from "./types.js";
 
 /** What a loader's redirect() throws, so render answers with the redirect instead of the page. */
 class Redirect {
@@ -159,10 +159,12 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     current: href === current ? "page" as const : "false" as const, depth, pageName: route.pageName,
     ...(route.groups === undefined ? {} : { group: route.groups.at(-1)!.label }) });
   // A page's place in the file tree: each URL segment, with its (group) folders where they sit.
+  // depth is the URL segments above the element: a segment's index, or a group's depth.
   const treePath = (href: string, route: ApplicationRoute) => {
-    const path = href.slice(config.base.length).split("/").filter(Boolean).map((name, i) => ({ name, rank: route.order?.[i] ?? null }));
+    const path: { name: string; rank: string | null; depth: number; group?: true }[] = href.slice(config.base.length).split("/").filter(Boolean)
+      .map((name, i) => ({ name, rank: route.order?.[i] ?? null, depth: i }));
     // Deepest first, so each insertion index is still a count of URL segments.
-    for (const group of (route.groups ?? []).toReversed()) path.splice(group.depth, 0, { name: group.label, rank: group.order });
+    for (const group of (route.groups ?? []).toReversed()) path.splice(group.depth, 0, { name: group.label, rank: group.order, depth: group.depth, group: true });
     return path;
   };
   const navigation = async (query: NavigationQuery = {}): Promise<readonly NavigationItem[]> => {
@@ -208,6 +210,45 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     }
     return Object.freeze(trail);
   };
+  // navigation()'s pages, which come in tree order, nested under the folders and groups below `from`.
+  const navigationTree = async (query: NavigationQuery = {}): Promise<readonly NavigationNode[]> => {
+    const items = await navigation(query);
+    const paths = await concreteRoutes();
+    const fromDepth = checkedFrom(query.from).split("/").filter(Boolean).length;
+    type Draft = { label: string; order: string | null; children: Draft[]; item?: NavigationItem; route?: ApplicationRoute };
+    const top: Draft[] = [];
+    const nodes = new Map<string, Draft>();
+    for (const item of items) {
+      const route = paths.get(item.href)!;
+      let siblings = top;
+      let key = "";
+      let node: Draft | undefined;
+      // The page's own node is the last element below `from`; `from`'s index page is a top node of its own.
+      for (const element of treePath(item.href, route).filter(element => element.depth >= fromDepth)) {
+        key += `${element.group ? "(" : "/"}${element.name}\0`;
+        node = nodes.get(key);
+        if (node === undefined) {
+          node = { label: element.group ? element.name : decodeURIComponent(element.name), order: element.rank, children: [] };
+          nodes.set(key, node);
+          siblings.push(node);
+        }
+        siblings = node.children;
+      }
+      if (node === undefined) { node = { label: item.label, order: null, children: [] }; top.unshift(node); }
+      node.item = item;
+      node.route = route;
+    }
+    const finish = (draft: Draft, depth: number): NavigationNode => {
+      const children = draft.children.map(child => finish(child, depth + 1));
+      const { item, route } = draft;
+      // A folder's index page labels the folder, by hk:label, then its <title>.
+      const label = item === undefined ? draft.label : children.length > 0 && route!.label === undefined ? route!.title ?? draft.label : item.label;
+      const current = item?.current ?? "false";
+      return Object.freeze({ label, ...(item === undefined ? {} : { href: item.href, pageName: item.pageName }), current,
+        open: current === "page" || children.some(child => child.open), depth, order: draft.order, children: Object.freeze(children) });
+    };
+    return Object.freeze(top.map(draft => finish(draft, 0)));
+  };
   // The neighbours of the current page in navigation order.
   const pager = async (query: NavigationQuery = {}): Promise<PagerLinks> => {
     const items = await navigation(query);
@@ -216,7 +257,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     return Object.freeze({ ...(index > 0 ? { previous: items[index - 1]! } : {}), ...(index < items.length - 1 ? { next: items[index + 1]! } : {}) });
   };
   const application: Application = {
-    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), navigation, files,
+    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), navigation, navigationTree, files,
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
@@ -301,6 +342,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
           propNames: Object.freeze(Object.keys(layerDefinitions[results.length]!.contract.props)),
           fetch: globalThis.fetch, signal,
           navigation: (query?: NavigationQuery) => navigation({ current, ...query }),
+          navigationTree: (query?: NavigationQuery) => navigationTree({ current, ...query }),
           breadcrumbs: (query?: NavigationQuery) => breadcrumbs({ current, ...query }),
           pager: (query?: NavigationQuery) => pager({ current, ...query }),
           redirect(location: string, status: RedirectStatus = 303): never {

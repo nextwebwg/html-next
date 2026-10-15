@@ -94,6 +94,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     directoryLayout: string | false | RouteLayer | undefined, outer: readonly RouteLayer[], groups: readonly RouteGroup[]): Promise<void> => {
     const files = await readdir(directory, { withFileTypes: true });
     const names = new Set(files.filter(file => file.isFile()).map(file => file.name));
+    const prefixDepth = prefix.split("/").filter(Boolean).length;
     const layer = (name: string, stem: string): RouteLayer => {
       const servers = ["ts", "js"].filter(ext => names.has(`${stem}.server.${ext}`));
       if (servers.length > 1) throw new HtmlKitError(`Choose one ${stem}.server.ts or .js loader.`, directory);
@@ -107,8 +108,10 @@ export async function discover(root: string, options: DiscoveryOptions) {
       const stem = name.slice(0, -extension.length);
       const { slug, rank } = ordered(stem, join(directory, name));
       const parts = slug === "index" ? segments : [...segments, slug];
-      // A 404 page at the root of the application's pages is the not-found page, not a /404/ route.
-      const notFound = parts.length === 1 && parts[0] === "404";
+      // A 404 page at the root of a page directory is never a route: at the / prefix it is the
+      // not-found page, and at any other prefix the site's not-found page serves those URLs too.
+      const notFound = slug === "404" && parts.length === prefixDepth + 1;
+      if (notFound && prefix !== "/") continue;
       add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}`, ...(notFound ? { notFound: true as const } : {}), ...(slug === "index" ? { index: true as const } : {}) },
         prefix, slug === "index" ? order : [...order, rank], directoryLayout, folderLayouts, groups);
     }
@@ -204,6 +207,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   const pageNames = new Map<string, { component: string; pattern: string; identity: string }>();
   const discovered: ApplicationRoute[] = [];
   let notFound: ApplicationRoute | undefined;
+  const folderOrders: { readonly segments: readonly string[]; readonly rank: string }[] = [];
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
   // A layout name is the site's layouts entry, then its app/layouts/<name>.html (the name itself),
   // then a plugin's entry, so a site overrides a plugin's layout with a file of the same name.
@@ -254,17 +258,30 @@ export async function discover(root: string, options: DiscoveryOptions) {
     // The selected layout is outermost and folder layouts nest inside it; none drops them all.
     if (selected !== false && selected !== "none") layouts = [...layouts, ...folderLayouts];
     // hk:order takes the place of the number-and-dot prefix on the page's own last segment.
+    // hk:order takes the place of the number-and-dot prefix on the page's own last segment; on a
+    // folder's index page, that segment is the folder's, so it orders the folder (below).
     let order = route.order;
     if (metadata.order !== undefined && route.canonical === undefined && !isNotFound) {
-      if (index || route.segments.length === 0) {
-        throw new HtmlKitError("hk:order orders a page among its folder's pages, and a folder's index page comes first in it; order the folder with a prefix such as 02.guide/.", route.component);
-      }
+      if (route.segments.length === 0) throw new HtmlKitError("hk:order on the site's home page has no folder to order; it orders a page among its folder's pages.", route.component);
       order = [...route.segments.slice(0, -1).map((_, i) => route.order?.[i] ?? null), metadata.order];
+      if (index) folderOrders.push({ segments: route.segments, rank: metadata.order });
     }
+    // A static <title> labels the page's folder in navigation trees when hk:label doesn't.
+    const title = /^<title>([^<{]*)<\/title>$/m.exec(metadata.head.replaceAll("><", ">\n<"))?.[1]?.trim()
+      .replace(/&(lt|gt|quot|#39|amp);/g, (_, name: string) => ({ lt: "<", gt: ">", quot: '"', "#39": "'", amp: "&" })[name]!);
     const discoveredRoute = { ...route, layouts, pageName, ...(order === undefined ? {} : { order }), ...(metadata.label === undefined ? {} : { label: metadata.label }),
-      ...(metadata.hidden ? { hidden: true } : {}) };
+      ...(title ? { title } : {}), ...(metadata.hidden ? { hidden: true } : {}) };
     if (isNotFound) notFound = discoveredRoute;
     else discovered.push(discoveredRoute);
+  }
+  // Every page in a folder whose index page sets hk:order takes that rank for the folder's segment.
+  for (const { segments, rank } of folderOrders) {
+    for (const [i, route] of discovered.entries()) {
+      if (route.canonical !== undefined || route.segments.length < segments.length || segments.some((segment, j) => route.segments[j] !== segment)) continue;
+      const order = route.segments.map((_, j) => route.order?.[j] ?? null);
+      order[segments.length - 1] = rank;
+      discovered[i] = { ...route, order };
+    }
   }
   return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), sources, files };
 }

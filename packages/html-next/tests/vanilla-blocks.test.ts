@@ -568,6 +568,23 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("compiles a component that invokes itself without importing its own factory", () => {
+    const { entry } = graph([`<template component="x-self-tree"><defs><prop name="items" type="list(object({ label: string, ... }))" required>Items.</prop></defs>
+      <ul><li $each="item of $items">{$item.label}<x-self-tree $if="$item.children" from:items="$item.children"></x-self-tree></li></ul></template>`]);
+    assert.doesNotMatch(entry, /import \{ createXSelfTree \}/);
+    assert.match(entry, /export function createXSelfTree\(/);
+  });
+
+  it("reads a row's item in the arms of a $match without a value inside the row", async () => {
+    const text = component(`
+      <state name="rows" type="list(object({ id: number, done: boolean, tags: list(string) }))" value="[]"></state>`, `
+      <ul><template $each="row, i of $rows"><li $if="$row.id != $rows[$i - 1].id" from:data-id="$row.id">{$i}</li><li><template $match><b $when="$row.tags">{$row.tags}</b><i $when="$row.done">done</i><u $else>open</u></template></li></template></ul>`);
+    await same(text, [
+      (host) => { host.state.rows = [{ id: 1, done: false, tags: [] }, { id: 2, done: true, tags: [] }, { id: 3, done: false, tags: ["t"] }]; },
+      (host) => { host.state.rows[0].done = true; host.state.rows[2].tags.length = 0; },
+    ]);
+  });
+
   it("renders every flow like the general runtime: tests, $with, $match, unkeyed, shaped and nested lists", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
