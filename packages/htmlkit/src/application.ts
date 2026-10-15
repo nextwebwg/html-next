@@ -88,7 +88,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
   const options = await withPlugins(input);
   const config = configure(options);
   const redirects = redirectTable(config.base, options.redirects);
-  const { routes, notFound: notFoundRoute, sources, files } = await discover(config.root, { ...options, base: config.base });
+  const { routes, notFound: notFoundRoute, sources, files, folderLabels, watched } = await discover(config.root, { ...options, base: config.base });
   // A dynamic page's entries are checked the same way when they are listed.
   const shadowed = routes.find(route => route.params.length === 0 && redirects.has(config.base + route.pattern.slice(1)));
   if (shadowed !== undefined) throw new HtmlKitError(`The redirects option also redirects ${shadowed.pattern}, which is this page's URL.`, shadowed.component);
@@ -160,9 +160,13 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     ...(route.groups === undefined ? {} : { group: route.groups.at(-1)!.label }) });
   // A page's place in the file tree: each URL segment, with its (group) folders where they sit.
   // depth is the URL segments above the element: a segment's index, or a group's depth.
+  // A segment's label is a plugin's folder() label for the folder it names; a catch-all's segments name none.
   const treePath = (href: string, route: ApplicationRoute) => {
-    const path: { name: string; rank: string | null; depth: number; group?: true }[] = href.slice(config.base.length).split("/").filter(Boolean)
-      .map((name, i) => ({ name, rank: route.order?.[i] ?? null, depth: i }));
+    const path: { name: string; rank: string | null; depth: number; group?: true; label?: string }[] = href.slice(config.base.length).split("/").filter(Boolean)
+      .map((name, i) => {
+        const label = i < route.segments.length && breadth(route.segments[i]) < 2 ? folderLabels.get(route.segments.slice(0, i + 1).join("/")) : undefined;
+        return { name, rank: route.order?.[i] ?? null, depth: i, ...(label === undefined ? {} : { label }) };
+      });
     // Deepest first, so each insertion index is still a count of URL segments.
     for (const group of (route.groups ?? []).toReversed()) path.splice(group.depth, 0, { name: group.label, rank: group.order, depth: group.depth, group: true });
     return path;
@@ -215,7 +219,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     const items = await navigation(query);
     const paths = await concreteRoutes();
     const fromDepth = checkedFrom(query.from).split("/").filter(Boolean).length;
-    type Draft = { label: string; order: string | null; children: Draft[]; item?: NavigationItem; route?: ApplicationRoute };
+    type Draft = { label: string; folder?: string; order: string | null; children: Draft[]; item?: NavigationItem; route?: ApplicationRoute };
     const top: Draft[] = [];
     const nodes = new Map<string, Draft>();
     for (const item of items) {
@@ -228,7 +232,8 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         key += `${element.group ? "(" : "/"}${element.name}\0`;
         node = nodes.get(key);
         if (node === undefined) {
-          node = { label: element.group ? element.name : decodeURIComponent(element.name), order: element.rank, children: [] };
+          node = { label: element.label ?? (element.group ? element.name : decodeURIComponent(element.name)), order: element.rank, children: [],
+            ...(element.label === undefined ? {} : { folder: element.label }) };
           nodes.set(key, node);
           siblings.push(node);
         }
@@ -241,8 +246,8 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     const finish = (draft: Draft, depth: number): NavigationNode => {
       const children = draft.children.map(child => finish(child, depth + 1));
       const { item, route } = draft;
-      // A folder's index page labels the folder, by hk:label, then its <title>.
-      const label = item === undefined ? draft.label : children.length > 0 && route!.label === undefined ? route!.title ?? draft.label : item.label;
+      // A folder's index page labels the folder by its hk:label; then a plugin's folder() label does, then the page's <title>.
+      const label = item === undefined ? draft.label : children.length > 0 && route!.label === undefined ? draft.folder ?? route!.title ?? draft.label : item.label;
       const current = item?.current ?? "false";
       return Object.freeze({ label, ...(item === undefined ? {} : { href: item.href, pageName: item.pageName }), current,
         open: current === "page" || children.some(child => child.open), depth, order: draft.order, children: Object.freeze(children) });
@@ -257,7 +262,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     return Object.freeze({ ...(index > 0 ? { previous: items[index - 1]! } : {}), ...(index < items.length - 1 ? { next: items[index + 1]! } : {}) });
   };
   const application: Application = {
-    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), navigation, navigationTree, files,
+    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), navigation, navigationTree, files, watchFiles: watched,
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
@@ -331,6 +336,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         if (!definition.slots?.some(slot => slot.name === "page")) throw new HtmlKitError('Layout requires a slot named "page".', definition.source.file);
       }
       const results: LoaderResult[] = [];
+      const attributes: Record<string, string>[] = [];
       let parent: Readonly<Record<string, unknown>> = Object.freeze({});
       let head: RenderedHead = {};
       // An alias marks its page's own entry current.
@@ -357,13 +363,15 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         results.push(result);
         parent = Object.freeze({ ...parent, ...result.data });
         const index = results.length - 1;
+        // Checked against the layer's own component, which a prop's diagnostic names; its head reuses them.
+        attributes.push(invocationAttributes(layerDefinitions[index]!, result));
         head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
-          (definition, values) => invocation(definition.contract.tag, invocationAttributes(definition, values), "hk-head", "", false));
+          definition => invocation(definition.contract.tag, attributes[index]!, "hk-head", "", false));
       }
       if (scripts.length > 0) head = { ...head, scripts };
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       const rendered: RenderedLayer[] = layers.map((_layer, i) => ({ component: layerDefinitions[i]!.contract.tag,
-        attributes: invocationAttributes(layerDefinitions[i]!, results[i]!), ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
+        attributes: attributes[i]!, ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
       let body = "";
       for (let i = layers.length - 1; i >= 0; i--) {
         const id = `hk-layer-${i}`;

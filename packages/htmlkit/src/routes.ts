@@ -46,11 +46,39 @@ export async function discoverRoutes(root = process.cwd(), options: DiscoveryOpt
 }
 
 /**
- * Routes plus what page plugins produced: compiled page sources by component path, and the files
- * pages reference, by deployment-relative path.
+ * Routes plus what plugins produced: compiled page sources by component path, the files pages
+ * reference by deployment-relative path, folder labels by route segments, and the files plugins watch.
  */
 export async function discover(root: string, options: DiscoveryOptions) {
   const base = options.base ?? "/";
+  const watched = new Set<string>();
+  const watch = (file: string) => { watched.add(resolve(file)); };
+  const folderLabels = new Map<string, string>();
+  // Each plugin's folder() label and order, the earliest plugin's first.
+  const folderMetadata = async (dir: string) => {
+    let label: string | undefined;
+    let order: string | undefined;
+    for (const plugin of options.plugins ?? []) {
+      if (plugin.folder === undefined) continue;
+      let metadata;
+      try { metadata = await plugin.folder(dir, { watch }); }
+      catch (error) {
+        const failure = new HtmlKitError(`Plugin ${plugin.name} failed in folder: ${error instanceof Error ? error.message : String(error)}`, dir);
+        failure.cause = error;
+        throw failure;
+      }
+      if (metadata == null) continue;
+      if (metadata.label !== undefined && (typeof metadata.label !== "string" || metadata.label.trim() === "")) {
+        throw new HtmlKitError(`Plugin ${plugin.name}'s folder() label must be a nonempty string.`, dir);
+      }
+      if (metadata.order !== undefined && (!Number.isSafeInteger(metadata.order) || metadata.order < 0)) {
+        throw new HtmlKitError(`Plugin ${plugin.name}'s folder() order must be a whole number, as hk:order's is.`, dir);
+      }
+      label ??= metadata.label;
+      order ??= metadata.order === undefined ? undefined : String(metadata.order);
+    }
+    return { label, order };
+  };
   const compilers = new Map<string, NonNullable<HtmlKitPlugin["pages"]>>();
   for (const plugin of options.plugins ?? []) {
     for (const extension of plugin.pages?.extensions ?? []) {
@@ -122,13 +150,19 @@ export async function discover(root: string, options: DiscoveryOptions) {
       const label = /^\(([^()]*)\)$/.exec(slug)?.[1];
       if (label !== undefined) {
         if (label.trim() === "") throw new HtmlKitError("A route group needs a label inside its parentheses.", join(directory, file.name));
-        await visit(join(directory, file.name), prefix, segments, order, directoryLayout, folderLayouts, [...groups, { label, order: rank, depth: segments.length }]);
+        // A plugin's folder() label and order take the place of the parentheses and the prefix.
+        const metadata = await folderMetadata(join(directory, file.name));
+        await visit(join(directory, file.name), prefix, segments, order, directoryLayout, folderLayouts,
+          [...groups, { label: metadata.label ?? label, order: metadata.order ?? rank, depth: segments.length }]);
         continue;
       }
       if (parameter(slug) === undefined && !/^[A-Za-z0-9_-]+$/.test(slug)) {
         throw new HtmlKitError("Route directories must be URL slugs, [named] parameters, or (groups).", join(directory, file.name));
       }
-      await visit(join(directory, file.name), prefix, [...segments, slug], [...order, rank], directoryLayout, folderLayouts, groups);
+      const metadata = await folderMetadata(join(directory, file.name));
+      const key = [...segments, slug].join("/");
+      if (metadata.label !== undefined && !folderLabels.has(key)) folderLabels.set(key, metadata.label);
+      await visit(join(directory, file.name), prefix, [...segments, slug], [...order, metadata.order ?? rank], directoryLayout, folderLayouts, groups);
     }
   };
   if (options.fileRoutes !== false) {
@@ -162,7 +196,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     let text = await readFile(identity, "utf8");
     const compiler = compilers.get(pageExtension(component) ?? ".html");
     if (compiler !== undefined) {
-      text = await compiler.compile(text, { file: component,
+      text = await compiler.compile(text, { file: component, watch,
         href: target => pageURLs.get(resolve(target)),
         asset(file) {
           const absolute = resolve(file);
@@ -283,7 +317,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       discovered[i] = { ...route, order };
     }
   }
-  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), sources, files };
+  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), sources, files, folderLabels, watched };
 }
 export function matchRoute(routes: readonly ApplicationRoute[], pathname: string, base: string) {
   if (!pathname.startsWith(base)) return undefined;

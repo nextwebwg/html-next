@@ -26,7 +26,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
     "build:docs-proof": "tsx examples/docs/build.ts",
-    "measure:delivery": "tsx scripts/measure-delivery.ts"
+    "measure:delivery": "tsx scripts/measure-delivery.ts",
+    "measure:navigation": "tsx scripts/measure-navigation.ts"
   },
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",

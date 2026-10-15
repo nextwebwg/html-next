@@ -115,6 +115,8 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   let application: Application;
   try { application = await createApplication(options, vite, assets); }
   catch (error) { await vite.close(); throw error; }
+  // What plugins read for pages and folders, wherever it lives, joins the watched root.
+  vite.watcher.add([...application.watchFiles]);
   let dirty = false;
   const change = () => {
     dirty = true;
@@ -130,7 +132,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
     const payload = pathname.startsWith(config.base + "_htmlkit/pages/");
     void (async () => {
-      if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
+      if (dirty) { application = await createApplication(options, vite, assets); vite.watcher.add([...application.watchFiles]); dirty = false; sources.clear(); }
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
       if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
