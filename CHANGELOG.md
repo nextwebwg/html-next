@@ -10,6 +10,10 @@
 
 - The converter README says what converted Vue components emit: each declared event as the same `CustomEvent<T>` dispatched on the root, plus `update:<prop>` for `v-model:<prop>`.
 
+### Fixed
+
+- In converted Vue components, a `:host` or `:host(…)` rule under an ancestor selector, such as `.wide :host` or `.wide :host::after`, matches the component root and its pseudo-elements, as in the live runtime and the compiled Vanilla build. The converter emits the ancestor test on the root, `:scope:not(:not(:is(.wide *)))`, with the same specificity, so Vue's scoped styles put the scope attribute on the root rather than on the ancestor.
+
 ## 1.0.0-alpha.49
 
 ### Added
