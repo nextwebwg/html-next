@@ -10,6 +10,7 @@ import { getDomInterface } from "../platform.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
+import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
@@ -45,6 +46,8 @@ export interface SvelteConversionOptions {
   readonly hostSpecifier?: string;
   readonly connectionSpecifier?: string;
   readonly renderSpecifier?: string;
+  /** The request steps, which a component that declares requests imports. */
+  readonly requestsSpecifier?: string;
   readonly controllerSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
@@ -52,7 +55,7 @@ export interface SvelteConversionOptions {
 export interface SvelteConversionOutput {
   readonly component: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render" | "requests")[];
 }
 
 /** A value Svelte reads as written in a quoted attribute: no entity, brace, quote or edge space. */
@@ -1160,15 +1163,25 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const dynamicSlots = target.slots.filter((slot) => slot.dynamic);
   const slotsType = target.slots.length === 0 ? "Record<string, Snippet<[Record<string, any>]> | null>"
     : `Readonly<{ ${namedSlots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`).join(" ")}${dynamicSlots.length === 0 ? "" : ` [name: string]: ${[...new Set(target.slots.map(slotType))].join(" | ")} | null | undefined;`} }>`;
-  const omittedNative = ["children", "slots", ...target.props.map((prop) => prop.name), ...eventCallbacks.map((event) => event.name)];
-  const propTypes = target.props.map((prop) =>
-    `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${genericParameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, dependentParameters)};`).join("\n  ");
+  // Each request is a function prop that answers it, and the event prop Svelte uses for declared events.
+  const requestProps = target.requests.map((request) => ({
+    request, listenerProp: `on${request.name}`, responder: freshIdentifier("htmlNextResponder"), listener: freshIdentifier("htmlNextRequestListener"),
+  }));
+  const omittedNative = ["children", "slots", ...target.props.map((prop) => prop.name), ...eventCallbacks.map((event) => event.name),
+    ...requestProps.flatMap(({ request, listenerProp }) => [request.propName, listenerProp])];
+  const propTypes = [...target.props.map((prop) =>
+    `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${genericParameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, dependentParameters)};`),
+  ...requestProps.flatMap(({ request, listenerProp }) => [
+    `${quote(request.propName)}?: ${responderType(request)} | null;`,
+    `${quote(listenerProp)}?: (${requestListenerType(request)}) | null;`,
+  ])].join("\n  ");
   const selectedInputs = new Map(target.props.filter((prop) => prop.contract.select !== undefined).map((prop) => [prop.name, {
     raw: freshIdentifier("htmlNextInput"), retain: freshIdentifier("htmlNextBoundInput"),
   }]));
   const structuredInputs = new Set(target.props.filter((prop) => prop.contract.select?.options.some((option) => hasStructuredHtmlInput(option.type))).map((prop) => prop.name));
   const structuredReader = (name: string): string => structuredInputs.has(name) ? ", parseHtmlLiteral" : "";
-  const destructured = target.props.map((prop) => `${quote(prop.name)}: ${selectedInputs.get(prop.name)?.raw ?? inputNames.get(prop.name)}`).join(", ");
+  const destructured = [...target.props.map((prop) => `${quote(prop.name)}: ${selectedInputs.get(prop.name)?.raw ?? inputNames.get(prop.name)}`),
+    ...requestProps.flatMap(({ request, listenerProp, responder, listener }) => [`${quote(request.propName)}: ${responder}`, `${quote(listenerProp)}: ${listener}`])].join(", ");
   const hasProps = target.props.length > 0;
   const controllerStateTypes = Object.fromEntries(states.flatMap((state) => {
     const type = declarationTypeNode(state.type, state.shape);
@@ -1311,6 +1324,13 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       ...(nestedDepthLimit !== undefined || states.length > 0 || context.imports.size > 0) ? ["setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
     RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
+    ...(requestProps.length === 0 ? [] : [
+      ...(usesController ? [
+        `import { ${REQUEST_CHECK} } from ${quote(options.propsSpecifier ?? "./props")};`,
+        `import { ${REQUEST_HELPERS.join(", ")} } from ${quote(options.requestsSpecifier ?? "./requests")};`,
+      ] : []),
+      `import type { ${REQUEST_TYPES.join(", ")} } from ${quote(options.requestsSpecifier ?? "./requests")};`,
+    ]),
     ...(definition.lifecycle === undefined ? [] : [`import { useLifecycle } from ${quote(options.connectionSpecifier ?? "./connection.svelte")};`]),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
@@ -1512,6 +1532,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       ...(usesControllerTypeChecks ? [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, ${controllerTypesName}[name], keys),`] : []),
       `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
+      ...(requestProps.length === 0 ? [] : [
+        `  request: ${frameworkRequestSource(target.requests, definition.source.file)},`,
+        `  responders: ${respondersSource(target.requests, (prop) => requestProps.find(({ request }) => request.propName === prop)!.responder,
+          (request) => requestProps.find((entry) => entry.request === request)!.listener)},`,
+      ]),
       "});",
     ] : []),
     ...handlerSources,
@@ -1539,7 +1564,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n${style}`;
   return { component, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
+      ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
+        (usesController && requestProps.length > 0) ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),
@@ -1550,5 +1576,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       ...(usesController || definition.lifecycle !== undefined || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
       ...(computed.length > 0 || usesController ? ["reactivity" as const] : []),
       ...(rendered.length > 0 ? ["render" as const] : []),
+      ...(requestProps.length > 0 ? ["requests" as const] : []),
     ] };
 }

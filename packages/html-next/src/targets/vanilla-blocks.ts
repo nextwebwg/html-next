@@ -2447,11 +2447,16 @@ export function emitBlocks(
     const type = declarationTypeNode(declaration.type, declaration.shape);
     return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${checkSource(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
   });
+  // Declared requests: `host.request` checks the detail and answer as live does; only a controller
+  // asks, and only these modules bundle the request steps.
+  const requests = definition.controller === undefined ? [] : Object.entries(contract.requests ?? {}).map(([name, request]) =>
+    `${JSON.stringify(name)}: requestChecks(${checkSource(request.type)}, ${checkSource(request.returns)})`);
   const shown = plan.roots.slice(0, plan.shown);
   // The transitions extension's rules, registered once per document when the module loads.
   const registration = plan.transitions === undefined || plan.transitions === "" ? "" : `transitionStyles(${JSON.stringify(plan.transitions)});`;
   const stateSpec = `const S = { n: ${JSON.stringify(shown.map((item) => item.name))}, t: [${shown.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
     plan.states === plan.shown ? "" : `, k: ${plan.states}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
+    requests.length === 0 ? "" : `, q: { ${requests.join(", ")} }, y: requestDeclared`}${
     blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""}${plan.states === plan.shown ? "" : ", r: readonlyView"} };`;
   // What the shared prop boundary reads (`CompiledProp`): each prop's rule as data and its type as compiled checks.
   const propsSpec = propNames.length === 0 ? undefined : `const D = { g: ${JSON.stringify(contract.tag)}, props: { ${Object.entries(contract.props).map(([name, prop]) => {
@@ -2465,7 +2470,7 @@ export function emitBlocks(
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
-    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState",
+    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "requestChecks", "requestDeclared", "eventPasses", "listen", "refTargets", "rootValue", "setState",
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",

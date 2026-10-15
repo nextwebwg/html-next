@@ -103,7 +103,8 @@ describe("Svelte controller event contract", () => {
       export const check = () => observation?.();
       ${hostSource}`, { loader: "ts", format: "esm" });
     const { useComponentHost, check } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
-    const root = Object.assign(new EventTarget(), { isConnected: true });
+    // A root belongs to a document, where requests from inside it wait for its controller.
+    const root = Object.assign(new EventTarget(), { isConnected: true, ownerDocument: {} });
     let currentRoot = root;
     const sequence: string[] = [];
     let initialized = 0;
@@ -132,7 +133,7 @@ describe("Svelte controller event contract", () => {
     root.dispatchEvent(new CustomEvent("activate", { detail: "detached" }));
     root.isConnected = true; check();
     root.dispatchEvent(new CustomEvent("activate", { detail: "again" }));
-    const replacement = Object.assign(new EventTarget(), { isConnected: true });
+    const replacement = Object.assign(new EventTarget(), { isConnected: true, ownerDocument: {} });
     currentRoot = replacement; check();
     root.dispatchEvent(new CustomEvent("activate", { detail: "old-root" }));
     replacement.dispatchEvent(new CustomEvent("activate", { detail: "new-root" }));

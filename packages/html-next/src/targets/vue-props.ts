@@ -1,6 +1,7 @@
 /** Typed prop boundaries shared by Vue output that declares props; other components do not import this. */
 import { CSS_COLOR_KEYWORDS } from "../css-color-keywords.js";
 import { HTML_EMAIL_PATTERN } from "../type-system.js";
+import { DECLARED_EVENT_TYPE_SOURCE } from "./shared-generated.js";
 export const VUE_PROPS_PATH = "vue/props.ts";
 export const VUE_PROPS_SPECIFIER = "./props";
 
@@ -522,5 +523,5 @@ export function typedPropsModule(version: string): string {
 }
 
 export function vuePropsModule(version: string): string {
-  return typedPropsModule(version);
+  return `${typedPropsModule(version)}${DECLARED_EVENT_TYPE_SOURCE}`;
 }

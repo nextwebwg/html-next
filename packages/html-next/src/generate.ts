@@ -28,6 +28,7 @@ import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
 import { VUE_PROPS_PATH, vuePropsModule } from "./targets/vue-props.js";
+import { requestsArtifact as makeRequestsArtifact } from "./targets/request-host-source.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
@@ -109,6 +110,11 @@ export function vueControlArtifact(): GeneratedArtifact {
 /** Feature-specific typed-prop boundary for Vue components that declare props. */
 export function vuePropsArtifact(): GeneratedArtifact {
   return Object.freeze({ path: VUE_PROPS_PATH, content: vuePropsModule(GENERATOR_VERSION) });
+}
+
+/** The request steps converted components that declare requests import, for one framework target. */
+export function requestsHelperArtifact(target: "vue" | "react" | "svelte"): GeneratedArtifact {
+  return makeRequestsArtifact(target, GENERATOR_VERSION);
 }
 
 /** Target-independent typed invocation rules, copied into React output only when props are used. */
@@ -198,6 +204,7 @@ export { importsVueHost } from "./targets/vue-host.js";
 export { importsVueHtml } from "./targets/vue-html.js";
 export { importsVueControl } from "./targets/vue-control.js";
 export { importsVueProps } from "./targets/vue-props.js";
+export { importsVueRequests } from "./targets/vue.js";
 
 export type { ComponentDefinition } from "./template.js";
 

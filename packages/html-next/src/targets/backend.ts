@@ -3,7 +3,8 @@ import type {
   EventDeclaration,
   SlotContract,
 } from "../template.js";
-import type { PropContract } from "../types.js";
+import { requestPropName } from "../names.js";
+import type { PropContract, RequestContract } from "../types.js";
 import { declarationTypeNode, parseTypeExpression, typeScriptType } from "../type-system.js";
 
 export interface TargetProp {
@@ -17,10 +18,23 @@ export interface TargetEvent extends EventDeclaration {
   readonly callbackName: string;
 }
 
+export interface TargetRequest {
+  readonly name: string;
+  readonly contract: RequestContract;
+  /** The detail's and the answer's TypeScript types; `null` is an answer besides `answerType`. */
+  readonly detailType: string;
+  readonly answerType: string;
+  /** A framework component's function prop: `mention-query` is `mentionQuery`. */
+  readonly propName: string;
+  /** The event form's framework prop: `mention-query` is `onMentionQuery`. */
+  readonly callbackName: string;
+}
+
 export interface TargetComponent {
   readonly definition: ComponentDefinition;
   readonly props: readonly TargetProp[];
   readonly events: readonly TargetEvent[];
+  readonly requests: readonly TargetRequest[];
   readonly slots: readonly SlotContract[];
   readonly controller?: string;
 }
@@ -56,6 +70,14 @@ export function targetComponent(definition: ComponentDefinition): TargetComponen
       ...event,
       detailType: typeScriptType(declarationTypeNode(event.type, event.shape)!),
       callbackName: `on${pascalCase(event.name)}`,
+    }))),
+    requests: Object.freeze(Object.entries(definition.contract.requests ?? {}).map(([name, contract]) => Object.freeze({
+      name,
+      contract,
+      detailType: typeScriptType(contract.type),
+      answerType: typeScriptType(contract.returns),
+      propName: requestPropName(name),
+      callbackName: `on${pascalCase(name)}`,
     }))),
     slots: Object.freeze([...(definition.slots ?? [])]),
     ...(definition.controller === undefined ? {} : { controller: definition.controller }),

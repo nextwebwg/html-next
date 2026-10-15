@@ -303,9 +303,10 @@ describe("HTML Next unplugin", () => {
     // bits, so a transitions hold also sees writes below a root. +77 B: the platform-object check that
     // keeps DOM nodes in state unwrapped, since a browser rejects a proxy as a native getter's receiver.
     // +6 B: a root renders, at its first connection, what changed after its construction.
+    // +90 B: the host's part of requests, `host.request` and `host.on`'s late-responder relay.
     // Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_727, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_817, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

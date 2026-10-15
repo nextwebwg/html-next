@@ -13,6 +13,11 @@ export function componentName(tag: string): string {
   return name;
 }
 
+/** A framework component's function prop for a request: `mention-query` is `mentionQuery`. */
+export function requestPropName(name: string): string {
+  return name.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
+}
+
 export function kebabCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }

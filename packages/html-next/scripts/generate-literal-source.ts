@@ -27,3 +27,14 @@ if (process.argv.includes("--check")) {
     throw new Error("Decimal source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
   }
 } else await writeFile(decimalOutput, decimalContent);
+
+// Converted framework components that declare requests carry the request steps as their own helper.
+const requests = await readFile(new URL("../src/requests.ts", import.meta.url), "utf8");
+const requestsOutput = new URL("../src/generated/requests-source.ts", import.meta.url);
+const requestsContent = "/** Generated from src/requests.ts by scripts/generate-literal-source.ts. */\nexport const REQUESTS_SOURCE = "
+  + JSON.stringify(requests) + ";\n";
+if (process.argv.includes("--check")) {
+  if (await readFile(requestsOutput, "utf8").catch(() => "") !== requestsContent) {
+    throw new Error("Requests source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
+  }
+} else await writeFile(requestsOutput, requestsContent);

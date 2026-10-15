@@ -40,6 +40,7 @@ import {
   reactContextArtifact,
   reactDepthArtifact,
   reactRenderArtifact,
+  requestsHelperArtifact,
   type DiagnosticLocation,
   type ComponentGraph,
   type TemplateNode,
@@ -501,6 +502,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           eventsSpecifier: relativeImport(componentPath, "svelte/events.ts").replace(/\.ts$/, ""),
           controlSpecifier: relativeImport(componentPath, "svelte/control.ts").replace(/\.ts$/, ""),
           dataSpecifier: relativeImport(componentPath, "svelte/data.svelte.ts").replace(/\.ts$/, ""),
+          requestsSpecifier: relativeImport(componentPath, "svelte/requests.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
           slotsByTag,
           propsByTag,
@@ -516,6 +518,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           contextSpecifier: reactHelperSpecifier("context"),
           depthSpecifier: reactHelperSpecifier("depth"),
           renderSpecifier: reactHelperSpecifier("render"),
+          requestsSpecifier: reactHelperSpecifier("requests"),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         })).component;
       } catch (error) {
@@ -638,6 +641,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "react" && neededHelpers.has("render")) {
     claim(reactRenderArtifact(), "helper");
   }
+  if (neededHelpers.has("requests")) claim(requestsHelperArtifact(options.target), "helper");
   if (options.target === "react" && reactStyles) {
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
   }

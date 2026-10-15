@@ -460,6 +460,155 @@ export default function initialize(host) {
 
 The DOM runs capture listeners on an element before the event reaches a descendant, and before that element's own non-capture listeners when the element is the event's target, as it is for a component whose root is the wrapped component. So the consumer's non-capture `select` listeners on the root and above it never see the event, whenever they were added. A capture listener on an ancestor of the root still runs first, as does one the consumer added to the root before the controller connected. The pattern works the same in the browser runtime and in converted Vue, React, and Svelte components.
 
+## Ask the consumer for behavior {#requests}
+
+Some components need behavior from whoever uses them: an editor asks for mention suggestions, an image field asks where to store a file. The component declares a **request** in `<defs>`, a named question with a typed detail and a typed answer. Its controller asks with `host.request`, and the consumer answers in its own JavaScript. The [requests section of the proposal](https://nextwebwg.org/declarative-components/javascript#requests) defines the behavior.
+
+```html title="src/editor.html"
+<template component="ui-editor" controller="./editor.js">
+  <defs>
+    <request name="mention-query" type="object({ query: string })"
+      returns="list(object({ id: string, label: string }))">
+      People matching the text after @.
+    </request>
+  </defs>
+  <div class="editor"></div>
+</template>
+```
+
+`host.request(name, detail, { signal })` resolves to the answer, or to `null` when nobody answers. Each keystroke aborts the request before it, so a slow answer to `@ad` never replaces the answer to `@ada`:
+
+```js title="src/editor.js"
+export default function controller(host) {
+  let pending;
+  host.root.addEventListener("input", () => {
+    pending?.abort();
+    pending = new AbortController();
+    host.request("mention-query", { query: currentQuery() }, { signal: pending.signal })
+      .then((people) => showMentions(people ?? []), () => {}); // rejected: superseded or disconnected
+  });
+}
+```
+
+The answer is checked against `returns`, and a `null` answer is always accepted. The request travels as a `RequestEvent` that bubbles from the editor's root, and the nearest listener answers with `respondWith`:
+
+::: framework-html-next
+
+A consumer component answers in its controller:
+
+```js title="src/notes.js"
+export default function controller(host) {
+  host.on("mention-query", (event) => {
+    event.respondWith(searchPeople(event.detail.query, { signal: event.signal }));
+  });
+}
+```
+
+A page script answers with `respond()`, which takes a function that returns the answer:
+
+```js title="src/setup.js"
+import { respond } from "@nextwebwg/html-next";
+
+respond(document, "mention-query", ({ query }, { signal }) => searchPeople(query, { signal }));
+```
+
+:::
+
+::: framework-vue
+
+Pass a function prop named after the request in camelCase, or listen with the event form:
+
+```html title="src/App.vue"
+<UiEditor :mention-query="({ query }, { signal }) => searchPeople(query, { signal })" />
+<UiEditor @mention-query="(event) => event.respondWith(searchPeople(event.detail.query))" />
+```
+
+:::
+
+::: framework-react
+
+Pass a function prop named after the request in camelCase, or listen with the event form:
+
+```tsx title="src/App.tsx"
+<UiEditor mentionQuery={({ query }, { signal }) => searchPeople(query, { signal })} />
+<UiEditor onMentionQuery={(event) => event.respondWith(searchPeople(event.detail.query))} />
+```
+
+:::
+
+::: framework-svelte
+
+Pass a function prop named after the request in camelCase, or listen with the event prop:
+
+```svelte title="src/App.svelte"
+<UiEditor mentionQuery={({ query }, { signal }) => searchPeople(query, { signal })} />
+<UiEditor onmention-query={(event) => event.respondWith(searchPeople(event.detail.query))} />
+```
+
+:::
+
+The component reads the function prop when each request arrives, so a new function takes effect on the next request. The generated types give the prop the request's detail and answer types. A framework prop and a request whose camelCase names match fail the build.
+
+### Report progress
+
+A long answer, such as an upload, reports progress while it is pending. The asker passes a `progress` callback, and the responder calls `event.progress(loaded, total)`:
+
+```html title="src/image-field.html"
+<template component="ui-image-field" controller="./image-field.js">
+  <defs>
+    <request name="image-upload" type="object">
+      <prop name="file" type="unknown" required>The file the author dropped.</prop>
+      <returns type="object"><prop name="src" type="string" required></prop></returns>
+    </request>
+  </defs>
+  <figure><img $ref="preview" alt=""><progress $ref="bar" value="0"></progress></figure>
+</template>
+```
+
+```js title="src/image-field.js"
+export default function controller(host) {
+  host.root.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    host.request("image-upload", { file }, {
+      progress: (loaded, total) => { host.refs.bar.value = total === 0 ? 0 : loaded / total; },
+    }).then((image) => { host.refs.preview.src = image?.src ?? URL.createObjectURL(file); });
+  });
+}
+```
+
+```js title="src/upload-setup.js"
+import { respond } from "@nextwebwg/html-next";
+
+respond(document, "image-upload", ({ file }, { signal, progress }) => uploadImage(file, {
+  signal,
+  onprogress: (loaded, total) => progress(loaded, total), // XMLHttpRequest upload progress
+}));
+```
+
+With no uploader on the page, the request resolves `null` and the field keeps a local preview.
+
+### Late responders
+
+A request reaches the listeners that exist when it is asked. A request from inside a consumer component waits until that consumer's controller has run, so the two controllers load in either order. A page script that loads later, or a framework prop set after the component mounted, is a late responder: it announces itself, and each component whose request went unanswered receives a `responder` event and decides whether to ask again:
+
+```js title="src/editor.js"
+export default function controller(host) {
+  const build = () => host.request("extensions").then((extensions) => createSession(extensions ?? []));
+  build();
+  host.on("responder", (event) => { if (event.detail.name === "extensions") build(); });
+}
+```
+
+`respond()` announces its responder when it adds its listener. A page script that listens itself announces with a bubbling event:
+
+```js
+element.addEventListener("extensions", (event) => event.respondWith([Highlight]));
+element.dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { name: "extensions" } }));
+```
+
+A consumer controller's later `host.on("extensions", …)`, and a function prop or event listener a framework sets after mounting, reach the waiting component the same way without dispatching an announcement.
+
 ## When you need more
 
 - [Ship a library](/html-next/ship) when other projects need your components.

@@ -5,6 +5,7 @@ import { loadController, loadControllerModule, type ModuleImporter } from "./con
 import { parseBrowserComponent, parseBrowserComponentResource } from "./browser-source.js";
 import { createStylesheetLoader } from "./stylesheet-resources.js";
 import { parseStylesheetInBrowser } from "./stylesheet-resources-browser.js";
+import { holdController } from "./requests.js";
 import {
   getComponentHost,
   installComponentGraph,
@@ -176,7 +177,11 @@ export async function startBrowserComponents(
     onConnect(element, definition) {
       const node = loaded.registry.get(definition.contract.tag)?.node;
       if (node?.controller === undefined) return;
+      const host = getComponentHost(element)!;
+      if (initialized.has(host)) return;
       const module = loadControllerModule(node, options.importer);
+      // Requests from inside this root wait until the controller has run, or failed to load.
+      const release = holdController(element);
       let disconnected = false;
       let cleanup: void | (() => void);
       void module
@@ -184,20 +189,20 @@ export async function startBrowserComponents(
         // fresh lifecycle attempt; invoking this stale one would duplicate controller work and
         // let asynchronous setup attach owners to an already disconnected instance.
         .then((loaded) => {
-          if (disconnected) return;
-          const host = getComponentHost(element)!;
-          if (initialized.has(host)) return;
+          if (disconnected || initialized.has(host)) return;
           initialized.add(host);
-          return loaded.default(host);
+          try { return loaded.default(host); } finally { release(); }
         })
         .then((result) => {
           if (typeof result !== "function") return;
           if (disconnected) result();
           else cleanup = result;
         })
-        .catch(report);
+        .catch(report)
+        .finally(release);
       return () => {
         disconnected = true;
+        release();
         cleanup?.();
       };
     },

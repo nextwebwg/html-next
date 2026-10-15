@@ -63,6 +63,20 @@ export interface ComponentContract {
   readonly summary?: string;
   readonly nativeElement: string;
   readonly props: Readonly<Record<string, PropContract>>;
+  /** Declared `<request>`s by name: what the controller asks its consumer. Omitted when none. */
+  readonly requests?: Readonly<Record<string, RequestContract>>;
+}
+
+/**
+ * A `<request>`: a question the controller asks with `host.request` and the consumer answers in
+ * JavaScript. Never reflected, rendered or hydrated, so its types may be `unknown` or `event`.
+ */
+export interface RequestContract {
+  /** The detail's type; `null` when the declaration has no `type`. */
+  readonly type: TypeNode;
+  /** The answer's type besides `null`, which always answers; `unknown` when it has no `returns`. */
+  readonly returns: TypeNode;
+  readonly description?: string;
 }
 
 export interface DefineContractOptions {

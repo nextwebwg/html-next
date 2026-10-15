@@ -2,7 +2,7 @@
 
 import { fail } from "./diagnostics.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
-import { lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
+import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent, isPlatformObject } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
@@ -24,6 +24,7 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
+import { ask, type RequestChecks, type RequestOptions } from "./requests.js";
 import { DataResource, type DataState } from "./data.js";
 import { propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
@@ -44,6 +45,7 @@ export {
   checkUnknown,
 } from "./type-checks.js";
 export { boundFailures } from "./value-constraints.js";
+export { RequestEvent, respond } from "./requests.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
 export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
@@ -1015,7 +1017,32 @@ export interface GeneratedStateSpec {
   readonly z?: typeof iteratedRef;
   /** `readonlyView`, supplied by a module with computeds or contexts, which the host shows read-only. */
   readonly r?: typeof readonlyView;
+  /** Declared requests' detail and answer checks, which `host.request` applies as the live host does. */
+  readonly q?: Readonly<Record<string, RequestChecks>>;
+  /** `requestDeclared`, supplied by a module that declares requests, so others do not bundle the request steps. */
+  readonly y?: typeof requestDeclared;
 }
+
+/** What `host.request` uses to abort the current connection's requests: paused, it aborts them. */
+interface ConnectionOwner extends ReactiveOwner {
+  c?: AbortController | undefined;
+}
+
+/** `host.request` for a module that declares requests: the live request steps, at the compiled root. */
+export function requestDeclared(instance: GeneratedInstance, name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> {
+  let owner = instance.a;
+  if (owner === undefined) {
+    const created: ConnectionOwner = { pause() { created.c?.abort(); created.c = undefined; }, resume() {}, stop() {} };
+    instance.o.push(owner = instance.a = created);
+  }
+  const connection = instance.c() ? (owner.c ??= new AbortController()).signal
+    : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
+  return ask(instance.e, connection, name, detail, options, instance.S.q?.[name], (message) => warnOnce(instance.S, message, message));
+}
+
+/** A declared request's checks: its detail's type, then its answer's; `null` always answers. */
+export const requestChecks = (detail: TypeCheck, answer: TypeCheck): RequestChecks =>
+  [(value) => detail(value, "$", "value").ok, (value) => answer(value, "$", "value").ok];
 
 /** A ref the host reads: an iterated one is what the iteration still renders, in document order. */
 export function iteratedRef(recorded: Record<string, unknown>, key: string): unknown {
@@ -1066,6 +1093,8 @@ export interface GeneratedInstance {
   D?: GeneratedInstance[];
   /** How many of its owners were released since the list was last compacted. */
   x?: number;
+  /** The owner whose pause aborts this connection's requests, made by the first `host.request`. */
+  a?: ConnectionOwner;
   /** Its root values, as attaching set them. */
   readonly v?: unknown[];
   /** `host.data`, set before attaching by a component that declares reads (`dataHandles`). */
@@ -1718,9 +1747,12 @@ export function attachGeneratedController(
       const stop = host.effect(() => {
         if (type === "connect") return untracked(() => callback(new Event(type))) as void | (() => void);
         if (type === "disconnect") return () => { if (!stopped) untracked(() => callback(new Event(type))); };
-        const listener = (event: Event): void => { callback(event); };
+        // `responder` reaches a controller only as the runtime's relay to its own root, which does not bubble.
+        const listener = (event: Event): void => { if (type !== "responder" || !event.bubbles) callback(event); };
         const target: Element = host.root;
         target.addEventListener(type, listener);
+        // A responder registered after a request went unanswered tells the asker to ask again.
+        documentState(target.ownerDocument).requests?.r?.(target, type);
         return () => target.removeEventListener(type, listener);
       });
       return () => { stopped = true; stop(); };
@@ -1747,6 +1779,8 @@ export function attachGeneratedController(
       return () => effect.stop();
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
+    request: (name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> => spec.y?.(handle, name, detail, options) ??
+      Promise.reject(new TypeError(`No <request> named \`${name}\` is declared.`)),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
   Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });

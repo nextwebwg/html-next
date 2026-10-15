@@ -1,5 +1,6 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
+import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
 
 const SOURCE = `import { flushSync, untrack } from "svelte";
 import { cycleCheckedComputed } from "./reactivity.svelte";
@@ -28,6 +29,10 @@ export interface ComponentHostOptions {
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  /** Asks one of the component's declared requests. */
+  request?(root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
+  readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
 }
 
 interface ControllerHost {
@@ -47,6 +52,7 @@ interface ControllerHost {
   computed<T>(compute: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
+  request(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
   on(type: string, callback: EventListener): () => void;
 }
 
@@ -72,6 +78,7 @@ function documentOrder(elements: readonly Element[]): Element[] {
 }
 
 ${CONTROLLER_STATE_SOURCE}
+${REQUEST_HOST_SOURCE}
 
 /** Public Svelte runes own reactions; native DOM connectivity owns controller lifetimes. */
 export function useComponentHost(loader: () => Promise<unknown>, options: ComponentHostOptions): void {
@@ -84,6 +91,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   let generation = 0;
   let initialized = false;
   let membership = $state(0);
+  const requests = requestConnection();
+  let releaseController: (() => void) | undefined;
   const effects = new Map<() => void, () => void>();
   const subscriptions = new Set<{ type: string; callback: EventListener; cleanup?: () => void }>();
   const connect = (subscription: { callback: EventListener; cleanup?: () => void }): void => {
@@ -160,20 +169,42 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       return stop;
     },
     dispatch: (name, detail) => options.dispatch(host.root, name, detail),
+    request: (name, detail, requestOptions) => options.request === undefined ? undeclaredRequest(name)
+      : options.request(host.root, requests.signal(connected), name, detail, requestOptions),
     on(type, callback) {
-      const subscription: { type: string; callback: EventListener; cleanup?: () => void } = { type, callback };
+      const listener: EventListener = type === "connect" || type === "disconnect" ? callback : hostListener(type, callback);
+      const subscription: { type: string; callback: EventListener; cleanup?: () => void } = { type, callback: listener };
       subscriptions.add(subscription);
       if (type === "connect") { if (connected) connect(subscription); }
-      else if (type !== "disconnect" && connected) host.root.addEventListener(type, callback);
+      else if (type !== "disconnect" && connected) {
+        host.root.addEventListener(type, listener);
+        // A responder registered after a request went unanswered tells the asker to ask again.
+        relayResponders(host.root, type);
+      }
       return () => {
         if (!subscriptions.delete(subscription)) return;
-        if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, callback);
+        if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, listener);
         subscription.cleanup?.();
         subscription.cleanup = undefined;
       };
     },
   };
   Object.freeze(host);
+  // Each request's responder listens on the root from its first connection, before the controller runs.
+  const responders = Object.entries(options.responders ?? {});
+  for (const [name, read] of responders) host.on(name, (event) => read()?.(event));
+  // A function prop or event form set later relays for its request, as a late host.on does.
+  if (responders.length > 0) {
+    let responding = untrack(() => responders.map(([, read]) => read() !== undefined));
+    $effect(() => {
+      const now = responders.map(([, read]) => read() !== undefined);
+      untrack(() => {
+        const element = root;
+        if (element !== null && connected) now.forEach((set, index) => { if (set && !responding[index]) relayResponders(element, responders[index]![0]); });
+        responding = now;
+      });
+    });
+  }
   const load = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve().then(loader).then((candidate) => {
     if (typeof (candidate as { default?: unknown } | null)?.default !== "function") throw moduleDiagnostic("HJ002", options);
     return candidate as ControllerModule;
@@ -185,6 +216,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     if (!connected) return;
     connected = false;
     generation += 1;
+    requests.end();
+    releaseController?.();
     for (const subscription of [...subscriptions]) {
       if (subscription.type === "disconnect") subscription.callback(new Event("disconnect"));
     }
@@ -214,24 +247,30 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     if (connected) return;
     connected = true;
     const current = ++generation;
-    if (initialized) {
-      for (const subscription of [...subscriptions]) {
-        if (subscription.type === "connect") connect(subscription);
-        else if (subscription.type !== "disconnect") next.addEventListener(subscription.type, subscription.callback);
+    // Before the controller first runs, the only subscriptions are the requests' responders.
+    for (const subscription of [...subscriptions]) {
+      if (subscription.type === "connect") connect(subscription);
+      else if (subscription.type !== "disconnect") {
+        next.addEventListener(subscription.type, subscription.callback);
+        relayResponders(next, subscription.type);
       }
-      return;
     }
+    if (initialized) return;
+    // Requests from inside this root wait until the controller has run, or failed to load.
+    const release = releaseController = holdController(next);
     started = load().then(async (module) => {
       if (!connected || current !== generation) return module;
       initialized = true;
-      const result = await module.default(host);
+      let invoked: ReturnType<ControllerModule["default"]>;
+      try { invoked = module.default(host); } finally { release(); }
+      const result = await invoked;
       if (typeof result === "function") {
         if (!connected || current !== generation) result();
         else cleanup = result;
       }
       return module;
     });
-    void started.catch(report);
+    void started.catch(report).finally(release);
   };
   $effect(() => {
     if (!options.ownsRoot()) { untrack(disconnect); return; }

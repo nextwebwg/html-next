@@ -13,6 +13,7 @@ import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
+import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
@@ -97,6 +98,8 @@ export interface ReactConversionOptions {
   readonly contextSpecifier?: string;
   readonly depthSpecifier?: string;
   readonly renderSpecifier?: string;
+  /** The request steps, which a component that declares requests imports. */
+  readonly requestsSpecifier?: string;
   readonly guardNestedDepth?: boolean;
   readonly controllerSpecifier?: string;
 }
@@ -104,7 +107,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render")[];
+  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests")[];
 }
 
 interface RootAttributes {
@@ -985,6 +988,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(usesHtml ? [`import { SanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`] : []),
     ...(usesHost ? [`import { ${[...usesController ? ["useComponentHost"] : [], ...definition.lifecycle === undefined ? [] : ["useLifecycle"]].join(", ")} } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
     ...(usesContext ? [`import { componentContext } from ${quote(options.contextSpecifier ?? "./context")};`] : []),
+    ...(target.requests.length === 0 ? [] : [
+      ...(usesController ? [
+        `import { ${REQUEST_CHECK} } from ${quote(options.propsSpecifier ?? "./props")};`,
+        `import { ${REQUEST_HELPERS.join(", ")} } from ${quote(options.requestsSpecifier ?? "./requests")};`,
+      ] : []),
+      `import type { ${REQUEST_TYPES.join(", ")} } from ${quote(options.requestsSpecifier ?? "./requests")};`,
+    ]),
     ...(nestedDepthLimit === undefined ? [] : [`import { NestedDepthContext } from ${quote(options.depthSpecifier ?? "./depth")};`]),
     RENDER_IMPORT,
     ...(styles.css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${name}.css`)};`]),
@@ -993,6 +1003,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       .map((context) => [`${context.from}:${context.name}`, context] as const)).values()]
       .map((context) => `const ${contextExportName(context.from, context.name)} = componentContext<unknown>(${quote(context.from)}, ${quote(context.name)});`),
     ...(checksControllerWrites ? [`const controllerStateTypes = ${JSON.stringify(controllerStateTypes)} as const;`] : []),
+    ...(usesController && target.requests.length > 0 ? [`const requestAsk = ${frameworkRequestSource(target.requests, definition.source.file)};`] : []),
     ...target.events.map((event) =>
       `const ${eventSchemas.get(event.name)!} = ${JSON.stringify({ type: declarationTypeNode(event.type, event.shape)!, init: { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable } })} as const;`),
     ...(states.map((state) =>
@@ -1000,6 +1011,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     "",
     `export type ${name}Props${genericDeclaration} = Omit<React.HTMLAttributes<${rootType}>, ${["style", ...target.props.map((prop) => prop.name)].map(quote).join(" | ")}> & {`,
     ...props,
+    // Each request is a function prop that answers it, and an event form that hears it.
+    ...target.requests.flatMap((request) => [
+      `  ${propKey(request.propName)}?: ${responderType(request)} | null;`,
+      `  ${propKey(request.callbackName)}?: (${requestListenerType(request)}) | null;`,
+    ]),
     ...(target.props.some((prop) => prop.name === "style") ? [] : ["  style?: React.CSSProperties | (React.CSSProperties & { [name: `--${string}`]: string | number | undefined });"]),
     "  children?: ReactNode;",
     `  slots?: ${slotsType};`,
@@ -1021,7 +1037,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "    throw Object.assign(new Error(`HR008: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR008', message }) });",
       "  }",
     ]),
-    `  const { children: _children, slots: _slots, ${target.props.map((prop) => `${propKey(prop.name)}: _${prop.name.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
+    `  const { children: _children, slots: _slots, ${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
+      .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     ...(target.props.length > 0 || usesNativeControls ? [
       "  const hasMounted = React.useRef(false);",
       "  React.useLayoutEffect(() => { hasMounted.current = true; }, []);",
@@ -1322,6 +1339,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    data: { ${data.map((value) => `${propKey(value.name)}: () => ${valueNames.get(value.name)!}`).join(", ")} },`,
       ...(checksControllerWrites ? [`    acceptsState: (name, keys, value) => acceptsControllerWrite(value, controllerStateTypes[name as keyof typeof controllerStateTypes], keys),`] : []),
       `    refs: ${usesRefs ? "refElements.current" : "new Map<string, ReadonlySet<Element>>()"},`,
+      ...(target.requests.length === 0 ? [] : [
+        "    request: requestAsk,",
+        `    responders: ${respondersSource(target.requests, (prop) => `props[${quote(prop)}]`, (request) => `props[${quote(request.callbackName)}]`)},`,
+      ]),
       `    dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${eventSchemas.get(event.name)!}.type, ${eventSchemas.get(event.name)!}.init);`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  });`,
     ] : []),
@@ -1385,7 +1406,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     component,
     css: styles.css,
     helpers: [
-      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites ? [] : ["props" as const]),
+      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),
@@ -1394,6 +1415,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(usesContext ? ["context" as const] : []),
       ...(nestedDepthLimit === undefined ? [] : ["depth" as const]),
       ...(rendered.length === 0 ? [] : ["render" as const]),
+      ...(target.requests.length === 0 ? [] : ["requests" as const]),
     ],
   };
 }

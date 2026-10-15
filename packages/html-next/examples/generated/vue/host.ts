@@ -202,6 +202,66 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
   return { state, data }
 }
 
+const requestStateKey = Symbol.for('@nextwebwg/html-next.runtime.v1')
+type RequestRecord = {
+  readonly g: WeakMap<Node, Promise<void>>
+  r?: (from: Node, name: string) => void
+}
+const requestRecord = (
+  root: Element,
+): RequestRecord => (((root.ownerDocument as unknown as Record<
+  symbol,
+  { requests?: RequestRecord } | undefined
+>)[requestStateKey] ??= {}).requests ??= { g: new WeakMap() })
+
+/** Requests from inside root wait until its controller has run; the returned release ends the wait. */
+function holdController(root: Element): () => void {
+  const { g: gates } = requestRecord(root)
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  gates.set(root, gate)
+  return () => {
+    if (gates.get(root) === gate) gates.delete(root)
+    release()
+  }
+}
+
+/** A responder registered on root relays to the requests inside it that went unanswered. */
+function relayResponders(root: Element, name: string): void {
+  requestRecord(root).r?.(root, name)
+}
+
+/** A responder announcement reaches a controller only as the relay to its own root, which does not bubble. */
+function hostListener(type: string, callback: (event: Event) => unknown): (event: Event) => void {
+  return (event) => {
+    if (type !== 'responder' || !event.bubbles) callback(event)
+  }
+}
+
+/** The connection signal requests use: it aborts when the component disconnects. */
+function requestConnection(): {
+  readonly signal: (connected: boolean) => AbortSignal
+  readonly end: () => void
+} {
+  let current: AbortController | undefined
+  return {
+    signal: (connected) =>
+      connected
+        ? (current ??= new AbortController()).signal
+        : AbortSignal.abort(new DOMException('The component is not connected.', 'AbortError')),
+    end: () => {
+      current?.abort()
+      current = undefined
+    },
+  }
+}
+
+/** host.request for a name the component does not declare. */
+const undeclaredRequest = (name: string): Promise<never> =>
+  Promise.reject(new TypeError('No <request> named ' + JSON.stringify(name) + ' is declared.'))
+
 export function dispatchToTargets(recorded: unknown, send: (target: Element) => void): void {
   const refs = recorded instanceof Set
     ? [...recorded]
@@ -484,6 +544,16 @@ export interface ComponentHostOptions {
   /** Values inherited through declared context, which a controller reads. */
   readonly context?: Readonly<Record<string, Readable<unknown>>>
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean
+  /** Asks one of the component's declared requests. */
+  request?(
+    root: Element,
+    connection: AbortSignal,
+    name: string,
+    detail?: unknown,
+    options?: unknown,
+  ): Promise<unknown>
+  /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
+  readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>
 }
 
 /** Vue does not promise a `v-for` ref array in source order, and the host does. */
@@ -582,6 +652,8 @@ export function useComponentHost(
     else if (entry.type !== 'disconnect') {
       entry.target = root.value ?? undefined
       entry.target?.addEventListener(entry.type, entry.callback as EventListener)
+      // A responder registered after a request went unanswered tells the asker to ask again.
+      if (entry.target !== undefined) relayResponders(entry.target, entry.type)
     }
   }
   const deactivate = (entry: Subscription, disconnecting: boolean): void => {
@@ -637,7 +709,12 @@ export function useComponentHost(
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
     }, options.controllerSource?.definition ?? '<component>'),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
-      const entry: Subscription = { type, callback }
+      const entry: Subscription = {
+        type,
+        callback: type === 'connect' || type === 'disconnect'
+          ? callback
+          : hostListener(type, callback),
+      }
       subscriptions.add(entry)
       if (connected.value) activate(entry)
       return () => {
@@ -703,6 +780,30 @@ export function useComponentHost(
       return dispose
     },
     dispatch,
+    request: (name: string, detail?: unknown, requestOptions?: unknown): Promise<unknown> =>
+      options.request === undefined
+        ? undeclaredRequest(name)
+        : options.request(
+          root.value as Element,
+          requests.signal(connected.value),
+          name,
+          detail,
+          requestOptions,
+        ),
+  }
+  const requests = requestConnection()
+  // Each request's responder listens on the root from its first connection, before the controller runs.
+  const responders = Object.entries(options.responders ?? {})
+  for (const [name, read] of responders) host.on(name, (event) => read()?.(event))
+  // A function prop or event form set later relays for its request, as a late host.on does.
+  if (responders.length > 0) {
+    watch(() => responders.map(([, read]) => read() !== undefined), (now, before) => {
+      const element = root.value
+      if (element === null || !connected.value) return
+      now.forEach((set, index) => {
+        if (set && !before[index]) relayResponders(element, responders[index]![0])
+      })
+    })
   }
 
   let cleanup: void | (() => void)
@@ -711,10 +812,13 @@ export function useComponentHost(
   let connection = 0
   let initialized = false
   let unmounted = false
+  let releaseController: (() => void) | undefined
   const disconnect = (): void => {
     if (!connected.value) return
     connected.value = false
     connection += 1
+    requests.end()
+    releaseController?.()
     for (const pause of pauses.values()) pause()
     for (const entry of subscriptions) deactivate(entry, true)
     cleanup?.()
@@ -741,17 +845,25 @@ export function useComponentHost(
     for (const entry of subscriptions) activate(entry)
     if (initialized) return
     const current = ++connection
+    // Requests from inside this root wait until the controller has run, or failed to load.
+    const release = releaseController = holdController(root.value!)
     started = loadControllerModule().then(async (loaded) => {
       if (!connected.value || current !== connection || initialized) return loaded
       initialized = true
-      const result = await loaded.default(host as never)
+      let invoked: unknown
+      try {
+        invoked = loaded.default(host as never)
+      } finally {
+        release()
+      }
+      const result = await invoked
       if (typeof result === 'function') {
         if (!connected.value || current !== connection) result()
         else cleanup = result as () => void
       }
       return loaded
     })
-    void started.catch(report)
+    void started.catch(report).finally(release)
   }
   onMounted(() => {
     if (root.value === null) return

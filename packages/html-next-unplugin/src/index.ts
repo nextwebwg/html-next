@@ -246,6 +246,7 @@ function componentCapabilities(definition: ComponentDefinition): readonly string
   if (definition.css !== "") capabilities.add("scoped-styles");
   if (definition.controller !== undefined) capabilities.add("controllers");
   for (const declaration of definition.declarations ?? []) capabilities.add(declaration.kind);
+  if (definition.contract.requests !== undefined) capabilities.add("request");
   visitTemplate(definition.template, capabilities);
   return Object.freeze([...capabilities].sort());
 }

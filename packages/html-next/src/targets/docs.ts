@@ -72,6 +72,19 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
         ),
       ]),
     "",
+    // An unanswered request degrades the component quietly, so its consumer reads what it asks for here.
+    ...(target.requests.length === 0 ? [] : [
+      "## Requests",
+      "",
+      "| Request | Detail | Answer | Framework prop | Description |",
+      "| --- | --- | --- | --- | --- |",
+      ...target.requests.map((request) =>
+        `| \`${request.name}\` | ${typeSource(request.contract.type)} | ${typeSource(request.contract.returns)} or \`null\` | \`${request.propName}\` | ${cell(request.contract.description ?? "—")} |`
+      ),
+      "",
+      "Answer a request in a consumer's controller with `host.on(name, (event) => event.respondWith(answer))`, in a page script with `respond(target, name, fn)`, or in a framework with its function prop. An unanswered request resolves `null`.",
+      "",
+    ]),
     "## Usage",
     "",
     "```html",
