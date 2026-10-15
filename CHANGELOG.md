@@ -17,6 +17,14 @@
 - A layout name with neither an `app/layouts/<name>.html` file nor a `layouts` entry is an error that names the page and the expected file.
 - `<hk-nav>`, `<hk-breadcrumbs>` and `<hk-pager>` declare their items with an open object type, which ends in `...`, and the navigation guide shows layouts the same declaration, so items keep passing through as they gain fields.
 
+### Changed
+
+- `HC021` names the prop, the component and the type of the value it received, as in `` HC021: Prop `count` of <x-counter> does not satisfy its declared type `number`: it received a string. `` `serializePropTarget(prop, value, name, component)` takes the prop's name and the component's tag for the message, and HTMLKit passes both for the props a page or layout loader returns.
+
+### Fixed
+
+- In compiled components, a `$match` arm inside a `$each` row reads the row's item, so each row renders, hydrates and updates with the arm its own item selects, as in the live runtime and server rendering. `<li $each="item of $items"><template $match><a $when="$item.href">…</a><span $else>…</span></template></li>` keeps the server's `<a>` and `<span>` rows through hydration. `$if`, `$with` and nested `$each` in a row read the row's item in the same way.
+
 ## 1.0.0-alpha.50
 
 ### Added
