@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-alpha.51
+
+### Added
+
+- HTMLKit route groups. A folder named in parentheses, such as `app/pages/docs/01.(Getting started)/`, groups its pages, and their URLs skip the folder: `01.intro.html` inside it serves `/docs/intro/`. The text inside the parentheses is the group's label, and a number-and-dot prefix orders the group among its neighbours in navigation. A group's `_layout.html` and `_layout.server.ts` wrap its pages like any folder's. Each navigation item in a group carries the innermost group's label as `group`, `<hk-nav>` shows each label as a `<li data-group>` before the group's first link, and each `ApplicationRoute` lists its `groups` (label, order and depth), outermost first. `<hk-nav>`, `<hk-breadcrumbs>` and `<hk-pager>` accept items with the optional `group` field.
+- HTMLKit catch-all routes. `[...name]` matches one or more URL segments and `[[...name]]` any number, including none, and the parameter is the list of segments, as in `{ path: ['a', 'b'] }`; a catch-all is the last segment of its route. `entries()` lists catch-all pages as lists of segments for static builds. Where several routes match a URL, the first differing segment decides: a literal precedes `[name]`, which precedes `[...name]`, which precedes `[[...name]]`. The `RouteParam` type describes a parameter value.
+- HTMLKit redirects. The `redirects` option maps old application paths to an application path or an `http(s)` URL, such as `{ '/start/': '/guide/' }`, and a loader's `redirect(location, status)` ends loading with a redirect, 303 unless it passes 301, 302, 307 or 308. The development server and `application.fetch` answer with the status and a `Location` header (308 for the option, with or without the trailing slash), and `render()` returns the status and `location`. A static build writes a redirect page at each old URL, with a meta refresh, a canonical link and a plain link to the new URL. The manifest's `redirects` lists each one's `from`, `to` and `status`, typed as `ManifestRedirect`, and a redirect from a page's own URL is an error that names the page.
+
 ## 1.0.0-alpha.50
 
 ### Added

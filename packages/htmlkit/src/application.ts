@@ -9,11 +9,16 @@ import { renderComponents } from "@nextwebwg/html-next/server";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
 import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
-import { documentHTML, escapeHTML, pagePayload, payloadPath, type PageAssets } from "./document.js";
-import { discover, matchRoute, parameter, validSegment } from "./routes.js";
+import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type PageAssets } from "./document.js";
+import { breadth, discover, matchRoute, parameter, redirectLocation, redirectStatuses, redirectTable, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
-import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, PagerLinks, RenderedHead, RenderedLayer, RenderedPage, RouteLayer, ServerModule } from "./types.js";
+import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RenderedPage, RouteLayer, ServerModule } from "./types.js";
+
+/** What a loader's redirect() throws, so render answers with the redirect instead of the page. */
+class Redirect {
+  constructor(readonly location: string, readonly status: RedirectStatus) {}
+}
 
 /** A loader's props as invocation attributes, in their HTML form, defaults included. */
 function invocationAttributes(definition: ComponentDefinition, result: LoaderResult): Record<string, string> {
@@ -82,7 +87,11 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
   assets?: (page: RenderedPage) => PageAssets): Promise<Application> {
   const options = await withPlugins(input);
   const config = configure(options);
+  const redirects = redirectTable(config.base, options.redirects);
   const { routes, notFound: notFoundRoute, sources, files } = await discover(config.root, { ...options, base: config.base });
+  // A dynamic page's entries are checked the same way when they are listed.
+  const shadowed = routes.find(route => route.params.length === 0 && redirects.has(config.base + route.pattern.slice(1)));
+  if (shadowed !== undefined) throw new HtmlKitError(`The redirects option also redirects ${shadowed.pattern}, which is this page's URL.`, shadowed.component);
   const scripts = await headScripts(options, config.root);
   const ownsServer = moduleServer === undefined;
   const map = importMap(config.root);
@@ -115,15 +124,23 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         if (entry === null || typeof entry !== "object" || Object.keys(entry).sort().join(",") !== [...route.params].sort().join(",")) {
           throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, origin(route));
         }
-        const segments = route.segments.map(segment => {
+        const segments = route.segments.flatMap(segment => {
           const name = parameter(segment);
-          if (name === undefined) return segment;
+          if (name === undefined) return [segment];
           const value: unknown = entry[name];
-          if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, origin(route));
-          return encodeURIComponent(value);
+          if (breadth(segment) === 1) {
+            if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, origin(route));
+            return [encodeURIComponent(value)];
+          }
+          // [...name] takes at least one segment and [[...name]] any number, as a list.
+          if (!Array.isArray(value) || !value.every(validSegment) || (value.length === 0 && breadth(segment) === 2)) {
+            throw new HtmlKitError(`Parameter ${name} must be a ${breadth(segment) === 2 ? "nonempty " : ""}list of safe nonempty URL segments.`, origin(route));
+          }
+          return value.map(encodeURIComponent);
         });
         const path = config.base + (segments.length === 0 ? "" : segments.join("/") + "/");
         if (paths.has(path)) throw new HtmlKitError(`Static route collision at ${path}.`, route.component);
+        if (redirects.has(path)) throw new HtmlKitError(`The redirects option also redirects ${path}, which is this page's URL.`, route.component);
         const matched = matchRoute(routes, path, config.base);
         if (matched?.route !== route) throw new HtmlKitError(`Static route collision with ${matched?.route.pattern} at ${path}.`, route.component);
         paths.set(path, route);
@@ -139,26 +156,35 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
   };
   const item = (href: string, route: ApplicationRoute, depth: number, current: string | undefined): NavigationItem => Object.freeze({
     href, label: route.label ?? decodeURIComponent(href.slice(config.base.length).split("/").filter(Boolean).at(-1) ?? "Home"),
-    current: href === current ? "page" as const : "false" as const, depth, pageName: route.pageName });
+    current: href === current ? "page" as const : "false" as const, depth, pageName: route.pageName,
+    ...(route.groups === undefined ? {} : { group: route.groups.at(-1)!.label }) });
+  // A page's place in the file tree: each URL segment, with its (group) folders where they sit.
+  const treePath = (href: string, route: ApplicationRoute) => {
+    const path = href.slice(config.base.length).split("/").filter(Boolean).map((name, i) => ({ name, rank: route.order?.[i] ?? null }));
+    // Deepest first, so each insertion index is still a count of URL segments.
+    for (const group of (route.groups ?? []).toReversed()) path.splice(group.depth, 0, { name: group.label, rank: group.order });
+    return path;
+  };
   const navigation = async (query: NavigationQuery = {}): Promise<readonly NavigationItem[]> => {
     const from = checkedFrom(query.from);
     const prefix = config.base + from.slice(1);
     const depth = from.split("/").filter(Boolean).length;
     // Hidden pages and alias routes stay routable but out of navigation.
     const items = [...await concreteRoutes()].filter(([path, route]) => path.startsWith(prefix) && !route.hidden && route.canonical === undefined);
-    items.sort(([a, left], [b, right]) => {
-      const aParts = a.slice(config.base.length).split("/").filter(Boolean);
-      const bParts = b.slice(config.base.length).split("/").filter(Boolean);
+    const paths = new Map(items.map(([href, route]) => [href, treePath(href, route)]));
+    items.sort(([a], [b]) => {
+      const aParts = paths.get(a)!;
+      const bParts = paths.get(b)!;
       for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
-        const aRank = left.order?.[i] ?? null;
-        const bRank = right.order?.[i] ?? null;
+        const aRank = aParts[i]!.rank;
+        const bRank = bParts[i]!.rank;
         if (aRank !== bRank) {
           if (aRank === null) return 1;
           if (bRank === null) return -1;
           const difference = BigInt(aRank) - BigInt(bRank);
           if (difference !== 0n) return difference < 0n ? -1 : 1;
         }
-        const difference = aParts[i]!.localeCompare(bParts[i]!);
+        const difference = aParts[i]!.name.localeCompare(bParts[i]!.name);
         if (difference !== 0) return difference;
       }
       return aParts.length - bParts.length || a.localeCompare(b);
@@ -204,6 +230,10 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       if (pathname.startsWith("//")) return notFound();
       const url = new URL(pathname, config.origin);
       if (url.origin !== config.origin || url.search || url.hash) throw new HtmlKitError("Static rendering requires an application pathname without a query or fragment.");
+      const redirected = (location: string, status: RedirectStatus) => ({ status, pathname: url.pathname, location, ...redirectPage(location), css: "", components: [], layers: [] });
+      // The redirects option precedes pages, with or without the trailing slash.
+      const configured = redirects.get(url.pathname.endsWith("/") ? url.pathname : url.pathname + "/");
+      if (configured !== undefined) return redirected(configured, 308);
       const matched = matchRoute(routes, url.pathname, config.base);
       // Unmatched paths render app/pages/404.html through its layouts, or the built-in page.
       if (matched === undefined && notFoundRoute === undefined) return notFound();
@@ -272,8 +302,14 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
           navigation: (query?: NavigationQuery) => navigation({ current, ...query }),
           breadcrumbs: (query?: NavigationQuery) => breadcrumbs({ current, ...query }),
           pager: (query?: NavigationQuery) => pager({ current, ...query }),
+          redirect(location: string, status: RedirectStatus = 303): never {
+            if (!redirectStatuses.includes(status)) throw new HtmlKitError(`Redirect status ${String(status)} must be 301, 302, 303, 307, or 308.`, origin(layer));
+            throw new Redirect(redirectLocation(config.base, location, origin(layer)), status);
+          },
           get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", origin(layer)); } };
-        const result = loaded.load === undefined ? {} : await loaded.load(context);
+        let result: LoaderResult;
+        try { result = loaded.load === undefined ? {} : await loaded.load(context); }
+        catch (error) { if (error instanceof Redirect) return redirected(error.location, error.status); throw error; }
         if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", origin(layer));
         results.push(result);
         parent = Object.freeze({ ...parent, ...result.data });
@@ -315,6 +351,10 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
           { status: data === undefined ? 404 : 200, headers: { "content-type": "application/json" } });
       }
       const page = await application.render(pathname, request.signal);
+      if (page.location !== undefined) {
+        return new Response(request.method === "HEAD" ? null : page.html,
+          { status: page.status, headers: { location: page.location, "content-type": "text/html; charset=utf-8" } });
+      }
       if (page.status === 200 && !pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" } });
       return new Response(request.method === "HEAD" ? null : documentHTML(page.body, page.head, assets?.(page)),
         { status: page.status, headers: { "content-type": "text/html; charset=utf-8" } });
