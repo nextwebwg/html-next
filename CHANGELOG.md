@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.51
+
+### Fixed
+
+- In converted Vue components, every `:host` rule has the live runtime's specificity: `:host`, `:host(…)`, and either one under an ancestor selector or with a pseudo-element. The converter emits the root as `:scope:where(:scope)`, which Vue's scoped styles turn into `:scope:where([data-v-…]:scope)`, the counterpart of the live runtime's `:scope:where([data-component~="…"])`, and puts the rule's other tests and ancestor context in an `:is()` after it, so `.wide :host(.on)` is `:scope:where(:scope):is(.wide .on)`. A consumer rule more specific than a component's `:host` rule applies to the root in converted Vue components as it does in the live runtime.
+
 ## 1.0.0-alpha.50
 
 ### Added
