@@ -78,7 +78,7 @@ describe("framework converter", () => {
       const root = await mkdtemp(join(tmpdir(), "html-next-converter-shared-"));
       temporary.push(root);
       await writeFile(join(root, "package.json"), "{}");
-      await writeFile(join(root, "defaults.css"), '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: rebeccapurple; } :host, *, *::before, *::after { box-sizing: border-box; } :host-state([open]) { color: rebeccapurple; }');
+      await writeFile(join(root, "defaults.css"), '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: rebeccapurple; } :host, *, *::before, *::after { box-sizing: border-box; } :host(:state(open)) { color: rebeccapurple; }');
       await writeFile(join(root, "components.html"), ["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span>own</span><slot></slot></section><style>@import "defaults.css";</style></template>`).join(""));
       const output = join(root, "out");
       const manifest = await convertComponents({ entries: ["components.html"], target, root, outDirectory: output, mode: "library" });
@@ -1087,8 +1087,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
       { code: "HT017", body: '<template component="x-card" status="early" summary="Card."><article $match="$oops"></article></template>' },
       { code: "HT019", body: '<template component="x-card" status="early" summary="Card."><article $ref="invalid name"></article></template>' },
       { code: "HT020", body: '<template component="x-card" status="early" summary="Card."><article style:1bad="true"></article></template>' },
-      { code: "HY001", body: '<template component="x-card" status="early" summary="Card."><article></article><style>:host-state([missing]) { color: red; }</style></template>' },
-      { code: "HY002", body: '<template component="x-card" status="early" summary="Card."><defs><state name="items" type="list(string)" value="[]"></state></defs><article></article><style>:host-state([items]) { color: red; }</style></template>' },
+      { code: "HY001", body: '<template component="x-card" status="early" summary="Card."><article></article><style>:host(:state(missing)) { color: red; }</style></template>' },
+      { code: "HY002", body: '<template component="x-card" status="early" summary="Card."><defs><state name="items" type="list(string)" value="[]"></state></defs><article></article><style>:host(:state(items)) { color: red; }</style></template>' },
       { code: "HY003", body: '<template component="x-card" status="early" summary="Card."><article></article><style>:scope { color: red; }</style></template>' },
     ] as const;
 

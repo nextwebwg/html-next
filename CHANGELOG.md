@@ -2,6 +2,10 @@
 
 ## 1.0.0-alpha.52
 
+### Changed
+
+- Component styles select state with `:state()`, as the [Style Scoping](https://nextwebwg.org/declarative-components/styling#state) chapter now defines: `:host(:state(open))` replaces `:host-state([open])`, and `:host(:state(tone=warm))` tests a value. A value follows attribute-selector rules: an identifier is written as is, and anything else, such as `"2"` or `"cool blue"`, is quoted. Tests combine by repetition, `:host([size=sm]:state(open):state(tone=warm))`, and a malformed argument is an `HY002` error. `:host-state()` is an `HY005` error that names its replacement. `:state()` outside `:host()`, or with `of` naming another component, is not supported yet and is an `HY006` error. The live runtime, the compiled Vanilla build, and converted Vue, React and Svelte components write the same `data-<tag>-state` tokens as before.
+
 ### Fixed
 
 - In converted Vue and Svelte components, a component selected by its tag has the live runtime's specificity, a type selector's, alone or in `:host:is(…)`: the converter emits `x-card` as `:is(x-card, :where(.x-card))`, the counterpart of the live runtime's `:is(x-card, :where([data-component~="x-card"]))`.

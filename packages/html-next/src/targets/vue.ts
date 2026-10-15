@@ -1134,7 +1134,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     `checkHydratedRoot(${hydrationExpectedTag}, ${quote(contract.tag)});`,
     ...(styles.stateNames.length === 0 ? [] : [
       "",
-      "/** The values the styles' :host-state() rules test. */",
+      "/** The values the styles' :host() prop and state rules test. */",
       "const hostState = computed(() => [",
       ...styles.stateNames.flatMap((name) => stateTokens(name, script, lowering)).map((token) => `  ${token},`),
       "].filter(Boolean).join(\" \"));",

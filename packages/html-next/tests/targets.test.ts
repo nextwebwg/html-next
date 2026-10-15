@@ -104,7 +104,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
   </section>
   <style>
     :host { display: block; }
-    :host-state([open]) .panel { outline: 1px solid; }
+    :host(:state(open)) .panel { outline: 1px solid; }
     :host([size="sm"]) h2 { font-size: small; }
     :slotted(p) { margin: 0; }
     x-badge { margin-inline: auto; }
@@ -972,7 +972,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(module, /writeUrlAttribute\(/);
   });
 
-  it("scopes styles to the region with root-only markers, :host, :host-state(), and :slotted()", () => {
+  it("scopes styles to the region with root-only markers, :host, :state(), and :slotted()", () => {
     const artifacts = generated(featureSource);
     const css = artifacts.get("styles/x-feature.css")!;
     assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\], \[data-slotted\]\)/);
@@ -1001,9 +1001,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.equal([...vanilla.matchAll(/setAttribute\("data-component"/g)].length, 1, "only the vanilla root is marked");
   });
 
-  it("rejects :scope and undeclared or structured :host-state() names", () => {
+  it("rejects :scope and undeclared or structured :state() names", () => {
     assert.throws(() => generated(componentSource("demo-a", "", `<div></div><style>:scope { color: red; }</style>`)), /HY003/);
-    assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host-state([missing]) { color: red; }</style>`)), /HY001/);
-    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" value="[]"></state></defs><div></div><style>:host-state([items]) { color: red; }</style>`)), /HY002/);
+    assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host(:state(missing)) { color: red; }</style>`)), /HY001/);
+    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" value="[]"></state></defs><div></div><style>:host(:state(items)) { color: red; }</style>`)), /HY002/);
   });
 });

@@ -74,7 +74,7 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
     });
   });
 
-  it("compiles :host, :host-state(), and deep :slotted() by renaming, parsing, and routing rules", async () => {
+  it("compiles :host, :host(:state()), and deep :slotted() by renaming, parsing, and routing rules", async () => {
     await inEachEngine(`<!doctype html>
       <article data-component="x-prose" data-x-prose-state="size=sm">
         <p class="label" id="own">own</p>
@@ -86,14 +86,15 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
         const source = `
           :host { outline: 1px solid }
           .label { color: rgb(1, 1, 1); }
-          :host-state([size="sm"]) .label { font-size: 8px }
+          :host(:state(size=sm)) .label { font-size: 8px }
           :slotted(h2) { color: rgb(2, 2, 2); & + ul { margin-top: 7px } }
           :slotted(ul li) { color: rgb(3, 3, 3) }
           @media (width > 1px) { :slotted(h2) { letter-spacing: 2px } }
           a[title="} :slotted(x) {"] { color: rgb(9, 9, 9) } /* :slotted(y) { } */`;
-        const sentinel: Record<string, string> = { slotted: "[--slotted]", "host-state": "[--state]" };
-        const renamed = source.replace(/\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|:(slotted|host-state)\(/g,
-          (match, kind?: string) => kind === undefined ? match : `:where(${sentinel[kind]}):is(`);
+        // `:state()` becomes an attribute test, because its value form is not native syntax.
+        const renamed = source.replace(/\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|:slotted\(|:state\(([\w-]+)(?:=([\w-]+))?\)/g,
+          (match, name?: string, value?: string) => match.startsWith(":slotted(") ? ":where([--slotted]):is("
+            : name === undefined ? match : `:where([--state]):is([${name}${value === undefined ? "" : `="${value}"`}])`);
         const parsed = new CSSStyleSheet();
         parsed.replaceSync(renamed);
         const root = `[data-component~="${tag}"]`;
@@ -105,7 +106,7 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
             if (rule instanceof CSSStyleRule) {
               const kind = rule.selectorText.includes("[--slotted]") ? "slotted" : "own";
               rule.selectorText = rule.selectorText
-                .replace(/:where\(\[--state\]\):is\(((?:\[[^\]]*\])+)\)/g, (_m, tests: string) => `:host${stateTest(tests)}`)
+                .replace(/:host\(:where\(\[--state\]\):is\(((?:\[[^\]]*\])+)\)\)/g, (_m, tests: string) => `:host${stateTest(tests)}`)
                 .replace(/:where\(\[--slotted\]\):is\(/g, ":where([data-slotted], [data-slotted] *):is(")
                 .replace(/:host\b/g, kind === "own" ? ":scope" : root);
               groups[kind].push(wrap(rule.cssText));
@@ -138,7 +139,7 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
       });
       assert.equal(result.root, "solid", `${engine}: :host`);
       assert.equal(result.own, "rgb(1, 1, 1)", `${engine}: own rule`);
-      assert.equal(result.state, "8px", `${engine}: :host-state()`);
+      assert.equal(result.state, "8px", `${engine}: :host(:state())`);
       assert.equal(result.deep, "rgb(2, 2, 2)", `${engine}: deep :slotted()`);
       assert.equal(result.nested, "7px", `${engine}: nested rule inside :slotted()`);
       assert.equal(result.complex, "rgb(3, 3, 3)", `${engine}: complex :slotted() argument`);
@@ -154,7 +155,7 @@ describe.skipIf(!enabled)("compiled SVG scope boundaries", () => {
   it("preserves ownership, explicit slot styles, inheritance and moves in browser and build CSS", async () => {
     const a = parseComponent('<template component="x-a"><defs><state name="on" type="boolean" value="false"></state></defs><div><slot></slot></div></template>');
     const b = parseComponent('<template component="x-b"><div><slot></slot></div></template>');
-    const cssA = ':host { fill: green; } .shape { fill: red; } :host-state([on]) .conditional { stroke: green; } :slotted(.projected) { fill: blue; }';
+    const cssA = ':host { fill: green; } .shape { fill: red; } :host(:state(on)) .conditional { stroke: green; } :slotted(.projected) { fill: blue; }';
     const cssB = ':host { fill: orange; } .shape { fill: purple; }';
     const bundled = await build({ entryPoints: [new URL('../src/component-styles.ts', import.meta.url).pathname],
       bundle: true, write: false, format: 'iife', globalName: 'Styles', platform: 'browser', target: 'es2022' });

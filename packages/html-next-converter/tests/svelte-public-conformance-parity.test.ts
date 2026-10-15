@@ -28,7 +28,7 @@ const selected = new Set([
   "lowers to native root with prop :attr, passthrough attrs, and default slot",
   "lets invocation attributes win over template literals and combines class and style",
   "serializes booleans on enumerated attributes as true and false",
-  "styles by camel-case props and state with :host-state()",
+  "styles by camel-case props and state with :state()",
   "applies a prop default when the invocation omits the prop",
   "coerces number, boolean, enum, and string props",
   "attribute serialization: absent/false remove, true is present-empty, number stringifies, list space-joins",

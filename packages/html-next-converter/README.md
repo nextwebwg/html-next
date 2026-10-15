@@ -154,7 +154,7 @@ to that listener. `<method>` and automatic named-export element methods are unsu
 `host.state` contains mutable state, readonly computed state, and inherited context. Resources
 are read through `host.data.name`, including their readonly response and status fields. Invalid
 authored state assignments retain the prior value and warn; native control edits retain their
-ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host-state([state])`.
+ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host(:state(state))`.
 The [public proposal](https://nextwebwg.org/declarative-components/javascript/) defines these contracts.
 
 Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).
