@@ -2,7 +2,7 @@
  * Converts a definition to a Vue 3.5 single-file component that depends only on Vue and the
  * component's own modules. Props, state, computed values, bindings, structural directives, slots,
  * events map to Vue's own facilities; the controller receives a host generated here from
- * Vue refs, effects, and lifecycle; styles become `<style scoped>`.
+ * Vue refs, effects, and lifecycle; styles become `<style scoped>`, which the converter scopes itself.
  */
 import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
@@ -24,7 +24,7 @@ import type {
 } from "../template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../template.js";
 import type { WritablePathSegment } from "../expression.js";
-import { compileComponentStylesForVue } from "../component-styles-build.js";
+import { compileComponentStylesForVue, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import type { PropContract } from "../types.js";
@@ -150,9 +150,11 @@ interface Context {
   readonly model: boolean;
   readonly validityValues?: string;
   readonly hostState: boolean;
-  /** The root carries its tag as a class: the scoped styles' `@scope` root. */
+  /** The root carries its tag as a class: the styles' `@scope` root. */
   readonly hostClass: boolean;
-  /** Invoked components, the scope's limits: each invocation carries its tag as a class. */
+  /** With styles and slots, the attribute the component's own markup carries and its styles test. */
+  readonly owner?: string;
+  /** Invoked components, which the styles may select by tag: each invocation carries its tag as a class. */
   readonly styledComponents: ReadonlySet<string>;
   readonly guarded: string[];
   readonly globals: ReadonlySet<string>;
@@ -579,7 +581,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope));
         const value = guarded ?? lowering.text(ast(plan, attribute.expression), names.template);
         context.usesHtml = true;
-        content = `<SanitizedHtml :value=${bound(value)} />`;
+        content = `<SanitizedHtml :value=${bound(value)}${context.owner === undefined ? "" : ` owner=${attributeValue(context.owner)}`} />`;
       } else {
         ast(plan, attribute.expression);
         content = renderNode({ kind: "text", value: "", expressionPlan: plan! }, names, context);
@@ -687,7 +689,12 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   // A <template> without structural flow produces its content with no wrapper element.
   if (node.name === "template" && !isRoot) return content ?? renderChildren(node.children, names, context);
-  // The scoped styles' root and limits are the root's and each invoked component's tag, as classes.
+  // Every converted root bounds the styles of the components around it; the component's own
+  // markup, and a delegated root, carry the attribute its styles test.
+  const element = !component && node.name !== "template";
+  if (isRoot && element) literals.push(VUE_ROOT_ATTRIBUTE);
+  if (context.owner !== undefined && (element || isRoot && component)) literals.push(context.owner);
+  // The styles' root is the root's tag, as a class; a component they select by tag carries its own.
   const styled = [
     ...(isRoot && context.hostClass ? [context.definition.contract.tag] : []),
     ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
@@ -945,6 +952,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(arms === undefined ? {} : { rootArmRef: "@html-next/root" }),
     hostState: styles.stateNames.length > 0,
     hostClass: styles.components !== undefined,
+    ...(styles.owner === undefined ? {} : { owner: styles.owner }),
     styledComponents: new Set(styles.components ?? []),
     model: modelProp !== undefined,
     ...(validityValues === undefined ? {} : { validityValues }),

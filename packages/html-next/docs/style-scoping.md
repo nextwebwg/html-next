@@ -150,9 +150,21 @@ results, and early/late loading comparisons.
 
 ## Vue
 
-Converted components use `<style scoped>` with a native scope that excludes nested component
-roots. `:host` becomes `:scope`; prop and state tests add the generated root's state tokens.
-Vue's own `:slotted()` handles projected content.
+Converted components scope their styles as the live runtime does, with the live runtime's
+selectors and specificity. The styles sit in a native scope rooted at the component's tag as a
+class and bounded by every converted component's root, which carries `data-hn`. `:host` becomes
+`:scope`; prop and state tests add the generated root's state tokens.
+
+In a component with slots, the scope also holds content a consumer projects. The component's own
+markup, sanitized `$html` markup included, carries `data-hn-<tag>`, and each selector's subject
+tests it in `:where()`, which adds no specificity. `:slotted()` selects what lacks it. Without
+slots, the selectors are exactly the live runtime's. A Vue component that is not converted has no
+`data-hn` root, so its markup in projected content is projected content to `:slotted()`, as plain
+markup is in the live runtime.
+
+The styles are `<style scoped>`, so Vite leaves a component's styles out of a build that leaves the
+component out, and each selector is in `:global()`, which Vue's scoped styles keep as written.
+`pnpm measure:vue-scoping` measures the selectors' style-recalc cost and the attributes' mount cost.
 
 ## Svelte
 

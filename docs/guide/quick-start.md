@@ -66,7 +66,7 @@ function reset(): void {
 </script>
 
 <template>
-  <div v-bind="nativeAttrs($attrs)">
+  <div v-bind="nativeAttrs($attrs)" data-hn>
     <button type="button" @click="increment">Count: {{ count }}</button>
     <button type="button" @click="reset">Reset</button>
   </div>

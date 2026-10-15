@@ -38,6 +38,33 @@ interface ParityCase {
 
 import { formattingSource, formattingProbe } from "./formatting-fixture.js";
 
+/** Components for the style-scoping cases: own, sanitized, projected and nested markup. */
+const scopeFixture: Readonly<Record<string, string>> = {
+  "x-scope-leaf": `<template component="x-scope-leaf"><em class="proj">leaf own</em></template>`,
+  "x-scope-kid": `<template component="x-scope-kid"><div class="k"><slot></slot></div><style>
+    :host { border-left: 1px solid rgb(1, 2, 3); } .k { color: rgb(128, 0, 128); } :slotted(*) { font-weight: 700; }
+  </style></template>`,
+  "x-scope-card": `<template component="x-scope-card"><section><div class="panel"><span class="t">own span</span></div>
+    <p class="in">own in</p><p class="html" $html="'&lt;b&gt;sanitized&lt;/b&gt;'"></p><slot></slot>
+    <x-scope-kid class="kk"><b class="in">own, in the kid's slot</b></x-scope-kid></section><style>
+    :host { padding-left: 9px; } :host(.on) { padding-right: 9px; } .wide :host { padding-top: 9px; }
+    :host { margin-right: 9px; & .panel { margin: 0; } }
+    .in { color: rgb(0, 128, 0); } .panel span { color: rgb(0, 100, 0); } .in::after { content: "o"; } .html b { color: rgb(0, 90, 0); }
+    :slotted(.proj) { color: rgb(0, 0, 255); } @media (min-width: 1px) { @supports (display: block) { :slotted(i) { text-decoration: underline; } } }
+    x-scope-kid { margin-left: 3px; } b { text-decoration: underline; }
+  </style></template>`,
+};
+// Each consumer rule is one class more specific than the component rule it meets in the live runtime.
+const scopeConsumerCss = ".chip.on { padding-left: 2px; margin-right: 2px; } .chip.on.big { padding-right: 2px; padding-top: 2px; } "
+  + ".chip .in { color: rgb(255, 0, 0); } .chip .panel .t { color: rgb(255, 0, 0); } .chip .proj { color: rgb(255, 0, 0); } "
+  + ".chip .html b { color: rgb(255, 0, 0); } .chip .kk { margin-left: 1px; }";
+const everyElementStyle = `[root, ...root.querySelectorAll("*")].map((node) => {
+  const style = getComputedStyle(node);
+  const text = [...node.childNodes].filter((child) => child.nodeType === 3).map((child) => child.textContent.trim()).join("");
+  return node.localName + "(" + text + ") " + ["color", "paddingLeft", "paddingRight", "paddingTop", "marginRight", "marginLeft", "marginTop",
+    "fontWeight", "textDecorationLine", "borderLeftWidth"].map((name) => style[name]).join(" ") + " after=" + getComputedStyle(node, "::after").content;
+})`;
+
 const cases: readonly ParityCase[] = [
   {
     name: "template text keeps spaces between siblings, non-breaking spaces and preformatted runs",
@@ -144,6 +171,30 @@ const cases: readonly ParityCase[] = [
     probe: `(({ paddingLeft, paddingRight, paddingTop, paddingBottom, marginLeft, marginRight }) => ({ paddingLeft, paddingRight, paddingTop, paddingBottom, marginLeft, marginRight, after: getComputedStyle(root, '::after').content }))(getComputedStyle(root))`,
     action: `root.classList.remove('on')`,
     expectedAfter: { paddingLeft: "9px", paddingRight: "0px", paddingTop: "9px", paddingBottom: "0px", marginLeft: "9px", marginRight: "9px", after: '"a"' },
+  },
+  ...[false, true].map((consumer): ParityCase => ({
+    // Every element under the root, own, sanitized, projected, nested and projected into a child.
+    name: `component styles match the live runtime on every element${consumer ? " against heavier consumer rules" : ""}`,
+    features: ["scoped styles", "host", "slots", "slotted", "nested components", "$html", "specificity"],
+    definitions: scopeFixture,
+    invocation: `${consumer ? `<style>${scopeConsumerCss}</style>` : ""}<div class="wide"><x-scope-card id="case" class="chip on big"><span class="proj">projected</span><span class="in">projected in</span><i>plain projected</i><x-scope-leaf></x-scope-leaf></x-scope-card></div>`,
+    vueRender: `h("div", {}, [${consumer ? `h("style", ${JSON.stringify(scopeConsumerCss)}), ` : ""}h("div", { class: "wide" }, [h(XScopeCard, { id: "case", class: "chip on big" }, { default: () => [h("span", { class: "proj" }, "projected"), h("span", { class: "in" }, "projected in"), h("i", {}, "plain projected"), h(XScopeLeaf)] })])])`,
+    root: "#case",
+    probe: everyElementStyle,
+    action: `root.classList.remove('on')`,
+  })),
+  {
+    // A Vue component that is not converted has no `data-hn` root: in projected content its markup
+    // is projected markup, as plain markup is in the live runtime, and `:slotted()` reaches it.
+    name: "projected markup of an unconverted Vue component is projected content",
+    features: ["scoped styles", "slotted", "third-party components"],
+    definitions: scopeFixture,
+    invocation: `<x-scope-card id="case"><span><em class="proj">third party</em></span></x-scope-card>`,
+    vueRender: `h(XScopeCard, { id: "case" }, { default: () => [h({ render: () => h("span", [h("em", { class: "proj" }, "third party")]) })] })`,
+    root: "#case",
+    probe: `getComputedStyle(root.querySelector("em")).color`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: "rgb(0, 0, 255)",
   },
   {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
@@ -615,7 +666,7 @@ const cases: readonly ParityCase[] = [
         <handler name="change"><set name="body" expr:value="'&lt;i title=&quot;next&quot;&gt;Two&lt;/i&gt;&lt;img src=x onerror=alert(1)&gt;'"></set></handler>
         </defs><article><div class="block" $html="$body"></div>
         <p>Before <template $html="$body"></template> after</p>
-        <button type="button" on:click="change">Change</button></article>
+        <button type="button" on:click="change">Change</button><slot></slot></article>
         <style>b { color: rgb(12 34 56); } i { color: rgb(65 43 21); }</style></template>`,
     },
     invocation: `<x-html id="case"></x-html>`,
@@ -1024,7 +1075,7 @@ function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unkno
       ? entry.flatMap((attribute) => {
         if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
         const [name, text] = attribute as [string, string];
-        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-")) return [];
+        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-") || name === "data-hn" || name.startsWith("data-hn-")) return [];
         // Vue selects a root, or a styled child, through its component tag as a class.
         if (name !== "class") return [attribute];
         const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token)).join(" ");
@@ -1252,8 +1303,12 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
             rootKept: document.querySelector("#case") === window.serverRoot,
             boldKept: document.querySelector("#case b") === window.serverBold,
             unsafe: document.querySelectorAll("#case img, #case [onerror]").length,
+            // With a slot, the root and the component's own markup, sanitized markup included, keep their ownership attributes.
+            owned: ["#case", "#case .block", "#case b", "#case button"].map((selector) => document.querySelector(selector)?.hasAttribute("data-hn-x-html")),
+            root: document.querySelector("#case")?.hasAttribute("data-hn"),
           }));
-          assert.deepEqual(hydrated, { rootKept: true, boldKept: true, unsafe: 0 });
+          assert.deepEqual(hydrated, { rootKept: true, boldKept: true, unsafe: 0, owned: [true, true, true, true], root: true });
+          assert.match(htmlServerMarkup, /<b[^>]*data-hn-x-html/);
           await page.locator("#case button").click();
           await page.waitForFunction(() => document.querySelector("#case i")?.textContent === "Two");
           assert.equal(await page.locator("#case b").count(), 0);

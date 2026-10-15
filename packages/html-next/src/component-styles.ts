@@ -344,6 +344,8 @@ export interface CompiledComponentStyles {
   readonly components?: readonly string[];
   /** Svelte: whether a selector tests Svelte's hash class, which Svelte then puts on the component's markup. */
   readonly hashed?: boolean;
+  /** Vue: the attribute the component's own markup carries, which its styles test. */
+  readonly owner?: string;
 }
 
 type RuleContainer = CSSStyleSheet | CSSGroupingRule;

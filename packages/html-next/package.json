@@ -87,6 +87,7 @@
     "measure:performance": "tsx scripts/measure-performance.ts",
     "measure:reactivity": "tsx scripts/measure-reactivity-matrix.ts",
     "measure:runtime": "tsx scripts/measure-runtime-size.ts",
+    "measure:vue-scoping": "tsx scripts/measure-vue-scoping.ts",
     "setup:frameworks": "tsx scripts/framework-benchmark.ts setup",
     "measure:frameworks": "tsx scripts/framework-benchmark.ts measure",
     "smoke:frameworks": "tsx scripts/framework-benchmark.ts smoke",

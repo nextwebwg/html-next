@@ -265,7 +265,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XCard,
       const vueMarkup = await vueModule.exports.render();
       assert.match(vueMarkup, /aria-label="Hello"/);
       assert.match(vueMarkup, /New/);
-      assert.match(vueMarkup, /<b>Safe<\/b>/);
+      assert.match(vueMarkup, /<b\b[^>]*>Safe<\/b>/);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
