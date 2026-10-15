@@ -16,7 +16,7 @@ export function liveReference(definition: ComponentDefinition, others: readonly 
     'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
     ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
     ...others.flatMap((other, index) => other.controller === undefined ? [] : [`import * as controller${index} from ${JSON.stringify(other.controller)};`]),
-    // Registered as a live document registers it, with its styles and their `:host-state()` names.
+    // Registered as a live document registers it, with its styles and their `:state()` names.
     `const definition = { ...${serializedDefinition(named)}, css: ${JSON.stringify(definition.css)} };`,
     `registerComponentDefinitions([definition${others.map((other) => `, { ...${serializedDefinition(other)}, css: ${JSON.stringify(other.css)} }`).join("")}]);`,
     // A live document is observed, so an invocation a region renders later lowers too. A root lowered

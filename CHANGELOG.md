@@ -14,6 +14,7 @@
 
 ### Changed
 
+- Component styles select state with `:state()`, as the [Style Scoping](https://nextwebwg.org/declarative-components/styling#state) chapter now defines: `:host(:state(open))` replaces `:host-state([open])`, and `:host(:state(tone=warm))` tests a value. A value follows attribute-selector rules: an identifier is written as is, and anything else, such as `"2"` or `"cool blue"`, is quoted. Tests combine by repetition, `:host([size=sm]:state(open):state(tone=warm))`, and a malformed argument is an `HY002` error. `:host-state()` is an `HY005` error that names its replacement. `:state()` outside `:host()`, or with `of` naming another component, is not supported yet and is an `HY006` error. The live runtime, the compiled Vanilla build, and converted Vue, React and Svelte components write the same `data-<tag>-state` tokens as before.
 - A layout name with neither an `app/layouts/<name>.html` file nor a `layouts` entry is an error that names the page and the expected file.
 - `<hk-nav>`, `<hk-breadcrumbs>` and `<hk-pager>` declare their items with an open object type, which ends in `...`, and the navigation guide shows layouts the same declaration, so items keep passing through as they gain fields.
 

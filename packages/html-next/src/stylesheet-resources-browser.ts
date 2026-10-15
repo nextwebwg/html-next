@@ -1,5 +1,5 @@
 import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-browser.js";
-import { renameComponentPseudoClasses } from "./component-styles.js";
+import { renameComponentPseudoClasses, restoreStatePseudoClasses } from "./component-styles.js";
 import type { ParsedStylesheet, StylesheetEntry } from "./stylesheet-resources.js";
 
 /** Inert documents retain CSSImportRule without starting resource requests. */
@@ -23,7 +23,6 @@ export function parseStylesheetInBrowser(css: string, document: Document): Parse
     } else if (index < lastImport && /^@layer\s[^{}]*;/i.test(rule.cssText)) imports.push({ css: rule.cssText, index });
     else body.push(rule.cssText);
   }
-  return { imports, css: normalizeStylesheetNamespacesInBrowser(body.join("\n"), document)
-    .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, ":slotted(")
-    .replace(/:where\(\s*\[--state\]\s*\):is\(/g, ":host-state(") };
+  return { imports, css: restoreStatePseudoClasses(normalizeStylesheetNamespacesInBrowser(body.join("\n"), document)
+    .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, ":slotted(")) };
 }

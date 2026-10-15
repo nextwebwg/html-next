@@ -14,6 +14,7 @@ import {
   COMPONENT_ATTRIBUTE,
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
+  type ComponentPseudoClass,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
   styleRuleKind,
@@ -134,7 +135,7 @@ export function compileComponentStylesForVue(
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
-  return compileClassScopedStyles(css, definition, source, ["host-state"], (selector) => postcss.list.comma(selector).map((complex) => {
+  return compileClassScopedStyles(css, definition, source, ["state"], (selector) => postcss.list.comma(selector).map((complex) => {
     const { start, pseudo } = subjectCompound(complex);
     if (start === 0 || !/:scope(?![\w-])/.test(complex.slice(start, pseudo))) return complex;
     return `${complex.slice(start, pseudo)}:not(:not(:is(${complex.slice(0, start)}*)))${complex.slice(pseudo)}`;
@@ -161,7 +162,7 @@ export function compileComponentStylesForSvelte(
   const slotted = new Set<object>();
   let hashed = false;
   let descends = false;
-  const compiled = compileClassScopedStyles(css, definition, source, ["slotted", "host-state"], (selector, rule) => {
+  const compiled = compileClassScopedStyles(css, definition, source, ["slotted", "state"], (selector, rule) => {
     if (selector.includes(SLOTTED) || (rule.parent !== undefined && slotted.has(rule.parent))) slotted.add(rule);
     return postcss.list.comma(selector.replaceAll(SLOTTED, "")).map((complex) => {
       const scoped = svelteSelector(complex, !projects ? undefined : slotted.has(rule) ? "projected" : "own", owner);
@@ -178,7 +179,7 @@ export function compileComponentStylesForSvelte(
 const SLOTTED = ":where([--slotted])";
 
 function compileClassScopedStyles(css: string, definition: ComponentDefinition, source: string | undefined,
-  renames: readonly ("slotted" | "host-state")[], target: (selector: string, rule: Rule) => string,
+  renames: readonly ComponentPseudoClass[], target: (selector: string, rule: Rule) => string,
   prepare?: (root: postcss.Root) => void, limited = (): boolean => true): CompiledComponentStyles {
   const tag = definition.contract.tag;
   if (css.trim() === "") return withImportedStateNames({ css: "", stateNames: [] }, definition);

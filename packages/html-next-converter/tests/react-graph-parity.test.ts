@@ -33,7 +33,7 @@ const parent = `<template component="x-graph-list" status="early" summary="Graph
   <ul><x-graph-item from:label="$count = 0 ? 'Item0' : 'Item1'" on:saved.stop="recordSaved"><strong>Child: </strong></x-graph-item></ul>
   <output class="saved" $value="$saved"></output><output class="ancestor-saved" $value="$ancestorSaved"></output>
 </section><style>:host { display: block; padding: 8px; background: rgb(225 235 245); }
-  :host-state([active]) { background: rgb(200 220 240); }</style></template>`;
+  :host(:state(active)) { background: rgb(200 220 240); }</style></template>`;
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

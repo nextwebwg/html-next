@@ -9,7 +9,7 @@ contract is the source of truth; this note only records how the tooling meets it
   markup root is another component) lists every owner: `data-component="x-primary x-base"`.
 - `data-slotted` is on each top-level projected node.
 - `data-<tag>-state="name=value name"` carries the resolved props and state the definition's
-  `:host-state()` rules test, and nothing else. A truthy value adds the bare `name`; a string or
+  `:host()` prop and state rules test, and nothing else. A truthy value adds the bare `name`; a string or
   number adds `name=<URI-encoded value>`.
 
 ## Compilation
@@ -23,8 +23,12 @@ A style block compiles to two scopes:
 
 - `:host` becomes `:scope:where([data-component~="tag"])`. The zero-specificity qualifier
   prevents Firefox from retaining another root's scoped style during dynamic root replacement.
-- `:host-state([name="value"])` becomes tokens of the state attribute; names must be declared
-  props or state of a scalar type (HY001, HY002).
+- `:host([prop="value"])` and `:host(:state(name=value))` become tokens of the state attribute;
+  attribute tests name declared props and `:state()` names mutable or computed state, of a scalar
+  type (HY001, HY002). `:state()` is renamed to an attribute test before parsing, because its value
+  form is not native syntax. `:host-state()` reports its replacement (HY005).
+- `:state()` outside `:host()`, or with `of` naming another component, tests another component's
+  state. This implementation does not support it yet (HY006).
 - `:slotted(X)` matches projected content at any depth:
   `:where([data-slotted], [data-slotted] *):is(X)`.
 - A component tag in a selector matches its lowered root with type specificity:
@@ -36,7 +40,7 @@ A style block compiles to two scopes:
 - Own selector lists containing pseudo-elements get a zero-specificity boundary guard so
   Firefox cannot match projected or nested-component roots through a scope limit.
 
-The browser runtime needs no CSS parser. It renames `:slotted(` and `:host-state(` into selectors
+The browser runtime needs no CSS parser. It renames `:slotted(` and `:state(` into selectors
 the browser accepts, parses the block twice with `CSSStyleSheet`, drops the other scope's rules from
 each copy, and rewrites the remaining selectors through the CSS Object Model
 (`src/component-styles.ts`). Build tools run the same steps over postcss

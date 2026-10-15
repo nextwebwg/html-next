@@ -1,6 +1,6 @@
 /**
  * `data-<tag>-state` exists for the names a definition's own stylesheet tests with
- * `:host([prop])` or `:host-state()`, and for nothing else: a definition that styles neither carries no state
+ * `:host([prop])` or `:host(:state(name))`, and for nothing else: a definition that styles neither carries no state
  * attribute at all, in any target. See nextwebwg.org/html-next/styling.
  */
 import assert from "node:assert/strict";
@@ -36,7 +36,7 @@ describe("the state attribute", () => {
   it("carries only the tested names, not every declared name", () => {
     const artifacts = generated(`<template component="x-loud" status="experimental" summary="Styles one of two names.">
       ${declarations}
-      <style>:host-state([open]) .panel { display: block; }</style>
+      <style>:host(:state(open)) .panel { display: block; }</style>
     </template>`);
 
     const css = artifacts.get("styles/x-loud.css")!;

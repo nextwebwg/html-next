@@ -924,14 +924,14 @@ const cases: readonly ParityCase[] = [
     afterReady: `document.querySelector("#case .note")?.textContent === "second"`,
   },
   {
-    name: "host-state and slotted selectors follow their component style boundaries",
-    features: [":host", ":host-state", ":slotted", "style isolation"],
+    name: ":state() and slotted selectors follow their component style boundaries",
+    features: [":host", ":state()", ":slotted", "style isolation"],
     definitions: {
       "x-painted": `<template component="x-painted" status="early" summary="Parity paint."><defs>
         <state type="boolean" name="active" value="true"></state>
         <handler name="toggle"><set name="active" expr:value="not $active"></set></handler>
         </defs><section><button type="button" on:click="toggle">Toggle</button><slot></slot><span>Own</span></section>
-        <style>:host { display: block; padding: 4px; } :host-state([active]) { background: rgb(230 240 250); }
+        <style>:host { display: block; padding: 4px; } :host(:state(active)) { background: rgb(230 240 250); }
         :slotted(strong) { color: rgb(60 20 100); } span { color: rgb(20 100 60); }</style></template>`,
     },
     invocation: `<x-painted id="case"><strong>Projected</strong></x-painted>`,
