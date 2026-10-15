@@ -68,12 +68,6 @@ export interface HtmlKitPlugin {
     readonly extensions: readonly string[];
     compile(source: string, page: PageContext): string | Promise<string>;
   };
-  /**
-   * A folder's label and order in navigation, such as from a metadata file inside it, for each folder
-   * and (group) folder in a page directory; dir is its absolute path. For each field, the earliest
-   * plugin that gives one wins.
-   */
-  readonly folder?: (dir: string, context: FolderContext) => FolderMetadata | void | Promise<FolderMetadata | void>;
   /** Runs before HTMLKit reads any page: once per build, and once when the development server starts. */
   readonly buildStart?: (context: BuildStartContext) => void | Promise<void>;
   /**
@@ -81,24 +75,6 @@ export interface HtmlKitPlugin {
    * output replaces outDir. A throw fails the build and leaves the previous output in place.
    */
   readonly buildEnd?: (context: BuildEndContext) => void | Promise<void>;
-}
-
-export interface FolderMetadata {
-  /**
-   * The folder's label in navigation trees, in place of its name, or of a group's parentheses. A
-   * folder's index page labels it by its own hk:label first.
-   */
-  readonly label?: string;
-  /**
-   * Its place among its neighbours, a whole number in place of its number-and-dot prefix, for
-   * navigation(), navigationTree() and pager(). hk:order on the folder's index page takes precedence.
-   */
-  readonly order?: number;
-}
-
-export interface FolderContext {
-  /** Recompile pages in development when this file changes, such as the metadata file folder() read. */
-  watch(file: string): void;
 }
 
 export interface BuildStartContext {
@@ -283,10 +259,7 @@ export interface NavigationItem {
  * an index page is that page's node, with the folder's pages as children.
  */
 export interface NavigationNode {
-  /**
-   * A page's label. A folder's is its index page's hk:label, then a plugin's folder() label, then the
-   * index page's <title>, then the folder name; a group's is a plugin's folder() label, then its parentheses.
-   */
+  /** A page's label; a folder's index page's hk:label, then its <title>, then the folder name; a group's parentheses. */
   readonly label: string;
   /** The page URL, for a page or a folder with an index page. */
   readonly href?: string;
@@ -296,7 +269,7 @@ export interface NavigationNode {
   readonly open: boolean;
   /** The nesting level, 0 at the top of the tree. */
   readonly depth: number;
-  /** The number-and-dot, folder() or hk:order rank, or null when the node has none. */
+  /** The number-and-dot or hk:order rank, or null when the node has none. */
   readonly order: string | null;
   readonly children: readonly NavigationNode[];
 }
@@ -334,7 +307,7 @@ export interface Application {
   readonly notFound?: ApplicationRoute;
   /** Files that plugin pages reference through PageContext.asset, by deployment-relative path. */
   readonly files: ReadonlyMap<string, string>;
-  /** The absolute paths plugins passed to watch(), which the development server watches. */
+  /** The absolute paths page plugins passed to page.watch(), which the development server watches. */
   readonly watchFiles: ReadonlySet<string>;
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */
   entries(): Promise<readonly string[]>;

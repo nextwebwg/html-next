@@ -115,7 +115,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   let application: Application;
   try { application = await createApplication(options, vite, assets); }
   catch (error) { await vite.close(); throw error; }
-  // What plugins read for pages and folders, wherever it lives, joins the watched root.
+  // What page plugins read, wherever it lives, joins the watched root.
   vite.watcher.add([...application.watchFiles]);
   let dirty = false;
   const change = () => {
