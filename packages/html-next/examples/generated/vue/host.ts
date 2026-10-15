@@ -385,6 +385,36 @@ function observeConnection(element: Element, check: () => void): () => void {
   }
 }
 
+/**
+ * Runs the root's on:connect and on:disconnect handlers each time it joins and leaves a document.
+ * Vue hooks cover mount and unmount; the shared native observer sees the root detached and
+ * reinserted outside Vue.
+ */
+export function useLifecycle(
+  root: Readable<Element | null>,
+  connect?: () => void,
+  disconnect?: () => void,
+): void {
+  let connected = false
+  let stop: (() => void) | undefined
+  const synchronize = (): void => {
+    if ((root.value?.isConnected === true) === connected) return
+    connected = !connected
+    ;(connected ? connect : disconnect)?.()
+  }
+  onMounted(() => {
+    if (root.value !== null) stop = observeConnection(root.value, synchronize)
+    synchronize()
+  })
+  onBeforeUnmount(() => {
+    stop?.()
+    if (connected) {
+      connected = false
+      disconnect?.()
+    }
+  })
+}
+
 /** Keep native focus on the corresponding control when a root-level $match replaces its element. */
 export function preserveRootFocus(root: Readable<Element | null>): void {
   const focusable =

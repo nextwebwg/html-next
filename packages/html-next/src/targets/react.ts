@@ -42,7 +42,7 @@ const REACT_RESERVED = new Set([
   "checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", "propValidityState",
   "selectedPropNode", "acceptsControllerWrite",
   "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
-  "useComponentHost", "componentContext", "NestedDepthContext", "ScopedAttachment",
+  "useComponentHost", "useLifecycle", "componentContext", "NestedDepthContext", "ScopedAttachment",
   ...REACT_RENDER_EXPORTS, ...REACT_EVENTS_EXPORTS,
 ]);
 
@@ -810,6 +810,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
 export function generateReactOutput(definition: ComponentDefinition, version: string, options: ReactConversionOptions = {}): ReactConversionOutput {
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
+  const usesHost = usesController || definition.lifecycle !== undefined;
+  /** Handlers whose steps read `$event`, filled as their functions are written below. */
+  const handlerTakesEvent = new Set<HandlerDeclaration>();
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
@@ -980,7 +983,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ].join(", ")} } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(data.length === 0 ? [] : [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data")};`]),
     ...(usesHtml ? [`import { SanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`] : []),
-    ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
+    ...(usesHost ? [`import { ${[...usesController ? ["useComponentHost"] : [], ...definition.lifecycle === undefined ? [] : ["useLifecycle"]].join(", ")} } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
     ...(usesContext ? [`import { componentContext } from ${quote(options.contextSpecifier ?? "./context")};`] : []),
     ...(nestedDepthLimit === undefined ? [] : [`import { NestedDepthContext } from ${quote(options.depthSpecifier ?? "./depth")};`]),
     RENDER_IMPORT,
@@ -1207,8 +1210,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const to = step.writablePath.length > 1 ? `(next) => ${setPath("next")}` : unknown ? `(next) => ${setter}(() => next)` : setter;
         return `    ${guard}${lowering.use("write")}(${to}, ${value}${writeCheck(destinationCheck, definition, handler, step)});`;
       });
+      const takesEvent = [...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line));
+      if (takesEvent) handlerTakesEvent.add(handler);
       return [
-        `  function ${handlerNames.get(handler.name)!}(${[...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line)) ? "event: Event" : ""}): void {`,
+        `  function ${handlerNames.get(handler.name)!}(${takesEvent ? "event: Event" : ""}): void {`,
         ...handlerComputed,
         ...steps,
         "  }",
@@ -1320,6 +1325,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${eventSchemas.get(event.name)!}.type, ${eventSchemas.get(event.name)!}.init);`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  });`,
     ] : []),
+    ...(definition.lifecycle === undefined ? [] : [`  useLifecycle(rootRef, ${(["connect", "disconnect"] as const).map((type) => {
+      const name = definition.lifecycle![type];
+      const handler = handlers.find((candidate) => candidate.name === name);
+      // A handler that reads $event gets a connection event, as a controller's host.on callback does.
+      return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
+    }).join(", ")});`]),
     `  return (${componentMarkup});`,
     "}",
     ...(usesScopedAttachments ? [
@@ -1379,7 +1390,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),
       ...(usesHtml ? ["html" as const] : []),
-      ...(usesController ? ["host" as const] : []),
+      ...(usesHost ? ["host" as const] : []),
       ...(usesContext ? ["context" as const] : []),
       ...(nestedDepthLimit === undefined ? [] : ["depth" as const]),
       ...(rendered.length === 0 ? [] : ["render" as const]),

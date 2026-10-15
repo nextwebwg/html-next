@@ -358,6 +358,15 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("runs on:connect and on:disconnect on each connection like the general runtime", async () => {
+    const run = await same(component(`<state name="connects" type="integer" value="0"></state><state name="disconnects" type="integer" value="0"></state>
+      <handler name="connected"><set name="connects" expr:value="$connects + 1"></set></handler>
+      <handler name="disconnected"><set name="disconnects" expr:value="$disconnects + 1"></set></handler>`,
+    `<output on:connect="connected" on:disconnect="disconnected">{$connects}/{$disconnects}</output>`, false), []);
+    // The first connection, then the one after the root is detached and reattached.
+    assert.deepEqual(run.snapshots.map((snapshot) => /\d+\/\d+/.exec(snapshot)?.[0]), ["1/0", "2/1"]);
+  });
+
   it("selects only affected keyed rows while preserving live/compiled DOM parity", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>

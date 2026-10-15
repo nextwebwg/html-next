@@ -16,6 +16,16 @@ export function useConnection(root: () => Element | null): () => boolean {
   });
   return () => connected;
 }
+
+/** Runs the root's on:connect and on:disconnect handlers each time it joins and leaves a document. */
+export function useLifecycle(root: () => Element | null, connect?: () => void, disconnect?: () => void): void {
+  const connected = useConnection(root);
+  $effect(() => {
+    if (!connected()) return;
+    untrack(() => connect?.());
+    return () => untrack(() => disconnect?.());
+  });
+}
 `;
 
 export function svelteConnectionArtifact(version: string): GeneratedArtifact {

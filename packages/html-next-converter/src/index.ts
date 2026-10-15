@@ -489,6 +489,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           decorationsSpecifier: relativeImport(componentPath, "svelte/decorations.ts").replace(/\.ts$/, ""),
           styleSpecifier: relativeImport(componentPath, "svelte/style/style.js"),
           hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),
+          connectionSpecifier: relativeImport(componentPath, "svelte/connection.svelte.ts").replace(/\.ts$/, ""),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
           reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
           renderSpecifier: relativeImport(componentPath, "svelte/render.svelte.ts").replace(/\.ts$/, ""),

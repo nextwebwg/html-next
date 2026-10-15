@@ -69,7 +69,7 @@ export const render = () => renderToString(<XEventMatrix id="case" />);
       ["passive-prevent", "on:click.passive.prevent"],
       ["repeated-stop", "on:click.stop.stop"],
       ["unknown-modifier", "on:click.unknown"],
-      ["deferred-lifecycle", "on:connect"],
+      ["lifecycle-modifier", "on:connect.once"],
     ] as const) {
       const entry = `components/${name}.html`;
       await writeFile(join(directory, entry), `<template component="x-${name}" status="early" summary="Invalid event modifier."><defs><handler name="hit"></handler></defs><button ${binding}="hit">Go</button></template>`);

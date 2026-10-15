@@ -177,6 +177,7 @@ export function serializedDefinition(definition: ComponentDefinition): string {
     template: definition.template,
     ...(definition.declarations === undefined ? {} : { declarations: definition.declarations }),
     ...(definition.root === undefined ? {} : { root: definition.root }),
+    ...(definition.lifecycle === undefined ? {} : { lifecycle: definition.lifecycle }),
   };
   return `{...${JSON.stringify(runtime)},source:{file:import.meta.url},css:""}`;
 }

@@ -2795,6 +2795,20 @@ function prepareRuntimeInvocation(
     committed: hydration,
     hydrationRanges,
   };
+  const lifecycle = definition.lifecycle;
+  if (lifecycle !== undefined) {
+    // One connection-owned effect, as a controller's `host.on`: it runs `on:connect` each time the
+    // instance connects and `on:disconnect` each time it disconnects. Static rendering never connects.
+    const run = (name: string | undefined, type: string): void => {
+      const declaration = (definition.declarations ?? []).find((candidate): candidate is HandlerDeclaration =>
+        candidate.kind === "handler" && candidate.name === name);
+      if (declaration !== undefined) untracked(() => runHandler(declaration, instance.element!, renderScope, context, new Event(type)));
+    };
+    instanceEffects.push(createEffect(scope.scheduler, () => {
+      run(lifecycle.connect, "connect");
+      return () => run(lifecycle.disconnect, "disconnect");
+    }, 2, false));
+  }
   const renderRootNode: ElementNode = rootWith === undefined
     ? rootNode
     : (({ flow: _flow, ...body }) => body)(rootNode);
