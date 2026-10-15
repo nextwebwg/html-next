@@ -988,7 +988,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     // Vue's scoped styles sit in a native scope rooted at the root's tag class and bounded by each
     // invoked component's tag class, which Vue passes to that component's root.
     assert.match(style, /@scope \(\.x-feature\) to \(\.x-badge\)/);
-    assert.match(style, /:scope \{\s+display: block;\s+\}/);
+    assert.match(style, /:scope:where\(:scope\) \{\s+display: block;\s+\}/);
     assert.match(style, /:scope\[data-x-feature-state~="open"\] \.panel/);
     assert.match(style, /:slotted\(p\)/);
     assert.match(style, /:is\(x-badge, \.x-badge\)/);

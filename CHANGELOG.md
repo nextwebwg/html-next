@@ -16,14 +16,12 @@
 
 - A layout name with neither an `app/layouts/<name>.html` file nor a `layouts` entry is an error that names the page and the expected file.
 - `<hk-nav>`, `<hk-breadcrumbs>` and `<hk-pager>` declare their items with an open object type, which ends in `...`, and the navigation guide shows layouts the same declaration, so items keep passing through as they gain fields.
-
-### Changed
-
 - `HC021` names the prop, the component and the type of the value it received, as in `` HC021: Prop `count` of <x-counter> does not satisfy its declared type `number`: it received a string. `` `serializePropTarget(prop, value, name, component)` takes the prop's name and the component's tag for the message, and HTMLKit passes both for the props a page or layout loader returns.
 
 ### Fixed
 
 - In compiled components, a `$match` arm inside a `$each` row reads the row's item, so each row renders, hydrates and updates with the arm its own item selects, as in the live runtime and server rendering. `<li $each="item of $items"><template $match><a $when="$item.href">…</a><span $else>…</span></template></li>` keeps the server's `<a>` and `<span>` rows through hydration. `$if`, `$with` and nested `$each` in a row read the row's item in the same way.
+- In converted Vue components, every `:host` rule has the live runtime's specificity: `:host`, `:host(…)`, and either one under an ancestor selector or with a pseudo-element. The converter emits the root as `:scope:where(:scope)`, which Vue's scoped styles turn into `:scope:where([data-v-…]:scope)`, the counterpart of the live runtime's `:scope:where([data-component~="…"])`, and puts the rule's other tests and ancestor context in an `:is()` after it, so `.wide :host(.on)` is `:scope:where(:scope):is(.wide .on)`. A consumer rule more specific than a component's `:host` rule applies to the root in converted Vue components as it does in the live runtime.
 
 ## 1.0.0-alpha.50
 

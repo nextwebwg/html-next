@@ -86,7 +86,7 @@ const hostState = computed(() =>
 
 <style scoped>
 @scope (.x-button) {
-  :scope {
+  :scope:where(:scope) {
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
@@ -97,15 +97,15 @@ const hostState = computed(() =>
     border-radius: 0.375rem;
     font: inherit;
   }
-  :scope[data-x-button-state~="size=sm"] {
+  :scope:where(:scope):is([data-x-button-state~="size=sm"]) {
     min-height: 2rem;
     padding: 0.25rem 0.625rem;
   }
-  :scope[data-x-button-state~="size=lg"] {
+  :scope:where(:scope):is([data-x-button-state~="size=lg"]) {
     min-height: 3rem;
     padding: 0.625rem 1rem;
   }
-  :scope[data-x-button-state~="variant=solid"] {
+  :scope:where(:scope):is([data-x-button-state~="variant=solid"]) {
     background: CanvasText;
     color: Canvas;
   }
