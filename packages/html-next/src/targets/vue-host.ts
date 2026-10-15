@@ -114,12 +114,23 @@ export interface Readable<T> {
   readonly value: T;
 }
 
+/** Vue refs a component invocation as its public instance; the ref is the root element it lowered to. */
+function refElement(ref: any): Element {
+  return ref == null || ref.nodeType === 1 ? ref : ref.$el;
+}
+
+/** The root ref as an element: a delegating component's root ref holds the invoked component. */
+function rootElement<T extends Element>(root: Readable<T | null>): Readable<T | null> {
+  return { get value() { return refElement(root.value) as T | null; } };
+}
+
 ${NATIVE_CONNECTION_SOURCE}/**
  * Runs the root's on:connect and on:disconnect handlers each time it joins and leaves a document.
  * Vue hooks cover mount and unmount; the shared native observer sees the root detached and
  * reinserted outside Vue.
  */
-export function useLifecycle(root: Readable<Element | null>, connect?: () => void, disconnect?: () => void): void {
+export function useLifecycle(componentRoot: Readable<Element | null>, connect?: () => void, disconnect?: () => void): void {
+  const root = rootElement(componentRoot);
   let connected = false;
   let stop: (() => void) | undefined;
   const synchronize = (): void => {
@@ -138,7 +149,8 @@ export function useLifecycle(root: Readable<Element | null>, connect?: () => voi
 }
 
 /** Keep native focus on the corresponding control when a root-level $match replaces its element. */
-export function preserveRootFocus(root: Readable<Element | null>): void {
+export function preserveRootFocus(componentRoot: Readable<Element | null>): void {
+  const root = rootElement(componentRoot);
   const focusable = "a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]";
   let previous: Element | null = null;
   let active: Element | null = null;
@@ -212,7 +224,8 @@ export function useComponentHost(
   controllerLoader: () => Promise<unknown>,
   options: ComponentHostOptions,
 ) {
-  const { root, dispatch, props, propInputs = () => null, propNames = [], refs = {}, state = {}, computed: computedValues = {}, data = {}, context = {} } = options;
+  const root = rootElement(options.root);
+  const { dispatch, props, propInputs = () => null, propNames = [], refs = {}, state = {}, computed: computedValues = {}, data = {}, context = {} } = options;
   const vueSlots = useSlots();
   const component = getCurrentInstance();
   const report = (error: unknown): void => {
@@ -300,7 +313,7 @@ export function useComponentHost(
       Object.fromEntries(
         Object.entries(refs).map(([name, ref]) => [name, {
           enumerable: true,
-          get: () => Array.isArray(ref.value) ? inDocumentOrder(ref.value) : (ref.value as Element),
+          get: () => Array.isArray(ref.value) ? inDocumentOrder(ref.value.map(refElement)) : refElement(ref.value),
         }]),
       ),
     ) as Readonly<Record<string, Element | readonly Element[]>>,
@@ -456,10 +469,11 @@ export function runFilteredEvent(event: Event, modifiers: readonly string[], han
 
 /** Reports declared CustomEvents to Vue and dispatches them through the DOM. */
 export function createDispatch(
-  root: Readable<HTMLElement | null>,
+  componentRoot: Readable<HTMLElement | null>,
   emit?: (name: string, detail: unknown) => void,
   options: DispatchOptions = {},
 ): (name: string, detail?: unknown, targets?: unknown) => boolean {
+  const root = rootElement(componentRoot);
   const { declared = {}, checks = {}, modeled = [] } = options;
   // One change can be reported by more than one event — a choice is both a select and a change —
   // and each carries the new value. The prop updates once per change: a value already reported in

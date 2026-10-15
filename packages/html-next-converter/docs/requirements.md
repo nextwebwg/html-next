@@ -179,7 +179,7 @@ Additional public-converter cases cover malformed controller specifiers and hand
 (`HC022`/`HC023`), `$match` aliases (`HT017`), references (`HT019`), and style binding targets
 (`HT020`) in both graph modes. Style diagnostics `HY001`–`HY003` likewise retain their original
 source-located codes rather than becoming generic target-conversion failures. Typed structured
-state is now rejected by `:host-state()` in both the live runtime and converted output.
+state is now rejected by `:state()` in both the live runtime and converted output.
 
 The diagnostic audit separates authored failures from defensive API guards. Authored-source
 failures use the shared parser and style validator; the browser corpus and public converter check
@@ -225,7 +225,7 @@ artifacts, mounts a parent plus its statically imported child through Vue's SFC 
 compares rendered behavior and exact pixels before and after a state change in Chromium, Firefox,
 and WebKit. It also compiles both components for Vue SSR, compares server markup before hydration,
 then hydrates and repeats reactive and event interactions with behavior and pixel checks in all
-three engines. The same fixture checks initially active `:host-state` styling, its reactive change,
+three engines. The same fixture checks initially active `:host(:state())` styling, its reactive change,
 and `:slotted(strong)` styling on projected content before and after hydration. This closes the
 representative nested-graph hydration gap; combinations involving
 other feature areas remain covered by their own parity fixtures or remain in the strict gate.

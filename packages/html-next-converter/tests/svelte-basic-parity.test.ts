@@ -59,7 +59,7 @@ const fixtures = [
     </defs><div class="base" class:open="$open" style:--tone="$open ? 'green' : 'red'">
       <button type="button" on:click="toggle">Toggle</button><output $value="$open ? 'Open' : 'Closed'"></output>
     </div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; background: var(--tone); }
-      :host-state([open]) { border-color: red; }</style></template>`,
+      :host(:state(open)) { border-color: red; }</style></template>`,
     tag: "x-style",
     root: "div",
     checkpoint: "output",

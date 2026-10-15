@@ -171,7 +171,7 @@ const successes: ConformanceCase[] = [
           ["aria-label", "Save"],
           ["class", "cta"],
           ["data-component", "x-btn"],
-          ["data-label", "Save"],
+          ["data-x-btn-prop-label", "Save"],
           ["id", "b"],
           ["type", "button"],
         ],
@@ -206,12 +206,12 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "styles by camel-case props and state with :host-state()",
+    name: "styles by camel-case props and state with :state()",
     source: scene({
       tag: "x-camel-state",
       defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state type="string" name="toneName" value="warm"></state>`,
       root: `<div></div>`,
-      style: `:host([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
+      style: `:host([isWide]) { width: 123px; } :host(:state(toneName=warm)) { height: 45px; }`,
       use: `<x-camel-state id="c"></x-camel-state>`,
     }),
     expect: {
@@ -258,7 +258,19 @@ const successes: ConformanceCase[] = [
         `const e = q('#b'); return { sum: e.getAttribute('data-sum'), ` +
         `hasFlag: e.hasAttribute('data-flag'), flag: e.getAttribute('data-flag'), ` +
         `kind: e.getAttribute('data-kind'), s: e.getAttribute('data-s') };`,
-      result: { sum: "6", hasFlag: true, flag: "true", kind: "b", s: "hey" },
+      result: { sum: "6", hasFlag: true, flag: "", kind: "b", s: "hey" },
+    },
+  },
+  {
+    name: "an omitted list prop without a default iterates as nothing",
+    source: scene({
+      defs: `<prop name="items" type="list(object({ id: number, label: string }))">Items.</prop>`,
+      root: `<ul><li $each="item of $items" $key="$item.id">{$item.label}</li><li $each="item of $items">{$item.id}</li></ul>`,
+      use: `<x-t id="omitted"></x-t>`,
+    }),
+    expect: {
+      probe: `const e = q('#omitted'); return [e.localName, e.children.length];`,
+      result: ["ul", 0],
     },
   },
   {
@@ -861,11 +873,11 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HC011" },
   },
   {
-    name: "HY002: structured state cannot be tested by :host-state()",
+    name: "HY002: structured state cannot be tested by :state()",
     source: scene({
       defs: `<state name="items" type="list(string)" value="[]"></state>`,
       root: `<div></div>`,
-      style: `:host-state([items]) { color: red; }`,
+      style: `:host(:state(items)) { color: red; }`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HY002" },

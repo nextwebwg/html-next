@@ -25,7 +25,7 @@ import {
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 import { DataResource, type DataState } from "./data.js";
-import { kebabCase } from "./names.js";
+import { propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
 import type { boundFailures } from "./value-constraints.js";
 import { manageDerivedValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
@@ -484,7 +484,7 @@ function taken(checks: PropChecks | null, input: unknown, source: "html" | "valu
   return parsed.ok ? parsed.value : undefined;
 }
 
-/** The `data-<name>` text of a value (`reflectedPropValue`): the type's form when the type takes it, else as given. */
+/** The `data-<tag>-prop-<name>` text of a value (`reflectedPropValue`): the type's form when the type takes it, else as given. */
 function reflected(value: unknown, checks: PropChecks | null): string {
   const parsed = checks?.c(value, "$", "value");
   return parsed?.ok === true ? typedText(parsed.value, checks!.j) : typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
@@ -495,20 +495,21 @@ const fits = (value: unknown, type: CompactType | null): boolean => value === AB
 
 /** A compiled instance's props, as the live runtime keeps an instance's. */
 export interface GeneratedPropRecord {
-  readonly D: { readonly props: CompiledProps };
+  /** The component tag, which namespaces each prop's recording attribute, and its props. */
+  readonly D: { readonly g: string; readonly props: CompiledProps };
   /** The state and computed names; each prop's root follows them, in the contract's order. */
   readonly n: readonly string[];
   readonly v: unknown[];
   /** The latest input of each prop, and the props an input made explicit. */
   readonly i: Record<string, PropInput>;
   readonly x: Set<string>;
-  /** Props the root template binds as `data-<name>` itself, so that attribute is its output; a root switch changes them. */
+  /** Props the root template binds as `data-<tag>-prop-<name>` itself, so that attribute is its output; a root switch changes them. */
   b: readonly string[];
   /** Moves the prop boundary to a new root, set by `manageProps`. */
   m?: (previous: Element, next: Element) => void;
   /** Applies a framework's or parent's props, set by `manageProps`. */
   u?: (props: Readonly<Record<string, unknown>>) => void;
-  /** Props whose `data-<name>` holds a raw input write, which a first connection leaves as it is. */
+  /** Props whose `data-<tag>-prop-<name>` holds a raw input write, which a first connection leaves as it is. */
   readonly w: Set<string>;
   /** The factory's values, written raw on the root before it first renders its props. */
   readonly f: Readonly<Record<string, unknown>>;
@@ -520,7 +521,7 @@ export interface GeneratedPropRecord {
 
 /**
  * Accepts a compiled component's props from its factory, as the live runtime accepts a factory's:
- * explicit inputs are recorded as `data-<name>` first, then every prop the root's attributes or the
+ * explicit inputs are recorded as `data-<tag>-prop-<name>` first, then every prop the root's attributes or the
  * factory supplies is parsed through its type, and an input that does not parse leaves the default.
  * Fills each prop's root in `v`; `manageProps` takes over once the instance is attached.
  */
@@ -530,7 +531,7 @@ export function acceptProps(
 ): GeneratedPropRecord {
   const props = D.props;
   const names = Object.keys(props);
-  // The factory's explicit values are recorded as `data-<name>`, raw, once the root exists (`manageProps`).
+  // The factory's explicit values are recorded as `data-<tag>-prop-<name>`, raw, once the root exists (`manageProps`).
   const raw = new Set<string>();
   for (const name of names) {
     const prop = props[name]!;
@@ -538,13 +539,13 @@ export function acceptProps(
     if (value === undefined || value === null || prop.select !== undefined && props[prop.select.from] === undefined) continue;
     raw.add(name);
   }
-  // An invocation's literal props are its HTML input; a factory's root reads its `data-<name>`
+  // An invocation's literal props are its HTML input; a factory's root reads its `data-<tag>-prop-<name>`
   // attributes back as HTML input instead, and the factory's values win.
   const incoming: Record<string, PropInput> = Object.create(null);
   if (html !== undefined) {
     for (const name of names) if (Object.hasOwn(html, name)) incoming[name] = { value: html[name], source: "html", present: true };
   } else for (const attribute of Array.from(element?.attributes ?? [])) {
-    const name = names.find((candidate) => attribute.name === `data-${kebabCase(candidate)}` || attribute.name === `data-${candidate.toLowerCase()}`);
+    const name = names.find((candidate) => attribute.name === propAttribute(D.g, candidate));
     if (name !== undefined) incoming[name] = { value: attribute.value, source: "html", present: true };
   }
   for (const name of names) if (input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
@@ -612,7 +613,7 @@ export function manageProps(instance: GeneratedInstance): void {
   const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
   // The factory's explicit values, as its live attachment writes them before rendering.
   for (const name of record.w) {
-    instance.e.setAttribute(`data-${kebabCase(name)}`, reflected(record.f[name], chosen(props, props[name]!, record.f)));
+    instance.e.setAttribute(propAttribute(D.g, name), reflected(record.f[name], chosen(props, props[name]!, record.f)));
   }
   for (const name of record.b) record.w.delete(name);
   const changed = new Set<string>();
@@ -634,8 +635,9 @@ export function manageProps(instance: GeneratedInstance): void {
     // Null is "no value" at the attribute boundary: it removes the attribute.
     const text = value === undefined || value === ABSENT || value === null ? null
       : reflected(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
-    if (text === null) element.removeAttribute(`data-${kebabCase(name)}`);
-    else if (element.getAttribute(`data-${kebabCase(name)}`) !== text) element.setAttribute(`data-${kebabCase(name)}`, text);
+    const attribute = propAttribute(D.g, name);
+    if (text === null) element.removeAttribute(attribute);
+    else if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
   };
   const job = new ReactiveEffect(instance.q, () => {
     if (!connected) return;
@@ -698,7 +700,7 @@ export function manageProps(instance: GeneratedInstance): void {
         notifyPropertySet(inputs, name, previous, inputs[name], undefined);
       }
       // A bound data-* attribute is template output; only its binding writes it.
-      const attribute = `data-${kebabCase(name)}`;
+      const attribute = propAttribute(D.g, name);
       if (value === undefined || value === null) {
         explicit.delete(name);
         if (!record.b.includes(name)) element.removeAttribute(attribute);
@@ -876,7 +878,7 @@ export function writeHtmlRange(start: Comment, html: string): void {
   end.before(sanitizeFragment(html, start.ownerDocument, markContentOnly));
 }
 
-/** `data-<tag>-state` for the props and state `:host-state()` rules name, as live writes it. */
+/** `data-<tag>-state` for the props and state `:host()` rules name, as live writes it. */
 export const hostState = (names: readonly string[], values: readonly unknown[]): string =>
   stateAttributeValue(names, (name) => values[names.indexOf(name)]);
 

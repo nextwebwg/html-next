@@ -474,6 +474,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "vue" ? generateVueComponent(definition, {
           slotsByTag,
+          propContractsByTag,
           guardNestedDepth,
           importSpecifier,
           helperSpecifier: (name) => {

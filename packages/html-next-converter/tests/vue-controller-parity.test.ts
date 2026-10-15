@@ -30,10 +30,11 @@ const component = `<template component="x-controlled" status="early" summary="Co
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
   <event name="helper-loaded" type="number"></event>
 </defs><template $match>
-  <article $when="$arm = 'article'" $ref="articleRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></article>
-  <section $else $ref="sectionRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></section>
+  <article $when="$arm = 'article'" $ref="articleRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver><x-ref-target $ref="single"></x-ref-target></article>
+  <section $else $ref="sectionRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver><x-ref-target $ref="single"></x-ref-target></section>
 </template></template>
-<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="$hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="$receiver" from:data-hits="$hits"></span></template>`;
+<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="$hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="$receiver" from:data-hits="$hits"></span></template>
+<template component="x-ref-target" status="early" summary="A component a ref names."><b hidden></b></template>`;
 const controller = `function connect(host) {
   window.trace.connects++;
   window.controllerHost = host;
@@ -84,7 +85,7 @@ export default function initialize(host) {
 }`;
 const helper = "export const answer = 42;\n";
 
-type Snapshot = { tag: string | null; count: string | null; local: string | null; amount: string | null; input: string | null; valid: string | null; stateHasAmount: string | null; stateHasCount: string | null; double: string | null; trace: Record<string, number>; focused: boolean };
+type Snapshot = { tag: string | null; count: string | null; local: string | null; amount: string | null; input: string | null; valid: string | null; stateHasAmount: string | null; stateHasCount: string | null; double: string | null; trace: Record<string, number>; focused: boolean; refs: unknown };
 
 async function snapshot(page: Page): Promise<{ behavior: Snapshot; pixels: Buffer }> {
   await page.waitForFunction(() => document.querySelector("#case")?.getAttribute("data-local") !== null);
@@ -102,6 +103,12 @@ async function snapshot(page: Page): Promise<{ behavior: Snapshot; pixels: Buffe
       double: document.querySelector("#case")?.getAttribute("data-double") ?? null,
       trace: { ...window.trace },
       focused: document.activeElement === document.querySelector("#case button"),
+      // A ref on a component invocation is the native root that component lowered to.
+      refs: ((refs: Record<string, unknown>) => Object.fromEntries(["single", "receivers"].map((name) => {
+        const read = (value: unknown) => value instanceof Element ? `${value.localName}:${value.isConnected && document.querySelector("#case")!.contains(value)}` : typeof value;
+        const value = refs[name];
+        return [name, Array.isArray(value) ? value.map(read) : read(value)];
+      })))((window as unknown as { controllerHost: { refs: Record<string, unknown> } }).controllerHost.refs),
     })),
     pixels: await page.locator("#case").screenshot({ animations: "disabled" }),
   };
@@ -232,6 +239,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         assert.deepEqual(initialHydrated.behavior, initialLive.behavior, "hydrated controller behavior differs");
         await assertPixelsEqual(hydrated, initialHydrated.pixels, initialLive.pixels, "hydrated controller pixels differ");
         assert.equal(initialLive.behavior.trace.connects, 1);
+        assert.deepEqual(initialLive.behavior.refs, { single: "b:true", receivers: ["span:true", "span:true"] });
 
         await Promise.all([live, hydrated].map((page) => page.locator("#case button").focus()));
         await Promise.all([live, hydrated].map((page) => page.locator("#case button").press("Enter")));

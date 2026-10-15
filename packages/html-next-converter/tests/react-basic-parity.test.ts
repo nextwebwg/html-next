@@ -30,7 +30,7 @@ const source = `<template component="x-counter" status="early" summary="Counter.
   <span>{$double}</span><output $value="min($width, 5px)"></output><small $value="min($width, 5px)"></small><em $value="['x', min($width, 5px)]"></em><sub>{$padded}</sub><i $if="min($width, 5px) = '4px'">Invalid branch</i>
   <template $match><b $when="min($width, 5px) = '4px'">Invalid match</b><b $else>Valid match</b></template>
 </button>
-<style>:host { display: inline-block; appearance: none; border: 1px solid rgb(80, 80, 80); padding: 8px; color: rgb(30, 40, 50); } :host-state([count]) { outline: 2px solid rgb(90, 70, 50); }</style>
+<style>:host { display: inline-block; appearance: none; border: 1px solid rgb(80, 80, 80); padding: 8px; color: rgb(30, 40, 50); } :host(:state(count)) { outline: 2px solid rgb(90, 70, 50); }</style>
 </template>`;
 
 async function snapshot(page: Page): Promise<{ readonly text: string; readonly padded: string | null; readonly classes: string; readonly background: string; readonly paddingLeft: string; readonly marginLeft: string; readonly invalidBranch: boolean; readonly matchText: string | null; readonly title: string; readonly color: string; readonly colorPriority: string; readonly hostState: string; readonly functions: Record<string, string | null>; readonly events: readonly number[]; readonly pixels: Buffer }> {

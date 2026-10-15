@@ -105,6 +105,25 @@ it("serves plugin page files and recompiles edited pages in development", async 
   } finally { await server.close(); }
 }, 60_000);
 
+it("recompiles a plugin page in development when a file it watches changes, outside the root too", async () => {
+  const root = await site();
+  const outside = await mkdtemp(join(tmpdir(), "htmlkit-watched-")); roots.push(outside);
+  const banner = join(outside, "banner.txt");
+  await write(outside, "banner.txt", "First banner");
+  const plugin = notes(root);
+  const compile = plugin.pages!.compile;
+  const watching: HtmlKitPlugin = { ...plugin, pages: { extensions: plugin.pages!.extensions, async compile(source, page) {
+    page.watch(banner);
+    return (await compile(source, page)).replace("Install body", await readFile(banner, "utf8"));
+  } } };
+  const server = await devApplication({ root, port: 0, plugins: [watching] });
+  try {
+    expect(await (await fetch(server.url + "v/one/install/")).text()).toContain("First banner");
+    await write(outside, "banner.txt", "Second banner");
+    await expect.poll(async () => (await fetch(server.url + "v/one/install/")).text(), { timeout: 10_000 }).toContain("Second banner");
+  } finally { await server.close(); }
+}, 60_000);
+
 it("builds plugin pages with the files they reference", async () => {
   const root = await site();
   const result = await buildApplication({ root, plugins: [notes(root)] });

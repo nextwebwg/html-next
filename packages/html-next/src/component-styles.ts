@@ -3,11 +3,11 @@ import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-
  * Component style compilation (nextwebwg.org/html-next/styling).
  *
  * A style block applies to its component's region: from the root (`[data-component~="tag"]`) down
- * to nested component roots and projected content. `:host` selects the root, `:host-state()` the root
- * while resolved state matches, `:host([prop])` resolved props, and `:slotted()` projected content
- * at any depth.
+ * to nested component roots and projected content. `:host` selects the root, `:host([prop])` and
+ * `:host(:state(name))` the root while resolved props and state match, and `:slotted()` projected
+ * content at any depth.
  *
- * The browser needs no CSS parser: the three pseudo-classes are renamed into selectors it accepts, it
+ * The browser needs no CSS parser: `:slotted()` and `:state()` are renamed into selectors it accepts, it
  * parses the block twice (the component's own markup, and projected content), each copy drops the
  * other's rules, and the remaining selectors are rewritten through the CSS Object Model. Build tools
  * run the same selector rewrite over a CSS parser (`component-styles-build.ts`).
@@ -47,16 +47,57 @@ export function stateAttribute(tag: string): string {
 
 export type StyleRuleKind = "own" | "slotted";
 
-const SENTINEL = { slotted: "[--slotted]", state: "[--state]" } as const;
-const RENAMABLE = /\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|:(slotted|host-state)\(/g;
+const RENAMABLE = /\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|:(slotted|state|host-state)\(/g;
+/**
+ * `name`, `name=value` with a CSS identifier or quoted value, and an optional `of <tag>`. A literal,
+ * so bundles that use only this module's runtime helpers can drop it.
+ */
+const STATE_ARGUMENT = /^\s*((?:--|-?[A-Za-z_])[\w-]*)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|((?:--|-?[A-Za-z_])[\w-]*)))?\s*(?:of\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)+))?\s*$/;
+/** `:state()` as renamed: the test as an attribute selector, and its `of` component as `[--of]`. */
+const STATE_SENTINEL = /:where\(\s*\[--state\]\s*\):is\(/g;
+
+export type ComponentPseudoClass = "slotted" | "state";
 
 /**
- * Renames `:slotted(` and `:host-state(` into valid selectors, skipping comments and strings. A
- * target that has its own `:slotted()` (Vue) renames only `:host-state(`.
+ * Renames `:slotted(` and `:state(` into valid selectors, skipping comments and strings. A `:state()`
+ * argument becomes an attribute test, because its value form and `of` are not native syntax. A target
+ * that has its own `:slotted()` (Vue) renames only `:state(`.
  */
-export function renameComponentPseudoClasses(css: string, kinds: readonly ("slotted" | "host-state")[] = ["slotted", "host-state"]): string {
-  return css.replace(RENAMABLE, (match, kind: "slotted" | "host-state" | undefined) =>
-    kind === undefined || !kinds.includes(kind) ? match : `:where(${kind === "slotted" ? SENTINEL.slotted : SENTINEL.state}):is(`);
+export function renameComponentPseudoClasses(css: string, kinds: readonly ComponentPseudoClass[] = ["slotted", "state"]): string {
+  let output = "";
+  let index = 0;
+  for (const match of css.matchAll(RENAMABLE)) {
+    const kind = match[1] as ComponentPseudoClass | "host-state" | undefined;
+    if (match.index < index || kind === undefined) continue;
+    if (kind === "host-state") fail("HY005", "`:host-state([name])` is now `:host(:state(name))`.");
+    if (!kinds.includes(kind)) continue;
+    const open = match.index + match[0].length - 1;
+    if (kind === "slotted") {
+      output += `${css.slice(index, match.index)}:where([--slotted]):is(`;
+      index = open + 1;
+      continue;
+    }
+    const close = closingParenthesis(css, open);
+    output += css.slice(index, match.index) + stateSentinel(css.slice(open + 1, close));
+    index = close + 1;
+  }
+  return output + css.slice(index);
+}
+
+function stateSentinel(argument: string): string {
+  const match = STATE_ARGUMENT.exec(argument);
+  if (match === null) {
+    fail("HY002", `\`:state(${argument.trim()})\` takes a state name, an optional \`=value\`, and an optional \`of <tag>\`; quote a value that is not a CSS identifier.`);
+  }
+  const value = match[2] ?? match[3]?.replace(/\\'/g, "'").replace(/"/g, '\\"') ?? match[4];
+  return `:where([--state]):is([${match[1]}${value === undefined ? "" : `="${value}"`}]${match[5] === undefined ? "" : `[--of="${match[5]}"]`})`;
+}
+
+/** The authored `:state()` for a renamed one, after a browser has parsed and serialized it. */
+export function restoreStatePseudoClasses(css: string): string {
+  return css.replace(/:where\(\s*\[--state\]\s*\):is\(\s*\[([^\]="\s]+)(?:="((?:\\.|[^"\\])*)")?\](?:\[--of="([^"]*)"\])?\s*\)/g,
+    (_match, name: string, value: string | undefined, of: string | undefined) =>
+      `:state(${name}${value === undefined ? "" : `="${value}"`}${of === undefined ? "" : ` of ${of}`})`);
 }
 
 /** Constructed sheets discard imports, so synchronous compilation must diagnose them first. */
@@ -88,25 +129,45 @@ function closingParenthesis(value: string, open: number): number {
 
 const ATTRIBUTE_TEST = /\[(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\]"'])*\]/g;
 const STATE_TEST = /^\[\s*([\w-]+)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\]\s]+))\s*)?\]$/;
+const OF_TEST = /\[\s*--of\s*=\s*"([^"]*)"\s*\]/;
 type StyleTestKind = "prop" | "state";
 type StyleNameResolver = (name: string, kind: StyleTestKind) => string;
 
-/** `[name]` and `[name="value"]` tests as tokens of the state attribute. */
-function stateTokens(tests: string, tag: string, names: Set<string>, canonical: StyleNameResolver,
-  kind: StyleTestKind): string {
-  const selector = kind === "prop" ? ":host()" : ":host-state()";
-  if (kind === "state" && tests.replace(ATTRIBUTE_TEST, "").trim() !== "") {
-    fail("HY002", `\`${selector}\` supports only presence and equality tests on declared values.`);
+/** A `[name]` or `[name="value"]` test as a token of the state attribute. */
+function stateToken(test: string, tag: string, names: Set<string>, canonical: StyleNameResolver, kind: StyleTestKind): string {
+  const match = STATE_TEST.exec(test);
+  if (match === null) fail("HY002", `\`${kind === "prop" ? ":host()" : ":state()"}\` supports only presence and equality tests on declared values.`);
+  const name = canonical(match[1]!, kind);
+  const value = match[2] ?? match[3] ?? match[4];
+  names.add(name);
+  return `[${stateAttribute(tag)}~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`;
+}
+
+/**
+ * A `:host(...)` argument: attribute tests are props, renamed `:state()` tests are the component's own
+ * state, and anything else (a class, say) stays a condition on the root.
+ */
+function hostTests(tests: string, tag: string, names: Set<string>, canonical: StyleNameResolver): string {
+  let output = "";
+  let index = 0;
+  const props = (part: string): string => part.replace(ATTRIBUTE_TEST, (test) => stateToken(test, tag, names, canonical, "prop"));
+  for (const match of tests.matchAll(STATE_SENTINEL)) {
+    if (match.index < index) continue;
+    const open = match.index + match[0].length - 1;
+    const close = closingParenthesis(tests, open);
+    output += props(tests.slice(index, match.index)) + ownState(tests.slice(open + 1, close), tag, names, canonical);
+    index = close + 1;
   }
-  const output = tests.replace(ATTRIBUTE_TEST, (test) => {
-    const match = STATE_TEST.exec(test);
-    if (match === null) fail("HY002", `\`${selector}\` supports only presence and equality tests on declared values.`);
-    const name = canonical(match[1]!, kind);
-    const value = match[2] ?? match[3] ?? match[4];
-    names.add(name);
-    return `[${stateAttribute(tag)}~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`;
-  });
-  return kind === "state" ? output.replace(/\s+/g, "") : output;
+  return output + props(tests.slice(index));
+}
+
+/** A renamed `:state()` inside `:host()`, which tests the stylesheet's own component. */
+function ownState(test: string, tag: string, names: Set<string>, canonical: StyleNameResolver): string {
+  const of = OF_TEST.exec(test)?.[1];
+  if (of !== undefined && of !== tag) {
+    fail("HY006", `\`:state(... of ${of})\` tests another component's state; this implementation supports \`:state()\` only on the component's own root, as \`:host(:state(name))\` (in <${tag}>).`);
+  }
+  return stateToken(test.replace(OF_TEST, "").trim(), tag, names, canonical, "state");
 }
 
 /**
@@ -164,10 +225,12 @@ export function rewriteComponentSelector(
   let index = 0;
   const resolved = /:where\(\s*\[--state\]\s*\):is\(|:host\(/g;
   for (let match = resolved.exec(selector); match !== null; match = resolved.exec(selector)) {
+    if (match[0] !== ":host(") {
+      fail("HY006", `\`:state()\` outside \`:host()\` tests another component's state; this implementation supports it only on the component's own root, as \`:host(:state(name))\` (in <${tag}>).`);
+    }
     const open = match.index + match[0].length - 1;
     const close = closingParenthesis(selector, open);
-    const kind = match[0] === ":host(" ? "prop" : "state";
-    output += `${selector.slice(index, match.index)}${host}${stateTokens(selector.slice(open + 1, close), tag, names, canonical, kind)}`;
+    output += `${selector.slice(index, match.index)}${host}${hostTests(selector.slice(open + 1, close), tag, names, canonical)}`;
     index = close + 1;
     resolved.lastIndex = index;
   }
@@ -257,10 +320,11 @@ export function componentStyleNameResolver(definition: ComponentDefinition, sour
   ].map((name) => [name.toLowerCase(), name])) : undefined;
   return (input, kind) => {
     const name = declared?.get(input.toLowerCase()) ?? input;
-    const selector = kind === "prop" ? ":host()" : ":host-state()";
+    const selector = kind === "prop" ? ":host()" : ":state()";
     const prop = definition.contract.props[name];
     if (kind === "prop" ? prop === undefined : !states.has(name)) {
-      const hint = kind === "state" && prop !== undefined ? ` Select the prop with \`:host([${name}])\`.` : "";
+      const hint = kind === "state" && prop !== undefined ? ` Select the prop with \`:host([${name}])\`.`
+        : kind === "prop" && states.has(name) ? ` Select the state with \`:host(:state(${name}))\`.` : "";
       fail("HY001", `\`${selector}\` tests \`${name}\`, which is not a declared ${kind === "prop" ? "prop" : "mutable or computed state"}.${hint}`, source);
     }
     const type = kind === "prop" ? prop!.type : states.get(name);

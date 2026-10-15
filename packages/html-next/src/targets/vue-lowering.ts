@@ -676,9 +676,8 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     source = this.value(node, scope),
   ): string {
     const type = typeOf(node, scope);
-    // Vue iterates null and undefined as nothing; anything but a list must also iterate as nothing.
+    // An absent list, such as an omitted optional prop, iterates as nothing; anything but a list must too.
     let code = type.type.kind === "list" ? source : `${this.use("list")}(${source})`;
-    if (options.where === undefined && options.sort.length === 0 && options.limit === undefined) return code;
     if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
     if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
     if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;

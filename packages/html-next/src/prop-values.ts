@@ -18,7 +18,7 @@ export function invocationValue(prop: PropContract, input: unknown, source: "htm
   return parsed.ok ? parsed.value as PropValue : undefined;
 }
 
-/** The `data-<name>` text that records a value. */
+/** The `data-<tag>-prop-<name>` text that records a value. */
 export function reflectedPropValue(value: unknown, type: PropType | null): string {
   if (type !== null && parseTypedValue(value, type, "$", "value").ok) {
     return serializeTypedValue(value, type);

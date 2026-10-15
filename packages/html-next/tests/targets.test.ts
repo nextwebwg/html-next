@@ -104,7 +104,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
   </section>
   <style>
     :host { display: block; }
-    :host-state([open]) .panel { outline: 1px solid; }
+    :host(:state(open)) .panel { outline: 1px solid; }
     :host([size="sm"]) h2 { font-size: small; }
     :slotted(p) { margin: 0; }
     x-badge { margin-inline: auto; }
@@ -720,12 +720,12 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     // The styles select the root as `:host`, so each arm's root carries the tag as a class, the
     // converted-root marker, and the attribute of the component's own markup.
     assert.equal(await render({}), '<button class="x-action action" type="button" data-hn data-hn-x-action>Go</button>');
-    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" data-hn data-hn-x-action href="/next" data-as="a" data-href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" data-hn data-hn-x-action href="/next" data-x-action-prop-as="a" data-x-action-prop-href="/next">Go</a>');
     const listed = await render({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] });
-    assert.match(listed, /data-tags="red, blue"/);
-    assert.match(listed, /data-space-tags="one two"/);
+    assert.match(listed, /data-x-action-prop-tags="red, blue"/);
+    assert.match(listed, /data-x-action-prop-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
-    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-hn data-hn-x-action data-as="a" data-disabled="true" data-href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-hn data-hn-x-action data-x-action-prop-as="a" data-x-action-prop-disabled="true" data-x-action-prop-href="/next">Go</a>');
     assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
@@ -975,7 +975,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(module, /writeUrlAttribute\(/);
   });
 
-  it("scopes styles to the region with root-only markers, :host, :host-state(), and :slotted()", () => {
+  it("scopes styles to the region with root-only markers, :host, :state(), and :slotted()", () => {
     const artifacts = generated(featureSource);
     const css = artifacts.get("styles/x-feature.css")!;
     assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\], \[data-slotted\]\)/);
@@ -1015,9 +1015,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /@scope \(\.demo-plain\) to \(\[data-hn\]\) \{\s+:global\(:scope\) \{\s+display: block;\s+\}\s+:global\(h2\) \{/);
   });
 
-  it("rejects :scope and undeclared or structured :host-state() names", () => {
+  it("rejects :scope and undeclared or structured :state() names", () => {
     assert.throws(() => generated(componentSource("demo-a", "", `<div></div><style>:scope { color: red; }</style>`)), /HY003/);
-    assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host-state([missing]) { color: red; }</style>`)), /HY001/);
-    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" value="[]"></state></defs><div></div><style>:host-state([items]) { color: red; }</style>`)), /HY002/);
+    assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host(:state(missing)) { color: red; }</style>`)), /HY001/);
+    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" value="[]"></state></defs><div></div><style>:host(:state(items)) { color: red; }</style>`)), /HY002/);
   });
 });

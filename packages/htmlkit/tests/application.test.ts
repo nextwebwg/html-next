@@ -323,7 +323,7 @@ describe("application platform", () => {
 
   it("nests each folder's _layout.html inside its parents' layouts, under the selected layout", async () => {
     const root = await app();
-    const shell = (tag: string) => `<template component="${tag}"><defs><prop name="trail" type="string" required>Trail</prop></defs><div data-trail="{$trail}"><slot name="page"></slot></div></template>`;
+    const shell = (tag: string) => `<template component="${tag}"><defs><prop name="trail" type="string" required>Trail</prop></defs><div from:data-trail="$trail"><slot name="page"></slot></div></template>`;
     await write(root, "app/layouts/admin.html", '<template component="admin-shell"><main><slot name="page"></slot></main></template>');
     await write(root, "app/layouts/admin.server.ts", "export const load = () => ({ data: { owner: 'admin' } });");
     await write(root, "app/pages/docs/_layout.html", shell("docs-shell"));

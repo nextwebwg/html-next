@@ -33,7 +33,7 @@ import { parseDuration } from "../duration.js";
 import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
 import { hasBounds } from "../validate.js";
-import { kebabCase } from "../names.js";
+import { kebabCase, propAttribute } from "../names.js";
 import { conformingStates, literalInitial, NotLiteral } from "./state-roots.js";
 import type { Invoked } from "../generate.js";
 
@@ -1431,7 +1431,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       }
       select = { ...reads as Lowered, source: `(${source})` };
     }
-    // `:host-state()` rules test `data-<tag>-state`, kept in step with the props and state they name.
+    // `:host()` prop and state rules test `data-<tag>-state`, kept in step with the props and state they name.
     const states = compileComponentStylesForBuild(definition.css, definition).stateNames;
     if (states.length > 0) {
       const values = states.map((name) => lower({ kind: "id", name }, planner.scope));
@@ -2187,9 +2187,9 @@ export function emitBlocks(
   const propNames = Object.keys(contract.props);
   const delegated = plan.root.spec === 5;
   const slotted = blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
-  /** Whether the props' `data-<name>` the root's template binds itself, which is then its output. */
+  /** Whether the props' `data-<tag>-prop-<name>` the root's template binds itself, which is then its output. */
   const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
-    node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === `data-${kebabCase(name)}`));
+    node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === propAttribute(contract.tag, name)));
   if (plan.arms !== undefined) {
     // Each arm's root block is made on an element: the factory's, or the one a switch creates.
     for (const block of plan.arms.blocks) {
@@ -2454,7 +2454,7 @@ export function emitBlocks(
     plan.states === plan.shown ? "" : `, k: ${plan.states}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
     blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""}${plan.states === plan.shown ? "" : ", r: readonlyView"} };`;
   // What the shared prop boundary reads (`CompiledProp`): each prop's rule as data and its type as compiled checks.
-  const propsSpec = propNames.length === 0 ? undefined : `const D = { props: { ${Object.entries(contract.props).map(([name, prop]) => {
+  const propsSpec = propNames.length === 0 ? undefined : `const D = { g: ${JSON.stringify(contract.tag)}, props: { ${Object.entries(contract.props).map(([name, prop]) => {
       const { type, select, target: _target, description: _description, ...rule } = prop;
       const data = JSON.stringify(rule).slice(1, -1);
       const typed = select === undefined ? propChecks(type)
@@ -2529,7 +2529,7 @@ function armRoot(node: ElementNode, definition: ComponentDefinition): ArmRoot {
   const classes: string[] = [];
   const styles: string[] = [];
   let style = "";
-  const written = [stateAttribute(definition.contract.tag), ...Object.keys(definition.contract.props).map((name) => `data-${kebabCase(name)}`)];
+  const written = [stateAttribute(definition.contract.tag), ...Object.keys(definition.contract.props).map((name) => propAttribute(definition.contract.tag, name))];
   for (const attribute of node.attributes) {
     // Every literal renders on the arm's root; class and style are also the arm's own tokens and properties.
     if (attribute.kind === "literal") literals[attribute.name] = attribute.value;

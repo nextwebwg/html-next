@@ -121,7 +121,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           requestTypes.push(`${path}:${route.request().resourceType()}`);
           const body = path === "/defaults.css" ? `
             :host, *, :host::before, :host::after, *::before, *::after { box-sizing: border-box; }
-            :host-state([open]) .own { color: rgb(1, 2, 3); }
+            :host(:state(open)) .own { color: rgb(1, 2, 3); }
             @media (width > 1px) { @keyframes pulse { to { opacity: .5; } } }
           ` : `<!doctype html><head></head><body>
             ${["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span class="own">own</span><slot></slot></section><style>@import "defaults.css";${tag === "x-a" ? ':host { box-sizing: content-box; }' : ''}</style></template>`).join("")}

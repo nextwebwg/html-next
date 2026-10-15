@@ -1259,14 +1259,14 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
-  it("keeps the :host-state attribute in step like the general runtime", async () => {
+  it("keeps the state attribute in step like the general runtime", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>
       <state name="tone" type="string" value=""></state>`, `
-      <section><p>{$tone}</p></section><style>:host-state([ready]) { color: red; } :host-state([tone="loud"]) { color: blue; }
-      :host-state([selected]) { outline: 1px solid; }</style>`);
+      <section><p>{$tone}</p></section><style>:host(:state(ready)) { color: red; } :host(:state(tone=loud)) { color: blue; }
+      :host(:state(selected)) { outline: 1px solid; }</style>`);
     await same(text, [
       (host) => { host.state.tone = "loud"; host.state.selected = 2; },
       (host) => { host.state.tone = ""; host.state.selected = 0; },
@@ -1539,7 +1539,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       // The equal sum logs nothing and writes nothing; the new one updates the child once.
       assert.deepEqual(run.events.slice(4, 11), [
         "1 state |undefined", "1 props amount=3/3/true", "1 root meter true", "1 connect true null true",
-        "1 props amount=6/6/true", "write data-amount", "write value",
+        "1 props amount=6/6/true", "write data-x-meter-prop-amount", "write value",
       ]);
     } finally {
       observer?.disconnect();

@@ -59,7 +59,7 @@ const reflectedProp = useReflectedProp()
 
 checkHydratedRoot('button', 'x-button')
 
-/** The values the styles' :host-state() rules test. */
+/** The values the styles' :host() prop and state rules test. */
 const hostState = computed(() =>
   [
     checkedProps.value.size && 'size',
@@ -78,8 +78,8 @@ const hostState = computed(() =>
     data-hn
     data-hn-x-button
     v-prop-validity="{ contract: propValidityContract, values: { ...props } }"
-    :data-size="reflectedProp('size', 'size', checkedProps.size, undefined, false)"
-    :data-variant="reflectedProp('variant', 'variant', checkedProps.variant, undefined, false)"
+    :data-x-button-prop-size="reflectedProp('size', 'size', checkedProps.size, undefined, false)"
+    :data-x-button-prop-variant="reflectedProp('variant', 'variant', checkedProps.variant, undefined, false)"
     :data-x-button-state="hostState || undefined"
   >
     <slot />

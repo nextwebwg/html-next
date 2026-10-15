@@ -65,3 +65,29 @@ it("infers selected props from an independently installed Vue library's declarat
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);
+
+it("types an invocation's literal props as the values the live runtime parses", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "html-next-vue-literal-props-"));
+  try {
+    await symlink(modules, join(directory, "node_modules"), "dir");
+    await writeFile(join(directory, "toolbar.html"), `<template component="x-toolbar" status="early" summary="Toolbar."><defs>
+      <prop name="floating" type="boolean" default="false">Floats.</prop>
+      <prop name="docked" type="boolean" default="true">Docks.</prop>
+      <prop name="count" type="number" default="0">Count.</prop>
+      <prop name="label" type="string" default="">Label.</prop>
+    </defs><div role="toolbar" from:aria-label="$label"><span>{$count}</span></div></template>`);
+    await writeFile(join(directory, "editor.html"), `<link rel="component" href="./toolbar.html">
+<template component="x-editor" status="early" summary="Editor."><defs></defs><section><x-toolbar floating docked="false" count="3" label="Tools"></x-toolbar></section></template>`);
+    await convertComponents({ target: "vue", mode: "application", root: directory, outDirectory: directory, entries: ["editor.html"] });
+    const editor = await readFile(join(directory, "vue", "XEditor.vue"), "utf8");
+    // A bare boolean attribute is `true`, as HTML presence reads; a string prop stays an attribute.
+    assert.match(editor, /<XToolbar :floating="true" :docked="false" :count="3" label="Tools" \/>/);
+    await writeFile(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, skipLibCheck: true, module: "ESNext",
+      moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true, noEmit: true },
+      include: ["vue/**/*.vue", "vue/**/*.ts"] }));
+    try { await run(process.execPath, [checker, "-p", join(directory, "tsconfig.json")], { cwd: directory }); }
+    catch (error) { assert.fail((error as { stdout: string }).stdout); }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
