@@ -28,7 +28,7 @@ function invocationAttributes(definition: ComponentDefinition, result: LoaderRes
   }
   const attributes: Record<string, string> = {};
   for (const [name, contract] of Object.entries(definition.contract.props)) {
-    serializePropTarget(contract, props[name]);
+    serializePropTarget(contract, props[name], name, definition.contract.tag);
     // The contract target describes lowering onto native DOM. Invocation attributes carry
     // the public prop name; writing the target name here silently loses remapped props.
     const provided = props[name] === undefined ? contract.default : props[name];

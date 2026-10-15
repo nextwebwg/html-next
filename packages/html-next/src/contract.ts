@@ -345,11 +345,19 @@ export function defineContractWithNativeCheck(
   });
 }
 
+/** `name` and `component` (a tag) name the prop in a diagnostic. */
 export function serializePropTarget(
   prop: PropContract,
   provided: unknown,
+  name?: string,
+  component?: string,
 ): SerializedPropTarget {
   const value = provided === undefined ? prop.default : provided;
+  const invalid = (): never => {
+    const subject = `${name === undefined ? "A prop" : `Prop \`${name}\``}${component === undefined ? "" : ` of <${component}>`}`;
+    const actual = value === null ? "null" : Array.isArray(value) ? "a list" : typeof value === "object" ? "an object" : `a ${typeof value}`;
+    return fail("HC021", `${subject} does not satisfy its declared type \`${formatType(prop.type)}\`: it received ${actual}.`);
+  };
   if (value === undefined) {
     if (prop.required) {
       fail("HC020", "A required prop value was omitted.");
@@ -360,9 +368,7 @@ export function serializePropTarget(
     return { kind: "property", name: prop.target.property, value: null };
   }
   if (value === null) {
-    if (prop.required) {
-      fail("HC021", "A prop value does not satisfy its declared type.");
-    }
+    if (prop.required) invalid();
     if ("attribute" in prop.target) {
       return { kind: "attribute", name: prop.target.attribute, value: null };
     }
@@ -370,10 +376,10 @@ export function serializePropTarget(
   }
   if ((prop.required && value === "") || !accepts(prop.type, value) ||
       !matchesPropBounds(value, prop.type, prop) || !matchesPropValues(value, prop.values)) {
-    fail("HC021", "A prop value does not satisfy its declared type.");
+    invalid();
   }
   const parsed = parseTypedValue(value, prop.type);
-  if (!parsed.ok) fail("HC021", "A prop value does not satisfy its declared type.");
+  if (!parsed.ok) return invalid();
   const canonical = parsed.value as PropValue;
 
   if ("property" in prop.target) {

@@ -8,6 +8,14 @@
 - HTMLKit catch-all routes. `[...name]` matches one or more URL segments and `[[...name]]` any number, including none, and the parameter is the list of segments, as in `{ path: ['a', 'b'] }`; a catch-all is the last segment of its route. `entries()` lists catch-all pages as lists of segments for static builds. Where several routes match a URL, the first differing segment decides: a literal precedes `[name]`, which precedes `[...name]`, which precedes `[[...name]]`. The `RouteParam` type describes a parameter value.
 - HTMLKit redirects. The `redirects` option maps old application paths to an application path or an `http(s)` URL, such as `{ '/start/': '/guide/' }`, and a loader's `redirect(location, status)` ends loading with a redirect, 303 unless it passes 301, 302, 307 or 308. The development server and `application.fetch` answer with the status and a `Location` header (308 for the option, with or without the trailing slash), and `render()` returns the status and `location`. A static build writes a redirect page at each old URL, with a meta refresh, a canonical link and a plain link to the new URL. The manifest's `redirects` lists each one's `from`, `to` and `status`, typed as `ManifestRedirect`, and a redirect from a page's own URL is an error that names the page.
 
+### Changed
+
+- `HC021` names the prop, the component and the type of the value it received, as in `` HC021: Prop `count` of <x-counter> does not satisfy its declared type `number`: it received a string. `` `serializePropTarget(prop, value, name, component)` takes the prop's name and the component's tag for the message, and HTMLKit passes both for the props a page or layout loader returns.
+
+### Fixed
+
+- In compiled components, a `$match` arm inside a `$each` row reads the row's item, so each row renders, hydrates and updates with the arm its own item selects, as in the live runtime and server rendering. `<li $each="item of $items"><template $match><a $when="$item.href">…</a><span $else>…</span></template></li>` keeps the server's `<a>` and `<span>` rows through hydration. `$if`, `$with` and nested `$each` in a row read the row's item in the same way.
+
 ## 1.0.0-alpha.50
 
 ### Added
