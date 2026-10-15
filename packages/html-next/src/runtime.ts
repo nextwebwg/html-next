@@ -336,7 +336,7 @@ function registryFor(root: Document): DocumentRegistry {
   return registry;
 }
 
-/** The state names each definition's `:host-state()` rules test, recorded when its styles compile. */
+/** The prop and state names each definition's `:host()` rules test, recorded when its styles compile. */
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
 type ComponentStyleCompiler = (css: string, definition: ComponentDefinition, source?: string,
@@ -2633,8 +2633,8 @@ function renderTemplateNode(
 }
 
 /**
- * Keeps `data-<tag>-state` in step with the resolved props and state the definition's `:host-state()`
- * rules test, so styles see defaults and state as well as explicit props.
+ * Keeps `data-<tag>-state` in step with the resolved props and state the definition's `:host()` rules
+ * test, so styles see defaults and state as well as explicit props.
  */
 function installStateAttribute(instance: RuntimeInstance): void {
   const names = stateNamesByDefinition.get(instance.definition) ?? [];

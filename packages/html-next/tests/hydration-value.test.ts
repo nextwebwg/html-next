@@ -26,6 +26,23 @@ describe("rendered instance values", () => {
     assert.equal(restored.first, restored.second);
   });
 
+  it("writes plain data as JSON, keeping shared objects, holes and negative zero tagged", () => {
+    const shared = { label: "Shared" };
+    const holes: number[] = [1];
+    holes[2] = 2;
+    const original = { tree: [{ label: "Home", children: [] }, { label: "Guide", open: true, order: null, children: [{ label: "Install" }] }],
+      first: shared, second: shared, holes, zero: { value: -0 } };
+    const encoded = encodeHydrationValue(original);
+    const entries = Object.fromEntries((encoded as readonly ["object", readonly (readonly [string, readonly unknown[]])[]])[1]);
+    assert.deepEqual(entries.tree, ["json", original.tree]);
+    assert.deepEqual([entries.first![0], entries.second![0], entries.holes![0], entries.zero![0]], ["json", "reference", "array", "object"]);
+    const restored = decodeHydrationValue(JSON.parse(JSON.stringify(encoded))) as typeof original;
+    // A hole restores as the undefined it reads as.
+    assert.deepEqual(restored, { ...original, holes: [1, undefined, 2] });
+    assert.equal(restored.first, restored.second);
+    assert.equal(Object.is(restored.zero.value, -0), true);
+  });
+
   it("rejects values that cannot be restored instead of silently changing them", () => {
     const cyclic: { self?: unknown } = {};
     cyclic.self = cyclic;

@@ -23,7 +23,7 @@ function identity(element: HeadElement): string | undefined {
 
 export async function renderHead(resource: ReturnType<typeof applicationResource>, definition: ComponentDefinition,
   result: LoaderResult, previous: RenderedHead, url: string,
-  invoke: (definition: ComponentDefinition, result: LoaderResult) => string): Promise<RenderedHead> {
+  invoke: (definition: ComponentDefinition) => string): Promise<RenderedHead> {
   let title = previous.title;
   let description = previous.description;
   const elements = [...(previous.elements ?? defaultHeadElements)];
@@ -41,7 +41,7 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
       node.nodeName = "span";
     }
     const headDefinition = parseComponent(`<template component="hk-head"><defs>${metadata.propDeclarations}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
-    const rendered = await renderComponents(invoke(headDefinition, { props: result.props ?? {} }), { definitions: [headDefinition], url });
+    const rendered = await renderComponents(invoke(headDefinition), { definitions: [headDefinition], url });
     const root = parseFragment(rendered.html).childNodes.find(node => "tagName" in node);
     if (root === undefined || !("childNodes" in root)) throw new HtmlKitError("Head rendering produced no root.", definition.source.file);
     const text = (node: DefaultTreeAdapterMap["node"]): string => "value" in node ? node.value : "childNodes" in node ? node.childNodes.map(text).join("") : "";

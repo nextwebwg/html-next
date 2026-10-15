@@ -389,7 +389,9 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
     await write(root, "app/pages/docs/_layout.server.ts", "export const load = ({ url }) => ({ props: { section: url.pathname } });");
     await write(root, "app/pages/docs/shell.ts", "export default function(host) { host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1); }");
     await write(root, "app/pages/docs/a.html", '<template component="a-page"><title>A</title><article><a id="to-b" href="/docs/b/">B</a></article></template>');
-    await write(root, "app/pages/docs/b.html", '<template component="b-page"><title>B</title><article><a id="to-home" href="/">Home</a></article></template>');
+    await write(root, "app/pages/docs/b.html", '<template component="b-page"><title>B</title><article><a id="to-deep" href="/docs/x/y/z/deep/">Deep</a></article></template>');
+    // Below <hk-nav>'s three inline levels, in its <hk-nav-items> instances.
+    await write(root, "app/pages/docs/x/y/z/deep.html", '<template component="deep-page"><title>Deep</title><article><a id="to-home" href="/">Home</a></article></template>');
     await buildApplication({ root });
     preview = await previewApplication({ root, port: 0 });
   }, 120_000);
@@ -417,6 +419,10 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
         const tree = () => page.evaluate(() => [document.querySelector<HTMLDetailsElement>("nav details")!.open, document.querySelector("nav summary")!.textContent,
           document.querySelector('nav a[aria-current="page"]')?.textContent ?? null]);
         expect(await tree()).toEqual([true, "docs", "b"]);
+        await page.locator("#to-deep").click();
+        await settled(page, "Deep");
+        expect(await page.evaluate(() => [[...document.querySelectorAll<HTMLDetailsElement>("nav details")].map(details => details.open),
+          document.querySelector('nav a[aria-current="page"]')?.textContent ?? null])).toEqual([[true, true, true, true], "deep"]);
         // Leaving the folder drops its layout, and its folder closes in the tree.
         await page.locator("#to-home").click();
         await settled(page, "Home");

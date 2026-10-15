@@ -206,12 +206,12 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "styles by camel-case props and state with :host-state()",
+    name: "styles by camel-case props and state with :state()",
     source: scene({
       tag: "x-camel-state",
       defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state type="string" name="toneName" value="warm"></state>`,
       root: `<div></div>`,
-      style: `:host([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
+      style: `:host([isWide]) { width: 123px; } :host(:state(toneName=warm)) { height: 45px; }`,
       use: `<x-camel-state id="c"></x-camel-state>`,
     }),
     expect: {
@@ -873,11 +873,11 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HC011" },
   },
   {
-    name: "HY002: structured state cannot be tested by :host-state()",
+    name: "HY002: structured state cannot be tested by :state()",
     source: scene({
       defs: `<state name="items" type="list(string)" value="[]"></state>`,
       root: `<div></div>`,
-      style: `:host-state([items]) { color: red; }`,
+      style: `:host(:state(items)) { color: red; }`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HY002" },

@@ -1776,7 +1776,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const first = `<template component="x-styled-ssr" status="early" summary="Style hydration.">` +
             `<defs><state name="active" type="boolean" value="false"></state></defs>` +
             `<article></article><style>:host { color: rgb(10, 20, 30) }` +
-            `:host-state([active]) { color: rgb(40, 50, 60) }</style></template>`;
+            `:host(:state(active)) { color: rgb(40, 50, 60) }</style></template>`;
           const second = `<template component="x-other-ssr" status="early" summary="Second bundled component.">` +
             `<aside></aside><style>:host { padding: 7px }</style></template>`;
           const definitions = first + second;

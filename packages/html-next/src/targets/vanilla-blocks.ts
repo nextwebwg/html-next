@@ -1431,7 +1431,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       }
       select = { ...reads as Lowered, source: `(${source})` };
     }
-    // `:host-state()` rules test `data-<tag>-state`, kept in step with the props and state they name.
+    // `:host()` prop and state rules test `data-<tag>-state`, kept in step with the props and state they name.
     const states = compileComponentStylesForBuild(definition.css, definition).stateNames;
     if (states.length > 0) {
       const values = states.map((name) => lower({ kind: "id", name }, planner.scope));

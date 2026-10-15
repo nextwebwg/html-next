@@ -878,7 +878,7 @@ export function writeHtmlRange(start: Comment, html: string): void {
   end.before(sanitizeFragment(html, start.ownerDocument, markContentOnly));
 }
 
-/** `data-<tag>-state` for the props and state `:host-state()` rules name, as live writes it. */
+/** `data-<tag>-state` for the props and state `:host()` rules name, as live writes it. */
 export const hostState = (names: readonly string[], values: readonly unknown[]): string =>
   stateAttributeValue(names, (name) => values[names.indexOf(name)]);
 
