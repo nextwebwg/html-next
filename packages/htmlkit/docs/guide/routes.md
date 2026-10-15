@@ -147,9 +147,9 @@ To use another layout for one page, name it; `content="none"` uses no layout:
 </template>
 ```
 
-A layout name is a file in `app/layouts/`, or an entry of the `layouts` option, which plugins add to
-([Configuration](/htmlkit/configuration#named-layouts)). A name with neither is an error that names
-the page and the file it expected.
+A layout name is an entry of the site's `layouts` option, a file in `app/layouts/`, or a plugin's
+layout, in that order ([Configuration](/htmlkit/configuration#named-layouts)). A name that matches
+none of them is an error that names the page and the file it expected.
 
 To give a whole folder a layout, add a `_layout.html` to it ([below](#nested-layouts)), or see
 `layoutDefaults` in [Configuration](/htmlkit/configuration).

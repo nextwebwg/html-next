@@ -3,7 +3,7 @@ import { realpathSync, statSync } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { HtmlKitError, within } from "./config.js";
+import { HtmlKitError, pluginLayouts, within, type PluginOptions } from "./config.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import type { ApplicationOptions, ApplicationRoute, HtmlKitPlugin, RouteGroup, RouteInput, RouteLayer } from "./types.js";
 
@@ -205,6 +205,15 @@ export async function discover(root: string, options: DiscoveryOptions) {
   const discovered: ApplicationRoute[] = [];
   let notFound: ApplicationRoute | undefined;
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
+  // A layout name is the site's layouts entry, then its app/layouts/<name>.html (the name itself),
+  // then a plugin's entry, so a site overrides a plugin's layout with a file of the same name.
+  const named = async (name: string): Promise<string | RouteLayer | undefined> => {
+    if (options.layouts !== undefined && Object.hasOwn(options.layouts, name)) return options.layouts[name]!;
+    try { await stat(resolve(root, `app/layouts/${name}.html`)); return name; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const plugins = (options as PluginOptions)[pluginLayouts];
+    return plugins !== undefined && Object.hasOwn(plugins, name) ? plugins[name] : undefined;
+  };
   for (const { prefix: _prefix, directoryLayout, folderLayouts, notFound: isNotFound, index, ...route } of routes) {
     const { identity, resource } = await resourceOf(route.component);
     const pageName = pageDefinition(resource, route.component).contract.tag;
@@ -217,26 +226,22 @@ export async function discover(root: string, options: DiscoveryOptions) {
     // An alias is a further URL for its page, so it takes the layout of the page's own URL.
     const directory = layoutDefaults.find(([prefix]) => (route.canonical ?? route.pattern).startsWith(prefix));
     let selected = metadata.layout ?? directoryLayout ?? directory?.[1] ?? options.layout;
-    if (selected === undefined && route.layouts.length === 0) {
-      if (options.layouts?.default !== undefined) selected = "default";
-      else try { await stat(resolve(root, "app/layouts/default.html")); selected = "default"; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (selected === undefined && route.layouts.length === 0 && await named("default") !== undefined) selected = "default";
+    if (typeof selected === "string" && selected !== "none") {
+      if (!/^[A-Za-z0-9_-]+$/.test(selected)) throw new HtmlKitError("Layout names must be filename slugs.", route.component);
+      const found = await named(selected);
+      if (found === undefined) {
+        throw new HtmlKitError(`Layout ${selected} needs ${resolve(root, `app/layouts/${selected}.html`)} or a layouts entry named ${selected}.`, route.component);
+      }
+      if (typeof found === "object") selected = found;
     }
-    // A name from the layouts option, which plugins extend, is a layer like any other.
-    if (typeof selected === "string" && options.layouts !== undefined && Object.hasOwn(options.layouts, selected)) selected = options.layouts[selected]!;
     let layouts = route.layouts;
     if (selected === false || selected === "none") layouts = [];
     else if (typeof selected === "object") {
       layouts = [{ component: resolve(root, selected.component),
         ...(selected.server === undefined ? {} : { server: typeof selected.server === "string" ? resolve(root, selected.server) : selected.server }) }];
     } else if (selected !== undefined) {
-      if (!/^[A-Za-z0-9_-]+$/.test(selected)) throw new HtmlKitError("Layout names must be filename slugs.", route.component);
       const component = resolve(root, `app/layouts/${selected}.html`);
-      try { await stat(component); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        throw new HtmlKitError(`Layout ${selected} needs ${component} or a layouts entry named ${selected}.`, route.component);
-      }
       const servers: string[] = [];
       for (const extension of ["ts", "js"]) {
         const candidate = resolve(root, `app/layouts/${selected}.server.${extension}`);

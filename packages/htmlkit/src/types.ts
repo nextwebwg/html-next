@@ -17,8 +17,8 @@ export interface ApplicationOptions {
   readonly layout?: string | false | RouteLayer;
   /**
    * Named layouts beside app/layouts, such as { home: { component, server: { load } } }. hk:layout,
-   * layout, layoutDefaults, and a page directory's layout name them, and a name here takes the place
-   * of app/layouts/<name>.html. A plugin's layouts add to these, and the first definition of a name wins.
+   * layout, layoutDefaults, and a page directory's layout name them. A name resolves to an entry here,
+   * then app/layouts/<name>.html, then a plugin's layouts entry, earliest plugin first.
    */
   readonly layouts?: Readonly<Record<string, RouteLayer>>;
   /** Route-directory defaults, overridden by page metadata; longest prefix wins. */

@@ -143,16 +143,26 @@ it("names plugin layouts that hk:layout selects, with their own loaders and decl
   const plugin: HtmlKitPlugin = { name: "home", config: () => ({ layouts: { home: { component: join(root, "plugin/home.html"), server: {
     // A loader returns exactly the props its layout declares.
     load: ({ propNames }) => { seen.push(propNames); return { props: Object.fromEntries(Object.entries(data).filter(([name]) => propNames.includes(name))) }; } } } } }) };
-  const application = await createApplication({ root, plugins: [notes(root), plugin] });
+  // A later plugin's layout of the same name loses to the earlier one's.
+  await write(root, "plugin/later.html", '<template component="later-shell"><main><slot name="page"></slot></main></template>');
+  const later: HtmlKitPlugin = { name: "later", config: () => ({ layouts: { home: { component: join(root, "plugin/later.html") } } }) };
+  const application = await createApplication({ root, plugins: [notes(root), plugin, later] });
   try {
     const { body } = await application.render("/landing/");
     expect(body).toContain('data-component="home-shell"');
     expect(body).toContain("<h1>Welcome</h1>");
     expect(seen).toEqual([["title"]]);
   } finally { await application.close(); }
-  // The site's own layouts win over a plugin's of the same name.
-  const merged = await withPlugins({ root, layouts: { home: { component: "app/home.html" } }, plugins: [plugin] });
-  expect(merged.layouts?.home?.component).toBe("app/home.html");
+  // The site's app/layouts/home.html wins over the plugin's, and its own layouts entry wins over both.
+  await write(root, "app/layouts/home.html", '<template component="site-home"><main><slot name="page"></slot></main></template>');
+  await write(root, "app/own.html", '<template component="own-home"><main><slot name="page"></slot></main></template>');
+  for (const [layouts, shell] of [[undefined, "site-home"], [{ home: { component: "app/own.html" } }, "own-home"]] as const) {
+    const site = await createApplication({ root, plugins: [notes(root), plugin], ...(layouts === undefined ? {} : { layouts }) });
+    try { expect((await site.render("/landing/")).body).toContain(`data-component="${shell}"`); }
+    finally { await site.close(); }
+  }
+  // Plugins' layouts stay apart from the site's layouts option.
+  expect((await withPlugins({ root, plugins: [plugin] })).layouts).toBeUndefined();
 });
 
 it("names the page and the expected file for a missing named layout", async () => {

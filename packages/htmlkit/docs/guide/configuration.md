@@ -142,10 +142,14 @@ const theme: HtmlKitPlugin = {
 ```
 
 A page with `<meta name="hk:layout" content="home">` then renders inside it, and its loader's
-`data` reaches the page's loader as `parent`. A `layouts` entry takes the place of
-`app/layouts/<name>.html`, and a `default` entry wraps every page as `default.html` does. A plugin's
-`layouts` add to the site's own; for a name defined twice, the site's own entry, then the earliest
-plugin's, wins.
+`data` reaches the page's loader as `parent`. A `default` entry wraps every page as `default.html`
+does. HTMLKit looks a name up in this order, and the first match is the layout:
+
+1. The site's own `layouts` option.
+2. The site's `app/layouts/<name>.html`.
+3. Plugins' `layouts`, earliest plugin first.
+
+So a site replaces a plugin's `home` layout by adding `app/layouts/home.html`.
 
 A layout's loader receives `propNames`, the props its component declares, which are the props it may
 return. A plugin that has more data than a site's layout declares returns

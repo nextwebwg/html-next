@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createServer, normalizePath } from "vite";
-import type { ApplicationOptions, HtmlKitPlugin } from "./types.js";
+import type { ApplicationOptions, HtmlKitPlugin, RouteLayer } from "./types.js";
 
 /**
  * The options htmlkit.config.ts (or .js) at root exports by default, loaded through Vite as the CLI
@@ -50,19 +50,23 @@ export function configure(options: ApplicationOptions) {
   return { root, base, origin: origin.origin, outDir, prefetch };
 }
 
+/** Plugins' named layouts, kept apart from the site's: a site's app/layouts/<name>.html wins over them. */
+export const pluginLayouts = Symbol("htmlkit.pluginLayouts");
+export type PluginOptions = ApplicationOptions & { readonly [pluginLayouts]?: Readonly<Record<string, RouteLayer>> };
+
 const pluginsApplied = new WeakSet<ApplicationOptions>();
 /** Merge each plugin's config() once; options already merged pass through, so nested entry points don't repeat hooks. */
 export async function withPlugins(options: ApplicationOptions): Promise<ApplicationOptions> {
   if (pluginsApplied.has(options) || options.plugins === undefined) return options;
-  let merged = options;
+  let merged: PluginOptions = options;
   for (const plugin of options.plugins) {
-    const added = await plugin.config?.(merged) ?? {};
+    const { layouts, ...added } = await plugin.config?.(merged) ?? {};
     // Page folders, stylesheets, and routes add to the application's own; app/pages stays the default folder.
     merged = { ...merged, ...added, plugins: options.plugins,
       ...(added.pages === undefined ? {} : { pages: [...merged.pages ?? [{ dir: "app/pages", optional: true }], ...added.pages] }),
       ...(added.css === undefined ? {} : { css: [...merged.css ?? [], ...added.css] }),
-      // The site's own named layouts, then earlier plugins', win over a later plugin's of the same name.
-      ...(added.layouts === undefined ? {} : { layouts: { ...added.layouts, ...merged.layouts } }),
+      // An earlier plugin's named layout wins over a later plugin's of the same name.
+      ...(layouts === undefined ? {} : { [pluginLayouts]: { ...layouts, ...merged[pluginLayouts] } }),
       ...(added.routes === undefined ? {} : { routes: [...merged.routes ?? [], ...added.routes] }) };
   }
   merged = { ...merged };
