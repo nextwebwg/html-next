@@ -109,6 +109,22 @@ const cases: readonly ParityCase[] = [
     expectedAfter: { border: "3px" },
   },
   {
+    name: "host selectors under an ancestor match the root and its pseudo-elements",
+    features: ["scoped styles", "host", "ancestor context", "host pseudo-elements"],
+    definitions: {
+      "x-host-context": `<template component="x-host-context"><p><slot></slot></p><style>
+        .wide :host { padding-left: 3px; } .wide :host::after { content: "x"; }
+        .wide > :host(.a) { padding-right: 5px; } .wide :host(:not(.c)) { padding-top: 7px; }
+      </style></template>`,
+    },
+    invocation: `<div class="wide"><x-host-context id="case" class="a">Go</x-host-context></div>`,
+    vueRender: `h("div", { class: "wide" }, [h(XHostContext, { id: "case", class: "a" }, { default: () => "Go" })])`,
+    root: "#case",
+    probe: `({ left: getComputedStyle(root).paddingLeft, right: getComputedStyle(root).paddingRight, top: getComputedStyle(root).paddingTop, after: getComputedStyle(root, '::after').content })`,
+    action: `root.parentElement.classList.remove('wide')`,
+    expectedAfter: { left: "0px", right: "0px", top: "0px", after: "none" },
+  },
+  {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
     features: ["scoped styles", "delegated root", "host pseudo-elements"],
     definitions: {

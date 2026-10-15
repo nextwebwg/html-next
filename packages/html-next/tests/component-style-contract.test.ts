@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { compileStyle } from "@vue/compiler-sfc";
 import { describe, it } from "vitest";
 
 import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "../src/component-styles-build.js";
@@ -122,6 +123,18 @@ it("keeps Vue grouping rules in the component scope and keyframes document-wide"
   assert.match(result.css, /:scope::before/);
   assert.match(result.css, /\*::after/);
   assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
+});
+
+it("keeps Vue's scope attribute on a host subject under an ancestor", () => {
+  const button = parseComponent('<template component="ui-x"><button><slot></slot></button></template>');
+  const css = compileComponentStylesForVue(`.wide :host { color: red; } .wide :host::after { content: "x"; }
+    .wide > :host(.a) { color: blue; } .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`, button).css;
+  const scoped = compileStyle({ source: css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code.replace(/\s+/g, " ");
+  assert.equal(scoped, '@scope (.ui-x) {[data-v-1]:scope:not(:not(:is(.wide *))) { color: red; }'
+    + '[data-v-1]:scope:not(:not(:is(.wide *)))::after { content: "x"; }'
+    + ':scope.a[data-v-1]:not(:not(:is(.wide > *))) { color: blue; }'
+    + '[data-v-1]:scope:not(.c):not(:not(:is(.wide *))) { color: green; }'
+    + '.wide :scope .in[data-v-1] { color: navy; } }');
 });
 
 it("keeps a component type selector's namespace in Vue's class form", () => {

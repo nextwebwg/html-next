@@ -121,13 +121,24 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
  * component roots, as in the default build, through classes: the root carries its tag, and each
  * component the template invokes carries its own, which Vue passes to that component's root.
  * `:host` is `:scope`, and a component selected by tag is its class.
+ *
+ * Vue adds its scope attribute to a selector's last compound with a class, attribute, type, or id,
+ * so in `.wide :scope` it lands on the ancestor, which never carries it. A `:scope` subject with
+ * context therefore tests that context on itself, `:scope:not(:not(:is(.wide *)))`, which keeps the
+ * selector's specificity and leaves Vue no earlier compound to scope. Vue scopes inside a bare
+ * `:is()`, not inside `:not()`; the inner `:is()` is for WebKit, which drops a pseudo-element of
+ * `:scope:not(:not(.wide *))`.
  */
 export function compileComponentStylesForVue(
   css: string,
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
-  return compileClassScopedStyles(css, definition, source, ["host-state"], (selector) => selector);
+  return compileClassScopedStyles(css, definition, source, ["host-state"], (selector) => postcss.list.comma(selector).map((complex) => {
+    const { start, pseudo } = subjectCompound(complex);
+    if (start === 0 || !/:scope(?![\w-])/.test(complex.slice(start, pseudo))) return complex;
+    return `${complex.slice(start, pseudo)}:not(:not(:is(${complex.slice(0, start)}*)))${complex.slice(pseudo)}`;
+  }).join(", "));
 }
 
 /**
