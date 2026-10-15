@@ -1,9 +1,9 @@
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { createApplication, discoverRoutes, type FolderMetadata, type HtmlKitPlugin } from "../src/index.js";
+import { createApplication, discoverRoutes } from "../src/index.js";
 import { write } from "./fixture.js";
 
 const roots: string[] = [];
@@ -147,56 +147,6 @@ it("nests navigation by folder and group, labels folders from their index pages,
     expect(body).toMatch(/<a rel="prev" href="\/guide\/next\/">/);
     expect(body).toMatch(/<a rel="next" href="\/guide\/deep\/more\/">/);
   } finally { await application.close(); }
-});
-
-it("labels and orders folders from a plugin's folder() hook, in the tree, navigation() and pager()", async () => {
-  const root = await site();
-  // Category folders without an index page, labelled and ordered by a _category.json inside them.
-  for (const [file, name] of [["components/forms/button", "button"], ["components/forms/input", "input"], ["components/layout/grid", "grid"],
-    ["components/(Display)/badge", "badge"], ["components/overlay/index", "overlay"], ["components/overlay/dialog", "dialog"]]) {
-    await write(root, `app/pages/${file}.html`, `<template component="page-${name}"><h1>${name}</h1></template>`);
-  }
-  await write(root, "app/pages/components/forms/_category.json", '{ "label": "Forms", "order": 2 }');
-  await write(root, "app/pages/components/layout/_category.json", '{ "label": "Layout", "order": 1 }');
-  await write(root, "app/pages/components/(Display)/_category.json", '{ "label": "Display", "order": 3 }');
-  // An index page's hk:label labels its folder before the plugin does; its <title> follows the plugin.
-  await write(root, "app/pages/components/overlay/index.html", '<template component="page-overlay"><title>Overlay title</title><h1>overlay</h1></template>');
-  await write(root, "app/pages/components/overlay/_category.json", '{ "label": "Overlays", "order": 4 }');
-  const categories: HtmlKitPlugin = { name: "categories", async folder(dir, { watch }) {
-    const file = join(dir, "_category.json");
-    watch(file);
-    try { return JSON.parse(await readFile(file, "utf8")) as FolderMetadata; } catch { return undefined; }
-  } };
-  const later: HtmlKitPlugin = { name: "later", folder: () => ({ label: "Later", order: 0 }) };
-  const item = "object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })";
-  await write(root, "app/layouts/default.html", `<template component="pager-shell"><defs>
-    <prop name="previous" type="${item}" nullable>Previous</prop><prop name="next" type="${item}" nullable>Next</prop></defs>
-    <main><slot name="page"></slot><hk-pager from:previous="$previous" from:next="$next"></hk-pager></main></template>`);
-  await write(root, "app/layouts/default.server.ts", 'export const load = async ({ pager }) => ({ props: await pager() });');
-  const application = await createApplication({ root, plugins: [categories, later] });
-  try {
-    const current = "/components/forms/input/";
-    const components = (await application.navigationTree({ from: "/components/", current }));
-    expect(components.map(node => [node.label, node.order, node.children.map(child => child.label)])).toEqual([
-      ["Layout", "1", ["grid"]], ["Forms", "2", ["button", "input"]], ["Display", "3", ["badge"]], ["Overlays", "4", ["dialog"]]]);
-    expect(components[1]!.open).toBe(true);
-    expect(components[3]!.href).toBe("/components/overlay/");
-    expect((await application.navigation({ from: "/components/" })).map(item => [item.href, item.group])).toEqual([
-      ["/components/layout/grid/", undefined], ["/components/forms/button/", undefined], ["/components/forms/input/", undefined],
-      ["/components/badge/", "Display"], ["/components/overlay/", undefined], ["/components/overlay/dialog/", undefined]]);
-    // The pager walks the same order: Layout's last page, then Forms' first.
-    expect((await application.render("/components/layout/grid/")).body).toMatch(/<a rel="next" href="\/components\/forms\/button\/">/);
-    expect(application.watchFiles).toContain(join(root, "app/pages/components/forms/_category.json"));
-    // A folder no earlier plugin describes takes the later plugin's metadata, over an index page's <title>.
-    expect((await application.navigationTree()).filter(node => node.label === "Later").map(node => [node.href, node.order])).toEqual([[undefined, "0"], ["/guide/", "0"]]);
-  } finally { await application.close(); }
-  await write(root, "app/pages/components/overlay/index.html", '<template component="page-overlay"><meta name="hk:label" content="Overlay page"><meta name="hk:order" content="9"><h1>overlay</h1></template>');
-  const indexed = await createApplication({ root, plugins: [categories] });
-  try {
-    expect((await indexed.navigationTree({ from: "/components/" })).map(node => [node.label, node.order]).at(-1)).toEqual(["Overlay page", "9"]);
-  } finally { await indexed.close(); }
-  await expect(discoverRoutes(root, { plugins: [{ name: "bad", folder: () => ({ order: -1 }) }] })).rejects.toThrow(/Plugin bad's folder\(\) order must be a whole number/);
-  await expect(discoverRoutes(root, { plugins: [{ name: "broken", folder: () => { throw new Error("unreadable"); } }] })).rejects.toThrow(/Plugin broken failed in folder: unreadable/);
 });
 
 it("renders a tree's first three levels inline in <hk-nav>, and deeper levels through <hk-nav-items>", async () => {

@@ -67,11 +67,6 @@ folder, so on an index page, `hk:order` orders the whole folder among its neighb
 the folder's own prefix: `hk:order` 5 on `guide/index.html` sorts `guide/` as `05.guide/` would.
 The site's home page has no folder to order, so `hk:order` there is an error.
 
-A folder without an index page takes its label and order from a plugin's
-[`folder()` hook](/htmlkit/configuration#folder-labels-and-order), such as one that reads a
-`_category.json` inside it. The order takes the place of the folder's prefix, as `hk:order` on an
-index page does.
-
 ## Groups
 
 A [route group](/htmlkit/routes#route-groups), such as `01.(Getting started)/`, keeps its pages
@@ -178,12 +173,12 @@ For `01.guide/index.html` (titled "The guide"), `01.guide/01.install.html`, and 
 
 | Field | Value |
 | --- | --- |
-| `label` | A page's label. A folder's is its index page's `hk:label`, then a plugin's [`folder()` label](/htmlkit/configuration#folder-labels-and-order), then the index page's static `<title>`, then the folder name; a group's is a plugin's `folder()` label, then the text in its parentheses. |
+| `label` | A page's label. A folder's is its index page's `hk:label`, then its static `<title>`, then the folder name; a group's is the text in its parentheses. |
 | `href`, `pageName` | The page's URL and component name, on a page or a folder with an index page. |
 | `current` | `"page"` for the page being rendered, otherwise `"false"`. |
 | `open` | `true` when the node or a node inside it is the current page. |
 | `depth` | The nesting level, `0` at the top. |
-| `order` | The node's number-and-dot prefix, a plugin's `folder()` order, or `hk:order`, or `null`. |
+| `order` | The node's number-and-dot prefix or `hk:order`, or `null`. |
 | `children` | The pages, folders, and groups inside it, in navigation order. |
 
 A folder with an index page is that page's node, and its summary links to the page. `from` gives the

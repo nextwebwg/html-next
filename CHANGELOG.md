@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.53
+
+### Removed
+
+- The HTMLKit `folder(dir, { watch })` plugin hook is removed, with its `FolderMetadata` and `FolderContext` types. A folder takes its label and order from its index page's `hk:label` and `hk:order`, and a route group takes its label from its parentheses and its order from its number-and-dot prefix. `page.watch(file)` and `Application.watchFiles` remain for page compilers.
+
 ## 1.0.0-alpha.52
 
 ### Added
