@@ -127,22 +127,23 @@ const cases: readonly ParityCase[] = [
   {
     // Each consumer rule is one class more specific than the host rule it meets, so it wins.
     name: "host selectors keep the live runtime's specificity against consumer rules",
-    features: ["scoped styles", "host", "ancestor context", "host pseudo-elements", "specificity"],
+    features: ["scoped styles", "host", "ancestor context", "host pseudo-elements", "component type selectors", "nesting", "specificity"],
     definitions: {
       "x-host-weight": `<template component="x-host-weight"><p><slot></slot></p><style>
         :host { padding-left: 9px; } :host::after { content: "a"; } :host(.on) { padding-right: 9px; }
         .wide :host { padding-top: 9px; } .wide :host(.on) { padding-bottom: 9px; }
+        :host:is(x-host-weight) { margin-left: 9px; } :host { margin-right: 9px; & p { margin: 0; } }
       </style></template>`,
     },
-    invocation: `<style>.chip.on { padding-left: 2px; } .chip.on::after { content: "b"; }
+    invocation: `<style>.chip.on { padding-left: 2px; margin-left: 2px; margin-right: 2px; } .chip.on::after { content: "b"; }
       .chip.on.big { padding-right: 2px; padding-top: 2px; } .wide .chip.on.big { padding-bottom: 2px; }</style>
       <div class="wide"><x-host-weight id="case" class="chip on big">Go</x-host-weight></div>`,
-    vueRender: `h("div", {}, [h("style", ".chip.on { padding-left: 2px; } .chip.on::after { content: 'b'; } .chip.on.big { padding-right: 2px; padding-top: 2px; } .wide .chip.on.big { padding-bottom: 2px; }"),
+    vueRender: `h("div", {}, [h("style", ".chip.on { padding-left: 2px; margin-left: 2px; margin-right: 2px; } .chip.on::after { content: 'b'; } .chip.on.big { padding-right: 2px; padding-top: 2px; } .wide .chip.on.big { padding-bottom: 2px; }"),
       h("div", { class: "wide" }, [h(XHostWeight, { id: "case", class: "chip on big" }, { default: () => "Go" })])])`,
     root: "#case",
-    probe: `({ left: getComputedStyle(root).paddingLeft, right: getComputedStyle(root).paddingRight, top: getComputedStyle(root).paddingTop, bottom: getComputedStyle(root).paddingBottom, after: getComputedStyle(root, '::after').content })`,
+    probe: `(({ paddingLeft, paddingRight, paddingTop, paddingBottom, marginLeft, marginRight }) => ({ paddingLeft, paddingRight, paddingTop, paddingBottom, marginLeft, marginRight, after: getComputedStyle(root, '::after').content }))(getComputedStyle(root))`,
     action: `root.classList.remove('on')`,
-    expectedAfter: { left: "9px", right: "0px", top: "9px", bottom: "0px", after: '"a"' },
+    expectedAfter: { paddingLeft: "9px", paddingRight: "0px", paddingTop: "9px", paddingBottom: "0px", marginLeft: "9px", marginRight: "9px", after: '"a"' },
   },
   {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",

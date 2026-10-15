@@ -26,6 +26,8 @@
 - Server rendering renders a component in a list row with list or object props, such as one that renders itself for nested items. Rendering repeats its update and lowering passes until a pass lowers no further component, so the row's component takes its props and renders its content.
 - A compiled Vanilla component that invokes itself compiles to one module that calls its own factory.
 - In converted Vue components, every `:host` rule has the live runtime's specificity: `:host`, `:host(…)`, and either one under an ancestor selector or with a pseudo-element. The converter emits the root as `:scope:where(:scope)`, which Vue's scoped styles turn into `:scope:where([data-v-…]:scope)`, the counterpart of the live runtime's `:scope:where([data-component~="…"])`, and puts the rule's other tests and ancestor context in an `:is()` after it, so `.wide :host(.on)` is `:scope:where(:scope):is(.wide .on)`. A consumer rule more specific than a component's `:host` rule applies to the root in converted Vue components as it does in the live runtime.
+- In converted Vue and Svelte components, a component selected by its tag has the live runtime's specificity, a type selector's, alone or in `:host:is(…)`: the converter emits `x-card` as `:is(x-card, :where(.x-card))`, the counterpart of the live runtime's `:is(x-card, :where([data-component~="x-card"]))`.
+- In converted Vue components, a rule that holds nested rules applies its own declarations at its own specificity, `:host` rules included. The converter moves those declarations, and those of its nested at-rules, into a first nested `:where(&):is(&) { … }`, which Vue's scoped styles turn into `:where(&[data-v-…]):is(&)`.
 
 ## 1.0.0-alpha.50
 

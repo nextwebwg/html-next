@@ -991,7 +991,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(style, /:scope:where\(:scope\) \{\s+display: block;\s+\}/);
     assert.match(style, /:scope\[data-x-feature-state~="open"\] \.panel/);
     assert.match(style, /:slotted\(p\)/);
-    assert.match(style, /:is\(x-badge, \.x-badge\)/);
+    assert.match(style, /:is\(x-badge, :where\(\.x-badge\)\)/);
     assert.match(vue, /<section\s+class="x-feature panel"/);
     assert.match(vue, /<XBadge class="x-badge" /);
     assert.doesNotMatch(vue, /data-component/);

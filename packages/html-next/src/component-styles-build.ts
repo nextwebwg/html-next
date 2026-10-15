@@ -120,7 +120,8 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
  * A native scope keeps ordinary selectors to the component's own descendants and stops at nested
  * component roots, as in the default build, through classes: the root carries its tag, and each
  * component the template invokes carries its own, which Vue passes to that component's root.
- * `:host` is `:scope`, and a component selected by tag is its class.
+ * `:host` is `:scope`, and a component selected by tag is its class in `:where()`, which keeps the
+ * type selector's specificity, as the live runtime's `:where([data-component~="…"])` does.
  *
  * Vue adds its scope attribute to a selector's last compound with a class, attribute, type, or id,
  * and otherwise inside the first `:where()` or `:is()` of a compound with none. A `:scope` subject is
@@ -129,8 +130,11 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
  * `:scope:where([data-v-…]:scope)`, the live runtime's `:scope:where([data-component~="…"])`, so the
  * root carries the scope attribute at the live runtime's specificity. (`:where(*)` would do, but Vue
  * drops the `*` of a rule that holds nested rules, leaving `:where()`.)
- * ponytail: such a rule's own declarations become Vue's `&[data-v-…] { … }`, one class heavier than
- * the live runtime; split them into a sibling rule if nesting under `:host` meets consumer rules.
+ *
+ * Vue scopes a rule that holds nested rules through them alone, moving its declarations, and those
+ * of its nested at-rules, into a first nested `& { … }` that it scopes as `&[data-v-…]`. The
+ * converter moves them first, into `:where(&):is(&) { … }`, which Vue scopes as
+ * `:where(&[data-v-…]):is(&)`: the same elements at the specificity of the rule itself.
  */
 export function compileComponentStylesForVue(
   css: string,
@@ -143,7 +147,13 @@ export function compileComponentStylesForVue(
     const tests = complex.slice(start, host) + complex.slice(host + ":scope".length, pseudo);
     const test = complex.slice(0, start) + (tests === "" ? "*" : tests);
     return `:scope:where(:scope)${test === "*" ? "" : `:is(${test})`}${complex.slice(pseudo)}`;
-  }).join(", "));
+  }).join(", "), (root) => root.walkRules((rule) => {
+    if (!rule.nodes.some((node) => node.type === "rule")) return;
+    for (const parent of [rule, ...rule.nodes.filter((node) => node.type === "atrule")]) {
+      const own = parent.nodes?.filter((node) => node.type === "decl" || node.type === "comment") ?? [];
+      if (own.length > 0) parent.prepend(postcss.rule({ selector: ":where(&):is(&)", raws: { between: " " } }).append(own));
+    }
+  }));
 }
 
 /**
@@ -195,7 +205,7 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", tagClassSelector), rule);
+    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`), rule);
   });
   const limits = limited() ? [...componentTags(definition.template)] : [];
   const scope = postcss.atRule({ name: "scope", params: classScope(definition.contract.tag, limits) });
