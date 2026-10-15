@@ -76,7 +76,7 @@ describe("resolved prop and state selectors", () => {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
       assert.match(result.css, compile === compileComponentStylesForBuild ? /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/
-        : /:scope\.active/);
+        : compile === compileComponentStylesForVue ? /:scope:where\(:scope\):is\(\.active\)/ : /:scope\.active/);
     }
   });
 
@@ -120,20 +120,25 @@ it("keeps Vue grouping rules in the component scope and keyframes document-wide"
     @media (min-width: 0px) { :host::before { animation: pulse 1s; } *::after { box-sizing: border-box; } }`, definition);
   assert.match(result.css, /^@keyframes pulse/);
   assert.match(result.css, /@scope \(\.x-style-contract\) \{\s*@media/);
-  assert.match(result.css, /:scope::before/);
+  assert.match(result.css, /:scope:where\(:scope\)::before/);
   assert.match(result.css, /\*::after/);
   assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });
 
-it("keeps Vue's scope attribute on a host subject under an ancestor", () => {
+it("puts Vue's scope attribute on a host subject in :where(), at the live runtime's specificity", () => {
   const button = parseComponent('<template component="ui-x"><button><slot></slot></button></template>');
-  const css = compileComponentStylesForVue(`.wide :host { color: red; } .wide :host::after { content: "x"; }
-    .wide > :host(.a) { color: blue; } .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`, button).css;
+  const css = compileComponentStylesForVue(`:host { color: red; } :host::after { content: "x"; } :host(.a) { color: blue; }
+    .wide :host { color: red; } .wide :host::after { content: "x"; } .wide > :host(.a) { color: blue; }
+    .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`, button).css;
   const scoped = compileStyle({ source: css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code.replace(/\s+/g, " ");
-  assert.equal(scoped, '@scope (.ui-x) {[data-v-1]:scope:not(:not(:is(.wide *))) { color: red; }'
-    + '[data-v-1]:scope:not(:not(:is(.wide *)))::after { content: "x"; }'
-    + ':scope.a[data-v-1]:not(:not(:is(.wide > *))) { color: blue; }'
-    + '[data-v-1]:scope:not(.c):not(:not(:is(.wide *))) { color: green; }'
+  // Live: `:scope:where([data-component~="ui-x"])`, (0,1,0); `.a` and `.wide` add one class each.
+  assert.equal(scoped, '@scope (.ui-x) {:scope:where([data-v-1]:scope) { color: red; }'
+    + ':scope:where([data-v-1]:scope)::after { content: "x"; }'
+    + ':scope:where([data-v-1]:scope):is(.a) { color: blue; }'
+    + ':scope:where([data-v-1]:scope):is(.wide *) { color: red; }'
+    + ':scope:where([data-v-1]:scope):is(.wide *)::after { content: "x"; }'
+    + ':scope:where([data-v-1]:scope):is(.wide > .a) { color: blue; }'
+    + ':scope:where([data-v-1]:scope):is(.wide :not(.c)) { color: green; }'
     + '.wide :scope .in[data-v-1] { color: navy; } }');
 });
 
