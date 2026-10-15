@@ -2,10 +2,14 @@
 
 ## 1.0.0-alpha.52
 
+### Changed
+
+- Converted Vue components scope their styles as the live runtime does, with the live runtime's selectors and specificity. The styles sit in a native scope rooted at the root's tag class and bounded by every converted component's root, which carries `data-hn`. In a component with slots, the component's own markup, sanitized `$html` markup included, carries `data-hn-<tag>`; each selector's subject tests it in `:where()`, which adds no specificity, and `:slotted()` selects the content that lacks it. A component without slots emits the live runtime's selectors as they are. A rule that holds nested rules applies its own declarations in place, at its own specificity. The styles stay `<style scoped>`, with each selector in `:global()`, so Vite still leaves an unused component's styles out of a build. A Vue component that is not converted carries no `data-hn`, so its markup inside projected content is projected content to `:slotted()`, as plain markup is in the live runtime. `pnpm measure:vue-scoping` measures the selectors' style-recalc cost and the attributes' mount cost in Chromium, Firefox and WebKit.
+
 ### Fixed
 
 - In converted Vue and Svelte components, a component selected by its tag has the live runtime's specificity, a type selector's, alone or in `:host:is(…)`: the converter emits `x-card` as `:is(x-card, :where(.x-card))`, the counterpart of the live runtime's `:is(x-card, :where([data-component~="x-card"]))`.
-- In converted Vue components, a rule that holds nested rules applies its own declarations at its own specificity, `:host` rules included. The converter moves those declarations, and those of its nested at-rules, into a first nested `:where(&):is(&) { … }`, which Vue's scoped styles turn into `:where(&[data-v-…]):is(&)`.
+- In converted Vue components, `:slotted()` stops at the root of a converted component inside projected content, as in the live runtime.
 
 ## 1.0.0-alpha.51
 

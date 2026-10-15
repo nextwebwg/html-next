@@ -382,8 +382,8 @@ server implementation uses `parse5` and the same allowlist. Neither the live run
 Vue output calls native `setHTML()`, even when available: Firefox currently reorders malformed table content differently
 from Chromium, WebKit, and `parse5`, which would make output browser-dependent and break
 deterministic SSR/hydration. Native `setHTML()` remains a differential conformance oracle.
-The converted helper renders sanitized Vue nodes, so dynamic content receives scoped styling and
-reactive updates without a raw `v-html` sink. Cross-engine pixel and behavior parity is covered;
+The converted helper renders sanitized Vue nodes, each carrying the component's `data-hn-<tag>`, so
+dynamic content receives the component's styles and reactive updates without a raw `v-html` sink. Cross-engine pixel and behavior parity is covered;
 a direct SSR-to-hydration test also verifies that Vue retains the server-rendered root and sanitized
 child nodes before a reactive update.
 

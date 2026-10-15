@@ -12,8 +12,12 @@ which would make hydration browser-dependent. Props, state, computed values, bin
 directives and slots map to Vue's own facilities; a declared event is a native `CustomEvent` on
 the lowered root, and Vue emits that same `CustomEvent<T>` under the event's name, plus
 `update:<prop>` for `v-model:<prop>` when its detail reports a prop. Styles become
-`<style scoped>`. `:host` selects the root by its tag as a class, and a component the styles select
-by tag carries that class where it is used, so Vue passes it to the child's root.
+`<style scoped>` with the live runtime's selectors and specificity, in a native scope rooted at the
+root's tag class and bounded by every converted root, which carries `data-hn`. In a component with
+slots, its own markup carries `data-hn-<tag>`, which each selector tests in `:where()`, and
+`:slotted()` selects the rest. A Vue component that is not converted carries no `data-hn`, so its
+markup inside projected content is projected content to `:slotted()`. A component the styles
+select by tag carries its tag as a class where it is used, so Vue passes it to the child's root.
 
 Every component imports the shared `vue/host.ts` for what each one does the same way: consumer
 attributes on the root, the hydration root check, checked handler writes, and the expression and

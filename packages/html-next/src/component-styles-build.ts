@@ -114,46 +114,55 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
 }
 
+/** Every converted Vue component's root, which bounds every other component's styles. */
+export const VUE_ROOT_ATTRIBUTE = "data-hn";
+
+/** The attribute a converted Vue component's styles select its own markup by. */
+function vueOwnerAttribute(tag: string): string {
+  return `${VUE_ROOT_ATTRIBUTE}-${tag}`;
+}
+
 /**
- * Styles for a converted Vue component, emitted as `<style scoped>`. Vue's scoping already bounds
- * the region: projected content carries the consumer's scope, and Vue's own `:slotted()` reaches it.
- * A native scope keeps ordinary selectors to the component's own descendants and stops at nested
- * component roots, as in the default build, through classes: the root carries its tag, and each
- * component the template invokes carries its own, which Vue passes to that component's root.
- * `:host` is `:scope`, and a component selected by tag is its class in `:where()`, which keeps the
- * type selector's specificity, as the live runtime's `:where([data-component~="…"])` does.
+ * Styles for a converted Vue component. The converter scopes them as the live runtime does, with
+ * the live runtime's selectors: a native scope rooted at the root's tag class and bounded by every
+ * converted component's root, `[data-hn]`. In a component with slots the scope also holds content a
+ * consumer projects, so the component's own markup carries `data-hn-<tag>`: a selector's subject
+ * tests it in `:where()`, which keeps the selector's specificity, and `:slotted()` selects what lacks
+ * it. Without slots, nothing is projected, and `:slotted()` selects nothing. `:host` is `:scope`,
+ * and a component selected by tag is its class in `:where()`, which keeps the type selector's
+ * specificity, as the live runtime's `:where([data-component~="…"])` does.
  *
- * Vue adds its scope attribute to a selector's last compound with a class, attribute, type, or id,
- * and otherwise inside the first `:where()` or `:is()` of a compound with none. A `:scope` subject is
- * therefore `:scope:where(:scope)`, with its other tests and any context in an `:is()` after it:
- * `.wide :host(.on)` is `:scope:where(:scope):is(.wide .on)`. Vue scopes it as
- * `:scope:where([data-v-…]:scope)`, the live runtime's `:scope:where([data-component~="…"])`, so the
- * root carries the scope attribute at the live runtime's specificity. (`:where(*)` would do, but Vue
- * drops the `*` of a rule that holds nested rules, leaving `:where()`.)
- *
- * Vue scopes a rule that holds nested rules through them alone, moving its declarations, and those
- * of its nested at-rules, into a first nested `& { … }` that it scopes as `&[data-v-…]`. The
- * converter moves them first, into `:where(&):is(&) { … }`, which Vue scopes as
- * `:where(&[data-v-…]):is(&)`: the same elements at the specificity of the rule itself.
+ * They are emitted as `<style scoped>`, since Vite drops the scoped styles of a component a build
+ * leaves out, with each selector in `:global()`, which Vue's scoped styles keep as written. Vue
+ * moves the declarations of a rule that holds nested rules into a first nested `& { … }`, which it
+ * scopes; the converter puts each run of them in a nested `&` rule of its own, where it stands.
  */
 export function compileComponentStylesForVue(
   css: string,
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
-  return compileClassScopedStyles(css, definition, source, ["host-state"], (selector) => postcss.list.comma(selector).map((complex) => {
-    const { start, pseudo, host } = subjectCompound(complex);
-    if (host === -1) return complex;
-    const tests = complex.slice(start, host) + complex.slice(host + ":scope".length, pseudo);
-    const test = complex.slice(0, start) + (tests === "" ? "*" : tests);
-    return `:scope:where(:scope)${test === "*" ? "" : `:is(${test})`}${complex.slice(pseudo)}`;
+  const projects = (definition.slots?.length ?? 0) > 0;
+  const attribute = vueOwnerAttribute(definition.contract.tag);
+  const owner = `[${attribute.replace(/[^\w-]/g, (character) => `\\${character}`)}]`;
+  const compiled = compileClassScopedStyles(css, definition, source, ["slotted", "host-state"], (selector) => postcss.list.comma(selector).map((complex) => {
+    if (complex.includes(SLOTTED)) return `:global(${complex.replaceAll(SLOTTED, projects ? `:where(:not(${owner}))` : ":not(*)")})`;
+    if (!projects) return `:global(${complex})`;
+    const { pseudo } = subjectCompound(complex);
+    return `:global(${complex.slice(0, pseudo)}:where(${owner})${complex.slice(pseudo)})`;
   }).join(", "), (root) => root.walkRules((rule) => {
     if (!rule.nodes.some((node) => node.type === "rule")) return;
     for (const parent of [rule, ...rule.nodes.filter((node) => node.type === "atrule")]) {
-      const own = parent.nodes?.filter((node) => node.type === "decl" || node.type === "comment") ?? [];
-      if (own.length > 0) parent.prepend(postcss.rule({ selector: ":where(&):is(&)", raws: { between: " " } }).append(own));
+      // Each run of declarations keeps its place, as the browser's nested declarations do.
+      let run: Rule | undefined;
+      for (const node of parent.nodes?.slice() ?? []) {
+        if (node.type !== "decl" && node.type !== "comment") { run = undefined; continue; }
+        if (run === undefined) node.before(run = postcss.rule({ selector: "&", raws: { between: " " } }));
+        run.append(node);
+      }
     }
-  }));
+  }), () => `[${VUE_ROOT_ATTRIBUTE}]`);
+  return projects && compiled.components !== undefined ? { ...compiled, owner: attribute } : compiled;
 }
 
 /**
@@ -194,7 +203,7 @@ const SLOTTED = ":where([--slotted])";
 
 function compileClassScopedStyles(css: string, definition: ComponentDefinition, source: string | undefined,
   renames: readonly ("slotted" | "host-state")[], target: (selector: string, rule: Rule) => string,
-  prepare?: (root: postcss.Root) => void, limited = (): boolean => true): CompiledComponentStyles {
+  prepare?: (root: postcss.Root) => void, limited = (): boolean | string => true): CompiledComponentStyles {
   const tag = definition.contract.tag;
   if (css.trim() === "") return withImportedStateNames({ css: "", stateNames: [] }, definition);
   assertResolvedStylesheet(css, source ?? definition.source.file);
@@ -207,8 +216,10 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
     rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`), rule);
   });
-  const limits = limited() ? [...componentTags(definition.template)] : [];
-  const scope = postcss.atRule({ name: "scope", params: classScope(definition.contract.tag, limits) });
+  const limit = limited();
+  const limits = limit === false ? [] : [...componentTags(definition.template)];
+  const scope = postcss.atRule({ name: "scope", params: typeof limit === "string"
+    ? `(${tagClassSelector(tag)}) to (${limit})` : classScope(definition.contract.tag, limits) });
   for (const node of root.nodes.slice()) {
     if (node.type === "rule" || (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()))) {
       scope.append(node);
@@ -231,14 +242,10 @@ function svelteSelector(complex: string, owned: "own" | "projected" | undefined,
   return { selector: `:global(${complex.slice(0, pseudo)}${subject === "" ? "*" : ""})${test}${complex.slice(pseudo)}`, tested: test !== "", root };
 }
 
-/**
- * Where a complex selector's last compound starts, where its pseudo-element starts (or its end), and
- * where that compound's own `:scope` starts (or -1).
- */
-function subjectCompound(selector: string): { start: number; pseudo: number; host: number } {
+/** Where a complex selector's last compound starts, and where its pseudo-element starts (or its end). */
+function subjectCompound(selector: string): { start: number; pseudo: number } {
   let start = 0;
   let pseudo = -1;
-  let host = -1;
   let depth = 0;
   let quote = "";
   for (let index = 0; index < selector.length; index += 1) {
@@ -249,11 +256,10 @@ function subjectCompound(selector: string): { start: number; pseudo: number; hos
     else if (character === "(" || character === "[") depth += 1;
     else if (character === ")" || character === "]") depth -= 1;
     else if (depth > 0) continue;
-    else if (/[\s>+~]/.test(character)) { start = index + 1; pseudo = -1; host = -1; }
+    else if (/[\s>+~]/.test(character)) { start = index + 1; pseudo = -1; }
     else if (character === ":" && pseudo === -1 && /^::|^:(?:before|after|first-line|first-letter)(?![\w-])/i.test(selector.slice(index))) pseudo = index;
-    else if (character === ":" && pseudo === -1 && /^:scope(?![\w-])/.test(selector.slice(index))) host = index;
   }
-  return { start, pseudo: pseudo === -1 ? selector.length : pseudo, host };
+  return { start, pseudo: pseudo === -1 ? selector.length : pseudo };
 }
 
 /** Whether a template renders sanitized HTML (`$html`), slot fallbacks included. */

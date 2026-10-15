@@ -75,6 +75,8 @@ const hostState = computed(() =>
   <button
     class="x-button"
     v-bind="nativeAttrs($attrs)"
+    data-hn
+    data-hn-x-button
     v-prop-validity="{ contract: propValidityContract, values: { ...props } }"
     :data-size="reflectedProp('size', 'size', checkedProps.size, undefined, false)"
     :data-variant="reflectedProp('variant', 'variant', checkedProps.variant, undefined, false)"
@@ -85,8 +87,8 @@ const hostState = computed(() =>
 </template>
 
 <style scoped>
-@scope (.x-button) {
-  :scope:where(:scope) {
+@scope (.x-button) to ([data-hn]) {
+  :global(:scope:where([data-hn-x-button])) {
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
@@ -97,15 +99,15 @@ const hostState = computed(() =>
     border-radius: 0.375rem;
     font: inherit;
   }
-  :scope:where(:scope):is([data-x-button-state~="size=sm"]) {
+  :global(:scope[data-x-button-state~="size=sm"]:where([data-hn-x-button])) {
     min-height: 2rem;
     padding: 0.25rem 0.625rem;
   }
-  :scope:where(:scope):is([data-x-button-state~="size=lg"]) {
+  :global(:scope[data-x-button-state~="size=lg"]:where([data-hn-x-button])) {
     min-height: 3rem;
     padding: 0.625rem 1rem;
   }
-  :scope:where(:scope):is([data-x-button-state~="variant=solid"]) {
+  :global(:scope[data-x-button-state~="variant=solid"]:where([data-hn-x-button])) {
     background: CanvasText;
     color: Canvas;
   }

@@ -568,8 +568,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   });
 
   it("maps each construct to Vue's own facility, as a Vue author writes it", () => {
-    const vue = generated(featureSource).get("vue/XFeature.vue")!;
-    assert.doesNotMatch(vue, /\bhn\b/);
+    // The styles' ownership attributes are covered with the styles.
+    const vue = generated(featureSource).get("vue/XFeature.vue")!.replace(/\s+data-hn(?:-[\w-]+)?(?=[\s>/])/g, "");
+    assert.doesNotMatch(vue.slice(0, vue.indexOf("<style")), /\bhn\b/);
     assert.match(vue, /const open = ref\(false\)\n/);
     assert.match(vue, /const query = ref\(''\)\n/);
     assert.match(vue, /const count = cycleCheckedComputed\(\(\) => checkedProps\.value\.items\?\.length\)\n/);
@@ -716,14 +717,15 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const render = (props: Record<string, unknown>): Promise<string> =>
       module.renderToString(module.createSSRApp({ render: () => module.h(module.default, props, { default: () => "Go" }) }))
         .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
-    // The scoped styles select the root as `:host`, so each arm's root carries the tag as a class.
-    assert.equal(await render({}), '<button class="x-action action" type="button">Go</button>');
-    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" href="/next" data-as="a" data-href="/next">Go</a>');
+    // The styles select the root as `:host`, so each arm's root carries the tag as a class, the
+    // converted-root marker, and the attribute of the component's own markup.
+    assert.equal(await render({}), '<button class="x-action action" type="button" data-hn data-hn-x-action>Go</button>');
+    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" data-hn data-hn-x-action href="/next" data-as="a" data-href="/next">Go</a>');
     const listed = await render({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] });
     assert.match(listed, /data-tags="red, blue"/);
     assert.match(listed, /data-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
-    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-as="a" data-disabled="true" data-href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-hn data-hn-x-action data-as="a" data-disabled="true" data-href="/next">Go</a>');
     assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
@@ -758,7 +760,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.equal(artifacts.has("vanilla/DemoHtml.js"), true);
   });
 
-  it("server-renders sanitized $html through Vue nodes with scoped styling markers", async () => {
+  it("server-renders sanitized $html through Vue nodes with its owner's attribute", async () => {
     const helper = vueHtmlArtifact().content;
     const bundle = await build({
       stdin: {
@@ -773,12 +775,13 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       logLevel: "silent",
     });
     const module = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`);
-    const Parent = { __scopeId: "data-v-safe", render: () => module.h("article", [
-      module.h(module.SanitizedHtml, { value: "<b title='safe'>One</b><img src=x onerror=alert(1)>" }),
+    const Parent = { render: () => module.h("article", [
+      module.h(module.SanitizedHtml, { value: "<b title='safe'>One <i>two</i></b><img src=x onerror=alert(1)>", owner: "data-hn-x-safe" }),
     ]) };
     const output = await module.renderToString(module.createSSRApp(Parent));
-    assert.match(output, /<b[^>]*title="safe"[^>]*>One<\/b>/);
-    assert.match(output, /<b[^>]*data-v-safe/);
+    assert.match(output, /<b[^>]*title="safe"[^>]*>One <i[^>]*>two<\/i><\/b>/);
+    assert.match(output, /<b[^>]*data-hn-x-safe/);
+    assert.match(output, /<i[^>]*data-hn-x-safe/);
     assert.doesNotMatch(output, /<img|onerror|<script/);
   });
 
@@ -985,20 +988,31 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
     const vue = artifacts.get("vue/XFeature.vue")!;
     const style = vue.slice(vue.indexOf("<style scoped>"));
-    // Vue's scoped styles sit in a native scope rooted at the root's tag class and bounded by each
-    // invoked component's tag class, which Vue passes to that component's root.
-    assert.match(style, /@scope \(\.x-feature\) to \(\.x-badge\)/);
-    assert.match(style, /:scope:where\(:scope\) \{\s+display: block;\s+\}/);
-    assert.match(style, /:scope\[data-x-feature-state~="open"\] \.panel/);
-    assert.match(style, /:slotted\(p\)/);
+    // Vue's styles sit in a native scope rooted at the root's tag class and bounded by every
+    // converted root, with the live runtime's selectors. The component's own markup carries
+    // `data-hn-x-feature`, which each subject tests in `:where()`, and `:slotted()` selects what lacks it.
+    assert.match(style, /@scope \(\.x-feature\) to \(\[data-hn\]\)/);
+    assert.match(style, /:global\(:scope:where\(\[data-hn-x-feature\]\)\) \{\s+display: block;\s+\}/);
+    assert.match(style, /:global\(:scope\[data-x-feature-state~="open"\] \.panel:where\(\[data-hn-x-feature\]\)\)/);
+    assert.match(style, /:global\(:where\(:not\(\[data-hn-x-feature\]\)\):is\(p\)\)/);
     assert.match(style, /:is\(x-badge, :where\(\.x-badge\)\)/);
-    assert.match(vue, /<section\s+class="x-feature panel"/);
+    assert.match(vue, /<section\s+class="x-feature panel"[^>]*\sdata-hn\s+data-hn-x-feature\s/);
+    assert.match(vue, /<h2 data-hn-x-feature>/);
     assert.match(vue, /<XBadge class="x-badge" /);
+    assert.doesNotMatch(vue, /<XBadge[^>]*data-hn/);
     assert.doesNotMatch(vue, /data-component/);
     assert.match(vue, /:data-x-feature-state="hostState \|\| undefined"/);
 
     const vanilla = artifacts.get("vanilla/XFeature.js")!;
     assert.equal([...vanilla.matchAll(/setAttribute\("data-component"/g)].length, 1, "only the vanilla root is marked");
+  });
+
+  it("marks a slotless Vue component's root and gives it the live runtime's selectors", () => {
+    const vue = generated(componentSource("demo-plain", "", `<article><h2>Card</h2></article><style>:host { display: block; } h2 { margin: 0; }</style>`)).get("vue/DemoPlain.vue")!;
+    // Nothing is projected without slots, so only the root carries the converted-root marker.
+    assert.match(vue, /<article class="demo-plain" v-bind="nativeAttrs\(\$attrs\)" data-hn>/);
+    assert.doesNotMatch(vue, /data-hn-demo-plain/);
+    assert.match(vue, /@scope \(\.demo-plain\) to \(\[data-hn\]\) \{\s+:global\(:scope\) \{\s+display: block;\s+\}\s+:global\(h2\) \{/);
   });
 
   it("rejects :scope and undeclared or structured :host-state() names", () => {

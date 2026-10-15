@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "../src/component-styles-build.js";
 import { guardComponentPseudoElements, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
+import type { ComponentDefinition } from "../src/template.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
 
@@ -77,7 +78,7 @@ describe("resolved prop and state selectors", () => {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
       assert.match(result.css, compile === compileComponentStylesForBuild ? /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/
-        : compile === compileComponentStylesForVue ? /:scope:where\(:scope\):is\(\.active\)/ : /:scope\.active/);
+        : /:scope\.active/);
     }
   });
 
@@ -120,49 +121,61 @@ it("keeps Vue grouping rules in the component scope and keyframes document-wide"
   const result = compileComponentStylesForVue(`@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }
     @media (min-width: 0px) { :host::before { animation: pulse 1s; } *::after { box-sizing: border-box; } }`, definition);
   assert.match(result.css, /^@keyframes pulse/);
-  assert.match(result.css, /@scope \(\.x-style-contract\) \{\s*@media/);
-  assert.match(result.css, /:scope:where\(:scope\)::before/);
-  assert.match(result.css, /\*::after/);
+  assert.match(result.css, /@scope \(\.x-style-contract\) to \(\[data-hn\]\) \{\s*@media/);
+  assert.match(result.css, /:global\(:scope::before\)/);
+  assert.match(result.css, /:global\(\*::after\)/);
   assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });
 
-it("puts Vue's scope attribute on a host subject in :where(), at the live runtime's specificity", () => {
+/** A converted Vue component's styles as Vue's scoped styles compile them, whitespace collapsed. */
+const vueScoped = (css: string, definition: ComponentDefinition): string => compileStyle({
+  source: compileComponentStylesForVue(css, definition).css, filename: "ui-x.vue", id: "data-v-1", scoped: true,
+}).code.replace(/\s+/g, " ");
+
+it("gives Vue host subjects the live runtime's selectors, with the owner test in :where()", () => {
   const button = parseComponent('<template component="ui-x"><button><slot></slot></button></template>');
-  const css = compileComponentStylesForVue(`:host { color: red; } :host::after { content: "x"; } :host(.a) { color: blue; }
+  const css = `:host { color: red; } :host::after { content: "x"; } :host(.a) { color: blue; }
     .wide :host { color: red; } .wide :host::after { content: "x"; } .wide > :host(.a) { color: blue; }
-    .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`, button).css;
-  const scoped = compileStyle({ source: css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code.replace(/\s+/g, " ");
-  // Live: `:scope:where([data-component~="ui-x"])`, (0,1,0); `.a` and `.wide` add one class each.
-  assert.equal(scoped, '@scope (.ui-x) {:scope:where([data-v-1]:scope) { color: red; }'
-    + ':scope:where([data-v-1]:scope)::after { content: "x"; }'
-    + ':scope:where([data-v-1]:scope):is(.a) { color: blue; }'
-    + ':scope:where([data-v-1]:scope):is(.wide *) { color: red; }'
-    + ':scope:where([data-v-1]:scope):is(.wide *)::after { content: "x"; }'
-    + ':scope:where([data-v-1]:scope):is(.wide > .a) { color: blue; }'
-    + ':scope:where([data-v-1]:scope):is(.wide :not(.c)) { color: green; }'
-    + '.wide :scope .in[data-v-1] { color: navy; } }');
+    .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`;
+  // Live: `:scope:where([data-component~="ui-x"])` for `:host`, with the same tests and context.
+  assert.equal(vueScoped(css, button), "@scope (.ui-x) to ([data-hn]) {:scope:where([data-hn-ui-x]) { color: red; }"
+    + ':scope:where([data-hn-ui-x])::after { content: "x"; }'
+    + ":scope.a:where([data-hn-ui-x]) { color: blue; }"
+    + ".wide :scope:where([data-hn-ui-x]) { color: red; }"
+    + '.wide :scope:where([data-hn-ui-x])::after { content: "x"; }'
+    + ".wide > :scope.a:where([data-hn-ui-x]) { color: blue; }"
+    + ".wide :scope:not(.c):where([data-hn-ui-x]) { color: green; }"
+    + ".wide :scope .in:where([data-hn-ui-x]) { color: navy; } }");
 });
 
-it("selects a component by tag with the live runtime's specificity in Vue and Svelte", () => {
+it("selects a component by tag with the live runtime's selectors in Vue and Svelte, without slots", () => {
   const card = parseComponent('<template component="ui-x"><p><x-kid></x-kid></p></template>');
   const css = ":host:is(ui-x) { color: red; } x-kid > b { color: blue; }";
-  const vue = compileStyle({ source: compileComponentStylesForVue(css, card).css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code;
   const svelte = compileSvelte(`<p class="ui-x"><x-kid></x-kid><b></b></p><style>${compileComponentStylesForSvelte(css, card).css}</style>`,
     { css: "external", filename: "UiX.svelte" }).css!.code;
   // Live: `:is(x-kid, :where([data-component~="x-kid"]))`, the type selector's (0,0,1).
-  assert.equal(vue.replace(/\s+/g, " "), "@scope (.ui-x) to (.x-kid) {:scope:where([data-v-1]:scope):is(:is(:is(ui-x, :where(.ui-x)))) { color: red; }"
-    + ":is(x-kid, :where(.x-kid)) > b[data-v-1] { color: blue; } }");
+  // Without slots nothing is projected, so a subject needs no owner test.
+  assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
+    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
   assert.equal(svelte.replace(/\s+/g, " "), "@scope (.ui-x) to (.x-kid) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
     + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
 });
 
-it("keeps a nested Vue rule's own declarations at its specificity", () => {
-  const button = parseComponent('<template component="ui-x"><button><b></b></button></template>');
-  const css = compileComponentStylesForVue(":host { color: red; & b { color: blue; } @media (min-width: 0px) { margin: 0; } padding: 0; }", button).css;
-  const scoped = compileStyle({ source: css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code.replace(/\s+/g, " ");
-  // Vue's own wrapper would be `&[data-v-1] { … }`, one class heavier than the rule.
-  assert.equal(scoped, "@scope (.ui-x) {:scope:where(:scope) { :where(&[data-v-1]):is(&) { color: red; padding: 0; } & b[data-v-1] { color: blue; }"
-    + " @media (min-width: 0px) {:where(&[data-v-1]):is(&) { margin: 0; } } } }");
+it("keeps a nested Vue rule's own declarations in place, at its specificity", () => {
+  const button = parseComponent('<template component="ui-x"><button><b></b><slot></slot></button></template>');
+  const css = ":host { color: red; & b { color: blue; } @media (min-width: 0px) { margin: 0; } padding: 0; }";
+  // Vue's own wrapper would be a first `&[data-v-1] { … }`, one class heavier than the rule.
+  assert.equal(vueScoped(css, button), "@scope (.ui-x) to ([data-hn]) {:scope:where([data-hn-ui-x]) { &:where([data-hn-ui-x]) { color: red; }"
+    + " & b:where([data-hn-ui-x]) { color: blue; } @media (min-width: 0px) { &:where([data-hn-ui-x]) { margin: 0; } }"
+    + " &:where([data-hn-ui-x]) { padding: 0; } } }");
+});
+
+it("selects projected content in Vue as what lacks the owner's attribute, inside grouping rules", () => {
+  const card = parseComponent('<template component="ui-x"><div><slot></slot></div></template>');
+  const css = ":slotted(p) { color: red; } @media (min-width: 0px) { @supports (display: grid) { @layer base { :slotted(.a), .own { color: blue; } } } }";
+  // Live: `:where([data-slotted], [data-slotted] *):is(p)`, in a scope bounded by component roots.
+  assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:where(:not([data-hn-ui-x])):is(p) { color: red; }"
+    + "@media (min-width: 0px) { @supports (display: grid) { @layer base { :where(:not([data-hn-ui-x])):is(.a),.own:where([data-hn-ui-x]) { color: blue; } } } } }");
 });
 
 it("keeps a component type selector's namespace in Vue's class form", () => {
