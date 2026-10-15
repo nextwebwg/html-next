@@ -788,9 +788,11 @@ const successes: ConformanceCase[] = [
       probe: `const root = window.lifecycleRoot; return root === undefined ? "unread" : root.isConnected ? root.dataset.counts : "detached";`,
       result: "unread",
       after: [
-        { action: `window.HtmlRuntime?.observeDocument(); window.lifecycleRoot = document.querySelector('#lifecycle');`, result: "1/0" },
+        { action: `window.stopObserving = window.HtmlRuntime?.observeDocument(); window.lifecycleRoot = document.querySelector('#lifecycle');`, result: "1/0" },
         { action: `window.lifecycleRoot.remove();`, result: "detached" },
         { action: `document.querySelector('.lifecycle-host').append(window.lifecycleRoot);`, result: "2/1" },
+        // The page runs later cases, so the observation ends here.
+        { action: `window.stopObserving?.();`, result: "2/1" },
       ],
     },
   },
