@@ -16,3 +16,11 @@ export function componentName(tag: string): string {
 export function kebabCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
+
+/**
+ * The attribute that records a component's explicit prop on its root. The component's tag
+ * namespaces it, as it does `data-<tag>-state`, so an authored `data-*` attribute never collides.
+ */
+export function propAttribute(tag: string, name: string): string {
+  return `data-${tag}-prop-${kebabCase(name)}`;
+}

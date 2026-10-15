@@ -441,6 +441,25 @@ For Svelte, use the Vite adapter above. Choose HTML Next in this section for the
 
 :::
 
+## Contain a wrapped component's events {#contain-events}
+
+A component that wraps another one sees the inner component's events bubble through its own root. To raise its own event in their place, its controller listens on its root in the capture phase and stops the inner event there:
+
+```js title="src/picker.js"
+export default function initialize(host) {
+  host.on("connect", () => {
+    const contain = (event) => {
+      event.stopImmediatePropagation();
+      host.dispatch("pick", event.detail);
+    };
+    host.root.addEventListener("select", contain, { capture: true });
+    return () => host.root.removeEventListener("select", contain, { capture: true });
+  });
+}
+```
+
+The DOM runs capture listeners on an element before the event reaches a descendant, and before that element's own non-capture listeners when the element is the event's target, as it is for a component whose root is the wrapped component. So the consumer's non-capture `select` listeners on the root and above it never see the event, whenever they were added. A capture listener on an ancestor of the root still runs first, as does one the consumer added to the root before the controller connected. The pattern works the same in the browser runtime and in converted Vue, React, and Svelte components.
+
 ## When you need more
 
 - [Ship a library](/html-next/ship) when other projects need your components.

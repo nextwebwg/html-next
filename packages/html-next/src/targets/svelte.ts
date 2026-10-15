@@ -2,7 +2,7 @@
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
 import { compileComponentStylesForSvelte } from "../component-styles-build.js";
-import { kebabCase, componentName } from "../names.js";
+import { kebabCase, componentName, propAttribute } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
@@ -587,7 +587,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   ];
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
   const rootScope = root ? scope as RootScope : undefined;
-  const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
+  const reflectedNames = new Set(rootScope?.props.map((prop) => propAttribute(rootScope.tag, prop)) ?? []);
   let selectValue: string | undefined;
   let selectSelectionName: string | undefined;
   const manualSelection = node.name === "select" && node.children.every(canMatchOptionText);
@@ -922,7 +922,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     if ((scope as RootScope).stateNames.length > 0) attributes.push(`data-${(scope as RootScope).tag}-state={hostState || undefined}`);
     for (const prop of rootScope!.props) {
-      const name = `data-${kebabCase(prop)}`;
+      const name = propAttribute(rootScope!.tag, prop);
       const authored = node.attributes.find((attribute) => attribute.name === name);
       const bound = authored?.kind === "attribute";
       const fallback = authored?.kind === "literal" ? quote(authored.value) : "undefined";

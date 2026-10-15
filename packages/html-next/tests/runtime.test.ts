@@ -1924,7 +1924,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
         });
         const result = await page.evaluate(() => ({
-          rows: Array.from(document.querySelectorAll("li.row"), (row) => row.getAttribute("data-tone")),
+          rows: Array.from(document.querySelectorAll("li.row"), (row) => row.getAttribute("data-x-row-prop-tone")),
           chips: Array.from(document.querySelectorAll("span.chip"), (chip) => chip.textContent),
           projected: Array.from(document.querySelectorAll("li.row > b"), (node) => node.textContent),
           pending: document.querySelectorAll("x-row, x-chip").length,
@@ -2441,7 +2441,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.waitForTimeout(100);
         const after = await page.evaluate(() => ({
           text: document.querySelector("p.child")?.textContent,
-          reflected: document.querySelector("p.child")?.getAttribute("data-label"),
+          reflected: document.querySelector("p.child")?.getAttribute("data-x-child-prop-label"),
         }));
         assert.deepEqual({ before, ...after }, {
           before: "count 1",
@@ -3222,7 +3222,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           );
         })()`);
 
-        assert.deepEqual(result, ["true", "true", "false", "true"]);
+        // A bound boolean data-* attribute is present when true, as any boolean binding is.
+        assert.deepEqual(result, ["", "", null, ""]);
       } finally {
         await browser.close();
       }
@@ -3993,6 +3994,45 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} records explicit props without matching authored data-* selectors`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The page styles its own image blocks by data-placement; a figure's placement prop must not join in.
+        await page.setContent(
+          `<style>[data-placement="end"] .caption { color: rgb(255, 0, 0); }</style>` +
+          `<template component="x-figure" status="early" summary="Figure."><defs>` +
+            `<prop name="placement" type="keyword" values="start, end" default="start">Where it floats.</prop></defs>` +
+            `<figure data-placement="figure"><slot></slot><output $value="$placement"></output></figure></template>` +
+          `<x-figure id="own" placement="end"><p class="caption">Own</p></x-figure>` +
+          `<x-figure id="passed" placement="end" data-placement="wide"></x-figure>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const own = document.querySelector('#own');
+          const passed = document.querySelector('#passed');
+          window.HtmlRuntime.updateComponentProps(passed, { placement: 'start' });
+          await Promise.resolve();
+          await Promise.resolve();
+          return {
+            authored: [own.getAttribute('data-placement'), passed.getAttribute('data-placement')],
+            recorded: [own.getAttribute('data-x-figure-prop-placement'), passed.getAttribute('data-x-figure-prop-placement')],
+            rendered: [own.querySelector('output').textContent, passed.querySelector('output').textContent],
+            caption: getComputedStyle(own.querySelector('.caption')).color,
+          };
+        })()`);
+        assert.deepEqual(result, {
+          authored: ["figure", "wide"],
+          recorded: ["end", "start"],
+          rendered: ["end", "start"],
+          caption: "rgb(0, 0, 0)",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} projects named, fallback, and data-selected slots and reconciles public props`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -4033,10 +4073,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
               empty.querySelector('.body-fallback')?.textContent,
             ],
           };
-          const reflectedInitially = filled.getAttribute('data-label');
-          const reflectedDefault = empty.hasAttribute('data-label');
-          // data-label records the configuration; writing it is not a prop update.
-          filled.setAttribute('data-label', 'External');
+          const reflectedInitially = filled.getAttribute('data-x-panel-prop-label');
+          const reflectedDefault = empty.hasAttribute('data-x-panel-prop-label');
+          // data-x-panel-prop-label records the configuration; writing it is not a prop update.
+          filled.setAttribute('data-x-panel-prop-label', 'External');
           await Promise.resolve();
           await Promise.resolve();
           const written = filled.querySelector('.label').textContent;
@@ -4049,7 +4089,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             updated: {
               label: filled.querySelector('.label').textContent,
               rows: Array.from(filled.querySelectorAll('li'), item => item.textContent),
-              reflectedLabel: filled.getAttribute('data-label'),
+              reflectedLabel: filled.getAttribute('data-x-panel-prop-label'),
               reflectedInitially,
               reflectedDefault,
               ownLabelProperty: Object.hasOwn(filled, 'label'),
@@ -4154,7 +4194,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             className: element.className,
             component: element.getAttribute('data-component'),
             href: element.getAttribute('href'),
-            dataHref: element.getAttribute('data-href'),
+            dataHref: element.getAttribute('data-x-action-prop-href'),
             type: element.getAttribute('type'),
             title: element.getAttribute('title'),
             count: element.querySelector('output').textContent,
@@ -4182,7 +4222,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const link = document.querySelector('#action');
           link.click();
           await settle();
-          const linked = { ...describe(link), replaced: !button.isConnected, dataAs: link.getAttribute('data-as') };
+          const linked = { ...describe(link), replaced: !button.isConnected, dataAs: link.getAttribute('data-x-action-prop-as') };
           runtime.updateComponentProps(link, { as: undefined });
           await settle();
           const back = document.querySelector('#action');
@@ -4272,7 +4312,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           await settle();
           const read = () => {
             const choice = document.querySelector('#choice');
-            return [choice.localName, choice.getAttribute('type'), choice.getAttribute('data-as'), document.querySelector('output').textContent];
+            return [choice.localName, choice.getAttribute('type'), choice.getAttribute('data-x-choice-prop-as'), document.querySelector('output').textContent];
           };
           const states = [read()];
           for (let index = 0; index < 3; index += 1) {
@@ -4371,7 +4411,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return {
             tags: [before.localName, root.localName],
             component: root.getAttribute('data-component'),
-            tone: [root.querySelector('output').textContent, root.getAttribute('data-tone')],
+            tone: [root.querySelector('output').textContent, root.getAttribute('data-x-card-prop-tone')],
             host: window.HtmlRuntime.getComponentHost(root) !== undefined,
           };
         })()`);
@@ -4485,7 +4525,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const read = (root) => Array.from(root.querySelectorAll("li"), (item) => item.textContent);
           const initial = {
             authored: read(authored),
-            reflected: authored.getAttribute("data-tags"),
+            reflected: authored.getAttribute("data-x-tags-prop-tags"),
             fallback: read(fallback),
             fallbackReflected: fallback.hasAttribute("data-tags"),
           };
@@ -4530,7 +4570,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return {
             ownProperty: Object.hasOwn(root, "defaultValue"),
             rendered: root.getAttribute("data-default"),
-            reflected: root.getAttribute("data-default-value"),
+            reflected: root.getAttribute("data-x-camel-prop-default-value"),
             legacyReflection: root.hasAttribute("data-defaultvalue"),
           };
         });
@@ -4586,7 +4626,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const root = document.getElementById("openable") as Element;
           return { ownProperty: Object.hasOwn(root, "open"), attribute: root.getAttribute("data-open") };
         });
-        assert.deepEqual(result, { ownProperty: false, attribute: "true" });
+        assert.deepEqual(result, { ownProperty: false, attribute: "" });
       } finally {
         await browser.close();
       }
@@ -4600,7 +4640,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-hydrated" status="early" summary="Hydration.">` +
             `<defs><prop name="label" type="string" default="Default">Label.</prop></defs>` +
             `<article><h2 $value="$label"></h2><input .value="$label"><slot></slot></article></template>` +
-          `<article id="server" data-component="x-hydrated" data-label="Server">` +
+          `<article id="server" data-component="x-hydrated" data-x-hydrated-prop-label="Server">` +
             `<h3>stale</h3>` +
             `<input value="server"><?start slot=""?><em id="projected" data-slotted>Projected</em><?end?>` +
           `</article>`,
@@ -4723,11 +4763,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["aria-label", "Save changes"],
               ["class", "cta"],
               ["data-component", "x-button"],
-              // `disabled` was not set by the author and the template does not bind data-disabled.
+              // The template binds data-size and data-variant; the author's explicit size is recorded as well.
               ["data-size", "lg"],
               ["data-trace", "runtime"],
               ["data-variant", "outline"],
               ["data-x-button", ""],
+              ["data-x-button-prop-size", "lg"],
               ["id", "primary"],
               // The author's attribute wins over the template's literal.
               ["type", "submit"],
@@ -4747,10 +4788,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
             tag: "button",
             attributes: [
               ["data-component", "x-button"],
-              ["data-disabled", "true"],
               ["data-size", "md"],
               ["data-variant", "solid"],
               ["data-x-button", ""],
+              ["data-x-button-prop-disabled", "true"],
+              ["data-x-button-prop-variant", "solid"],
               ["disabled", ""],
               ["id", "disabled"],
               ["type", "button"],
@@ -4762,7 +4804,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             tag: "output",
             attributes: [
               ["data-component", "x-status"],
-              ["data-message", "Ready"],
+              ["data-x-status-prop-message", "Ready"],
               ["id", "status"],
             ],
             children: [{ text: "Ready" }],

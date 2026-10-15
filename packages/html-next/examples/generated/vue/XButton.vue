@@ -76,8 +76,8 @@ const hostState = computed(() =>
     class="x-button"
     v-bind="nativeAttrs($attrs)"
     v-prop-validity="{ contract: propValidityContract, values: { ...props } }"
-    :data-size="reflectedProp('size', 'size', checkedProps.size, undefined, false)"
-    :data-variant="reflectedProp('variant', 'variant', checkedProps.variant, undefined, false)"
+    :data-x-button-prop-size="reflectedProp('size', 'size', checkedProps.size, undefined, false)"
+    :data-x-button-prop-variant="reflectedProp('variant', 'variant', checkedProps.variant, undefined, false)"
     :data-x-button-state="hostState || undefined"
   >
     <slot />

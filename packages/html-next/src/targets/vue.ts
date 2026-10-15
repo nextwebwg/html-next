@@ -8,7 +8,7 @@ import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
 import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
-import { componentName, kebabCase } from "../names.js";
+import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import type {
@@ -26,7 +26,8 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../te
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { conformingScalarStates } from "./state-roots.js";
 import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
@@ -106,6 +107,18 @@ function bound(code: string): string {
     `'${literal.slice(1, -1).replace(/\\"/g, "\"").replace(/'/g, "\\'")}'`));
 }
 
+/**
+ * A literal prop on a component invocation, as the value the live runtime parses from it: a bare
+ * boolean attribute is `true`, and `count="3"` is the number. A string value stays a plain attribute.
+ */
+function literalPropBinding(name: string, value: string, props: Readonly<Record<string, PropContract>> | undefined): string | undefined {
+  const contract = Object.entries(props ?? {}).find(([prop]) => prop.toLowerCase() === name || kebabCase(prop) === name)?.[1];
+  if (contract === undefined || contract.select !== undefined) return undefined;
+  const parsed = parseTypedValue(value, contract.type, "$", "html");
+  if (parsed.ok && typeof parsed.value === "string") return undefined;
+  return `:${name}=${bound(parsed.ok ? JSON.stringify(parsed.value) : `${quote(value)} as any`)}`;
+}
+
 function writableTarget(path: readonly WritablePathSegment[], scope: Scope, lowering: Lowering): string {
   const [root, ...rest] = path;
   const base = scope.code.get(String(root));
@@ -120,6 +133,8 @@ interface Context {
   readonly definition: ComponentDefinition;
   /** Slot declarations in the linked component graph, keyed by receiving tag. */
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
+  /** Prop declarations in the linked component graph, keyed by receiving tag. */
+  readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
   readonly lowering: Lowering;
   readonly imports: Set<string>;
   /** Template refs, by ref name, and the script variable holding each. */
@@ -540,7 +555,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const styles: string[] = [];
   const reflected = isRoot && !component
     ? Object.entries(context.definition.contract.props).map(([propName]) => {
-      const attributeName = `data-${kebabCase(propName)}`;
+      const attributeName = propAttribute(context.definition.contract.tag, propName);
       const existing = node.attributes.find((attribute) =>
         (attribute.kind === "attribute" || attribute.kind === "literal") && attribute.name === attributeName);
       return { propName, attributeName, existing };
@@ -552,7 +567,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     if (attribute.kind === "literal") {
       const propertyOwnsControl = nativeControl && ["value", "checked"].includes(attribute.name) &&
         node.attributes.some((candidate) => candidate.kind === "property" && candidate.name === attribute.name);
-      if (!reflectedNames.has(attribute.name) && !propertyOwnsControl) literals.push(`${attribute.name}=${attributeValue(attribute.value)}`);
+      const typed = component ? literalPropBinding(attribute.name, attribute.value, context.propContractsByTag?.get(node.name)) : undefined;
+      if (typed !== undefined) literals.push(typed);
+      else if (!reflectedNames.has(attribute.name) && !propertyOwnsControl) literals.push(`${attribute.name}=${attributeValue(attribute.value)}`);
     } else if (attribute.kind === "attribute" && reflectedNames.has(attribute.name) && attribute.twoWay !== true) {
       // The runtime's prop reflection is the final writer for this data-* attribute.
       continue;
@@ -792,6 +809,8 @@ function stateTokens(name: string, scope: Scope, lowering: Lowering): string[] {
 export interface VueConversionOptions {
   /** Resolve projected slot props from the receiving component, including names shadowing consumer state. */
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
+  /** Type an invocation's literal props, as the live runtime parses its attributes. */
+  readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
   /** Original controller resource before the public converter relocates its module. */
   readonly controllerSpecifier?: string;
   /** Emit the live runtime's nested-component lowering bound for a graph that can exceed it. */
@@ -916,6 +935,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const context: Context = {
     definition,
     ...(options.slotsByTag === undefined ? {} : { slotsByTag: options.slotsByTag }),
+    ...(options.propContractsByTag === undefined ? {} : { propContractsByTag: options.propContractsByTag }),
     lowering,
     imports: new Set(),
     refs: new Map(),

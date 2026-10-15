@@ -38,6 +38,19 @@ describe("Node component rendering", () => {
     const rendered = await renderComponents("<x-connected></x-connected>", { definitions: [definition] });
     assert.match(rendered.html, /data-connected="no"/);
   });
+  it("records explicit props under the component's tag, leaving authored data-* attributes as written", async () => {
+    const definition = parseComponent(`<template component="x-figure"><defs>
+      <prop name="placement" type="keyword" values="start, end" default="start">Where the figure floats.</prop>
+      </defs><figure data-placement="figure"><slot></slot></figure></template>`);
+    const rendered = await renderComponents('<x-figure placement="end"></x-figure><x-figure placement="end" data-placement="wide"></x-figure>',
+      { definitions: [definition] });
+    const roots = [...rendered.html.matchAll(/<figure[^>]*>/g)].map(([tag]) => tag);
+    assert.equal(roots.length, 2);
+    // The template's own data-placement and a consumer's pass-through keep their values; the prop has its own attribute.
+    assert.match(roots[0]!, /\sdata-placement="figure"/);
+    assert.match(roots[1]!, /\sdata-placement="wide"/);
+    for (const root of roots) assert.match(root, /\sdata-x-figure-prop-placement="end"/);
+  });
   it("keeps whitespace-only text between elements inside pre", async () => {
     const definition = parseComponent(`<template component="x-code"><pre class="shiki"><code><span class="line">a</span>
 <span class="line">b</span></code></pre></template>`);

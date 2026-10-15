@@ -718,12 +718,12 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
     // The scoped styles select the root as `:host`, so each arm's root carries the tag as a class.
     assert.equal(await render({}), '<button class="x-action action" type="button">Go</button>');
-    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" href="/next" data-as="a" data-href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" href="/next" data-x-action-prop-as="a" data-x-action-prop-href="/next">Go</a>');
     const listed = await render({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] });
-    assert.match(listed, /data-tags="red, blue"/);
-    assert.match(listed, /data-space-tags="one two"/);
+    assert.match(listed, /data-x-action-prop-tags="red, blue"/);
+    assert.match(listed, /data-x-action-prop-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
-    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-as="a" data-disabled="true" data-href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-x-action-prop-as="a" data-x-action-prop-disabled="true" data-x-action-prop-href="/next">Go</a>');
     assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;

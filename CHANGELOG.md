@@ -2,10 +2,22 @@
 
 ## 1.0.0-alpha.52
 
+### Added
+
+- The usage guide shows how a component contains a wrapped component's events: its controller listens on its own root in the capture phase, calls `stopImmediatePropagation()`, and dispatches its own event. A test holds the pattern in Chromium, Firefox and WebKit, in the browser runtime and in converted Vue, React and Svelte components.
+
+### Changed
+
+- A component root records each explicit prop as `data-<tag>-prop-<name>`, such as `data-x-figure-prop-placement="end"`, in place of `data-<name>`. The live runtime, server rendering, compiled Vanilla output and converted Vue, React and Svelte components write the same attribute, and hydration reads it. An authored `data-*` attribute on the root, from the template or passed through by a consumer, keeps its own value, and a page selector such as `[data-placement="end"] .caption` no longer matches inside a component whose `placement` prop is `end`. A template that binds `from:data-<name>="$name"` writes that attribute as its own binding.
+
 ### Fixed
 
 - In converted Vue and Svelte components, a component selected by its tag has the live runtime's specificity, a type selector's, alone or in `:host:is(…)`: the converter emits `x-card` as `:is(x-card, :where(.x-card))`, the counterpart of the live runtime's `:is(x-card, :where([data-component~="x-card"]))`.
 - In converted Vue components, a rule that holds nested rules applies its own declarations at its own specificity, `:host` rules included. The converter moves those declarations, and those of its nested at-rules, into a first nested `:where(&):is(&) { … }`, which Vue's scoped styles turn into `:where(&[data-v-…]):is(&)`.
+- In converted Vue components, `host.refs` holds the native root of a component that a `$ref` names, as the live runtime's does, for a single ref and for each item of an iterated one. It held the component's Vue instance, and reading an iterated component ref threw.
+- In converted Vue components, a literal prop on a component invocation passes the value the live runtime parses from it: a bare boolean attribute such as `<x-toolbar floating>` passes `:floating="true"`, `docked="false"` passes `false` and `count="3"` passes `3`, so the generated prop types check. A string prop stays a plain attribute. React and Svelte output already passed these values.
+- In converted Vue components, an omitted list prop with no default iterates as nothing, as in the live runtime: `<li $each="item of $items" $key="$item.id">` renders no rows, and the generated component type-checks.
+- In converted Vue components, a component whose root is another component runs its controller: `host.root`, `host.dispatch`, connection, `on:connect` and root focus use the root element. The controller failed to connect.
 
 ## 1.0.0-alpha.51
 
