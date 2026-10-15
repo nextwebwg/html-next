@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.52
+
+### Fixed
+
+- In converted Vue and Svelte components, a component selected by its tag has the live runtime's specificity, a type selector's, alone or in `:host:is(…)`: the converter emits `x-card` as `:is(x-card, :where(.x-card))`, the counterpart of the live runtime's `:is(x-card, :where([data-component~="x-card"]))`.
+- In converted Vue components, a rule that holds nested rules applies its own declarations at its own specificity, `:host` rules included. The converter moves those declarations, and those of its nested at-rules, into a first nested `:where(&):is(&) { … }`, which Vue's scoped styles turn into `:where(&[data-v-…]):is(&)`.
+
 ## 1.0.0-alpha.51
 
 ### Added
