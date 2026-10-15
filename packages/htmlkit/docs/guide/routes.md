@@ -196,6 +196,11 @@ writes it to `404.html`. It is not a route: `/404/` is not one of the site's pag
 doesn't list it. Its loader receives the requested URL, except in the built `404.html`, which a static
 host serves for every missing path. Without the file, HTMLKit serves a plain "Page not found" page.
 
+The same holds for a `404` page at the top of any [page folder](/htmlkit/configuration#page-folders)
+served at `/`, which renders through that folder's `layout`. A folder served at another prefix, such
+as `/v/one/`, serves its `404` page at no URL, and the site's not-found page answers its missing
+paths.
+
 ```html
 <template component="page-not-found">
   <title>Page not found</title>

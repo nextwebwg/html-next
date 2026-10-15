@@ -378,7 +378,11 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "htmlkit-nested-layouts-"));
     await write(root, "package.json", '{"name":"htmlkit-nested-layouts","private":true,"type":"module"}');
-    await write(root, "app/layouts/default.html", '<template component="site-shell"><div class="site"><slot name="page"></slot></div></template>');
+    // A navigation tree, whose folders open around the current page as client navigation moves.
+    await write(root, "app/layouts/default.html", `<template component="site-shell"><defs>
+      <prop name="tree" type="list(object({ label: string, current: string, depth: number, ... }))" required>Tree</prop></defs>
+      <div class="site"><hk-nav from:items="$tree"></hk-nav><slot name="page"></slot></div></template>`);
+    await write(root, "app/layouts/default.server.ts", "export const load = async ({ navigationTree }) => ({ props: { tree: await navigationTree() } });");
     await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><article><a id="to-a" href="/docs/a/">A</a></article></template>');
     await write(root, "app/pages/docs/_layout.html", `<template component="docs-shell" controller="./shell.ts"><defs><prop name="section" type="string" required>Section</prop></defs>
       <div class="docs"><aside from:data-section="$section">Docs</aside><slot name="page"></slot></div></template>`);
@@ -410,10 +414,14 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
           return [docs === (window as unknown as { docs: Element }).docs, docs.dataset.connections, docs.querySelector("aside")!.dataset.section,
             document.getElementById("hk-layer-2")!.dataset.component];
         })).toEqual([true, "1", "/docs/b/", "b-page"]);
-        // Leaving the folder drops its layout.
+        const tree = () => page.evaluate(() => [document.querySelector<HTMLDetailsElement>("nav details")!.open, document.querySelector("nav summary")!.textContent,
+          document.querySelector('nav a[aria-current="page"]')?.textContent ?? null]);
+        expect(await tree()).toEqual([true, "docs", "b"]);
+        // Leaving the folder drops its layout, and its folder closes in the tree.
         await page.locator("#to-home").click();
         await settled(page, "Home");
         expect(await page.evaluate(() => [document.getElementById("hk-layer-1")!.dataset.component, document.getElementById("hk-layer-2")])).toEqual(["home-page", null]);
+        expect(await tree()).toEqual([false, "docs", "Home"]);
         expect([await marked(page), errors]).toEqual([true, []]);
       } finally { await browser.close(); }
     }, 60_000);

@@ -7,5 +7,5 @@ import type { ApplicationOptions } from "./types.js";
 /** Type-check an htmlkit.config.ts file without changing its values. */
 export function defineConfig(options: ApplicationOptions): ApplicationOptions { return options; }
 export type { Application, ApplicationOptions, ApplicationRoute, ApplicationServer, BrowserDefinition, BuildEndContext, BuildManifest, BuildResult, BuildStartContext, HtmlKitPlugin, PageContext, PageDirectory,
-  HeadElement, LoadContext, LoaderResult, ManifestPage, ManifestRedirect, NavigationItem, NavigationQuery, PagerLinks, PageHead, PrefetchPolicy, RedirectStatus, RenderedHead, RenderedLayer, RenderedPage,
+  HeadElement, LoadContext, LoaderResult, ManifestPage, ManifestRedirect, NavigationItem, NavigationNode, NavigationQuery, PagerLinks, PageHead, PrefetchPolicy, RedirectStatus, RenderedHead, RenderedLayer, RenderedPage,
   RouteGroup, RouteInput, RouteLayer, RouteParam, ServerModule, ServerOptions } from "./types.js";

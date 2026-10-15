@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { compileStyle } from "@vue/compiler-sfc";
+import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
 import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "../src/component-styles-build.js";
@@ -25,7 +26,7 @@ it("scopes Svelte selectors by the hash Svelte gives the component's own markup"
       :global(:scope), :global(:scope[data-x-svelte-scope-state~="open"] span)${own} { color: red; }
       :global(.item *)${own}::before, :global(p)${own}:after { color: blue; }
       :global(:is(.projected) a):not(:scope, * *, [data-html-next-owner~="x-svelte-scope"])::marker { color: green; }
-      :global(:is(x-child, .x-child))${own} { color: navy; }
+      :global(:is(x-child, :where(.x-child)))${own} { color: navy; }
     }`));
   assert.equal(compiled.hashed, true);
   // Without slots nothing is projected, so the native scope alone bounds the rules and Svelte hashes nothing.
@@ -76,7 +77,7 @@ describe("resolved prop and state selectors", () => {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
       assert.match(result.css, compile === compileComponentStylesForBuild ? /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/
-        : /:scope\.active/);
+        : compile === compileComponentStylesForVue ? /:scope:where\(:scope\):is\(\.active\)/ : /:scope\.active/);
     }
   });
 
@@ -156,27 +157,54 @@ it("keeps Vue grouping rules in the component scope and keyframes document-wide"
     @media (min-width: 0px) { :host::before { animation: pulse 1s; } *::after { box-sizing: border-box; } }`, definition);
   assert.match(result.css, /^@keyframes pulse/);
   assert.match(result.css, /@scope \(\.x-style-contract\) \{\s*@media/);
-  assert.match(result.css, /:scope::before/);
+  assert.match(result.css, /:scope:where\(:scope\)::before/);
   assert.match(result.css, /\*::after/);
   assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });
 
-it("keeps Vue's scope attribute on a host subject under an ancestor", () => {
+it("puts Vue's scope attribute on a host subject in :where(), at the live runtime's specificity", () => {
   const button = parseComponent('<template component="ui-x"><button><slot></slot></button></template>');
-  const css = compileComponentStylesForVue(`.wide :host { color: red; } .wide :host::after { content: "x"; }
-    .wide > :host(.a) { color: blue; } .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`, button).css;
+  const css = compileComponentStylesForVue(`:host { color: red; } :host::after { content: "x"; } :host(.a) { color: blue; }
+    .wide :host { color: red; } .wide :host::after { content: "x"; } .wide > :host(.a) { color: blue; }
+    .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`, button).css;
   const scoped = compileStyle({ source: css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code.replace(/\s+/g, " ");
-  assert.equal(scoped, '@scope (.ui-x) {[data-v-1]:scope:not(:not(:is(.wide *))) { color: red; }'
-    + '[data-v-1]:scope:not(:not(:is(.wide *)))::after { content: "x"; }'
-    + ':scope.a[data-v-1]:not(:not(:is(.wide > *))) { color: blue; }'
-    + '[data-v-1]:scope:not(.c):not(:not(:is(.wide *))) { color: green; }'
+  // Live: `:scope:where([data-component~="ui-x"])`, (0,1,0); `.a` and `.wide` add one class each.
+  assert.equal(scoped, '@scope (.ui-x) {:scope:where([data-v-1]:scope) { color: red; }'
+    + ':scope:where([data-v-1]:scope)::after { content: "x"; }'
+    + ':scope:where([data-v-1]:scope):is(.a) { color: blue; }'
+    + ':scope:where([data-v-1]:scope):is(.wide *) { color: red; }'
+    + ':scope:where([data-v-1]:scope):is(.wide *)::after { content: "x"; }'
+    + ':scope:where([data-v-1]:scope):is(.wide > .a) { color: blue; }'
+    + ':scope:where([data-v-1]:scope):is(.wide :not(.c)) { color: green; }'
     + '.wide :scope .in[data-v-1] { color: navy; } }');
+});
+
+it("selects a component by tag with the live runtime's specificity in Vue and Svelte", () => {
+  const card = parseComponent('<template component="ui-x"><p><x-kid></x-kid></p></template>');
+  const css = ":host:is(ui-x) { color: red; } x-kid > b { color: blue; }";
+  const vue = compileStyle({ source: compileComponentStylesForVue(css, card).css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code;
+  const svelte = compileSvelte(`<p class="ui-x"><x-kid></x-kid><b></b></p><style>${compileComponentStylesForSvelte(css, card).css}</style>`,
+    { css: "external", filename: "UiX.svelte" }).css!.code;
+  // Live: `:is(x-kid, :where([data-component~="x-kid"]))`, the type selector's (0,0,1).
+  assert.equal(vue.replace(/\s+/g, " "), "@scope (.ui-x) to (.x-kid) {:scope:where([data-v-1]:scope):is(:is(:is(ui-x, :where(.ui-x)))) { color: red; }"
+    + ":is(x-kid, :where(.x-kid)) > b[data-v-1] { color: blue; } }");
+  assert.equal(svelte.replace(/\s+/g, " "), "@scope (.ui-x) to (.x-kid) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
+    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
+});
+
+it("keeps a nested Vue rule's own declarations at its specificity", () => {
+  const button = parseComponent('<template component="ui-x"><button><b></b></button></template>');
+  const css = compileComponentStylesForVue(":host { color: red; & b { color: blue; } @media (min-width: 0px) { margin: 0; } padding: 0; }", button).css;
+  const scoped = compileStyle({ source: css, filename: "ui-x.vue", id: "data-v-1", scoped: true }).code.replace(/\s+/g, " ");
+  // Vue's own wrapper would be `&[data-v-1] { … }`, one class heavier than the rule.
+  assert.equal(scoped, "@scope (.ui-x) {:scope:where(:scope) { :where(&[data-v-1]):is(&) { color: red; padding: 0; } & b[data-v-1] { color: blue; }"
+    + " @media (min-width: 0px) {:where(&[data-v-1]):is(&) { margin: 0; } } } }");
 });
 
 it("keeps a component type selector's namespace in Vue's class form", () => {
   const nested = parseComponent('<template component="x-ns"><div><x-ns-child></x-ns-child></div></template>');
   const css = compileComponentStylesForVue('@namespace n "http://www.w3.org/1999/xhtml"; :host:is(n|x-ns) { color: red; } *|x-ns-child { color: blue; }', nested).css;
-  assert.match(css, /:is\((htmlnextns\w+)\|x-ns, \1\|\*\.x-ns\)/);
-  assert.match(css, /:is\(\*\|x-ns-child, \*\|\*\.x-ns-child\)/);
+  assert.match(css, /:is\((htmlnextns\w+)\|x-ns, :where\(\1\|\*\.x-ns\)\)/);
+  assert.match(css, /:is\(\*\|x-ns-child, :where\(\*\|\*\.x-ns-child\)\)/);
   assert.doesNotMatch(css, /\|:is\(/);
 });

@@ -121,14 +121,21 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
  * A native scope keeps ordinary selectors to the component's own descendants and stops at nested
  * component roots, as in the default build, through classes: the root carries its tag, and each
  * component the template invokes carries its own, which Vue passes to that component's root.
- * `:host` is `:scope`, and a component selected by tag is its class.
+ * `:host` is `:scope`, and a component selected by tag is its class in `:where()`, which keeps the
+ * type selector's specificity, as the live runtime's `:where([data-component~="…"])` does.
  *
  * Vue adds its scope attribute to a selector's last compound with a class, attribute, type, or id,
- * so in `.wide :scope` it lands on the ancestor, which never carries it. A `:scope` subject with
- * context therefore tests that context on itself, `:scope:not(:not(:is(.wide *)))`, which keeps the
- * selector's specificity and leaves Vue no earlier compound to scope. Vue scopes inside a bare
- * `:is()`, not inside `:not()`; the inner `:is()` is for WebKit, which drops a pseudo-element of
- * `:scope:not(:not(.wide *))`.
+ * and otherwise inside the first `:where()` or `:is()` of a compound with none. A `:scope` subject is
+ * therefore `:scope:where(:scope)`, with its other tests and any context in an `:is()` after it:
+ * `.wide :host(.on)` is `:scope:where(:scope):is(.wide .on)`. Vue scopes it as
+ * `:scope:where([data-v-…]:scope)`, the live runtime's `:scope:where([data-component~="…"])`, so the
+ * root carries the scope attribute at the live runtime's specificity. (`:where(*)` would do, but Vue
+ * drops the `*` of a rule that holds nested rules, leaving `:where()`.)
+ *
+ * Vue scopes a rule that holds nested rules through them alone, moving its declarations, and those
+ * of its nested at-rules, into a first nested `& { … }` that it scopes as `&[data-v-…]`. The
+ * converter moves them first, into `:where(&):is(&) { … }`, which Vue scopes as
+ * `:where(&[data-v-…]):is(&)`: the same elements at the specificity of the rule itself.
  */
 export function compileComponentStylesForVue(
   css: string,
@@ -136,10 +143,18 @@ export function compileComponentStylesForVue(
   source?: string,
 ): CompiledComponentStyles {
   return compileClassScopedStyles(css, definition, source, ["state"], (selector) => postcss.list.comma(selector).map((complex) => {
-    const { start, pseudo } = subjectCompound(complex);
-    if (start === 0 || !/:scope(?![\w-])/.test(complex.slice(start, pseudo))) return complex;
-    return `${complex.slice(start, pseudo)}:not(:not(:is(${complex.slice(0, start)}*)))${complex.slice(pseudo)}`;
-  }).join(", "));
+    const { start, pseudo, host } = subjectCompound(complex);
+    if (host === -1) return complex;
+    const tests = complex.slice(start, host) + complex.slice(host + ":scope".length, pseudo);
+    const test = complex.slice(0, start) + (tests === "" ? "*" : tests);
+    return `:scope:where(:scope)${test === "*" ? "" : `:is(${test})`}${complex.slice(pseudo)}`;
+  }).join(", "), (root) => root.walkRules((rule) => {
+    if (!rule.nodes.some((node) => node.type === "rule")) return;
+    for (const parent of [rule, ...rule.nodes.filter((node) => node.type === "atrule")]) {
+      const own = parent.nodes?.filter((node) => node.type === "decl" || node.type === "comment") ?? [];
+      if (own.length > 0) parent.prepend(postcss.rule({ selector: ":where(&):is(&)", raws: { between: " " } }).append(own));
+    }
+  }));
 }
 
 /**
@@ -191,7 +206,7 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", tagClassSelector), rule);
+    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`), rule);
   });
   const limits = limited() ? [...componentTags(definition.template)] : [];
   const scope = postcss.atRule({ name: "scope", params: classScope(definition.contract.tag, limits) });
@@ -217,10 +232,14 @@ function svelteSelector(complex: string, owned: "own" | "projected" | undefined,
   return { selector: `:global(${complex.slice(0, pseudo)}${subject === "" ? "*" : ""})${test}${complex.slice(pseudo)}`, tested: test !== "", root };
 }
 
-/** Where a complex selector's last compound starts, and where its pseudo-element starts (or its end). */
-function subjectCompound(selector: string): { start: number; pseudo: number } {
+/**
+ * Where a complex selector's last compound starts, where its pseudo-element starts (or its end), and
+ * where that compound's own `:scope` starts (or -1).
+ */
+function subjectCompound(selector: string): { start: number; pseudo: number; host: number } {
   let start = 0;
   let pseudo = -1;
+  let host = -1;
   let depth = 0;
   let quote = "";
   for (let index = 0; index < selector.length; index += 1) {
@@ -231,10 +250,11 @@ function subjectCompound(selector: string): { start: number; pseudo: number } {
     else if (character === "(" || character === "[") depth += 1;
     else if (character === ")" || character === "]") depth -= 1;
     else if (depth > 0) continue;
-    else if (/[\s>+~]/.test(character)) { start = index + 1; pseudo = -1; }
+    else if (/[\s>+~]/.test(character)) { start = index + 1; pseudo = -1; host = -1; }
     else if (character === ":" && pseudo === -1 && /^::|^:(?:before|after|first-line|first-letter)(?![\w-])/i.test(selector.slice(index))) pseudo = index;
+    else if (character === ":" && pseudo === -1 && /^:scope(?![\w-])/.test(selector.slice(index))) host = index;
   }
-  return { start, pseudo: pseudo === -1 ? selector.length : pseudo };
+  return { start, pseudo: pseudo === -1 ? selector.length : pseudo, host };
 }
 
 /** Whether a template renders sanitized HTML (`$html`), slot fallbacks included. */

@@ -44,9 +44,13 @@ try {
       for (const [name, value] of Object.entries(state)) host.state[name] = value;
     }
   }
-  // Drain the shared runtime's microtask updates, including nested structural changes.
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  lowerDocument(document, { connect: false });
+  // Drain the shared runtime's microtask updates, including nested structural changes, until a
+  // pass lowers nothing: a component in a row those updates render takes its props in the next drain.
+  let pass = 0;
+  do {
+    if (++pass > 32) fail("HR008", "Component invocations nested deeper than the lowering limit.");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } while (lowerDocument(document, { connect: false }) > 0);
   const result = {
     html: serializeRenderedForm(document.body),
     css: hoistStylesheetNamespaces(Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n")),

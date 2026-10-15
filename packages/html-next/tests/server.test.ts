@@ -21,6 +21,16 @@ describe("Node component rendering", () => {
     assert.match(rendered.html, /Total: &lt;b&gt;Ada&lt;\/b&gt; due today\. \$literal costs \$1\.15\./);
     assert.match(rendered.html, /<td>&lt;b&gt;Ada&lt;\/b&gt;<\/td>/);
   });
+  it("renders a component in a list row with structured props, including a component that renders itself", async () => {
+    const definition = parseComponent(`<template component="x-tree"><defs>
+      <prop name="items" type="list(object({ label: string, children: list(object({ label: string, ... })), ... }))" required>Items.</prop>
+      </defs><ul><li $each="item of $items">{$item.label}<x-tree $if="$item.children.length" from:items="$item.children"></x-tree></li></ul></template>`);
+    const items = JSON.stringify([{ label: "a", children: [{ label: "b", children: [{ label: "c", children: [] }] }] }]).replaceAll('"', "&quot;");
+    const rendered = await renderComponents(`<x-tree items="${items}"></x-tree>`, { definitions: [definition] });
+    const html = rendered.html.replace(/ data-[a-z-]+="[^"]*"/g, "").replace(/<!--[^>]*-->/g, "");
+    assert.equal(html, "<ul><li>a<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>");
+    assert.doesNotMatch(rendered.html, /aria-invalid/);
+  });
   it("never runs on:connect while rendering on the server", async () => {
     const definition = parseComponent(`<template component="x-connected"><defs><state name="connected" type="string" value="no"></state>
       <handler name="join"><set name="connected" value="yes"></set></handler></defs>
