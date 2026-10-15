@@ -14,6 +14,7 @@ import {
   COMPONENT_ATTRIBUTE,
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
+  type ComponentPseudoClass,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
   styleRuleKind,
@@ -141,7 +142,7 @@ export function compileComponentStylesForVue(
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
-  return compileClassScopedStyles(css, definition, source, ["host-state"], (selector) => postcss.list.comma(selector).map((complex) => {
+  return compileClassScopedStyles(css, definition, source, ["state"], (selector) => postcss.list.comma(selector).map((complex) => {
     const { start, pseudo, host } = subjectCompound(complex);
     if (host === -1) return complex;
     const tests = complex.slice(start, host) + complex.slice(host + ":scope".length, pseudo);
@@ -176,7 +177,7 @@ export function compileComponentStylesForSvelte(
   const slotted = new Set<object>();
   let hashed = false;
   let descends = false;
-  const compiled = compileClassScopedStyles(css, definition, source, ["slotted", "host-state"], (selector, rule) => {
+  const compiled = compileClassScopedStyles(css, definition, source, ["slotted", "state"], (selector, rule) => {
     if (selector.includes(SLOTTED) || (rule.parent !== undefined && slotted.has(rule.parent))) slotted.add(rule);
     return postcss.list.comma(selector.replaceAll(SLOTTED, "")).map((complex) => {
       const scoped = svelteSelector(complex, !projects ? undefined : slotted.has(rule) ? "projected" : "own", owner);
@@ -193,7 +194,7 @@ export function compileComponentStylesForSvelte(
 const SLOTTED = ":where([--slotted])";
 
 function compileClassScopedStyles(css: string, definition: ComponentDefinition, source: string | undefined,
-  renames: readonly ("slotted" | "host-state")[], target: (selector: string, rule: Rule) => string,
+  renames: readonly ComponentPseudoClass[], target: (selector: string, rule: Rule) => string,
   prepare?: (root: postcss.Root) => void, limited = (): boolean => true): CompiledComponentStyles {
   const tag = definition.contract.tag;
   if (css.trim() === "") return withImportedStateNames({ css: "", stateNames: [] }, definition);

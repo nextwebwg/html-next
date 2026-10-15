@@ -82,7 +82,7 @@ describe("shared component CSS resources", () => {
 
   it("delivers one compatible body for two adopting definitions during SSR, with owner-specific state tests", async () => {
     const graph = await loadNodeComponents(["file:///pkg/app.html"], { readComponent: async url => ({ url, source:
-      url.endsWith(".css") ? ':host-state([open]) { color: rebeccapurple; } * { box-sizing: border-box; }' :
+      url.endsWith(".css") ? ':host(:state(open)) { color: rebeccapurple; } * { box-sizing: border-box; }' :
       ["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><div><span>own</span></div><style>@import "defaults.css";</style></template>`).join("") }) });
     const definitions = [...graph.nodes.values()].map(node => node.definition);
     assert.equal(collectSharedStylesheets(definitions).length, 1);

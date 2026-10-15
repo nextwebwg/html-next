@@ -4,7 +4,7 @@ import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
 import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "../src/component-styles-build.js";
-import { guardComponentPseudoElements, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
+import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
@@ -16,7 +16,7 @@ it("preserves an implicit universal selector before a descendant pseudo-element"
 
 it("scopes Svelte selectors by the hash Svelte gives the component's own markup", () => {
   const definition = parseComponent('<template component="x-svelte-scope"><div><p $html="\'<b>x</b>\'"></p><x-child></x-child><slot></slot></div></template>');
-  const compiled = compileComponentStylesForSvelte(`:host, :host-state([open]) span { color: red; } .item ::before, p:after { color: blue; }
+  const compiled = compileComponentStylesForSvelte(`:host, :host(:state(open)) span { color: red; } .item ::before, p:after { color: blue; }
     :slotted(.projected) a::marker { color: green; } x-child { color: navy; } @keyframes spin { to { opacity: 0; } }`,
   { ...definition, declarations: [{ kind: "state", name: "open", type: "boolean" }] });
   const own = ':where(*, :global([data-html-next-owner~="x-svelte-scope"]))';
@@ -62,7 +62,7 @@ const resolved: Readonly<Record<string, unknown>> = { size: "md", open: false, c
 describe("resolved prop and state selectors", () => {
   it("lowers prop tests, mutable state, and computed state to the same resolved-value tokens", () => {
     for (const compile of compilers) {
-      const result = compile(':host([size="md"]) { color: blue; } :host-state([open]) { color: red; } :host-state([closed]) { color: green; }', definition);
+      const result = compile(':host([size="md"]) { color: blue; } :host(:state(open)) { color: red; } :host(:state(closed)) { color: green; }', definition);
       assert.deepEqual(result.stateNames, ["size", "open", "closed"]);
       assert.match(result.css, /\[data-x-style-contract-state~="size=md"\]/);
       assert.match(result.css, /\[data-x-style-contract-state~="open"\]/);
@@ -81,20 +81,56 @@ describe("resolved prop and state selectors", () => {
     }
   });
 
-  it("requires props in :host and mutable or computed state in :host-state", () => {
+  it("requires props in :host([prop]) and mutable or computed state in :state()", () => {
     for (const compile of compilers) {
-      assert.throws(() => compile(":host-state([size]) { color: red; }", definition), /HY001.*:host\(\[size\]\)/);
+      assert.throws(() => compile(":host(:state(size)) { color: red; }", definition), /HY001.*:host\(\[size\]\)/);
       assert.throws(() => compile(":host([open]) { color: red; }", definition), /HY001/);
       assert.throws(() => compile(":host([missing]) { color: red; }", definition), /HY001/);
-      assert.throws(() => compile(":host-state([missing]) { color: red; }", definition), /HY001/);
+      assert.throws(() => compile(":host(:state(missing)) { color: red; }", definition), /HY001/);
     }
   });
 
   it("accepts only presence and equality tests for resolved values", () => {
     for (const compile of compilers) {
       assert.throws(() => compile(':host([size^="m"]) { color: red; }', definition), /HY002/);
-      assert.throws(() => compile(':host-state([open~="true"]) { color: red; }', definition), /HY002/);
+      assert.throws(() => compile(':host(:state(open~=true)) { color: red; }', definition), /HY002/);
     }
+  });
+
+  it("accepts identifier and quoted values, repeated tests, props, and its own tag in :state()", () => {
+    const tone = parseComponent(`<template component="x-tone"><defs>
+      <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
+      <state name="tone" type="string" value="warm"></state>
+      <state name="step" type="number" value="2"></state>
+      <state name="open" type="boolean" value="false"></state>
+    </defs><section></section></template>`);
+    for (const compile of compilers) {
+      const result = compile(`:host(:state(tone=warm)) { color: red; } :host(:state(tone="cool blue")) { color: blue; }
+        :host(:state(step="2")) { color: green; } :host([size=sm]:state(open):state(tone='warm' of x-tone)) .label { color: navy; }`, tone);
+      assert.deepEqual(result.stateNames, ["tone", "step", "size", "open"]);
+      assert.match(result.css, /\[data-x-tone-state~="tone=warm"\]/);
+      assert.match(result.css, /\[data-x-tone-state~="tone=cool%20blue"\]/);
+      assert.match(result.css, /\[data-x-tone-state~="step=2"\]/);
+      assert.match(result.css, /\[data-x-tone-state~="size=sm"\]\[data-x-tone-state~="open"\]\[data-x-tone-state~="tone=warm"\]/);
+    }
+  });
+
+  it("rejects malformed :state() arguments, :host-state(), and other components' state", () => {
+    for (const compile of compilers) {
+      for (const malformed of [":state(step=2)", ":state(tone=)", ":state(open closed)", ":state(open of x)", ":state()"]) {
+        assert.throws(() => compile(`:host(${malformed}) { color: red; }`, definition), /HY002.*quote a value/, malformed);
+      }
+      assert.throws(() => compile(":host-state([open]) { color: red; }", definition), /HY005.*:host\(:state\(name\)\)/);
+      assert.throws(() => compile("x-child:state(open) + p { color: red; }", definition), /HY006/);
+      assert.throws(() => compile(":host(:state(open of x-other)) { color: red; }", definition), /HY006/);
+      assert.throws(() => compile(":host(:state(size)) { color: red; }", definition), /HY001.*:host\(\[size\]\)/);
+      assert.throws(() => compile(":host([open]) { color: red; }", definition), /HY001.*:host\(:state\(open\)\)/);
+    }
+  });
+
+  it("restores a browser-serialized :state() to its authored form", () => {
+    const renamed = renameComponentPseudoClasses(':host(:state(tone="cool blue" of x-tone)) a, :state(open) { color: red; } /* :state(x y) */');
+    assert.equal(restoreStatePseudoClasses(renamed), ':host(:state(tone="cool blue" of x-tone)) a, :state(open) { color: red; } /* :state(x y) */');
   });
 
   it("rejects structured props and state and native event values", () => {
@@ -107,10 +143,10 @@ describe("resolved prop and state selectors", () => {
     const event = { ...definition, declarations: [{ kind: "state" as const, name: "sourceEvent", type: "event" }] };
     for (const compile of compilers) {
       assert.throws(() => compile(":host([items]) { color: red; }", structured), /HY002/);
-      assert.throws(() => compile(":host-state([rows]) { color: red; }", structured), /HY002/);
-      assert.throws(() => compile(":host-state([entry]) { color: red; }", structured), /HY002/);
-      assert.throws(() => compile(":host-state([entries]) { color: red; }", structured), /HY002/);
-      assert.throws(() => compile(":host-state([sourceEvent]) { color: red; }", event), /HY002/);
+      assert.throws(() => compile(":host(:state(rows)) { color: red; }", structured), /HY002/);
+      assert.throws(() => compile(":host(:state(entry)) { color: red; }", structured), /HY002/);
+      assert.throws(() => compile(":host(:state(entries)) { color: red; }", structured), /HY002/);
+      assert.throws(() => compile(":host(:state(sourceEvent)) { color: red; }", event), /HY002/);
     }
   });
 });

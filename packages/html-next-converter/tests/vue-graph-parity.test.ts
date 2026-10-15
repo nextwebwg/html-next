@@ -39,7 +39,7 @@ const parent = `<link rel="component" href="./item.html">
     <output class="saved-hits" $value="concat($saved, ':', $ancestorSaved)"></output>
     <output class="right-hits" $value="$rightHits"></output>
   </section>
-  <style>:host { display: block; padding: 8px; background: rgb(225 235 245); } :host-state([active]) { background: rgb(200 220 240); }</style>
+  <style>:host { display: block; padding: 8px; background: rgb(225 235 245); } :host(:state(active)) { background: rgb(200 220 240); }</style>
 </template>`;
 
 type Snapshot = { readonly behavior: { readonly tag: string; readonly text: string; readonly rootHits: string; readonly savedHits: string; readonly rightHits: string; readonly documentClicks: number; readonly documentSaved: number; readonly color: string; readonly background: string; readonly projectedColor: string }; readonly pixels: Buffer };

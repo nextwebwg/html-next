@@ -41,7 +41,7 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
       <ul><li $each="link of $links"><a from:href="$link.href">{$link.label}</a></li></ul></nav>
       <div class="content"><slot name="page"></slot></div></div></main>
     <style>:host { color: #183047; background: #fff; min-height: 100vh; padding: 2rem; font: 1rem/1.65 system-ui; }
-      :host-state([dark]) { color: #e1ebf4; background: #142638; } header { display: flex; justify-content: space-between; border-bottom: 1px solid #9aaebf; padding-bottom: 1rem; }
+      :host(:state(dark)) { color: #e1ebf4; background: #142638; } header { display: flex; justify-content: space-between; border-bottom: 1px solid #9aaebf; padding-bottom: 1rem; }
       .columns { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 3rem; max-width: 80rem; margin: 2rem auto; } input, button { font: inherit; padding: .4rem; } ul { padding-left: 1rem; } a { color: #2785d7; }
       @media (max-width: 640px) { .columns { display: block; } }</style></template>`);
   await write("app/layouts/default.server.ts", `export const load = () => ({ props: { links: ${JSON.stringify(navigation)} } });`);
