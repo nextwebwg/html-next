@@ -67,7 +67,7 @@ it("orders and labels (group) folders in navigation without adding a URL segment
   }
   // A group's _layout.html wraps its pages like any folder's.
   await write(root, "app/pages/docs/01.(Getting started)/_layout.html", '<template component="start-shell"><section><slot name="page"></slot></section></template>');
-  await write(root, "app/layouts/default.html", `<template component="group-shell"><defs><prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string }))" required>Links</prop></defs>
+  await write(root, "app/layouts/default.html", `<template component="group-shell"><defs><prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, ... }))" required>Links</prop></defs>
     <main><hk-nav from:items="$pages"></hk-nav><slot name="page"></slot></main></template>`);
   await write(root, "app/layouts/default.server.ts", 'export const load = async ({ navigation }) => ({ props: { pages: await navigation({ from: "/docs/" }) } });');
   const application = await createApplication({ root });
@@ -88,6 +88,23 @@ it("orders and labels (group) folders in navigation without adding a URL segment
   } finally { await application.close(); }
   await mkdir(join(root, "app/pages/docs/03.( )"));
   await expect(discoverRoutes(root)).rejects.toThrow(/route group needs a label/);
+});
+
+it("orders a page by hk:order in place of its number-and-dot prefix", async () => {
+  const root = await site();
+  // 10.next.html would follow 02.install.html; hk:order 1 puts it first, and about joins the numbered pages.
+  await write(root, "app/pages/01.guide/10.next.html", '<template component="page-next"><meta name="hk:order" content="1"><h1>next</h1></template>');
+  await write(root, "app/pages/about.html", '<template component="page-about"><meta name="hk:order" content="3"><h1>about</h1></template>');
+  const application = await createApplication({ root });
+  try {
+    expect((await application.navigation()).map(item => item.href)).toEqual(["/", "/guide/", "/guide/next/", "/guide/install/", "/api/", "/about/"]);
+    expect(application.routes.find(route => route.pageName === "page-next")!.order).toEqual(["01", "1"]);
+  } finally { await application.close(); }
+  await write(root, "app/pages/about.html", '<template component="page-about"><meta name="hk:order" content="first"><h1>about</h1></template>');
+  await expect(discoverRoutes(root)).rejects.toThrow(/hk:order needs a whole number/);
+  await write(root, "app/pages/about.html", '<template component="page-about"><h1>about</h1></template>');
+  await write(root, "app/pages/01.guide/01.index.html", '<template component="page-guide"><meta name="hk:order" content="5"><h1>guide</h1></template>');
+  await expect(discoverRoutes(root)).rejects.toThrow(/01\.index\.html: hk:order orders a page among its folder's pages/);
 });
 
 it("omits unenumerated dynamic patterns from navigation while static builds diagnose them", async () => {

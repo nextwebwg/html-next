@@ -2,7 +2,7 @@ export { createApplication } from "./application.js";
 export { buildApplication, readManifest } from "./build.js";
 export { devApplication, previewApplication } from "./serve.js";
 export { discoverRoutes } from "./routes.js";
-export { HtmlKitError } from "./config.js";
+export { HtmlKitError, loadConfig } from "./config.js";
 import type { ApplicationOptions } from "./types.js";
 /** Type-check an htmlkit.config.ts file without changing its values. */
 export function defineConfig(options: ApplicationOptions): ApplicationOptions { return options; }

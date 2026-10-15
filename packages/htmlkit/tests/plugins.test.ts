@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { withPlugins } from "../src/config.js";
-import { buildApplication, createApplication, devApplication, type HtmlKitPlugin, type NavigationItem, type NavigationQuery } from "../src/index.js";
+import { buildApplication, createApplication, devApplication, loadConfig, type HtmlKitPlugin, type NavigationItem, type NavigationQuery } from "../src/index.js";
 import { write } from "./fixture.js";
 
 const roots: string[] = [];
@@ -133,3 +133,50 @@ it("adds a plugin's page folders, stylesheets, and folder layout to the site's o
     expect(install).not.toContain('data-component="site-shell"');
   } finally { await application.close(); }
 }, 60_000);
+
+it("names plugin layouts that hk:layout selects, with their own loaders and declared props", async () => {
+  const root = await site();
+  await write(root, "plugin/home.html", '<template component="home-shell"><defs><prop name="title" type="string" required>Title</prop></defs><main><h1>{$title}</h1><slot name="page"></slot></main></template>');
+  await write(root, "docs/04.landing.note", '<meta name="hk:layout" content="home"><article>Landing body</article>');
+  const seen: (readonly string[])[] = [];
+  const data = { title: "Welcome", sidebar: "unused by home" };
+  const plugin: HtmlKitPlugin = { name: "home", config: () => ({ layouts: { home: { component: join(root, "plugin/home.html"), server: {
+    // A loader returns exactly the props its layout declares.
+    load: ({ propNames }) => { seen.push(propNames); return { props: Object.fromEntries(Object.entries(data).filter(([name]) => propNames.includes(name))) }; } } } } }) };
+  // A later plugin's layout of the same name loses to the earlier one's.
+  await write(root, "plugin/later.html", '<template component="later-shell"><main><slot name="page"></slot></main></template>');
+  const later: HtmlKitPlugin = { name: "later", config: () => ({ layouts: { home: { component: join(root, "plugin/later.html") } } }) };
+  const application = await createApplication({ root, plugins: [notes(root), plugin, later] });
+  try {
+    const { body } = await application.render("/landing/");
+    expect(body).toContain('data-component="home-shell"');
+    expect(body).toContain("<h1>Welcome</h1>");
+    expect(seen).toEqual([["title"]]);
+  } finally { await application.close(); }
+  // The site's app/layouts/home.html wins over the plugin's, and its own layouts entry wins over both.
+  await write(root, "app/layouts/home.html", '<template component="site-home"><main><slot name="page"></slot></main></template>');
+  await write(root, "app/own.html", '<template component="own-home"><main><slot name="page"></slot></main></template>');
+  for (const [layouts, shell] of [[undefined, "site-home"], [{ home: { component: "app/own.html" } }, "own-home"]] as const) {
+    const site = await createApplication({ root, plugins: [notes(root), plugin], ...(layouts === undefined ? {} : { layouts }) });
+    try { expect((await site.render("/landing/")).body).toContain(`data-component="${shell}"`); }
+    finally { await site.close(); }
+  }
+  // Plugins' layouts stay apart from the site's layouts option.
+  expect((await withPlugins({ root, plugins: [plugin] })).layouts).toBeUndefined();
+});
+
+it("names the page and the expected file for a missing named layout", async () => {
+  const root = await site();
+  await write(root, "docs/04.landing.note", '<meta name="hk:layout" content="missing"><article>Landing body</article>');
+  await expect(createApplication({ root, plugins: [notes(root)] }))
+    .rejects.toThrow(/04\.landing\.note: Layout missing needs .*app\/layouts\/missing\.html or a layouts entry named missing\./);
+});
+
+it("loads htmlkit.config.ts for a wrapping command", async () => {
+  const root = await site();
+  expect(await loadConfig(root)).toEqual({});
+  await write(root, "htmlkit.config.ts", "const base: string = '/docs/';\nexport default { base };");
+  expect(await loadConfig(root)).toEqual({ base: "/docs/" });
+  await write(root, "htmlkit.config.js", "export default {};");
+  await expect(loadConfig(root)).rejects.toThrow(/Choose one htmlkit\.config\.ts or \.js/);
+});

@@ -298,6 +298,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         signal.throwIfAborted();
         const loaded = await module(layer);
         const context = { phase: "prerender" as const, url: new URL(url), base: config.base, params, parent,
+          propNames: Object.freeze(Object.keys(layerDefinitions[results.length]!.contract.props)),
           fetch: globalThis.fetch, signal,
           navigation: (query?: NavigationQuery) => navigation({ current, ...query }),
           breadcrumbs: (query?: NavigationQuery) => breadcrumbs({ current, ...query }),

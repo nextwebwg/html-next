@@ -3,7 +3,7 @@ import { realpathSync, statSync } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { HtmlKitError, within } from "./config.js";
+import { HtmlKitError, pluginLayouts, within, type PluginOptions } from "./config.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import type { ApplicationOptions, ApplicationRoute, HtmlKitPlugin, RouteGroup, RouteInput, RouteLayer } from "./types.js";
 
@@ -39,7 +39,7 @@ export function redirectTable(base: string, redirects: Readonly<Record<string, s
   }
   return table;
 }
-type DiscoveryOptions = Pick<ApplicationOptions, "base" | "routes" | "fileRoutes" | "pages" | "layout" | "layoutDefaults" | "plugins">;
+type DiscoveryOptions = Pick<ApplicationOptions, "base" | "routes" | "fileRoutes" | "pages" | "layout" | "layouts" | "layoutDefaults" | "plugins">;
 
 export async function discoverRoutes(root = process.cwd(), options: DiscoveryOptions = {}): Promise<readonly ApplicationRoute[]> {
   return (await discover(root, options)).routes;
@@ -64,8 +64,8 @@ export async function discover(root: string, options: DiscoveryOptions) {
   // Each route remembers its page directory's prefix, which page aliases are relative to.
   // folderLayouts are the _layout.html files from the page directory down to the page, outermost first.
   const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string; readonly directoryLayout?: string | false | RouteLayer;
-    readonly folderLayouts: readonly RouteLayer[]; readonly notFound?: true })[] = [];
-  const add = (input: RouteInput & { readonly canonical?: string; readonly notFound?: true }, prefix: string, order?: readonly (string | null)[],
+    readonly folderLayouts: readonly RouteLayer[]; readonly notFound?: true; readonly index?: true })[] = [];
+  const add = (input: RouteInput & { readonly canonical?: string; readonly notFound?: true; readonly index?: true }, prefix: string, order?: readonly (string | null)[],
     directoryLayout?: string | false | RouteLayer, folderLayouts: readonly RouteLayer[] = [], groups: readonly RouteGroup[] = []): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
     const segments = input.pattern.slice(1, -1).split("/").filter(Boolean);
@@ -81,7 +81,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), prefix, folderLayouts,
       ...(directoryLayout === undefined ? {} : { directoryLayout }), ...(groups.length === 0 ? {} : { groups }),
       ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }),
-      ...(input.notFound ? { notFound: true as const } : {}) });
+      ...(input.notFound ? { notFound: true as const } : {}), ...(input.index ? { index: true as const } : {}) });
   };
   // A number and a dot ("01.guide") order a file or directory and stay out of its URL. Route
   // segments cannot contain dots, so the prefix is never part of a name.
@@ -109,7 +109,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       const parts = slug === "index" ? segments : [...segments, slug];
       // A 404 page at the root of the application's pages is the not-found page, not a /404/ route.
       const notFound = parts.length === 1 && parts[0] === "404";
-      add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}`, ...(notFound ? { notFound: true as const } : {}) },
+      add({ ...layer(name, stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}`, ...(notFound ? { notFound: true as const } : {}), ...(slug === "index" ? { index: true as const } : {}) },
         prefix, slug === "index" ? order : [...order, rank], directoryLayout, folderLayouts, groups);
     }
     for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -205,7 +205,16 @@ export async function discover(root: string, options: DiscoveryOptions) {
   const discovered: ApplicationRoute[] = [];
   let notFound: ApplicationRoute | undefined;
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
-  for (const { prefix: _prefix, directoryLayout, folderLayouts, notFound: isNotFound, ...route } of routes) {
+  // A layout name is the site's layouts entry, then its app/layouts/<name>.html (the name itself),
+  // then a plugin's entry, so a site overrides a plugin's layout with a file of the same name.
+  const named = async (name: string): Promise<string | RouteLayer | undefined> => {
+    if (options.layouts !== undefined && Object.hasOwn(options.layouts, name)) return options.layouts[name]!;
+    try { await stat(resolve(root, `app/layouts/${name}.html`)); return name; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const plugins = (options as PluginOptions)[pluginLayouts];
+    return plugins !== undefined && Object.hasOwn(plugins, name) ? plugins[name] : undefined;
+  };
+  for (const { prefix: _prefix, directoryLayout, folderLayouts, notFound: isNotFound, index, ...route } of routes) {
     const { identity, resource } = await resourceOf(route.component);
     const pageName = pageDefinition(resource, route.component).contract.tag;
     const previous = pageNames.get(pageName);
@@ -217,9 +226,14 @@ export async function discover(root: string, options: DiscoveryOptions) {
     // An alias is a further URL for its page, so it takes the layout of the page's own URL.
     const directory = layoutDefaults.find(([prefix]) => (route.canonical ?? route.pattern).startsWith(prefix));
     let selected = metadata.layout ?? directoryLayout ?? directory?.[1] ?? options.layout;
-    if (selected === undefined && route.layouts.length === 0) {
-      try { await stat(resolve(root, "app/layouts/default.html")); selected = "default"; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (selected === undefined && route.layouts.length === 0 && await named("default") !== undefined) selected = "default";
+    if (typeof selected === "string" && selected !== "none") {
+      if (!/^[A-Za-z0-9_-]+$/.test(selected)) throw new HtmlKitError("Layout names must be filename slugs.", route.component);
+      const found = await named(selected);
+      if (found === undefined) {
+        throw new HtmlKitError(`Layout ${selected} needs ${resolve(root, `app/layouts/${selected}.html`)} or a layouts entry named ${selected}.`, route.component);
+      }
+      if (typeof found === "object") selected = found;
     }
     let layouts = route.layouts;
     if (selected === false || selected === "none") layouts = [];
@@ -227,9 +241,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       layouts = [{ component: resolve(root, selected.component),
         ...(selected.server === undefined ? {} : { server: typeof selected.server === "string" ? resolve(root, selected.server) : selected.server }) }];
     } else if (selected !== undefined) {
-      if (!/^[A-Za-z0-9_-]+$/.test(selected)) throw new HtmlKitError("Layout names must be filename slugs.", route.component);
       const component = resolve(root, `app/layouts/${selected}.html`);
-      await stat(component);
       const servers: string[] = [];
       for (const extension of ["ts", "js"]) {
         const candidate = resolve(root, `app/layouts/${selected}.server.${extension}`);
@@ -241,7 +253,15 @@ export async function discover(root: string, options: DiscoveryOptions) {
     }
     // The selected layout is outermost and folder layouts nest inside it; none drops them all.
     if (selected !== false && selected !== "none") layouts = [...layouts, ...folderLayouts];
-    const discoveredRoute = { ...route, layouts, pageName, ...(metadata.label === undefined ? {} : { label: metadata.label }),
+    // hk:order takes the place of the number-and-dot prefix on the page's own last segment.
+    let order = route.order;
+    if (metadata.order !== undefined && route.canonical === undefined && !isNotFound) {
+      if (index || route.segments.length === 0) {
+        throw new HtmlKitError("hk:order orders a page among its folder's pages, and a folder's index page comes first in it; order the folder with a prefix such as 02.guide/.", route.component);
+      }
+      order = [...route.segments.slice(0, -1).map((_, i) => route.order?.[i] ?? null), metadata.order];
+    }
+    const discoveredRoute = { ...route, layouts, pageName, ...(order === undefined ? {} : { order }), ...(metadata.label === undefined ? {} : { label: metadata.label }),
       ...(metadata.hidden ? { hidden: true } : {}) };
     if (isNotFound) notFound = discoveredRoute;
     else discovered.push(discoveredRoute);

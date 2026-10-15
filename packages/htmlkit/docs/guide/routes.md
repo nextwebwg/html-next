@@ -147,6 +147,10 @@ To use another layout for one page, name it; `content="none"` uses no layout:
 </template>
 ```
 
+A layout name is an entry of the site's `layouts` option, a file in `app/layouts/`, or a plugin's
+layout, in that order ([Configuration](/htmlkit/configuration#named-layouts)). A name that matches
+none of them is an error that names the page and the file it expected.
+
 To give a whole folder a layout, add a `_layout.html` to it ([below](#nested-layouts)), or see
 `layoutDefaults` in [Configuration](/htmlkit/configuration).
 
@@ -261,6 +265,7 @@ Settings that start with `hk:` configure HTMLKit and never reach the page:
 | `hk:page` | Chooses the page component in a file with several components. Goes outside the components. |
 | `hk:layout` | Chooses a layout, or `none`. |
 | `hk:label` | Sets the page's label in [navigation](/htmlkit/navigation). |
+| `hk:order` | Sets the page's place in [navigation](/htmlkit/navigation#ordering-pages), in place of its file name's number. |
 | `hk:navigation` | `content="hidden"` keeps the page out of navigation. |
 | `hk:alias` | Adds another URL for the page, such as `content="/start/"`. |
 

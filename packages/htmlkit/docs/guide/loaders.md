@@ -61,6 +61,7 @@ them is public**. Keep secrets in `data` or out of the result entirely.
 | `url` | The page URL, using the configured `origin`. |
 | `base` | The site's base path, for building links. |
 | `parent` | `data` from the layout loaders that ran before this one. |
+| `propNames` | The props this loader's page or layout declares, which are the props `load()` may return. |
 | `navigation(query)` | The site's pages, for [navigation](/htmlkit/navigation). |
 | `redirect(location, status)` | Stops loading and sends the reader to `location` instead ([below](#redirecting)). |
 | `fetch`, `signal` | The standard `fetch`, and an `AbortSignal` for the render. |
