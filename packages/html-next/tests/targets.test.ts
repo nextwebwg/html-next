@@ -847,13 +847,28 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(module, /bindControl\(I, /);
   });
 
-  it("rejects deferred declarative connection handlers", () => {
-    for (const binding of ["on:connect", "on:disconnect", "on:connect.once.exact.prevent.capture.enter.left", "on:disconnect.passive.stop"]) {
-      assert.throws(() => generated(`<template component="demo-event-lifecycle" status="experimental" summary="Deferred lifecycle.">
+  it("rejects modifiers on declarative connection handlers", () => {
+    for (const binding of ["on:connect.once.exact.prevent.capture.enter.left", "on:disconnect.passive.stop"]) {
+      assert.throws(() => generated(`<template component="demo-event-lifecycle" status="experimental" summary="Lifecycle modifiers.">
         <defs><handler name="increment"></handler></defs>
         <button ${binding}="increment"></button>
       </template>`), /HT010/);
     }
+  });
+
+  it("runs declarative connection handlers through each target's connection lifecycle", () => {
+    const source = `<template component="demo-event-lifecycle" status="experimental" summary="Lifecycle handlers.">
+      <defs><state name="kind" type="string" value=""></state>
+        <handler name="joined"><set name="kind" expr:value="$$event.type"></set></handler>
+        <handler name="left"><set name="kind" expr:value="'left'"></set></handler></defs>
+      <button on:connect="joined" on:disconnect="left">{$kind}</button>
+    </template>`;
+    const outputs = generated(source);
+    assert.match(outputs.get("vanilla/DemoEventLifecycle.js")!, /I\.H\.on\("connect", \(event\) => \{ h\d\(event\); \}\);\n  I\.H\.on\("disconnect", \(event\) => \{ h\d\(event\); \}\);/);
+    assert.match(outputs.get("vue/DemoEventLifecycle.vue")!, /useLifecycle\(root, \(\) => joined\(new Event\('connect'\)\), \(\) => left\(\)\)/);
+    const definition = parseComponent(source);
+    assert.match(generateReactComponent(definition), /useLifecycle\(rootRef, \(\) => joined\(new Event\("connect"\)\), \(\) => left\(\)\);/);
+    assert.match(generateSvelteOutput(definition, "test").component, /useLifecycle\(\(\) => rootElement \?\? null, \(\) => joined\(new Event\('connect'\)\), \(\) => left\(\)\);/);
   });
 
   it("exposes declared event detail through a typed Vue CustomEvent", () => {

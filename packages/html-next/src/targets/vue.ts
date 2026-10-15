@@ -912,7 +912,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const styles = compileComponentStylesForVue(definition.css, definition);
   const controlled = definition.controller !== undefined;
   const dispatches = events.length > 0 || controlled;
-  const needsRoot = dispatches || arms !== undefined;
+  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined;
   const context: Context = {
     definition,
     ...(options.slotsByTag === undefined ? {} : { slotsByTag: options.slotsByTag }),
@@ -1141,6 +1141,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(!dispatches ? [] : ["", ...checkSources, dispatchSource]),
     ...handlerSources.flatMap((source) => ["", source]),
+    ...(definition.lifecycle === undefined ? [] : ["", `useLifecycle(root, ${(["connect", "disconnect"] as const).map((type) => {
+      const handler = handlers.findIndex((candidate) => candidate.name === definition.lifecycle![type]);
+      if (handler < 0) return "undefined";
+      const name = handlerNames.get(handlers[handler]!.name)!;
+      // A handler that reads $event gets a connection event, as a controller's host.on callback does.
+      return `() => ${name}(${handlerSources[handler]!.startsWith(`function ${name}(event`) ? `new Event(${quote(type)})` : ""})`;
+    }).join(", ")});`]),
     "",
     ...hostSource(definition, {
       props: target.props.length > 0,
@@ -1160,7 +1167,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const code = `${body.join("\n")}\n${rootMarkup}`;
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   // The shared module holds what every component's host and dispatcher do the same way.
-  const shared = [...["createDispatch", "useComponentHost", "useDataRead", "runFilteredEvent", "preserveRootFocus",
+  const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
     "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "useReflectedProp", "useScopedSlotName",
     "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)), ...lowering.helpers()].sort();

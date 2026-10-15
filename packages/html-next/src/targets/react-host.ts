@@ -423,6 +423,25 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     return () => { stopObserving(); runtime.current!.disconnect(); };
   }, []);
 }
+
+/** Runs the root's on:connect and on:disconnect handlers each time it joins and leaves a document. */
+export function useLifecycle(root: { readonly current: Element | null }, connect?: () => void, disconnect?: () => void): void {
+  const latest = React.useRef({ connect, disconnect });
+  React.useLayoutEffect(() => { latest.current = { connect, disconnect }; });
+  React.useLayoutEffect(() => {
+    const element = root.current;
+    if (element === null) return;
+    let connected = false;
+    const synchronize = (): void => {
+      if (element.isConnected === connected) return;
+      connected = !connected;
+      (connected ? latest.current.connect : latest.current.disconnect)?.();
+    };
+    const stopObserving = observeConnection(element, synchronize);
+    synchronize();
+    return () => { stopObserving(); if (connected) { connected = false; latest.current.disconnect?.(); } };
+  }, []);
+}
 `;
 
 export function reactHostArtifact(version: string): GeneratedArtifact {

@@ -43,6 +43,7 @@ export interface SvelteConversionOptions {
   readonly guardNestedDepth?: boolean;
   readonly reactivitySpecifier?: string;
   readonly hostSpecifier?: string;
+  readonly connectionSpecifier?: string;
   readonly renderSpecifier?: string;
   readonly controllerSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
@@ -1077,7 +1078,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
@@ -1310,6 +1311,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       ...(nestedDepthLimit !== undefined || states.length > 0 || context.imports.size > 0) ? ["setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
     RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
+    ...(definition.lifecycle === undefined ? [] : [`import { useLifecycle } from ${quote(options.connectionSpecifier ?? "./connection.svelte")};`]),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, prepareHydrationControls, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
@@ -1513,6 +1515,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       "});",
     ] : []),
     ...handlerSources,
+    ...(definition.lifecycle === undefined ? [] : [`useLifecycle(() => rootElement ?? null, ${(["connect", "disconnect"] as const).map((type) => {
+      const handler = handlers.findIndex((candidate) => candidate.name === definition.lifecycle![type]);
+      if (handler < 0) return "undefined";
+      // A handler that reads $event gets a connection event, as a controller's host.on callback does.
+      return `() => ${handlerNames.get(handlers[handler]!.name)!}(${handlerSources[handler]!.includes("(event: Event)") ? `new Event(${quote(type)})` : ""})`;
+    }).join(", ")});`]),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
   const open = script.slice(0, script.indexOf("\n"));
   let body = script.slice(open.length + 1, script.lastIndexOf("\n</script>"));
@@ -1539,7 +1547,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       ...(context.usesStyleDecorations ? ["style" as const] : []),
       ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
       ...(usesController ? ["host" as const] : []),
-      ...(usesController || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
+      ...(usesController || definition.lifecycle !== undefined || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
       ...(computed.length > 0 || usesController ? ["reactivity" as const] : []),
       ...(rendered.length > 0 ? ["render" as const] : []),
     ] };

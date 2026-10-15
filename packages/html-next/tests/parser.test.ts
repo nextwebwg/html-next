@@ -921,12 +921,22 @@ describe("parseComponent", () => {
     );
   });
 
-  it("rejects deferred declarative connection lifecycle bindings", () => {
+  it("reads on:connect and on:disconnect on the native root as the component's lifecycle handlers", () => {
     const declarations = `<defs><state type="boolean" name="ready" value="false"></state>` +
-      `<handler name="markReady"><set name="ready" value="true"></set></handler></defs>`;
+      `<handler name="markReady"><set name="ready" value="true"></set></handler>` +
+      `<handler name="markGone"><set name="ready" value="false"></set></handler></defs>`;
+    const definition = parseComponent(`<template component="demo-example">${declarations}` +
+      `<section on:connect="markReady" on:disconnect="markGone" on:click="markReady"></section></template>`);
+    assert.deepEqual(definition.lifecycle, { connect: "markReady", disconnect: "markGone" });
+    assert.deepEqual(definition.template.events, [{ name: "click", handler: "markReady", modifiers: [] }]);
+    assert.equal(parseComponent(`<template component="demo-example">${declarations}<section on:connect="markReady"></section></template>`).template.events, undefined);
     for (const attribute of ["on:connect", "on:disconnect"]) {
-      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section ${attribute}="markReady"></section></template>`);
+      // Only the element the component always renders as its own root has its lifecycle.
       expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section><span ${attribute}="markReady"></span></section></template>`);
+      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<template $match=""><p $when="$ready" ${attribute}="markReady"></p><p $else></p></template></template>`);
+      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<x-other ${attribute}="markReady"></x-other></template>`);
+      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section ${attribute}.once="markReady"></section></template>`);
+      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section ${attribute}="missing"></section></template>`);
     }
   });
 

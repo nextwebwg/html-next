@@ -21,6 +21,13 @@ describe("Node component rendering", () => {
     assert.match(rendered.html, /Total: &lt;b&gt;Ada&lt;\/b&gt; due today\. \$literal costs \$1\.15\./);
     assert.match(rendered.html, /<td>&lt;b&gt;Ada&lt;\/b&gt;<\/td>/);
   });
+  it("never runs on:connect while rendering on the server", async () => {
+    const definition = parseComponent(`<template component="x-connected"><defs><state name="connected" type="string" value="no"></state>
+      <handler name="join"><set name="connected" value="yes"></set></handler></defs>
+      <section on:connect="join" from:data-connected="$connected"></section></template>`);
+    const rendered = await renderComponents("<x-connected></x-connected>", { definitions: [definition] });
+    assert.match(rendered.html, /data-connected="no"/);
+  });
   it("keeps whitespace-only text between elements inside pre", async () => {
     const definition = parseComponent(`<template component="x-code"><pre class="shiki"><code><span class="line">a</span>
 <span class="line">b</span></code></pre></template>`);

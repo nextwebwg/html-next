@@ -9,8 +9,9 @@ deterministic SSR. It parses inert fragments and applies one pinned safe-default
 browser and on the server. It deliberately does not call native `setHTML()`, even where available:
 Firefox currently parses malformed table content differently from Chromium, WebKit, and `parse5`,
 which would make hydration browser-dependent. Props, state, computed values, bindings, structural
-directives and slots map to Vue's own facilities; declared events remain native
-`CustomEvent`s on the lowered root (Vue emits are reserved for `v-model` updates), and styles become
+directives and slots map to Vue's own facilities; a declared event is a native `CustomEvent` on
+the lowered root, and Vue emits that same `CustomEvent<T>` under the event's name, plus
+`update:<prop>` for `v-model:<prop>` when its detail reports a prop. Styles become
 `<style scoped>`. `:host` selects the root by its tag as a class, and a component the styles select
 by tag carries that class where it is used, so Vue passes it to the child's root.
 

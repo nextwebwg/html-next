@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-alpha.50
+
+### Added
+
+- A component's native root takes `on:connect` and `on:disconnect`. Each names a handler that runs every time the component connects to, or disconnects from, a document, again after a reconnect, as a controller's `host.on("connect")` and `host.on("disconnect")` do; a handler that reads `$$event` gets an `Event` of that type. The live runtime, compiled Vanilla output and converted Vue, React and Svelte components run them, and server rendering never does. On any other element, on a delegated or `$match` root, or with modifiers, the bindings are an `HT010` error.
+
+### Changed
+
+- The converter README says what converted Vue components emit: each declared event as the same `CustomEvent<T>` dispatched on the root, plus `update:<prop>` for `v-model:<prop>`.
+
 ## 1.0.0-alpha.49
 
 ### Added

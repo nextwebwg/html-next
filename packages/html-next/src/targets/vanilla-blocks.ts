@@ -270,6 +270,8 @@ export interface BlockPlan {
   readonly arms?: { readonly blocks: readonly Block[]; readonly nodes: readonly ElementNode[]; readonly select: Lowered };
   /** The `transitions` extension's document-level rules for this component's values. */
   readonly transitions?: string;
+  /** The compiled handlers the root's `on:connect` and `on:disconnect` run. */
+  readonly lifecycle: readonly { readonly type: "connect" | "disconnect"; readonly handler: string }[];
 }
 
 /** What the parser already rules out; reaching it is a compiler defect, reported at build time. */
@@ -1456,7 +1458,11 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
         };
       }),
     }]);
-    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
+    const lifecycle = (["connect", "disconnect"] as const).flatMap((type) => {
+      const name = definition.lifecycle?.[type];
+      return name === undefined ? [] : [{ type, handler: planner.handler(name).name }];
+    });
+    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle,
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
       aliased: roots.flatMap((item, index) => item.alias === undefined ? [] : [{ index, value: planner.checked(item.alias, planner.scope) }]),
@@ -2310,6 +2316,8 @@ export function emitBlocks(
     ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
     ...plan.arms !== undefined ? [] : root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
+    // The host runs connection subscriptions on each connect and disconnect, as live's instance effect does.
+    ...plan.lifecycle.map(({ type, handler }) => `  I.H.on(${JSON.stringify(type)}, (event) => { ${handler}(event); });`),
     ...plan.arms === undefined && root.bindings.some((binding) => binding.kind === "control") ? [
       "  {",
       // A destination function reads the root record as `r`, as listeners in other blocks do.

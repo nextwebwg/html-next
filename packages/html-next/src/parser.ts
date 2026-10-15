@@ -18,6 +18,7 @@ import { isIgnoredResourceMetadata } from "./resource-metadata.js";
 import type {
   ComponentDefinition,
   ComponentDeclaration,
+  ComponentLifecycle,
   ElementNode,
   ElementTransition,
   EventBinding,
@@ -1154,10 +1155,15 @@ function parseAttributes(
   return parsed;
 }
 
+/**
+ * The element's DOM event bindings. `lifecycle` is given for the component's native root only: it
+ * collects the root's `on:connect` and `on:disconnect`, which name handlers rather than listen.
+ */
 function parseEvents(
   sourceAttributes: readonly SourceAttribute[] | undefined,
   scope: ParseScope,
   source: string,
+  lifecycle?: { -readonly [K in keyof ComponentLifecycle]: ComponentLifecycle[K] },
 ): EventBinding[] | undefined {
   if (sourceAttributes === undefined) return undefined;
   const events: EventBinding[] = [];
@@ -1166,8 +1172,12 @@ function parseEvents(
     if (!EVENT_PART_RE.test(name) || modifiers.some((modifier) => !EVENT_PART_RE.test(modifier))) {
       fail("HT010", `\`${attribute.name}\` is not a valid declarative event binding.`, source);
     }
-    if (name === "connect" || name === "disconnect") {
-      fail("HT010", `\`${attribute.name}\` is not supported as a declarative lifecycle binding; use a controller for imperative lifecycle work.`, source);
+    const connection = name === "connect" || name === "disconnect";
+    if (connection && lifecycle === undefined) {
+      fail("HT010", `\`${attribute.name}\` is a component lifecycle binding; only the component's native root element takes it.`, source);
+    }
+    if (connection && modifiers.length > 0) {
+      fail("HT010", `Lifecycle binding \`${attribute.name}\` takes no modifiers.`, source);
     }
     for (let index = 0; index < modifiers.length; index += 1) {
       const modifier = modifiers[index]!;
@@ -1184,9 +1194,10 @@ function parseEvents(
     if (!scope.handlers.has(attribute.value)) {
       fail("HT010", `Event binding \`${attribute.name}\` names undeclared handler \`${attribute.value}\`.`, source);
     }
-    events.push({ name, handler: attribute.value, modifiers });
+    if (connection) lifecycle![name] = attribute.value;
+    else events.push({ name, handler: attribute.value, modifiers });
   }
-  return events;
+  return events.length === 0 ? undefined : events;
 }
 
 function parseRef(name: string | undefined, refs: Set<string>, source: string): string | undefined {
@@ -1352,6 +1363,7 @@ function parseElementAtSource(
   },
   platform: ComponentParserPlatform,
   rootMatch = false,
+  lifecycle?: Parameters<typeof parseEvents>[3],
 ): ElementNode {
   if (scope.report !== undefined) scope = { ...scope, at: sourceLocation(element) ?? scope.at };
   const tagName = sourceTag(element);
@@ -1390,7 +1402,7 @@ function parseElementAtSource(
     ? { ...nodeScope, allowUndeclared: true }
     : isPreformattedElement(tagName) ? { ...nodeScope, preformatted: true } : nodeScope;
   const attributes = parseAttributes(bindingAttributes, tagName, contract, nodeScope, source, platform);
-  const events = parseEvents(eventAttributes, nodeScope, source);
+  const events = parseEvents(eventAttributes, nodeScope, source, lifecycle);
   const ref = parseRef(refName, slotState.refs, source);
   const transition = parseTransition(element, tagName, transitionValue, transitionName, nodeScope, source);
   const children: TemplateNode[] = [];
@@ -1728,7 +1740,10 @@ function parseComponentNodesAtSource(
     contracts: [] as SlotContract[],
     refs: new Set<string>(),
   };
-  const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined);
+  // Lifecycle bindings belong to the one element the component always renders as its own root.
+  const lifecycle: Parameters<typeof parseEvents>[3] = {};
+  const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined,
+    rootArms === undefined && !delegatedRoot ? lifecycle : undefined);
   if (template.flow !== undefined && template.flow.kind !== "with" && template.flow.kind !== "match") {
     fail("HT021", "A component root must always select exactly one native or delegated element.", source);
   }
@@ -1752,6 +1767,7 @@ function parseComponentNodesAtSource(
     declarations: ComponentDeclaration[];
     slots: SlotContract[];
     root: NonNullable<ComponentDefinition["root"]>;
+    lifecycle?: ComponentLifecycle;
   } = {
     source: { file: source },
     contract,
@@ -1768,5 +1784,6 @@ function parseComponentNodesAtSource(
         },
   };
   if (controller !== undefined) definition.controller = controller;
+  if (Object.keys(lifecycle).length > 0) definition.lifecycle = lifecycle;
   return deepFreeze(definition);
 }

@@ -13,6 +13,14 @@ export interface ComponentDefinition {
   readonly declarations?: readonly ComponentDeclaration[];
   readonly slots?: readonly SlotContract[];
   readonly root?: ComponentRoot;
+  /** The handlers the native root's `on:connect` and `on:disconnect` name. */
+  readonly lifecycle?: ComponentLifecycle;
+}
+
+/** Handlers run each time the component connects to, and disconnects from, a document. */
+export interface ComponentLifecycle {
+  readonly connect?: string;
+  readonly disconnect?: string;
 }
 
 export interface ComponentStylesheet {

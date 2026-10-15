@@ -362,12 +362,19 @@ order, including for declared events on nested components, and that `on:click.ri
 invocation still listens for a native `click`. Vue's own modifiers can stop a filtered
 child event or reinterpret `click.middle`/`click.right`, so the converter retains only native
 listener options and applies the other modifiers to the original DOM event. Declared component
-events remain native `CustomEvent`s on the lowered root; Vue emits are used only for `v-model`
-updates. A public-converter matrix exercises every supported modifier, capture ordering, and
+events remain native `CustomEvent`s on the lowered root, and Vue emits each one as the same
+`CustomEvent<T>`, plus `update:<prop>` for `v-model:<prop>`. A public-converter matrix exercises every supported modifier, capture ordering, and
 representative combinations in application and library mode in all three engines, comparing
 dispatch outcomes, state, and exact pixels after both a fresh mount and SSR/hydration. Invalid
 modifier bindings retain their source-located
-HTML Next `HT010` diagnostics. Declarative connection hooks are deferred from Level 1.
+HTML Next `HT010` diagnostics.
+
+The native root's `on:connect` and `on:disconnect` run their handlers each time the component's
+root joins and leaves a document, as in the live runtime: Vue, React, and Svelte use their mount and
+unmount hooks plus the shared native connection observer, so a root detached and reinserted outside
+the framework disconnects and connects again. Server rendering never connects. The shared
+conformance case runs in every target suite after a fresh mount and after hydration. Elsewhere, and
+with modifiers, the bindings keep their `HT010` diagnostics.
 
 `$html` uses a common sanitizer contract. The browser runtime and generated Vue helper parse
 with the HTML fragment parser and apply the HTML Sanitizer API's safe-default allowlist; the

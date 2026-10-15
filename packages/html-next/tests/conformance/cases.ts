@@ -769,6 +769,33 @@ const successes: ConformanceCase[] = [
       ],
     },
   },
+  {
+    // Connection runs after the first render, and server markup never connects, so the counts are
+    // invisible and the probe reads them only from the first step on. A detached root renders nothing
+    // new: its counts show again once it reconnects. The live
+    // reference tracks later connection changes only while it observes the document; a framework
+    // target tracks its own roots.
+    name: "on:connect and on:disconnect run their handlers on each connection, again after reconnect",
+    source: scene({
+      defs:
+        `<state name="connects" type="integer" value="0"></state><state name="disconnects" type="integer" value="0"></state>` +
+        `<handler name="connected"><set name="connects" expr:value="$connects + 1"></set></handler>` +
+        `<handler name="disconnected"><set name="disconnects" expr:value="$disconnects + 1"></set></handler>`,
+      root: `<section on:connect="connected" on:disconnect="disconnected" from:data-counts="concat($connects, '/', $disconnects)"></section>`,
+      use: `<div class="lifecycle-host"><x-t id="lifecycle"></x-t></div>`,
+    }),
+    expect: {
+      probe: `const root = window.lifecycleRoot; return root === undefined ? "unread" : root.isConnected ? root.dataset.counts : "detached";`,
+      result: "unread",
+      after: [
+        { action: `window.stopObserving = window.HtmlRuntime?.observeDocument(); window.lifecycleRoot = document.querySelector('#lifecycle');`, result: "1/0" },
+        { action: `window.lifecycleRoot.remove();`, result: "detached" },
+        { action: `document.querySelector('.lifecycle-host').append(window.lifecycleRoot);`, result: "2/1" },
+        // The page runs later cases, so the observation ends here.
+        { action: `window.stopObserving?.();`, result: "2/1" },
+      ],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
