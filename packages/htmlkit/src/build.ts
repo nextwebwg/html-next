@@ -6,9 +6,9 @@ import { createApplication, headScripts, notFoundPage } from "./application.js";
 import { browserSources, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
 import { configure, globalStylesheets, HtmlKitError, runHook, withPlugins, within } from "./config.js";
-import { documentHTML, pagePayload, payloadPath } from "./document.js";
-import { matchRoute } from "./routes.js";
-import type { ApplicationOptions, BuildManifest, BuildResult } from "./types.js";
+import { documentHTML, pagePayload, payloadPath, redirectPage } from "./document.js";
+import { matchRoute, redirectTable } from "./routes.js";
+import type { ApplicationOptions, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -42,7 +42,8 @@ export async function readManifest(outDir: string): Promise<BuildManifest> {
   const file = join(outDir, "_htmlkit/manifest.json");
   const manifest = JSON.parse(await readFile(file, "utf8")) as BuildManifest;
   if (manifest.version !== 1) throw new HtmlKitError(`Unsupported manifest version ${String(manifest.version)}; this HTMLKit reads version 1.`, file);
-  return manifest;
+  // Builds from before redirects have none.
+  return { ...manifest, redirects: manifest.redirects ?? [] };
 }
 
 export async function buildApplication(input: ApplicationOptions = {}): Promise<BuildResult> {
@@ -67,16 +68,20 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
   catch (error) { await application.close(); throw error; }
   const backup = stage + "-previous";
   try {
-    const routes = await application.entries();
-    if (routes.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
+    const entries = await application.entries();
+    if (entries.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
     await copyPublic(resolve(config.root, "public"), stage);
     if (await exists(join(stage, "_htmlkit"))) throw new HtmlKitError("Public asset collision: _htmlkit is reserved for generated assets.");
     const pages = [];
     const sources = new Map<string, string>();
+    const redirects: ManifestRedirect[] = [...redirectTable(config.base, options.redirects)].map(([from, to]) => ({ from, to, status: 308 }));
     // The not-found page renders like a page, through its layouts, and becomes 404.html.
-    const notFoundIndex = application.notFound === undefined ? -1 : routes.length;
-    for (const pathname of notFoundIndex < 0 ? routes : [...routes, config.base + "404/"]) {
+    let notFoundIndex = -1;
+    for (const pathname of application.notFound === undefined ? entries : [...entries, config.base + "404/"]) {
       const page = await application.render(pathname);
+      // A loader's redirect() makes the page a redirect page.
+      if (page.location !== undefined) { redirects.push({ from: page.pathname, to: page.location, status: page.status as RedirectStatus }); continue; }
+      if (page.status === 404) notFoundIndex = pages.length;
       pages.push(page);
       for (const [id, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch,
         manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length - 1}`, globalStylesheets(options, config.root))) sources.set(id, source);
@@ -128,7 +133,15 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     await rm(join(stage, "_htmlkit/vite-manifest.json"));
     if (await exists(join(stage, "404.html"))) throw new HtmlKitError("Public asset collision: 404.html is generated.");
     await writeFile(join(stage, "404.html"), notFoundHTML);
-    const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery };
+    // Static hosts have no server redirects, so each old URL gets a page that sends readers on.
+    for (const { from, to } of redirects) {
+      const path = join(stage, decodeURIComponent(from.slice(config.base.length)), "index.html");
+      if (await exists(path)) throw new HtmlKitError(`Redirect collision at ${from}: a public asset or page is already there.`, path);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, redirectPage(to).html);
+    }
+    const routes = delivery.map(page => page.pathname);
+    const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };
     await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify(published, null, 2) + "\n");
     await runHook(options, "buildEnd", { root: config.root, base: config.base, outDir: stage, routes: application.routes, pages: routes,
       async writeFile(path, contents) {

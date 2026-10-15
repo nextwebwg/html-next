@@ -29,6 +29,7 @@ export default defineConfig({
 | `layoutDefaults` | none | Layout names by URL prefix, such as `{ '/admin/': 'admin' }`. |
 | `pages` | `[{ dir: 'app/pages' }]` | Page folders and the URL prefix each serves. |
 | `routes` | none | Pages at URLs of your choosing (below). |
+| `redirects` | none | Old paths and where each now lives, such as `{ '/start/': '/guide/' }` ([redirects](/htmlkit/routes#redirects)). |
 | `fileRoutes` | `true` | `false` turns off page folders, so only `routes` remain. |
 | `css` | none | Page-wide stylesheets for rules such as `html` and `body`, for example `['@/styles/page.css']`. Components keep their own styles. |
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
@@ -182,7 +183,7 @@ link checker or a coverage report. Read it with `readManifest(outDir)`, which re
 ```ts
 import { readManifest } from '@nextwebwg/htmlkit';
 
-const { base, routes, pages } = await readManifest('dist');
+const { base, routes, pages, redirects } = await readManifest('dist');
 ```
 
 ```json
@@ -197,6 +198,9 @@ const { base, routes, pages } = await readManifest('dist');
       "browserModule": "/docs/_htmlkit/page-0-BxfIu_Pn.js",
       "chunks": ["/docs/_htmlkit/client-Cq3Rt8aZ.js"]
     }
+  ],
+  "redirects": [
+    { "from": "/docs/start/", "to": "/docs/guide/", "status": 308 }
   ]
 }
 ```
@@ -211,6 +215,10 @@ const { base, routes, pages } = await readManifest('dist');
 | `pages[].pageName` | The page's component name. |
 | `pages[].browserModule` | The URL of the page's own browser module. |
 | `pages[].chunks` | URLs of the shared modules the page imports. |
+| `redirects` | Each redirect page the build wrote, from the [`redirects` option](/htmlkit/routes#redirects) and from loaders' [`redirect()`](/htmlkit/loaders#redirecting). |
+| `redirects[].from` | The old URL path, where the redirect page is. |
+| `redirects[].to` | Where it sends readers: a URL path including `base`, or an absolute URL. |
+| `redirects[].status` | The status a server answers with: 308 for the option, and the loader's status for `redirect()`. |
 
 These fields are stable. A release may add fields at version `1`, so ignore fields you don't use.
 `version` changes only when a field is removed, renamed, or changes meaning, and `readManifest`

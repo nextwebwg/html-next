@@ -97,8 +97,8 @@ it("pins the version 1 manifest format", async () => {
   const page = (pathname: string, pageName: string) => ({ pathname, pageName,
     browserModule: expect.stringMatching(/^\/docs\/_htmlkit\/[^/]+\.js$/) as unknown, chunks: expect.arrayContaining([expect.stringMatching(/^\/docs\/_htmlkit\/[^/]+\.js$/)]) as unknown });
   expect(manifest).toStrictEqual({ version: 1, base: "/docs/", routes: ["/docs/", "/docs/guide/one/"],
-    pages: [page("/docs/", "home-page"), page("/docs/guide/one/", "guide-page")] });
-  expect(Object.keys(manifest)).toEqual(["version", "base", "routes", "pages"]);
+    pages: [page("/docs/", "home-page"), page("/docs/guide/one/", "guide-page")], redirects: [] });
+  expect(Object.keys(manifest)).toEqual(["version", "base", "routes", "pages", "redirects"]);
   expect(manifest.pages.map(entry => Object.keys(entry))).toEqual([["pathname", "pageName", "browserModule", "chunks"], ["pathname", "pageName", "browserModule", "chunks"]]);
   await write(result.outDir, "_htmlkit/manifest.json", JSON.stringify({ ...manifest, version: 2 }));
   await expect(readManifest(result.outDir)).rejects.toThrow("Unsupported manifest version 2; this HTMLKit reads version 1.");
