@@ -2,12 +2,21 @@
 
 ## 1.0.0-alpha.52
 
+### Added
+
+- HTMLKit plugins label and order folders. A plugin's `folder(dir, { watch })` hook runs for each folder and route group folder in a page directory, with its absolute path, and returns `{ label, order }`, such as from a `_category.json` inside it. `label` labels the folder in `navigationTree()`, in place of its name or a group's parentheses, after its index page's `hk:label` and before that page's `<title>`. `order`, a whole number, takes the place of the folder's number-and-dot prefix in `navigation()`, `navigationTree()` and `pager()`, after `hk:order` on its index page. For each field, the earliest plugin that returns one wins. The package exports the `FolderMetadata` and `FolderContext` types.
+- HTMLKit plugins declare the files a page or folder depends on. `page.watch(file)` in a page compiler, and `watch(file)` in `folder()`, add a file to what `htmlkit dev` watches, inside the project root or outside it, so editing it recompiles the pages and reloads open pages. `Application.watchFiles` lists them.
+- `pnpm --filter @nextwebwg/htmlkit measure:navigation` builds an 81-page site with a `<hk-nav>` of its `navigationTree()` and reports one page's document, sidebar and JavaScript bytes.
+
 ### Changed
 
+- `<hk-nav>` renders the first three levels of its items inline and each deeper level as an `<hk-nav-items>`, so a page carries a tree up to three levels deep once in `<hk-nav>`'s props. On the 81-page measurement site, a page is 155 KB (5.6 KB gzip) instead of 472 KB (15.8 KB gzip), its sidebar 78 KB (2.7 KB gzip) instead of 377 KB (11.9 KB gzip), and its JavaScript 88 KB (26.4 KB gzip) instead of 76 KB (25.6 KB gzip). Client navigation updates `current` and `open` at every level.
+- Server rendering writes each component's hydration record with plain data as JSON. An array or object holding only strings, numbers, booleans, null, and arrays and objects of the same, none of which occurs elsewhere in the record, is written as itself, and other values keep their tagged form. A record of an 81-page navigation tree, as a prop input and its accepted value, is 26 KB instead of 46 KB, encodes in about 110 µs instead of 245 µs, and decodes in about 45 µs instead of 340 µs.
 - Component styles select state with `:state()`, as the [Style Scoping](https://nextwebwg.org/declarative-components/styling#state) chapter now defines: `:host(:state(open))` replaces `:host-state([open])`, and `:host(:state(tone=warm))` tests a value. A value follows attribute-selector rules: an identifier is written as is, and anything else, such as `"2"` or `"cool blue"`, is quoted. Tests combine by repetition, `:host([size=sm]:state(open):state(tone=warm))`, and a malformed argument is an `HY002` error. `:host-state()` is an `HY005` error that names its replacement. `:state()` outside `:host()`, or with `of` naming another component, is not supported yet and is an `HY006` error. The live runtime, the compiled Vanilla build, and converted Vue, React and Svelte components write the same `data-<tag>-state` tokens as before.
 
 ### Fixed
 
+- `HC021` names the page or layout whose loader returned a prop that fails its declared type, as in `` HC021: Prop `crumbs` of <trail-shell> does not satisfy its declared type ``, when the component also has head metadata, such as a layout with a closed-object `crumbs` prop rendering breadcrumbs that carry a `group` field.
 - In converted Vue and Svelte components, a component selected by its tag has the live runtime's specificity, a type selector's, alone or in `:host:is(…)`: the converter emits `x-card` as `:is(x-card, :where(.x-card))`, the counterpart of the live runtime's `:is(x-card, :where([data-component~="x-card"]))`.
 - In converted Vue components, a rule that holds nested rules applies its own declarations at its own specificity, `:host` rules included. The converter moves those declarations, and those of its nested at-rules, into a first nested `:where(&):is(&) { … }`, which Vue's scoped styles turn into `:where(&[data-v-…]):is(&)`.
 
