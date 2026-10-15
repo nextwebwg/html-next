@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { createServer } from "vite";
 import { buildApplication } from "./build.js";
-import { HtmlKitError } from "./config.js";
+import { HtmlKitError, loadConfig } from "./config.js";
 import { devApplication, previewApplication } from "./serve.js";
-import type { ApplicationOptions, ServerOptions } from "./types.js";
+import type { ServerOptions } from "./types.js";
 
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
@@ -20,17 +18,7 @@ async function main(): Promise<void> {
   const command = positionals[0];
   if (!["dev", "build", "preview"].includes(command!) || positionals.length > 2) throw new HtmlKitError("Choose dev, build, or preview and an optional application root.");
   const root = resolve(positionals[1] ?? process.cwd());
-  let configured: ApplicationOptions = {};
-  const files = ["ts", "js"].map(ext => resolve(root, `htmlkit.config.${ext}`)).filter(existsSync);
-  if (files.length > 1) throw new HtmlKitError("Choose one htmlkit.config.ts or .js.", root);
-  if (files[0] !== undefined) {
-    const loader = await createServer({ root, configFile: false, appType: "custom", logLevel: "silent",
-      server: { middlewareMode: true, watch: null, hmr: false }, optimizeDeps: { noDiscovery: true, include: [] } });
-    try { configured = (await loader.ssrLoadModule(files[0])).default as ApplicationOptions; }
-    finally { await loader.close(); }
-    if (configured === null || typeof configured !== "object") throw new HtmlKitError("Configuration must export a default ApplicationOptions object.", files[0]);
-  }
-  const options: ServerOptions = { ...configured, root,
+  const options: ServerOptions = { ...await loadConfig(root), root,
     ...(values.base === undefined ? {} : { base: values.base }),
     ...(values.origin === undefined ? {} : { origin: values.origin }),
     ...(values["out-dir"] === undefined ? {} : { outDir: values["out-dir"] }),

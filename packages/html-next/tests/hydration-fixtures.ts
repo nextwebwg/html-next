@@ -83,6 +83,14 @@ export const definitions = [
     <section><button type="button" on:click="toggle">More</button><div $if="$open"><slot name="details"></slot></div></section></template>`,
   `<template component="ssr-lazy-page"><defs><state name="label" type="string" value="first"></state></defs>
     <article><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="$label"></b></template></ssr-lazy-toggle></article></template>`,
+  `<template component="ssr-row-flows"><defs>
+    <state name="items" type="list(object({ label: string, href: string, tags: list(string) }))" value="[]"></state>
+    <handler name="change"><set name="items" expr:value="[{ label: 'group', href: '', tags: [] }, { label: 'link', href: '/a/', tags: ['x'] }]"></set></handler>
+    </defs><section><button type="button" on:click="change">Change</button>
+    <ul><li $each="item of $items"><template $match><a $when="$item.href" from:href="$item.href">{$item.label}</a><span $else>{$item.label}</span></template></li></ul>
+    <ol><li $each="item of $items"><template $match><a $when="$item.href != ''">{$item.label}</a><span $else>{$item.label}</span></template></li></ol>
+    <dl><template $each="item of $items"><dt $if="$item.href">{$item.label}</dt><dd $if="not $item.href">{$item.label}</dd>
+    <dd $each="tag of $item.tags"><template $match><b $when="$item.href">{$tag}</b><i $else>{$tag}</i></template></dd></template></dl></section></template>`,
 ].map((source) => parseComponent(source));
 
 export const cases = [
@@ -103,6 +111,8 @@ export const cases = [
   { name: "scoped slots and keyed projection", html: '<ssr-scoped id="subject"><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped>', state: { rows: ["Ada", "Bea"] } },
   { name: "a consumer component's scoped template and keyed projection", html: '<ssr-scoped-page id="subject"></ssr-scoped-page>', state: {} },
   { name: "$html, a bound select, rows of several nodes and $with", html: '<ssr-assorted id="subject"></ssr-assorted>', state: { choice: "a", pairs: ["y", "x"] } },
+  { name: "control flow in rows reading the row's item", html: '<ssr-row-flows id="subject"></ssr-row-flows>',
+    state: { items: [{ label: "link", href: "/a/", tags: ["x", "y"] }, { label: "group", href: "", tags: ["z"] }] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
 ] as const;
 

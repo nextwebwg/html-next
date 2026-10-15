@@ -54,7 +54,9 @@ describe("defineContract", () => {
     } };
     const prop = defineFromButtonFile(contract).props.sku!;
     assert.deepEqual(serializePropTarget(prop, "ABC-1234"), { kind: "attribute", name: "data-sku", value: "ABC-1234" });
-    assert.throws(() => serializePropTarget(prop, "xABC-1234"), /HC021/);
+    assert.throws(() => serializePropTarget(prop, "xABC-1234"), /HC021: A prop does not satisfy its declared type `string`: it received a string\./);
+    assert.throws(() => serializePropTarget(prop, 12, "sku", "x-button"),
+      /HC021: Prop `sku` of <x-button> does not satisfy its declared type `string`: it received a number\./);
   });
 
   it("rejects an empty required string", () => {
@@ -390,10 +392,11 @@ describe("serializePropTarget", () => {
       value: null,
     });
     assert.throws(
-      () => serializePropTarget(contract.props.disabled!, null),
+      () => serializePropTarget(contract.props.disabled!, null, "disabled", "x-button"),
       (error: unknown) =>
         error instanceof HtmlDiagnosticError &&
-        error.diagnostic.code === "HC021",
+        error.diagnostic.code === "HC021" &&
+        error.diagnostic.message === "Prop `disabled` of <x-button> does not satisfy its declared type `boolean`: it received null.",
     );
     assert.throws(
       () => serializePropTarget(contract.props.disabled!, undefined),

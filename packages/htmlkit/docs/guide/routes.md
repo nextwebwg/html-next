@@ -16,6 +16,8 @@ Every file in `app/pages` is a page, and its path is its URL:
 | `app/pages/blog/index.html` | `/blog/` |
 | `app/pages/blog/first-post.html` | `/blog/first-post/` |
 | `app/pages/blog/[slug].html` | `/blog/anything/` (one page per value) |
+| `app/pages/docs/[...path].html` | `/docs/a/` and `/docs/a/b/` (any depth) |
+| `app/pages/docs/(guides)/intro.html` | `/docs/intro/` (URLs skip a group folder) |
 
 A few rules cover the rest:
 
@@ -73,6 +75,55 @@ export function load({ params }) {
 
 When a literal page and a dynamic one could both match, the literal page wins.
 
+## Catch-all pages
+
+`[...name]` matches one or more segments, and `[[...name]]` matches any number, including none. The
+parameter is the list of segments:
+
+| File | Matches | `params` |
+| --- | --- | --- |
+| `app/pages/docs/[...path].html` | `/docs/a/`, `/docs/a/b/` | `{ path: ['a'] }`, `{ path: ['a', 'b'] }` |
+| `app/pages/files/[[...path]].html` | `/files/`, `/files/a/b/` | `{ path: [] }`, `{ path: ['a', 'b'] }` |
+
+A catch-all is the last part of its route, so it is a file name or a folder holding only an
+`index.html`. Its `entries()` list each page as a list of segments:
+
+```ts
+// app/pages/docs/[...path].server.ts
+export const entries = () => [{ path: ['guide', 'intro'] }, { path: ['api'] }];
+
+export function load({ params }) {
+  return { props: { title: params.path.join(' / ') } };
+}
+```
+
+When several pages could match a URL, HTMLKit compares their segments from the left. At the first
+segment where they differ, a literal name wins over `[name]`, which wins over `[...name]`, which
+wins over `[[...name]]`. So with `docs/index.html`, `docs/[id].html`, and `docs/[...path].html`,
+`/docs/` is the index, `/docs/a/` is `[id]`, and `/docs/a/b/` is `[...path]`. A build reports an
+entry whose URL a more specific page matches.
+
+## Route groups
+
+A folder named in parentheses groups pages, and their URLs skip it. The text inside the
+parentheses labels the group in [navigation](/htmlkit/navigation#groups), and a number and a dot in
+front orders it among its neighbours:
+
+```text
+app/pages/docs/
+  index.html                    /docs/
+  01.(Getting started)/
+    _layout.html                wraps intro and setup
+    01.intro.html               /docs/intro/
+    02.setup.html               /docs/setup/
+  02.(Reference)/
+    api.html                    /docs/api/
+```
+
+A group is a folder like any other: its `_layout.html` and `_layout.server.ts` wrap its pages, and
+it can hold further folders and groups. Two pages in different groups that produce the same URL
+are an error that names both files.
+
 ## Layouts
 
 A layout wraps pages. `app/layouts/default.html` wraps every page automatically; the page appears
@@ -95,6 +146,10 @@ To use another layout for one page, name it; `content="none"` uses no layout:
   <h1>Dashboard</h1>
 </template>
 ```
+
+A layout name is an entry of the site's `layouts` option, a file in `app/layouts/`, or a plugin's
+layout, in that order ([Configuration](/htmlkit/configuration#named-layouts)). A name that matches
+none of them is an error that names the page and the file it expected.
 
 To give a whole folder a layout, add a `_layout.html` to it ([below](#nested-layouts)), or see
 `layoutDefaults` in [Configuration](/htmlkit/configuration).
@@ -149,6 +204,38 @@ host serves for every missing path. Without the file, HTMLKit serves a plain "Pa
 </template>
 ```
 
+## Redirects
+
+The `redirects` option sends old URLs to their new place. Each key is an application path, and each
+value is an application path or an `http(s)` URL. Application paths get the site's base path:
+
+```ts
+// htmlkit.config.ts
+export default defineConfig({
+  redirects: {
+    '/getting-started/': '/docs/intro/',
+    '/chat/': 'https://example.com/community/',
+  },
+});
+```
+
+The development server and `application.fetch` answer `/getting-started/` and `/getting-started`
+with a 308 and a `Location` header. A static build writes a page at each old URL, for hosts such as
+GitHub Pages, which serve files as they are. The page refreshes to the new URL at once, names it as
+canonical, and links to it for readers who stay on the page:
+
+```html
+<meta http-equiv="refresh" content="0; url=/docs/intro/">
+<link rel="canonical" href="/docs/intro/">
+…
+<p>This page is now at <a href="/docs/intro/">/docs/intro/</a>.</p>
+```
+
+A redirect from a page's own URL is an error that names the page. The build lists every redirect in
+the manifest's
+[`redirects`](/htmlkit/configuration#build-manifest). To redirect from a loader, for example after
+checking data, use [`redirect()`](/htmlkit/loaders#redirecting).
+
 ## The page head
 
 `<title>`, `<meta>`, and `<link>` tags directly inside a page or layout component go in the document
@@ -178,6 +265,7 @@ Settings that start with `hk:` configure HTMLKit and never reach the page:
 | `hk:page` | Chooses the page component in a file with several components. Goes outside the components. |
 | `hk:layout` | Chooses a layout, or `none`. |
 | `hk:label` | Sets the page's label in [navigation](/htmlkit/navigation). |
+| `hk:order` | Sets the page's place in [navigation](/htmlkit/navigation#ordering-pages), in place of its file name's number. |
 | `hk:navigation` | `content="hidden"` keeps the page out of navigation. |
 | `hk:alias` | Adds another URL for the page, such as `content="/start/"`. |
 
@@ -197,8 +285,8 @@ allow it with a `'sha256-…'` hash of its text.
 ## Details
 
 - Two files that produce the same URL are an error that names both files.
-- Literal URL segments take priority over parameters. Optional and catch-all parameters are not
-  supported yet.
+- Literal URL segments take priority over parameters, and parameters over
+  [catch-alls](#catch-all-pages).
 - Pages, layouts, and components link other components with
   `<link rel="component" href="…">`. `@/` is the project root, so
   `href="@/app/components/card.html"` works from anywhere.

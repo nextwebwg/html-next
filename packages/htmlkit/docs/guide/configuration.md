@@ -26,9 +26,11 @@ export default defineConfig({
 | `origin` | `http://localhost` | The site's origin, used for `url` in loaders. |
 | `outDir` | `dist` | Where `build` writes the site. |
 | `layout` | `default` when `app/layouts/default.html` exists | The layout name for every page, or `false` for none. |
+| `layouts` | none | [Named layouts](#named-layouts) beside `app/layouts/`, such as `{ home: { component: 'theme/home.html' } }`. |
 | `layoutDefaults` | none | Layout names by URL prefix, such as `{ '/admin/': 'admin' }`. |
 | `pages` | `[{ dir: 'app/pages' }]` | Page folders and the URL prefix each serves. |
 | `routes` | none | Pages at URLs of your choosing (below). |
+| `redirects` | none | Old paths and where each now lives, such as `{ '/start/': '/guide/' }` ([redirects](/htmlkit/routes#redirects)). |
 | `fileRoutes` | `true` | `false` turns off page folders, so only `routes` remain. |
 | `css` | none | Page-wide stylesheets for rules such as `html` and `body`, for example `['@/styles/page.css']`. Components keep their own styles. |
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
@@ -119,8 +121,40 @@ A plugin's `config(options)` returns settings to merge before the site starts. P
 stylesheets, and routes are added to the site's own, and `app/pages` stays. Give a plugin's page
 folders their own `layout` (a name, or `{ component, server: { load } }` with an in-process loader)
 so it doesn't wrap the site's other pages. A plugin can also set a `headScript` that runs before
-`app/head.js`. [Markupress](https://github.com/threadlabs-studio/markupress) is built
-this way.
+`app/head.js`, and add [named layouts](#named-layouts).
+[Markupress](https://github.com/threadlabs-studio/markupress) is built this way.
+
+### Named layouts
+
+`layouts` gives layouts names that `hk:layout`, `layout`, `layoutDefaults`, and a `pages` entry's
+`layout` can use, as they use the files in `app/layouts/`. Each is a component with an optional
+loader: a module path, or for a plugin, the loader itself:
+
+```ts
+const theme: HtmlKitPlugin = {
+  name: 'theme',
+  config: () => ({
+    layouts: {
+      home: { component: '/path/to/theme/home.html', server: { load: () => ({ props: { title: 'Welcome' } }) } },
+    },
+  }),
+};
+```
+
+A page with `<meta name="hk:layout" content="home">` then renders inside it, and its loader's
+`data` reaches the page's loader as `parent`. A `default` entry wraps every page as `default.html`
+does. HTMLKit looks a name up in this order, and the first match is the layout:
+
+1. The site's own `layouts` option.
+2. The site's `app/layouts/<name>.html`.
+3. Plugins' `layouts`, earliest plugin first.
+
+So a site replaces a plugin's `home` layout by adding `app/layouts/home.html`.
+
+A layout's loader receives `propNames`, the props its component declares, which are the props it may
+return. A plugin that has more data than a site's layout declares returns
+`Object.fromEntries(Object.entries(data).filter(([name]) => propNames.includes(name)))` and passes
+the rest on as `data`.
 
 ### Build hooks
 
@@ -182,7 +216,7 @@ link checker or a coverage report. Read it with `readManifest(outDir)`, which re
 ```ts
 import { readManifest } from '@nextwebwg/htmlkit';
 
-const { base, routes, pages } = await readManifest('dist');
+const { base, routes, pages, redirects } = await readManifest('dist');
 ```
 
 ```json
@@ -197,6 +231,9 @@ const { base, routes, pages } = await readManifest('dist');
       "browserModule": "/docs/_htmlkit/page-0-BxfIu_Pn.js",
       "chunks": ["/docs/_htmlkit/client-Cq3Rt8aZ.js"]
     }
+  ],
+  "redirects": [
+    { "from": "/docs/start/", "to": "/docs/guide/", "status": 308 }
   ]
 }
 ```
@@ -211,6 +248,10 @@ const { base, routes, pages } = await readManifest('dist');
 | `pages[].pageName` | The page's component name. |
 | `pages[].browserModule` | The URL of the page's own browser module. |
 | `pages[].chunks` | URLs of the shared modules the page imports. |
+| `redirects` | Each redirect page the build wrote, from the [`redirects` option](/htmlkit/routes#redirects) and from loaders' [`redirect()`](/htmlkit/loaders#redirecting). |
+| `redirects[].from` | The old URL path, where the redirect page is. |
+| `redirects[].to` | Where it sends readers: a URL path including `base`, or an absolute URL. |
+| `redirects[].status` | The status a server answers with: 308 for the option, and the loader's status for `redirect()`. |
 
 These fields are stable. A release may add fields at version `1`, so ignore fields you don't use.
 `version` changes only when a field is removed, renamed, or changes meaning, and `readManifest`
@@ -232,6 +273,17 @@ await app.close();
 
 These functions take the same options as the config file, which they don't read. Close
 applications and servers when you're done.
+
+`loadConfig(root)` reads `htmlkit.config.ts` or `.js` at `root` as the CLI does, and returns its
+options, or `{}` when there is no file. A command that wraps HTMLKit loads the site's config this way
+and adds its own settings:
+
+```ts
+import { buildApplication, loadConfig } from '@nextwebwg/htmlkit';
+
+const config = await loadConfig(root);
+await buildApplication({ ...config, root, plugins: [...config.plugins ?? [], docs()] });
+```
 
 `app.fetch(request)` takes a standard `Request` and returns a `Response`, on Node, Deno 2.8+, and
 Bun. Pass it directly, as in `Deno.serve(app.fetch)`. Its pages don't include browser scripts; the

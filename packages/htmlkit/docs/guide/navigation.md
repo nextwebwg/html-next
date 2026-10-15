@@ -21,7 +21,7 @@ export async function load({ navigation }) {
 <!-- app/layouts/default.html -->
 <template component="site-shell">
   <defs>
-    <prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Site pages</prop>
+    <prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... }))" required>Site pages</prop>
   </defs>
   <aside><hk-nav from:items="$pages" label="Site"></hk-nav></aside>
   <main><slot name="page"></slot></main>
@@ -50,6 +50,62 @@ app/pages/
 Numbers compare as numbers, so `10.` comes after `02.`. Zero-padded names (`01.`, `02.`) also sort
 correctly in your editor. A folder's own page comes before the pages inside it. A dash is part of a
 name, not an order: `2024-recap.html` is `/2024-recap/`.
+
+A page can also set its number with `hk:order`, which is how a page format such as Markdown passes
+on an order from its front matter. The number takes the place of the file name's own prefix, and
+compares with its neighbours' prefixes as one, so this page sorts as `03.about.html` would:
+
+```html
+<template component="page-about">
+  <meta name="hk:order" content="3">
+  …
+</template>
+```
+
+`hk:order` orders a page among the pages in its folder. A folder's `index.html` comes first in its
+folder, so the folder's own prefix, as in `02.guide/`, orders the folder and its index page
+together, and `hk:order` on an index page is an error.
+
+## Groups
+
+A [route group](/htmlkit/routes#route-groups), such as `01.(Getting started)/`, keeps its pages
+together in navigation, and their URLs skip it. Its number orders it among the pages and
+folders beside it, as for any folder, and its pages keep their own order inside it:
+
+```text
+app/pages/docs/
+  index.html                  /docs/           1st
+  01.(Getting started)/
+    01.intro.html             /docs/intro/     2nd, group "Getting started"
+    02.setup.html             /docs/setup/     3rd, group "Getting started"
+  02.(Reference)/
+    api.html                  /docs/api/       4th, group "Reference"
+  faq.html                    /docs/faq/       last
+```
+
+Each navigation item in a group has a `group` field with the group's label. `<hk-nav>` shows the
+label as a list item, with a `data-group` attribute, before the group's first link, so a sidebar can
+style it as a heading:
+
+```html
+<li data-group="" data-depth="1">Getting started</li>
+<li data-depth="1"><a href="/docs/intro/" aria-current="false">intro</a></li>
+```
+
+For nested groups, `group` is the innermost label; each route's `groups` (from `createApplication`
+or `discoverRoutes`) lists them all, outermost first, with their order and depth.
+
+## Declaring navigation props
+
+A layout passes navigation items through its own props, as in the examples on this page. Declare
+them with an open object type, which ends in `...`, so the props accept every field an item has,
+including `group` and fields a later release adds:
+
+```text
+object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })
+```
+
+`<hk-nav>`, `<hk-breadcrumbs>`, and `<hk-pager>` declare their items this way.
 
 ## Labels and hidden pages
 
@@ -88,9 +144,9 @@ export async function load({ breadcrumbs, pager }) {
 <!-- app/layouts/default.html -->
 <template component="site-shell">
   <defs>
-    <prop name="crumbs" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Trail</prop>
-    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string })" nullable>Previous page</prop>
-    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string })" nullable>Next page</prop>
+    <prop name="crumbs" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... }))" required>Trail</prop>
+    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })" nullable>Previous page</prop>
+    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })" nullable>Next page</prop>
   </defs>
   <main>
     <hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs>
@@ -119,6 +175,7 @@ moves only between the pages under it.
 | `current` | `"page"` for the page being rendered, otherwise `"false"`. |
 | `depth` | How deep the page is below `from`. |
 | `pageName` | The page's component name. |
+| `group` | On a page in a [group](#groups), the label of the innermost group holding it. |
 
 Dynamic pages appear once per value their loader's `entries()` lists. Outside loaders,
 `application.navigation({ from, current })` returns the same list.

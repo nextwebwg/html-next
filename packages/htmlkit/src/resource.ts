@@ -5,6 +5,8 @@ import { HtmlKitError } from "./config.js";
 interface ComponentMetadata {
   readonly layout?: string;
   readonly label?: string;
+  /** hk:order, the page's place among its neighbours, as a number-and-dot prefix gives it. */
+  readonly order?: string;
   readonly hidden?: boolean;
   /** Extra route patterns for a page, relative to its page directory's prefix. */
   readonly aliases: readonly string[];
@@ -40,7 +42,7 @@ export function applicationResource(source: string, file: string) {
     const tag = node.attrs.find(attribute => attribute.name === "component")?.value;
     if (node.tagName !== "template" || tag === undefined) continue;
     const children = (node as DefaultTreeAdapterMap["template"]).content.childNodes;
-    const configuration: { layout?: string; label?: string; hidden?: boolean } = {};
+    const configuration: { layout?: string; label?: string; order?: string; hidden?: boolean } = {};
     const aliases: string[] = [];
     const head: string[] = [];
     for (const child of children) {
@@ -51,10 +53,11 @@ export function applicationResource(source: string, file: string) {
         const content = child.attrs.find(attribute => attribute.name === "content")?.value;
         if (!content) throw new HtmlKitError(`Declare ${name} with nonempty content.`, file);
         if (name === "hk:alias") { aliases.push(content); continue; }
-        const key = ({ "hk:layout": "layout", "hk:label": "label", "hk:navigation": "hidden" } as const)[name];
-        if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:navigation, or hk:alias; hk:page belongs outside the carrier (${name}).`, file);
+        const key = ({ "hk:layout": "layout", "hk:label": "label", "hk:order": "order", "hk:navigation": "hidden" } as const)[name];
+        if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:order, hk:navigation, or hk:alias; hk:page belongs outside the carrier (${name}).`, file);
         if (configuration[key] !== undefined) throw new HtmlKitError(`Declare ${name} once per component.`, file);
         if (key === "hidden" && content !== "hidden") throw new HtmlKitError('hk:navigation accepts only content="hidden".', file);
+        if (key === "order" && !/^\d+$/.test(content)) throw new HtmlKitError("hk:order needs a whole number, such as content=\"3\".", file);
         if (key === "hidden") configuration.hidden = true; else configuration[key] = content;
       } else head.push(serializeOuter(child));
     }

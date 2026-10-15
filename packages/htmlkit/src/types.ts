@@ -15,6 +15,12 @@ export interface ApplicationOptions {
   readonly routes?: readonly RouteInput[];
   /** Named layout, or a layout a plugin supplies; default.html is automatic when present. false disables it. */
   readonly layout?: string | false | RouteLayer;
+  /**
+   * Named layouts beside app/layouts, such as { home: { component, server: { load } } }. hk:layout,
+   * layout, layoutDefaults, and a page directory's layout name them. A name resolves to an entry here,
+   * then app/layouts/<name>.html, then a plugin's layouts entry, earliest plugin first.
+   */
+  readonly layouts?: Readonly<Record<string, RouteLayer>>;
   /** Route-directory defaults, overridden by page metadata; longest prefix wins. */
   readonly layoutDefaults?: Readonly<Record<string, string | false>>;
   readonly plugins?: readonly HtmlKitPlugin[];
@@ -31,7 +37,14 @@ export interface ApplicationOptions {
    * prefetches nothing. A link or its ancestor overrides it with data-hk-prefetch.
    */
   readonly prefetch?: PrefetchPolicy;
+  /**
+   * Old application paths and where each now lives, such as { "/start/": "/guide/intro/" }: an
+   * application path or an http(s) URL. Requests answer 308; static builds write a redirect page.
+   */
+  readonly redirects?: Readonly<Record<string, string>>;
 }
+
+export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
 
 export type PrefetchPolicy = "interaction" | "visible" | "none";
 
@@ -93,6 +106,16 @@ export interface BuildManifest {
   /** Each page's deployment pathname, in build order. */
   readonly routes: readonly string[];
   readonly pages: readonly ManifestPage[];
+  /** Each redirect page the build wrote, from the redirects option and from loaders. */
+  readonly redirects: readonly ManifestRedirect[];
+}
+
+export interface ManifestRedirect {
+  /** The old deployment pathname, where the build wrote the redirect page. */
+  readonly from: string;
+  /** The Location: a deployment pathname or an absolute URL. */
+  readonly to: string;
+  readonly status: RedirectStatus;
 }
 
 export interface ManifestPage {
@@ -145,8 +168,11 @@ export interface LoadContext {
   readonly phase: "prerender";
   readonly url: URL;
   readonly base: string;
-  readonly params: Readonly<Record<string, string>>;
+  /** Each [name] parameter's segment, and each [...name] or [[...name]] parameter's list of segments. */
+  readonly params: Readonly<Record<string, RouteParam>>;
   readonly parent: Readonly<Record<string, unknown>>;
+  /** The props the loader's own page or layout component declares, which are the props it may return. */
+  readonly propNames: readonly string[];
   readonly fetch: typeof globalThis.fetch;
   readonly signal: AbortSignal;
   /** Ordered concrete routes. from is an application-relative directory prefix. */
@@ -155,14 +181,20 @@ export interface LoadContext {
   readonly breadcrumbs: (options?: NavigationQuery) => Promise<readonly NavigationItem[]>;
   /** The pages before and after the current one in navigation order, for <hk-pager>. */
   readonly pager: (options?: NavigationQuery) => Promise<PagerLinks>;
+  /**
+   * Stop loading and redirect to an application path or an http(s) URL, with status 303 unless
+   * given: requests answer with it, and static builds write a redirect page.
+   */
+  readonly redirect: (location: string, status?: RedirectStatus) => never;
   /** Unavailable during static generation; accessing it throws a diagnostic. */
   readonly request: Request;
 }
 
 export interface ServerModule {
   readonly load?: (context: LoadContext) => LoaderResult | Promise<LoaderResult>;
-  readonly entries?: () => readonly Readonly<Record<string, string>>[] | Promise<readonly Readonly<Record<string, string>>[]>;
+  readonly entries?: () => readonly Readonly<Record<string, RouteParam>>[] | Promise<readonly Readonly<Record<string, RouteParam>>[]>;
 }
+export type RouteParam = string | readonly string[];
 
 /** server is a loader module path, or for a plugin's layout, the loader module itself. */
 export interface RouteLayer { readonly component: string; readonly server?: string | ServerModule; }
@@ -185,6 +217,17 @@ export interface ApplicationRoute extends RouteLayer {
   readonly canonical?: string;
   /** Per-segment numeric file order; independent of URLs and component identity. */
   readonly order?: readonly (string | null)[];
+  /** The (group) folders the page is in, outermost first. */
+  readonly groups?: readonly RouteGroup[];
+}
+/** A (group) folder: it orders and labels its pages and adds no URL segment. */
+export interface RouteGroup {
+  /** The text inside the parentheses. */
+  readonly label: string;
+  /** The folder's number-and-dot order, as in order. */
+  readonly order: string | null;
+  /** How many URL segments, base excluded, lead to the folder. */
+  readonly depth: number;
 }
 export interface NavigationQuery {
   /** Application-relative subtree, e.g. /guide/. Defaults to /. */
@@ -202,6 +245,8 @@ export interface NavigationItem {
   readonly current: "page" | "false";
   readonly depth: number;
   readonly pageName: string;
+  /** The label of the innermost (group) folder the page is in; absent outside groups. */
+  readonly group?: string;
 }
 export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
@@ -209,8 +254,10 @@ export interface BrowserDefinition {
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
-  readonly status: 200 | 404;
+  readonly status: 200 | 404 | RedirectStatus;
   readonly pathname: string;
+  /** A redirect's Location; html is then its redirect page. */
+  readonly location?: string;
   readonly html: string;
   readonly css: string;
   readonly head: RenderedHead;
@@ -241,7 +288,7 @@ export interface Application {
   /** Render a fresh declarative baseline without executing browser controllers. */
   render(pathname: string, signal?: AbortSignal): Promise<RenderedPage>;
   /**
-   * Serve pages for a native Request, on any runtime with fetch types: GET and HEAD under base, 308 to
+   * Serve pages for a native Request, on any runtime with fetch types: GET and HEAD under base, redirects, 308 to
    * a route's trailing-slash URL, 404, and 405. Documents include browser modules only when the
    * serving adapter supplies them, as the development server does.
    */

@@ -1297,9 +1297,11 @@ class Planner {
       const alias = flow.alias;
       const armScope = alias === undefined ? inner
         : this.layer(inner, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item");
-      // The arms' tests run in a function of the match value, `o`, inside the region's own block.
-      const testBase = alias === undefined ? scope : {
-        ...this.layer(scope, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item", "o"),
+      // The arms' tests run in a function of the match value, `o`, inside the region's own block,
+      // so a row's own item reads as `r.i` there.
+      const testBase: Scope = {
+        ...alias === undefined ? scope
+          : this.layer(scope, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item", "o"),
         closure: true,
       };
       const arms = node.children.filter((child): child is ElementNode =>

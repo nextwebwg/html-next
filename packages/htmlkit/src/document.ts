@@ -24,6 +24,17 @@ export function documentHTML(body: string, head: RenderedHead, assets: PageAsset
 }
 
 /**
+ * The page at a redirect's old URL, for static hosts without server redirects: a meta refresh and a
+ * canonical link to the Location, and a plain link for readers that don't refresh.
+ */
+export function redirectPage(location: string) {
+  const head: RenderedHead = { title: "Redirecting", elements: [...defaultHeadElements,
+    { tag: "meta", attributes: { "http-equiv": "refresh", content: `0; url=${location}` } }, { tag: "link", attributes: { rel: "canonical", href: location } }] };
+  const body = `<main><p>This page is now at <a href="${escapeHTML(location)}">${escapeHTML(location)}</a>.</p></main>`;
+  return { head, body, html: documentHTML(body, head) };
+}
+
+/**
  * A page's payload URL: its route path under the reserved _htmlkit/pages/ tree, which no route or
  * public file may use, so it never collides with an application's own files.
  */

@@ -57,11 +57,13 @@ them is public**. Keep secrets in `data` or out of the result entirely.
 
 | Field | Value |
 | --- | --- |
-| `params` | URL parameters, such as `{ slug: 'first-post' }` for `blog/[slug].html`. |
+| `params` | URL parameters, such as `{ slug: 'first-post' }` for `blog/[slug].html`, or a list of segments for a [catch-all](/htmlkit/routes#catch-all-pages), such as `{ path: ['guide', 'intro'] }`. |
 | `url` | The page URL, using the configured `origin`. |
 | `base` | The site's base path, for building links. |
 | `parent` | `data` from the layout loaders that ran before this one. |
+| `propNames` | The props this loader's page or layout declares, which are the props `load()` may return. |
 | `navigation(query)` | The site's pages, for [navigation](/htmlkit/navigation). |
+| `redirect(location, status)` | Stops loading and sends the reader to `location` instead ([below](#redirecting)). |
 | `fetch`, `signal` | The standard `fetch`, and an `AbortSignal` for the render. |
 
 Static builds have no visitor request, so `request` and query parameters are not available.
@@ -83,7 +85,26 @@ export function load({ params }) {
 ```
 
 Development renders any value; a build renders exactly the listed ones and reports a dynamic page
-without `entries()`.
+without `entries()`. Each entry gives every parameter of the page: a string for `[slug]`, and a
+list of segments for `[...path]` (at least one) or `[[...path]]` (any number, so `[]` is the
+folder's own URL).
+
+## Redirecting
+
+`redirect(location, status)` ends the loader and answers with a redirect instead of the page.
+`location` is an application path, which gets the site's base path, or an `http(s)` URL. The status
+is 303 unless you pass 301, 302, 307, or 308:
+
+```ts
+// app/pages/account.server.ts
+export function load({ redirect }) {
+  redirect('/login/');
+}
+```
+
+The development server and `application.fetch` answer with that status and a `Location` header. A
+static build writes a redirect page at the page's URL, as for the
+[`redirects` option](/htmlkit/routes#redirects), and lists it in the manifest's `redirects`.
 
 ## Layout loaders
 
