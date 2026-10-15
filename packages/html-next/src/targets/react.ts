@@ -3,7 +3,7 @@ import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { compilePath, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
-import { componentName, kebabCase } from "../names.js";
+import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
@@ -782,7 +782,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       scope, lowering, imports, handlers, attachments, state, undefined, component, svg && node.name !== "foreignObject")).join("");
   state.preformatted = preformatted;
   const boundReflections = rootTag === undefined ? [] : Object.keys(state.definition.contract.props).flatMap((name) => {
-    const attributeName = `data-${kebabCase(name)}`;
+    const attributeName = propAttribute(state.definition.contract.tag, name);
     if (!node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === attributeName)) return [];
     const value = `checkedProps[${quote(name)}]`;
     const serialized = `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`;
@@ -1057,7 +1057,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...target.props.map((prop) => {
         const value = `(hasMounted.current && !inputAccepted[${quote(prop.name)}] ? props[${quote(prop.name)}] : checkedProps[${quote(prop.name)}])`;
         const serialized = `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`;
-        return `    ...(Object.hasOwn(props, ${quote(prop.name)}) ? { ${quote(`data-${kebabCase(prop.name)}`)}: ${value} == null ? undefined : (${serialized}) } : {}),`;
+        return `    ...(Object.hasOwn(props, ${quote(prop.name)}) ? { ${quote(propAttribute(definition.contract.tag, prop.name))}: ${value} == null ? undefined : (${serialized}) } : {}),`;
       }),
       "  };",
     ]),

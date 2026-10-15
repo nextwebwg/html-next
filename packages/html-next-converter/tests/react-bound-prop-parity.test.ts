@@ -37,7 +37,7 @@ async function observe(page: Page) {
       const inner = outer.querySelector("output")!;
       const validity = (element: Element) => (element as Element & { validity: ValidityState }).validity;
       return {
-        source: outer.getAttribute("data-incoming"),
+        source: outer.getAttribute("data-x-reading-owner-prop-incoming"),
         outerBadInput: validity(outer).badInput,
         amount: inner.getAttribute("data-amount"),
         text: inner.textContent,

@@ -169,7 +169,7 @@ describe("framework converter", () => {
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!, { id: "case", className: "outer" })),
-      '<main id="case" class="outer" data-component="x-app"><article aria-label="Hello" class="card ready" style="border-radius:2px;color:red" data-label="Hello" data-x-card-state="label label=Hello" data-component="x-card"></article></main>');
+      '<main id="case" class="outer" data-component="x-app"><article aria-label="Hello" class="card ready" style="border-radius:2px;color:red" data-x-card-prop-label="Hello" data-x-card-state="label label=Hello" data-component="x-card"></article></main>');
   });
 
   it("does not infer React helpers from authored text", async () => {
@@ -205,7 +205,7 @@ describe("framework converter", () => {
 
   it("converts every successful shared conformance definition to React in both graph modes", async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 41, "review new successful conformance cases for React coverage");
+    assert.equal(successful.length, 42, "review new successful conformance cases for React coverage");
     const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -597,7 +597,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, { status: "bad" })),
-      '<table data-status="bad" data-component="x-card"><tbody><tr><td>No</td></tr></tbody></table>');
+      '<table data-status="bad" data-x-card-prop-status="bad" data-component="x-card"><tbody><tr><td>No</td></tr></tbody></table>');
   });
 
   it("checks and reflects typed React props at the public boundary", async () => {
@@ -618,11 +618,11 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     const render = (props: Record<string, unknown>): string => renderToStaticMarkup(createElement(module.exports.XCard!, props));
     assert.equal(render({ count: 42, active: "" }),
-      '<output data-count="42" data-active="false" data-component="x-card">42</output>');
+      '<output data-count="42" data-x-card-prop-active="false" data-x-card-prop-count="42" data-component="x-card">42</output>');
     assert.equal(render({ count: "42", active: "" }),
-      '<output data-active="false" data-component="x-card"></output>');
-    assert.equal(render({}), '<output data-active="false" data-component="x-card"></output>');
-    assert.equal(render({ count: "wrong" }), '<output data-active="false" data-component="x-card"></output>');
+      '<output data-x-card-prop-active="false" data-component="x-card"></output>');
+    assert.equal(render({}), '<output data-component="x-card"></output>');
+    assert.equal(render({ count: "wrong" }), '<output data-component="x-card"></output>');
   });
 
   it("typechecks generated reactive React TSX", async () => {
@@ -1306,7 +1306,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["counter.html"], target: "vue", root, outDirectory });
     const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-    assert.match(component, /<section[\s\S]*:data-as="reflectedProp\('as'/);
+    assert.match(component, /<section[\s\S]*:data-x-counter-prop-as="reflectedProp\('as'/);
     assert.match(component, /<p v-if="checkedProps\.as === 'a'">A<\/p>/);
   });
 
@@ -1380,7 +1380,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, { body: "<b title='safe'>One</b><img src=x onerror=alert(1)>" })),
-      '<article data-body="&lt;b title=&#x27;safe&#x27;&gt;One&lt;/b&gt;&lt;img src=x onerror=alert(1)&gt;" data-component="x-card"><div><b title="safe">One</b></div><p>Before <b title="safe">One</b> after</p></article>');
+      '<article data-x-card-prop-body="&lt;b title=&#x27;safe&#x27;&gt;One&lt;/b&gt;&lt;img src=x onerror=alert(1)&gt;" data-component="x-card"><div><b title="safe">One</b></div><p>Before <b title="safe">One</b> after</p></article>');
   });
 
   it("projects named React slots through nested generated components and preserves fallbacks", async () => {
@@ -1507,7 +1507,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><div data-which="row" data-component="x-receiver"><b data-slotted="">Ada</b></div><div data-which="other" data-component="x-receiver"><span>Fallback</span></div></main>');
+      '<main data-component="x-app"><div data-which="row" data-x-receiver-prop-which="row" data-component="x-receiver"><b data-slotted="">Ada</b></div><div data-which="other" data-x-receiver-prop-which="other" data-component="x-receiver"><span>Fallback</span></div></main>');
   });
 
   it("marks sanitized fragment roots projected through a React slot", async () => {
@@ -1567,7 +1567,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><section data-start="1" data-component="x-steps"><p data-slotted="" data-active="yes" data-number="1" data-component="x-step">Outer one</p><p data-slotted="" data-active="no" data-number="2" data-component="x-step">Outer two</p><section data-slotted="" data-start="2" data-component="x-steps"><p data-slotted="" data-active="yes" data-number="1" data-component="x-step">Inner one</p><p data-slotted="" data-active="no" data-number="2" data-component="x-step">Inner two</p></section></section></main>');
+      '<main data-component="x-app"><section data-start="1" data-x-steps-prop-start="1" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Outer one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Outer two</p><section data-slotted="" data-start="2" data-x-steps-prop-start="2" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Inner one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Inner two</p></section></section></main>');
     assert.throws(() => renderToStaticMarkup(createElement(module.exports.XStep!, { number: 1 })), (error: unknown) => {
       const diagnostic = error as Error & { diagnostic?: { code?: string; message?: string } };
       return diagnostic.name === "HtmlDiagnosticError" && diagnostic.diagnostic?.code === "HR009" &&

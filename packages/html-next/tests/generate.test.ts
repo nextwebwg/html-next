@@ -181,8 +181,9 @@ describe("generateComponent", () => {
     const vue = byPath.get("vue/DemoAction.vue")!;
     assert.match(vue, /:formAction\.prop="checkedProps\.destination as any"/);
     assert.match(vue, /:disabled="checkedProps\.disabled \?\? undefined"/);
-    // The root's reflected prop is the final writer for a bound data-* attribute.
-    assert.match(vue, /:data-selected="reflectedProp\('selected', 'selected', checkedProps\.selected, undefined, true\)"/);
+    // An authored data-* binding is the template's own; the prop's record has its namespaced attribute.
+    assert.match(vue, /:data-selected="checkedProps\.selected \? '' : undefined"/);
+    assert.match(vue, /:data-demo-action-prop-selected="reflectedProp\('selected', 'selected', checkedProps\.selected, undefined, false\)"/);
     assert.match(vue, /title="A & &quot;quote&quot;"/);
     assert.match(vue, /Text &amp; &#123;literal&#125;/);
   });

@@ -491,8 +491,8 @@ createApp({ render: () => h("div", [h(DemoCounter, { id: "counter", onCountChang
             ownTitle: Object.hasOwn(root, "title"),
             panel: {
               ownAlign: Object.hasOwn(panel, "align"),
-              dataAlign: panel.getAttribute("data-align"),
-              dataLabel: panel.getAttribute("data-label"),
+              dataAlign: panel.getAttribute("data-demo-panel-prop-align"),
+              dataLabel: panel.getAttribute("data-demo-panel-prop-label"),
               className: panel.className,
               role: panel.getAttribute("role"),
             },
@@ -510,7 +510,7 @@ createApp({ render: () => h("div", [h(DemoCounter, { id: "counter", onCountChang
           invalid: true,
           optionalTitle: "",
           ownTitle: false,
-          // Both targets record explicit props as data-* for the rendered form.
+          // Both targets record explicit props as data-<tag>-prop-<name> for the rendered form.
           panel: { ownAlign: false, dataAlign: "end", dataLabel: "Ready", className: "base consumer", role: "region" },
           // The vanilla build stamps its root's provenance; Vue scopes styles its own way and need not.
           provenance: target === "vanilla" ? "demo-counter" : null,
@@ -2967,7 +2967,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
             tone: root.getAttribute("data-tone"),
-            reflectedLabel: root.hasAttribute("data-label"),
+            reflectedLabel: root.hasAttribute("data-demo-props-prop-label"),
             ownProperties: ["count", "label", "tone"].filter((key) => Object.hasOwn(root, key)),
             projectedMarker: projected.getAttribute("data-slotted"),
           };
@@ -2982,12 +2982,12 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
           const batched = {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
-            reflected: root.getAttribute("data-label"),
+            reflected: root.getAttribute("data-demo-props-prop-label"),
             mixed: label.textContent,
           };
 
-          // data-label records the configuration; writing it is not a prop update.
-          root.setAttribute("data-label", "External");
+          // data-demo-props-prop-label records the configuration; writing it is not a prop update.
+          root.setAttribute("data-demo-props-prop-label", "External");
           await tick();
           const external = { label: label.getAttribute("aria-label") };
 
@@ -3009,7 +3009,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
 
           update(root, { tone: "unknown" });
           await tick();
-          const invalid = { tone: root.getAttribute("data-tone"),
+          const invalid = { tone: root.getAttribute("data-demo-props-prop-tone"),
             typeMismatch: (root as Element & { validity: ValidityState }).validity.typeMismatch };
           return {
             invalid,

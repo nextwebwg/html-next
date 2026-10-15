@@ -31,6 +31,7 @@ const selected = new Set([
   "styles by camel-case props and state with :state()",
   "applies a prop default when the invocation omits the prop",
   "coerces number, boolean, enum, and string props",
+  "an omitted list prop without a default iterates as nothing",
   "attribute serialization: absent/false remove, true is present-empty, number stringifies, list space-joins",
   "invocation attributes named after Object prototype members pass through",
   "$value renders escaped text (a <b> in data is literal characters)",
@@ -654,7 +655,7 @@ const regressions: readonly ConverterCase[] = [
       <style>:host { color: rgb(170 20 20); } :host(.active) { background: rgb(230 240 250); }</style></template>
       <x-primary id="case" class="outside active" label="Ready">Go</x-primary>`,
     hydrationOnlyProbe: true,
-    expect: { probe: `const e = q('#case'); return [e.localName, [...e.classList].filter((name) => !['x-primary', 'x-base-button'].includes(name) && !name.startsWith('svelte-')).join(' '), e.getAttribute('data-active'), getComputedStyle(e).padding, e.textContent.trim(), e.getAttribute('data-label'), e.validity.valid, document.activeElement === e, window.changes ?? []];`,
+    expect: { probe: `const e = q('#case'); return [e.localName, [...e.classList].filter((name) => !['x-primary', 'x-base-button'].includes(name) && !name.startsWith('svelte-')).join(' '), e.getAttribute('data-active'), getComputedStyle(e).padding, e.textContent.trim(), e.getAttribute('data-x-primary-prop-label'), e.validity.valid, document.activeElement === e, window.changes ?? []];`,
       result: ["button", "base primary outside", null, "6px", "Go", "Ready", true, false, []], after: [
         { action: `window.changes = []; const e = document.querySelector('#case'); e.addEventListener('change', e => window.changes.push([e.detail, e.bubbles, e.composed, e.cancelable])); e.click();`, result: ["button", "base primary outside active", "", "6px", "Go", "Ready", true, true, [[true, true, false, true]]] },
         { action: `document.querySelector('#case').click();`, result: ["button", "base primary outside", null, "6px", "Go", "Ready", true, true, [[true, true, false, true], [false, true, false, true]]] },

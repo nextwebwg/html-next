@@ -1539,7 +1539,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       // The equal sum logs nothing and writes nothing; the new one updates the child once.
       assert.deepEqual(run.events.slice(4, 11), [
         "1 state |undefined", "1 props amount=3/3/true", "1 root meter true", "1 connect true null true",
-        "1 props amount=6/6/true", "write data-amount", "write value",
+        "1 props amount=6/6/true", "write data-x-meter-prop-amount", "write value",
       ]);
     } finally {
       observer?.disconnect();

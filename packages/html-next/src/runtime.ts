@@ -26,7 +26,7 @@ import {
   type Scope,
   type Value,
 } from "./expression.js";
-import { kebabCase } from "./names.js";
+import { kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
   type HydrationRange, type RenderedInstanceRecord,
@@ -554,8 +554,7 @@ function propAttributeNames(
     for (const name of Object.keys(definition.contract.props)) {
       const attributeName = kebabCase(name);
       invocation[attributeName] = name;
-      hydrated[`data-${attributeName}`] = name;
-      if (attributeName !== name.toLowerCase()) hydrated[`data-${name.toLowerCase()}`] = name;
+      hydrated[propAttribute(definition.contract.tag, name)] = name;
     }
     names = [invocation, hydrated];
     definitionAttributes.set(definition, names);
@@ -700,7 +699,7 @@ function readInvocation(
       : { value: item.value, source: item.source, present: true });
   }
 
-  // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
+  // Props are attributes on the invocation (or, when hydrating, the recorded `data-<tag>-prop-<name>` of the
   // author's explicit attributes). They are never read from JavaScript properties.
   const { scope, effects } = componentScope(definition, values, parent);
   if (restored !== undefined) {
@@ -2651,15 +2650,15 @@ function installStateAttribute(instance: RuntimeInstance): void {
 }
 
 /**
- * Records the author's explicit props on the lowered root as `data-<name>` so the element shows
+ * Records the author's explicit props on the lowered root as `data-<tag>-prop-<name>` so the element shows
  * which options produced it and server output can be hydrated. Defaults are not written unless the
  * template binds the attribute itself, and no JavaScript properties are added. The record is output:
  * props change through bindings and framework adapters, never by writing these attributes.
  */
 function installPropReflection(instance: RuntimeInstance): void {
-  // `data-<name>` records the configuration; it is output, never read back after lowering.
+  // `data-<tag>-prop-<name>` records the configuration; it is output, never read back after lowering.
   for (const [name, prop] of Object.entries(instance.definition.contract.props)) {
-    const attributeName = `data-${kebabCase(name)}`;
+    const attributeName = propAttribute(instance.definition.contract.tag, name);
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const root = instance.rootElement.get();
       if (root === undefined) return;
@@ -2911,7 +2910,7 @@ function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderCont
     const literals = new Map<string, string>();
     const written = new Set([
       stateAttribute(tag),
-      ...Object.keys(definition.contract.props).map((name) => `data-${kebabCase(name)}`),
+      ...Object.keys(definition.contract.props).map((name) => propAttribute(tag, name)),
     ]);
     // Class tokens and style properties are shared with the consumer, so only the old arm's own go.
     // The browser's CSS parser names the properties its style writes, shorthands as their longhands.
@@ -3521,14 +3520,14 @@ function attachRuntimeComponent(
       markProjectedRoot(node);
     }
     addAttributeToken(element, COMPONENT_ATTRIBUTE, definition.contract.tag);
-    // The framework's explicit props become the same data-* attributes hydration reads; defaults
+    // The framework's explicit props become the same recorded attributes hydration reads; defaults
     // stay implicit, exactly as for HTML authors.
     for (const [name, prop] of Object.entries(definition.contract.props)) {
       const value = options.props?.[name];
       if (value !== undefined && value !== null) {
         if (prop.select !== undefined && definition.contract.props[prop.select.from] === undefined) continue;
         const selected = selectedPropType(definition.contract, prop, options.props ?? {});
-        element.setAttribute(`data-${kebabCase(name)}`, reflectedPropValue(value, selected));
+        element.setAttribute(propAttribute(definition.contract.tag, name), reflectedPropValue(value, selected));
       }
     }
     const attaching = [
@@ -3566,7 +3565,7 @@ function attachRuntimeComponent(
 
 /**
  * The framework-adapter prop channel. A framework's props are the equivalent of authored
- * attributes: each defined value becomes explicit (and is reflected as `data-<name>`), and
+ * attributes: each defined value becomes explicit (and is reflected as `data-<tag>-prop-<name>`), and
  * `undefined` returns the prop to its implicit default. This is not a page-authoring API.
  */
 export function updateComponentProps(
@@ -3654,7 +3653,7 @@ function applyComponentProps(
     if (previous.source !== record.source || previous.present !== record.present || !Object.is(previous.value, record.value)) {
       instance.propInputs[name]!.set(record);
     }
-    const attributeName = `data-${kebabCase(name)}`;
+    const attributeName = propAttribute(contract.tag, name);
     const value = next[name] as Value;
     // A bound data-* attribute is template output. Direct input still updates the prop handle,
     // but only the binding may write that output (and an invalid input cannot trigger it).

@@ -171,7 +171,7 @@ const successes: ConformanceCase[] = [
           ["aria-label", "Save"],
           ["class", "cta"],
           ["data-component", "x-btn"],
-          ["data-label", "Save"],
+          ["data-x-btn-prop-label", "Save"],
           ["id", "b"],
           ["type", "button"],
         ],
@@ -258,7 +258,19 @@ const successes: ConformanceCase[] = [
         `const e = q('#b'); return { sum: e.getAttribute('data-sum'), ` +
         `hasFlag: e.hasAttribute('data-flag'), flag: e.getAttribute('data-flag'), ` +
         `kind: e.getAttribute('data-kind'), s: e.getAttribute('data-s') };`,
-      result: { sum: "6", hasFlag: true, flag: "true", kind: "b", s: "hey" },
+      result: { sum: "6", hasFlag: true, flag: "", kind: "b", s: "hey" },
+    },
+  },
+  {
+    name: "an omitted list prop without a default iterates as nothing",
+    source: scene({
+      defs: `<prop name="items" type="list(object({ id: number, label: string }))">Items.</prop>`,
+      root: `<ul><li $each="item of $items" $key="$item.id">{$item.label}</li><li $each="item of $items">{$item.id}</li></ul>`,
+      use: `<x-t id="omitted"></x-t>`,
+    }),
+    expect: {
+      probe: `const e = q('#omitted'); return [e.localName, e.children.length];`,
+      result: ["ul", 0],
     },
   },
   {

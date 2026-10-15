@@ -87,8 +87,8 @@ async function snapshot(page: Page) {
       })),
       controls: Array.from(root.querySelectorAll("input"), (element) => ({
         value: element.value, title: element.title, checked: element.checked, defaultValue: element.defaultValue,
-        defaultChecked: element.defaultChecked, files: element.type === "file" ? Array.from(element.files ?? [], (file) => file.name) : undefined, amount: element.getAttribute("data-amount"),
-        text: element.getAttribute("data-value"), local: element.getAttribute("data-local"), flag: element.getAttribute("data-checked"),
+        defaultChecked: element.defaultChecked, files: element.type === "file" ? Array.from(element.files ?? [], (file) => file.name) : undefined, amount: (Array.from(element.attributes).find((attribute) => attribute.name.endsWith("-prop-amount"))?.value ?? null),
+        text: (Array.from(element.attributes).find((attribute) => attribute.name.endsWith("-prop-value"))?.value ?? null), local: element.getAttribute("data-local"), flag: (Array.from(element.attributes).find((attribute) => attribute.name.endsWith("-prop-checked"))?.value ?? null),
         valid: element.getAttribute("data-valid"),
       })),
     })),
@@ -131,12 +131,12 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
       await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
-      assert.match(markup, /data-amount="12"/);
+      assert.match(markup, /data-x-number-field-prop-amount="12"/);
       assert.match(markup, /value="Ready"/);
       for (const [id, value] of [["state-selected", "12"], ["prop-selected", "12"], ["literal-selected", "14"]]) {
         const input = markup.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
         assert.ok(input);
-        assert.match(input, new RegExp(`data-value="${value}"`));
+        assert.match(input, new RegExp(`-prop-value="${value}"`));
         assert.match(input, new RegExp(`value="${value}"`));
       }
       outputs.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
