@@ -180,3 +180,19 @@ it("loads htmlkit.config.ts for a wrapping command", async () => {
   await write(root, "htmlkit.config.js", "export default {};");
   await expect(loadConfig(root)).rejects.toThrow(/Choose one htmlkit\.config\.ts or \.js/);
 });
+
+it("makes a page directory's 404 page the not-found page only at /, with that directory's layout", async () => {
+  const root = await site();
+  await write(root, "docs/404.note", "<title>Lost</title><article>Nothing here</article>");
+  const application = await createApplication({ root, plugins: [notes(root)] });
+  try {
+    expect(application.routes.map(route => route.pattern).filter(pattern => pattern.includes("404"))).toEqual([]);
+    for (const path of ["/v/one/404/", "/v/one/missing/", "/missing/"]) {
+      const page = await application.render(path);
+      expect([page.status, page.body.includes("Nothing here"), page.body.includes('data-component="notes-shell"')]).toEqual([404, true, true]);
+    }
+  } finally { await application.close(); }
+  // Two not-found pages at / are a conflict that names both.
+  await write(root, "more/404.html", '<template component="page-other-404"><h1>Other</h1></template>');
+  await expect(createApplication({ root, plugins: [notes(root)], pages: [{ dir: "more" }] })).rejects.toThrow(/Route conflict: .*404\.html \(\/404\/\) and .*404\.note/);
+});

@@ -63,8 +63,9 @@ compares with its neighbours' prefixes as one, so this page sorts as `03.about.h
 ```
 
 `hk:order` orders a page among the pages in its folder. A folder's `index.html` comes first in its
-folder, so the folder's own prefix, as in `02.guide/`, orders the folder and its index page
-together, and `hk:order` on an index page is an error.
+folder, so on an index page, `hk:order` orders the whole folder among its neighbours, in place of
+the folder's own prefix: `hk:order` 5 on `guide/index.html` sorts `guide/` as `05.guide/` would.
+The site's home page has no folder to order, so `hk:order` there is an error.
 
 ## Groups
 
@@ -126,6 +127,64 @@ out of navigation while remaining a page:
 
 An `hk:alias` URL, such as `<meta name="hk:alias" content="/start/">`, opens the same page but never
 gets its own link. Visiting it marks the page's own link as current.
+
+## A navigation tree
+
+`navigationTree()` returns the same pages as `navigation()`, in the same order, nested by folder and
+[group](#groups). `<hk-nav>` renders it as nested lists, with each folder and group in a native
+`<details>` element that is open when it holds the current page:
+
+```ts
+// app/layouts/default.server.ts
+export async function load({ navigationTree }) {
+  return { props: { pages: await navigationTree() } };
+}
+```
+
+```html
+<!-- app/layouts/default.html -->
+<template component="site-shell">
+  <defs>
+    <prop name="pages" type="list(object({ label: string, current: string, depth: number, ... }))" required>Site pages</prop>
+  </defs>
+  <aside><hk-nav from:items="$pages" label="Site"></hk-nav></aside>
+  <main><slot name="page"></slot></main>
+</template>
+```
+
+For `01.guide/index.html` (titled "The guide"), `01.guide/01.install.html`, and `01.guide/02.(Advanced)/tuning.html`, while
+`/guide/tuning/` is the current page, the guide's node is:
+
+```json
+{
+  "label": "The guide", "href": "/guide/", "pageName": "page-guide",
+  "current": "false", "open": true, "depth": 0, "order": "01",
+  "children": [
+    { "label": "install", "href": "/guide/install/", "pageName": "page-install",
+      "current": "false", "open": false, "depth": 1, "order": "01", "children": [] },
+    { "label": "Advanced", "current": "false", "open": true, "depth": 1, "order": "02",
+      "children": [
+        { "label": "tuning", "href": "/guide/tuning/", "pageName": "page-tuning",
+          "current": "page", "open": true, "depth": 2, "order": null, "children": [] }
+      ] }
+  ]
+}
+```
+
+| Field | Value |
+| --- | --- |
+| `label` | A page's label. A folder's is its index page's `hk:label`, then its static `<title>`, then the folder name; a group's is the text in its parentheses. |
+| `href`, `pageName` | The page's URL and component name, on a page or a folder with an index page. |
+| `current` | `"page"` for the page being rendered, otherwise `"false"`. |
+| `open` | `true` when the node or a node inside it is the current page. |
+| `depth` | The nesting level, `0` at the top. |
+| `order` | The node's number-and-dot prefix or `hk:order`, or `null`. |
+| `children` | The pages, folders, and groups inside it, in navigation order. |
+
+A folder with an index page is that page's node, and its summary links to the page. `from` gives the
+tree under a folder, with the folder's own index page first. `<hk-nav>` also takes `navigation()`'s
+flat list, which it renders as one list. `pager()` follows the same order, so the
+previous and next links walk the tree from top to bottom.
 
 ## Breadcrumbs and previous/next links
 

@@ -177,6 +177,8 @@ export interface LoadContext {
   readonly signal: AbortSignal;
   /** Ordered concrete routes. from is an application-relative directory prefix. */
   readonly navigation: (options?: NavigationQuery) => Promise<readonly NavigationItem[]>;
+  /** The same pages as navigation(), nested by folder and (group) folder, for <hk-nav>. */
+  readonly navigationTree: (options?: NavigationQuery) => Promise<readonly NavigationNode[]>;
   /** Each existing page from `from` (default /) down to the current page, for <hk-breadcrumbs>. */
   readonly breadcrumbs: (options?: NavigationQuery) => Promise<readonly NavigationItem[]>;
   /** The pages before and after the current one in navigation order, for <hk-pager>. */
@@ -211,6 +213,8 @@ export interface ApplicationRoute extends RouteLayer {
   readonly layouts: readonly RouteLayer[];
   /** From the page's hk:label metadata; navigation otherwise labels the last URL segment. */
   readonly label?: string;
+  /** The page's static <title>, which labels its folder in a navigation tree when hk:label is absent. */
+  readonly title?: string;
   /** hk:navigation="hidden" metadata leaves the page out of navigation. */
   readonly hidden?: boolean;
   /** For an hk:alias route, the pattern of the page's own route, which navigation marks current. */
@@ -247,6 +251,25 @@ export interface NavigationItem {
   readonly pageName: string;
   /** The label of the innermost (group) folder the page is in; absent outside groups. */
   readonly group?: string;
+}
+/**
+ * A navigation tree node: a page, a folder, or a (group) folder, in navigation order. A folder with
+ * an index page is that page's node, with the folder's pages as children.
+ */
+export interface NavigationNode {
+  /** A page's label; a folder's index page's hk:label, then its <title>, then the folder name; a group's parentheses. */
+  readonly label: string;
+  /** The page URL, for a page or a folder with an index page. */
+  readonly href?: string;
+  readonly pageName?: string;
+  readonly current: "page" | "false";
+  /** Whether the node or one of its descendants is the current page. */
+  readonly open: boolean;
+  /** The nesting level, 0 at the top of the tree. */
+  readonly depth: number;
+  /** The number-and-dot or hk:order rank, or null when the node has none. */
+  readonly order: string | null;
+  readonly children: readonly NavigationNode[];
 }
 export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
@@ -285,6 +308,7 @@ export interface Application {
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */
   entries(): Promise<readonly string[]>;
   navigation(options?: NavigationQuery): Promise<readonly NavigationItem[]>;
+  navigationTree(options?: NavigationQuery): Promise<readonly NavigationNode[]>;
   /** Render a fresh declarative baseline without executing browser controllers. */
   render(pathname: string, signal?: AbortSignal): Promise<RenderedPage>;
   /**

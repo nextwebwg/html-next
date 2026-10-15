@@ -1,12 +1,22 @@
+<template component="hk-nav-items">
+  <defs>
+    <prop name="items" type="list(object({ label: string, current: string, depth: number, href?: string, group?: string, open?: boolean, children?: list(object({ label: string, ... })), ... }))" required>Navigation items, each with its nested items.</prop>
+  </defs>
+  <ul><template $each="item, index of $items">
+    <li $if="$item.group and $item.group != $items[$index - 1].group" data-group from:data-depth="$item.depth">{$item.group}</li>
+    <li from:data-depth="$item.depth">
+      <template $match><details $when="$item.children" from:open="$item.open">
+        <summary><template $match><a $when="$item.href" from:href="$item.href" from:aria-current="$item.current">{$item.label}</a><span $else>{$item.label}</span></template></summary>
+        <hk-nav-items from:items="$item.children"></hk-nav-items>
+      </details>
+      <a $else from:href="$item.href" from:aria-current="$item.current">{$item.label}</a></template>
+    </li>
+  </template></ul>
+</template>
 <template component="hk-nav">
   <defs>
-    <prop name="items" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... }))" required>Ordered concrete route links.</prop>
+    <prop name="items" type="list(object({ label: string, current: string, depth: number, href?: string, group?: string, open?: boolean, children?: list(object({ label: string, ... })), ... }))" required>Ordered page links: navigation() items, or navigationTree() nodes.</prop>
     <prop name="label" type="string" default="Navigation">Accessible navigation name.</prop>
   </defs>
-  <nav from:aria-label="$label">
-    <ul><template $each="item, index of $items">
-      <li $if="$item.group and $item.group != $items[$index - 1].group" data-group from:data-depth="$item.depth">{$item.group}</li>
-      <li from:data-depth="$item.depth"><a from:href="$item.href" from:aria-current="$item.current">{$item.label}</a></li>
-    </template></ul>
-  </nav>
+  <nav from:aria-label="$label"><hk-nav-items from:items="$items"></hk-nav-items></nav>
 </template>
