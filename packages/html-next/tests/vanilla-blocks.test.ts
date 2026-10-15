@@ -575,7 +575,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     assert.match(entry, /export function createXSelfTree\(/);
   });
 
-  it("reads a row's item in the arms of a $match without a value inside the row", async () => {
+  it("reads a row's item in $match arms of a <template $each> row with an index alias, as <hk-nav> renders", async () => {
     const text = component(`
       <state name="rows" type="list(object({ id: number, done: boolean, tags: list(string) }))" value="[]"></state>`, `
       <ul><template $each="row, i of $rows"><li $if="$row.id != $rows[$i - 1].id" from:data-id="$row.id">{$i}</li><li><template $match><b $when="$row.tags">{$row.tags}</b><i $when="$row.done">done</i><u $else>open</u></template></li></template></ul>`);
@@ -837,6 +837,23 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows[2].label = "x"; host.state.title = "b"; },
       (host) => { host.state.rows = host.state.rows.slice(1).concat(host.state.rows.slice(0, 1)); },
       (host) => { host.state.rows.push({ id: 5, label: "l5" }); },
+    ]);
+  });
+
+  it("resolves a row's item in every control flow nested in the row like the general runtime", async () => {
+    const text = component(`
+      <state name="rows" type="list(object({ id: number, label: string, href: string, tags: list(string) }))" value="[]"></state>`, `
+      <section><ul><li $each="row of $rows" from:data-id="$row.id"><template $match><a $when="$row.href" from:href="$row.href">{$row.label}</a><span $else>{$row.label}</span></template></li></ul>
+        <ol><li $each="row of $rows"><template $match><a $when="$row.href != ''">{$row.label}</a><span $else>{$row.label}</span></template></li></ol>
+        <menu><li $each="row of $rows"><template $match="$row.tags.length as count"><b $when="$count = 0">{$row.label}</b><i $when="$row.href">{$count}</i><u $else>{$row.id}</u></template></li></menu>
+        <dl><template $each="row of $rows"><dt $if="$row.href">{$row.label}</dt><dd $if="not $row.href">{$row.id}</dd>
+          <dd $if="$row.tags"><template $match><s $when="$row.href">{$row.href}</s><q $else>{$row.label}</q></template></dd>
+          <dd $each="tag of $row.tags"><template $match><b $when="$tag = $row.label">{$tag}</b><i $else>{$row.label}:{$tag}</i></template></dd></template></dl></section>`);
+    await same(text, [
+      (host) => { host.state.rows = [{ id: 1, label: "link", href: "/a/", tags: ["link"] }, { id: 2, label: "group", href: "", tags: [] }]; },
+      (host) => { host.state.rows[0].href = ""; host.state.rows[1].href = "/b/"; },
+      (host) => { host.state.rows[1].tags.push("group", "x"); host.state.rows[0].label = "x"; },
+      (host) => { host.state.rows = host.state.rows.toReversed(); },
     ]);
   });
 

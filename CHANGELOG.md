@@ -17,12 +17,14 @@
 
 - A layout name with neither an `app/layouts/<name>.html` file nor a `layouts` entry is an error that names the page and the expected file.
 - `<hk-nav>`, `<hk-breadcrumbs>` and `<hk-pager>` declare their items with an open object type, which ends in `...`, and the navigation guide shows layouts the same declaration, so items keep passing through as they gain fields.
+- `HC021` names the prop, the component and the type of the value it received, as in `` HC021: Prop `count` of <x-counter> does not satisfy its declared type `number`: it received a string. `` `serializePropTarget(prop, value, name, component)` takes the prop's name and the component's tag for the message, and HTMLKit passes both for the props a page or layout loader returns.
 
 ### Fixed
 
+- In compiled components, a `$match` arm inside a `$each` row reads the row's item, so each row renders, hydrates and updates with the arm its own item selects, as in the live runtime and server rendering. `<li $each="item of $items"><template $match><a $when="$item.href">…</a><span $else>…</span></template></li>` keeps the server's `<a>` and `<span>` rows through hydration. `$if`, `$with` and nested `$each` in a row read the row's item in the same way.
 - A `404` page at the top of a `pages` folder served at a prefix other than `/`, such as `/v/one/`, is no route: the site's not-found page answers that prefix's missing paths, and the folder's copy at `/` is the not-found page, through that folder's layout.
 - Server rendering renders a component in a list row with list or object props, such as one that renders itself for nested items. Rendering repeats its update and lowering passes until a pass lowers no further component, so the row's component takes its props and renders its content.
-- Compiled Vanilla components read a list row's item in the `$when` arms of a `$match` without a value inside that row, as the live runtime does, and a component that invokes itself compiles to one module that calls its own factory.
+- A compiled Vanilla component that invokes itself compiles to one module that calls its own factory.
 
 ## 1.0.0-alpha.50
 

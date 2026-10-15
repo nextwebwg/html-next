@@ -1297,9 +1297,11 @@ class Planner {
       const alias = flow.alias;
       const armScope = alias === undefined ? inner
         : this.layer(inner, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item");
-      // The arms' tests run in a function of the match value, `mo`, inside the region's own block; a row's item may be `o`.
-      const testBase = alias === undefined ? scope : {
-        ...this.layer(scope, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item", "mo"),
+      // The arms' tests run in a function of the match value, `o`, inside the region's own block,
+      // so a row's own item reads as `r.i` there.
+      const testBase: Scope = {
+        ...alias === undefined ? scope
+          : this.layer(scope, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item", "o"),
         closure: true,
       };
       const arms = node.children.filter((child): child is ElementNode =>
@@ -1318,7 +1320,7 @@ class Planner {
         reads = merge(reads, converted(armTest));
         return `{ const t = ${armTest.source}; if (t === NONCONFORMING) return t; if (truthy(t)) return ${index}; }`;
       });
-      const source = `((mo) => { ${lines.join(" ")} return -1; })(${value === undefined ? "undefined" : "mv"})`;
+      const source = `((o) => { ${lines.join(" ")} return -1; })(${value === undefined ? "undefined" : "mv"})`;
       const selection = value === undefined ? source : `((mv = ${value.source}) === NONCONFORMING ? mv : ${source})`;
       const decision = decide({ ...none(`match:${site}`, selection), ...reads, fails: true }, chosen, alias,
         expression === undefined ? undefined : declaredExpressionType(expression, scope.types));
