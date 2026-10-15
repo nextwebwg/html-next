@@ -1,6 +1,24 @@
+import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { normalizePath } from "vite";
+import { createServer, normalizePath } from "vite";
 import type { ApplicationOptions, HtmlKitPlugin } from "./types.js";
+
+/**
+ * The options htmlkit.config.ts (or .js) at root exports by default, loaded through Vite as the CLI
+ * loads them; {} without a config file.
+ */
+export async function loadConfig(root = process.cwd()): Promise<ApplicationOptions> {
+  const files = ["ts", "js"].map(ext => resolve(root, `htmlkit.config.${ext}`)).filter(existsSync);
+  if (files.length > 1) throw new HtmlKitError("Choose one htmlkit.config.ts or .js.", resolve(root));
+  if (files[0] === undefined) return {};
+  const loader = await createServer({ root: resolve(root), configFile: false, appType: "custom", logLevel: "silent",
+    server: { middlewareMode: true, watch: null, hmr: false }, optimizeDeps: { noDiscovery: true, include: [] } });
+  let configured: unknown;
+  try { configured = (await loader.ssrLoadModule(files[0])).default; }
+  finally { await loader.close(); }
+  if (configured === null || typeof configured !== "object") throw new HtmlKitError("Configuration must export a default ApplicationOptions object.", files[0]);
+  return configured as ApplicationOptions;
+}
 
 export class HtmlKitError extends Error {
   constructor(message: string, readonly source?: string) {
@@ -43,6 +61,8 @@ export async function withPlugins(options: ApplicationOptions): Promise<Applicat
     merged = { ...merged, ...added, plugins: options.plugins,
       ...(added.pages === undefined ? {} : { pages: [...merged.pages ?? [{ dir: "app/pages", optional: true }], ...added.pages] }),
       ...(added.css === undefined ? {} : { css: [...merged.css ?? [], ...added.css] }),
+      // The site's own named layouts, then earlier plugins', win over a later plugin's of the same name.
+      ...(added.layouts === undefined ? {} : { layouts: { ...added.layouts, ...merged.layouts } }),
       ...(added.routes === undefined ? {} : { routes: [...merged.routes ?? [], ...added.routes] }) };
   }
   merged = { ...merged };

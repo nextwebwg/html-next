@@ -15,6 +15,12 @@ export interface ApplicationOptions {
   readonly routes?: readonly RouteInput[];
   /** Named layout, or a layout a plugin supplies; default.html is automatic when present. false disables it. */
   readonly layout?: string | false | RouteLayer;
+  /**
+   * Named layouts beside app/layouts, such as { home: { component, server: { load } } }. hk:layout,
+   * layout, layoutDefaults, and a page directory's layout name them, and a name here takes the place
+   * of app/layouts/<name>.html. A plugin's layouts add to these, and the first definition of a name wins.
+   */
+  readonly layouts?: Readonly<Record<string, RouteLayer>>;
   /** Route-directory defaults, overridden by page metadata; longest prefix wins. */
   readonly layoutDefaults?: Readonly<Record<string, string | false>>;
   readonly plugins?: readonly HtmlKitPlugin[];
@@ -165,6 +171,8 @@ export interface LoadContext {
   /** Each [name] parameter's segment, and each [...name] or [[...name]] parameter's list of segments. */
   readonly params: Readonly<Record<string, RouteParam>>;
   readonly parent: Readonly<Record<string, unknown>>;
+  /** The props the loader's own page or layout component declares, which are the props it may return. */
+  readonly propNames: readonly string[];
   readonly fetch: typeof globalThis.fetch;
   readonly signal: AbortSignal;
   /** Ordered concrete routes. from is an application-relative directory prefix. */
