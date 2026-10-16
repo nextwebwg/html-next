@@ -33,16 +33,24 @@ const source = `<template component="docs-layout"><defs>
 </defs><article>B</article></template>
 <template component="x-note"><defs><title>Note</title></defs><aside></aside></template>`;
 const definitions = parseComponentResource(source, "https://app.example/app.html").definitions;
+// A build reads its components from files, as HTMLKit does.
+const widget = parseComponentResource(`<template component="x-widget"><defs>
+  <script name="widget" src="/kit/widget.js"></script>
+</defs><div from:data-ok="$widget.ok"></div></template>`, "file:///app/widget.html").definitions;
 const authoredHead = '<meta charset="utf-8"><title>Acme</title><meta name="description" content="Site">';
 
 describe.skipIf(!enabled)("head declarations through compiled hydration, in every engine", () => {
   let compiled = "";
   let page = "";
+  /** Rendered at HTMLKit's default origin, to be served from another. */
+  let elsewhere = "";
 
   beforeAll(async () => {
-    compiled = await compiledFixtures("iife", 'export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";', definitions);
+    compiled = await compiledFixtures("iife", 'export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";', [...definitions, ...widget]);
     const rendered = await renderComponents('<docs-layout><page-a id="page"></page-a></docs-layout>', { definitions, head: authoredHead, url: "https://app.example/" });
     page = `<!doctype html><head>${rendered.head}</head><body><main id="mount">${rendered.html}</main></body>`;
+    const widgetPage = await renderComponents("<x-widget></x-widget>", { definitions: widget, head: '<meta charset="utf-8">', url: "http://localhost/" });
+    elsewhere = `<!doctype html><head>${widgetPage.head}</head><body><main id="mount">${widgetPage.html}</main></body>`;
   });
   afterAll(() => {});
 
@@ -155,6 +163,54 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
         });
         assert.deepEqual(restored, { same: true, title: "Acme", description: "Site", scripts: 1 });
         assert.deepEqual(requested, ["/sdk.js"]);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} preloads a same-origin script by its path, wherever the page is served`, async () => {
+      // Rendered at http://localhost, the preload names no origin.
+      assert.match(elsewhere, /<link rel="preload" as="script" href="\/kit\/widget\.js" data-component-head="">/);
+      const browser = await browserType.launch({ headless: true });
+      const errors: string[] = [];
+      try {
+        const tab = await browser.newPage();
+        tab.setDefaultTimeout(10_000);
+        tab.on("pageerror", (error) => errors.push(error.message));
+        const requested: string[] = [];
+        await tab.route(/^https:\/\/app\.example\//, (route) => {
+          const url = new URL(route.request().url());
+          if (url.pathname === "/kit/widget.js") {
+            requested.push(url.pathname);
+            return route.fulfill({ contentType: "text/javascript", body: "globalThis.widgetRuns = (globalThis.widgetRuns ?? 0) + 1;" });
+          }
+          // A same-origin script policy, which blocks a preload or script from any other origin.
+          return route.fulfill({ contentType: "text/html; charset=utf-8", body: elsewhere,
+            headers: { "content-security-policy": "script-src 'self' 'unsafe-inline'" } });
+        });
+        await tab.goto("https://app.example/");
+        await tab.evaluate(() => {
+          const kept = globalThis as unknown as Record<string, unknown>;
+          kept.blocked = [];
+          document.addEventListener("securitypolicyviolation", (event) => (kept.blocked as string[]).push(event.blockedURI));
+          kept.preload = document.querySelector('link[rel="preload"]');
+        });
+        await tab.addScriptTag({ content: compiled });
+        await tab.evaluate(() => {
+          const { factories } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options: object, html: undefined, root: Element) => Element> } }).HtmlCompiled;
+          factories["x-widget"]!({}, undefined, document.querySelector('[data-component~="x-widget"]')!);
+        });
+        await tab.waitForFunction(() => document.querySelector('[data-component~="x-widget"]')?.hasAttribute("data-ok") === true);
+        const result = await tab.evaluate(() => {
+          const kept = globalThis as unknown as Record<string, unknown>;
+          return { preload: (kept.preload as HTMLLinkElement).href, kept: kept.preload === document.querySelector('link[rel="preload"]'),
+            scripts: Array.from(document.querySelectorAll("script[src]"), (script) => (script as HTMLScriptElement).src),
+            runs: (globalThis as unknown as { widgetRuns?: number }).widgetRuns ?? 0, blocked: kept.blocked };
+        });
+        // The inserted script and its preload are the served origin's, so the script entry owns the preload.
+        assert.deepEqual(result, { preload: "https://app.example/kit/widget.js", kept: true, scripts: ["https://app.example/kit/widget.js"], runs: 1, blocked: [] });
+        assert.deepEqual(requested, ["/kit/widget.js"]);
         assert.deepEqual(errors, []);
       } finally {
         await browser.close();

@@ -21,6 +21,10 @@ To migrate a page or layout:
 5. A helper component that declared a title or description now sets it while it is on the page, as the deepest component; remove head content the page should own.
 6. A page compiler (`pages.compile`) writes the page's head content and `hk:` settings into the component's `<defs>`.
 
+### Fixed
+
+- Server rendering writes an eager declared script's preload `href` as a path, such as `/kit/widget.js`, when the script has the render URL's origin, and as its absolute URL only for another origin. A page rendered at one origin, such as HTMLKit's default `http://localhost`, and served from another preloads from the served origin, and the script entry the client inserts there owns that preload, under a `script-src 'self'` policy too. `renderComponents` and `writeCollectedHead` both write it. A test renders a compiled component at `http://localhost` and hydrates it at another origin under that policy, in Chromium, Firefox and WebKit.
+
 ## 1.0.0-alpha.55
 
 ### Added
