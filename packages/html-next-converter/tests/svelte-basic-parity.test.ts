@@ -133,7 +133,7 @@ mount(Component, { target: document.querySelector("main") });`);
             for (const [index, expected] of fixture.expectedText.entries()) {
               try {
                 await Promise.all([live, svelte].map((page) => page.waitForFunction(({ selector, text }) =>
-                  document.querySelector(selector)?.textContent === text, { selector: fixture.checkpoint, text: expected }, { timeout: 3_000 })));
+                  document.querySelector(selector)?.textContent?.trim() === text, { selector: fixture.checkpoint, text: expected }, { timeout: 3_000 })));
               } catch (error) {
                 assert.fail(`Missing ${fixture.name} checkpoint ${index}: ${String(error)}; page errors=${errors.join(" | ")}`);
               }

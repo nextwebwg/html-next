@@ -11,7 +11,7 @@ import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementN
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
@@ -375,7 +375,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
-    const fallback = (node.fallback ?? []).map((child) => renderNode(child, false, scope, lowering, context)).join("");
+    const fallback = (node.fallback ?? []).map((child, index, nodes) => isEdgeSpace(nodes, index) ? '{" "}' : renderNode(child, false, scope, lowering, context)).join("");
     const sampledName = node.nameExpression === undefined ? undefined : context.freshIdentifier("htmlNextSlotName");
     if (sampledName !== undefined) context.usesSampledSlots = true;
     const name = sampledName ?? quote(node.name ?? "");
@@ -495,7 +495,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     optionTextValue = `[${node.children.map((child) => textSource(child, scope, lowering, context)).join(", ")}].map(value => String(value ?? "")).join("")`;
     content = `{${optionTextValue}}`;
   }
-  if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
+  // Svelte drops whitespace at a block's edges, so a space kept there is an expression.
+  if (node.name === "template") return content ?? node.children.map((child, index, nodes) => isEdgeSpace(nodes, index) ? '{" "}' : renderNode(child, false, scope, lowering, context)).join("");
   const component = node.name.includes("-");
   if (component) context.imports.add(node.name);
   const name = component ? componentName(node.name) : node.name;
@@ -1032,9 +1033,9 @@ function rootAttributeOptions(scope: string | undefined, nativeRoot: boolean, om
 const LINE_WIDTH = 100;
 
 /**
- * An element's markup. Svelte renders whitespace between elements as a space, and HTML Next
- * templates have none there, so lines break inside tags: a long start tag puts each attribute on
- * its own line, and long content puts each child element on its own, hugging the tags around it.
+ * An element's markup. Svelte renders whitespace between elements as a space, so lines break inside
+ * tags: a long start tag puts each attribute on its own line, and long content puts each child
+ * element on its own, hugging the tags around it, or after a line break where a space separates it.
  */
 function layoutElement(name: string, attributes: readonly string[], children?: readonly string[]): string {
   const indent = (markup: string): string => markup.replaceAll("\n", "\n\t");
@@ -1043,9 +1044,10 @@ function layoutElement(name: string, attributes: readonly string[], children?: r
   const start = broken ? `<${name}${attributes.map((attribute) => `\n\t${indent(attribute)}`).join("")}` : flat;
   if (children === undefined) return `${start}${broken ? "\n" : ""}>`;
   const inline = `${start}${broken ? "\n" : ""}>${children.join("")}</${name}>`;
-  const elements = children.length > 0 && children.every((child) => child.startsWith("<") && child.endsWith(">"));
+  const elements = children.length > 0 && children.every((child) => child === " " || child.startsWith("<") && child.endsWith(">"));
   if (!elements || !inline.includes("\n") && inline.length <= LINE_WIDTH) return inline;
-  return `${start}${children.map((child) => `\n\t>${indent(child.slice(0, -1))}`).join("")}\n></${name}>`;
+  return `${start}${children.map((child, index) => child === " " ? ""
+    : `${children[index - 1] === " " ? ">\n\t" : "\n\t>"}${indent(child.slice(0, -1))}`).join("")}\n></${name}>`;
 }
 
 interface RootScope extends Scope {
@@ -1057,6 +1059,7 @@ interface RootScope extends Scope {
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, version: string, options: SvelteConversionOptions = {}): SvelteConversionOutput {
+  definition = condenseWhitespace(definition);
   const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;

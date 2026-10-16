@@ -10,6 +10,15 @@ const UNSAFE_DEFINITION_ELEMENT_RE = /^(?:base|embed|link|meta|object|script|sty
 // The HTML UA stylesheet's `white-space: pre` and `pre-wrap` elements.
 const PREFORMATTED_ELEMENT_RE = /^(?:listing|plaintext|pre|textarea|xmp)$/;
 
+// Table structure and SVG containers: a browser never renders whitespace-only text among their
+// children, whatever `white-space` says (CSS Tables, anonymous box fixup; SVG renders text only in <text>).
+const WHITESPACE_DISCARDING_ELEMENT_RE = /^(?:table|thead|tbody|tfoot|tr|colgroup|svg|g|defs|symbol|clipPath|mask|pattern|marker|linearGradient|radialGradient|filter|switch)$/;
+
+/** Whitespace-only text among these elements' children never renders, so templates drop it there. */
+export function isWhitespaceDiscardingElement(name: string): boolean {
+  return WHITESPACE_DISCARDING_ELEMENT_RE.test(name);
+}
+
 export function isReservedElement(name: string): boolean {
   return RESERVED_ELEMENT_RE.test(name);
 }

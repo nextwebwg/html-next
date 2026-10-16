@@ -59,6 +59,15 @@ describe("Node component rendering", () => {
     assert.match(rendered.html, /<code><span class="line">a<\/span>\n<span class="line">b<\/span><\/code>/);
   });
 
+  it("keeps whitespace-only text between inline elements and drops it among table rows", async () => {
+    const definition = parseComponent(`<template component="x-package"><div><p><strong>Package:</strong> <code>x</code> and <em>a</em> <em>b</em></p>
+      <table>
+        <tr> <td>1</td> </tr>
+      </table></div></template>`);
+    const rendered = await renderComponents("<x-package></x-package>", { definitions: [definition] });
+    assert.match(rendered.html, /<p><strong>Package:<\/strong> <code>x<\/code> and <em>a<\/em> <em>b<\/em><\/p>\n {6}<table><tbody><tr><td>1<\/td><\/tr><\/tbody><\/table><\/div>/);
+  });
+
   it("renders native HTML and styles without installing browser globals in Node", async () => {
     const before = Object.getOwnPropertyDescriptor(globalThis, "document");
     const rendered = await renderComponents('<x-server-counter label="Visits">Hello</x-server-counter>', {

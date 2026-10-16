@@ -543,7 +543,7 @@ describe("parseComponent", () => {
         .map((attribute) => attribute.expressionPlan?.dependencies),
       [["variant"], ["size"]],
     );
-    assert.deepEqual(definition.template.children, [{ kind: "slot" }]);
+    assert.deepEqual(definition.template.children, [{ kind: "text", value: "\n    " }, { kind: "slot" }, { kind: "text", value: "\n  " }]);
     assert.match(definition.css, /all: revert/);
     assert.equal(definition.source.file, "x-button.html");
   });
@@ -1042,29 +1042,70 @@ describe("ref-targeted dispatch", () => {
   });
 });
 
-describe("preformatted whitespace", () => {
+describe("template whitespace", () => {
   // Shiki's code blocks separate `.line` spans with "\n" text nodes that hold no other text.
   const source = `<template component="x-code"><section>
     <pre class="shiki"><code><span class="line">a</span>
 <span class="line">b</span><template $if="true"> </template><slot>
 </slot></code></pre>
-    <p><b>x</b> <i>y</i></p><listing><b>l</b>
+    <p><strong>Package:</strong> <code>x</code> and <em>a</em> <em>b</em></p>
+    <p><em>a</em>
+      <em>b</em> <!-- note --> <b>c</b>&nbsp;<i>d</i></p>
+    <listing><b>l</b>
 <b>m</b></listing><textarea>
-  </textarea></section></template>`;
-  it("keeps whitespace-only text inside pre, listing and textarea in parse5 and browser parsing", () => {
-    const { document } = new JSDOM(source).window;
-    for (const { template } of [parseComponent(source), parseBrowserComponent(document.querySelector("template")!, "code.html")]) {
-      const [pre, p, listing, textarea] = template.children as ElementNode[];
+  </textarea>
+    <table>
+      <tbody>
+        <tr $each="row of [1]">
+          <td> <b>1</b> </td>
+        </tr>
+      </tbody>
+    </table>
+    <svg><defs>
+      <g></g>
+    </defs><text> <tspan>a</tspan> <tspan>b</tspan></text></svg>
+    <output $value="'x'">
+    </output>
+    <x-card>
+      <b slot="title">t</b>
+      <i>a</i> <i>b</i>
+    </x-card>
+  </section></template>`;
+  const shape = (node: ElementNode): string[] => node.children.map((child) =>
+    child.kind === "text" ? child.value : child.kind === "element" ? child.name : child.kind);
+  for (const [mode, parse] of [
+    ["parse5", () => parseComponent(source)],
+    ["browser", () => parseBrowserComponent(new JSDOM(source).window.document.querySelector("template")!, "code.html")],
+  ] as const) {
+    it(`keeps whitespace-only text where it can render, in ${mode} parsing`, () => {
+      const { template } = parse();
+      const [pre, inline, wrapped, listing, textarea, table, svg, output, card] = template.children.filter((child): child is ElementNode => child.kind === "element");
+      const indent = "\n    ";
+      assert.deepEqual(shape(template), [indent, "pre", indent, "p", indent, "p", indent, "listing", "textarea", indent, "table", indent, "svg", indent, "output", indent, "x-card", "\n  "]);
       const code = pre!.children[0] as ElementNode;
-      assert.deepEqual(code.children.map((child) => child.kind === "text" ? child.value : child.kind), ["element", "\n", "element", "element", "slot"]);
-      assert.deepEqual((code.children[3] as ElementNode).children, [{ kind: "text", value: " " }]);
+      assert.deepEqual(shape(code), ["span", "\n", "span", "template", "slot"]);
+      assert.deepEqual(shape(code.children[3] as ElementNode), [" "]);
       assert.deepEqual((code.children[4] as { fallback: unknown }).fallback, [{ kind: "text", value: "\n" }]);
-      // Outside a preformatted element, whitespace-only text between elements is still dropped.
-      assert.equal(p!.children.length, 2);
-      assert.deepEqual(listing!.children[1], { kind: "text", value: "\n" });
-      assert.deepEqual(textarea!.children, [{ kind: "text", value: "  " }]);
-    }
-  });
+      // Between inline elements, as in a hand-written page: a space, or a line break and indentation.
+      assert.deepEqual(shape(inline!), ["strong", " ", "code", " and ", "em", " ", "em"]);
+      // Text a comment splits is one run, as it renders; a non-breaking space is not HTML whitespace.
+      assert.deepEqual(shape(wrapped!), ["em", "\n      ", "em", "  ", "b", "\u00a0", "i"]);
+      assert.deepEqual(shape(listing!), ["b", "\n", "b"]);
+      assert.deepEqual(shape(textarea!), ["  "]);
+      // Table structure and SVG containers never render whitespace-only text; a cell and <text> do.
+      const tbody = table!.children[0] as ElementNode;
+      const row = tbody.children[0] as ElementNode;
+      assert.deepEqual([shape(table!), shape(tbody), shape(row)], [["tbody"], ["tr"], ["td"]]);
+      assert.deepEqual(shape(row.children[0] as ElementNode), [" ", "b", " "]);
+      assert.deepEqual(shape(svg!), ["defs", "text"]);
+      assert.deepEqual(shape(svg!.children[0] as ElementNode), ["g"]);
+      assert.deepEqual(shape(svg!.children[1] as ElementNode), [" ", "tspan", " ", "tspan"]);
+      // A content directive replaces its element's children, so whitespace beside it is layout.
+      assert.deepEqual(output!.children, []);
+      // Around a component's projected content and its named-slot content, whitespace is layout.
+      assert.deepEqual(shape(card!), ["b", "i", " ", "i"]);
+    });
+  }
 });
 
 describe("browser-parsed components", () => {

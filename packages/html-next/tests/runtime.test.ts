@@ -4773,7 +4773,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
               // The author's attribute wins over the template's literal.
               ["type", "submit"],
             ],
+            // The template's indentation around its slot stays, as authored.
             children: [
+              { text: "\n        " },
               { text: "Save " },
               {
                 namespace: "http://www.w3.org/1999/xhtml",
@@ -4781,6 +4783,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
                 attributes: [["data-slotted", ""], ["id", "kept-child"]],
                 children: [{ text: "now" }],
               },
+              { text: "\n      " },
             ],
           },
           disabled: {
@@ -4797,7 +4800,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["id", "disabled"],
               ["type", "button"],
             ],
-            children: [],
+            children: [{ text: "\n        " }, { text: "\n      " }],
           },
           status: {
             namespace: "http://www.w3.org/1999/xhtml",

@@ -83,7 +83,7 @@ it("orders and labels (group) folders in navigation without adding a URL segment
     expect(body).toContain('data-component="start-shell"');
     // <hk-nav> labels each group where its pages start.
     expect([...body.matchAll(/<li data-group[^>]*>([^<]+)<\/li>/g)].map(match => match[1])).toEqual(["Getting started", "Advanced", "Reference"]);
-    expect(body.replace(/<!--[^>]*-->/g, "")).toContain('<li data-group="" data-depth="1">Getting started</li><li data-depth="1"><a href="/docs/intro/" aria-current="page">intro</a></li>');
+    expect(body.replace(/<!--[^>]*-->/g, "").replace(/>\s+</g, "><")).toContain('<li data-group="" data-depth="1">Getting started</li><li data-depth="1"><a href="/docs/intro/" aria-current="page">intro</a></li>');
     expect((await application.render("/docs/faq/")).body).not.toContain("start-shell");
   } finally { await application.close(); }
   await mkdir(join(root, "app/pages/docs/03.( )"));
@@ -140,7 +140,7 @@ it("nests navigation by folder and group, labels folders from their index pages,
     expect((await application.navigationTree({ from: "/guide/" })).map(node => node.label)).toEqual(["guide", "install", "next", "Advanced", "deep"]);
     // The pager moves through the same order as the tree.
     expect((await application.navigation()).map(item => item.href)).toEqual(["/", "/guide/", "/guide/install/", "/guide/next/", "/guide/tuning/", "/guide/deep/more/", "/api/", "/about/"]);
-    const body = (await application.render("/guide/tuning/")).body.replace(/<!--[^>]*-->/g, "");
+    const body = (await application.render("/guide/tuning/")).body.replace(/<!--[^>]*-->/g, "").replace(/>\s+</g, "><");
     expect(body).toContain('<details open=""><summary><a href="/guide/" aria-current="false">The guide</a></summary>');
     expect(body).toContain('<details open=""><summary><span>Advanced</span></summary>');
     expect(body).toContain('<details><summary><span>deep</span></summary><ul><li data-depth="2"><a href="/guide/deep/more/" aria-current="false">more</a></li></ul></details>');
@@ -158,7 +158,7 @@ it("renders a tree's first three levels inline in <hk-nav>, and deeper levels th
   await write(root, "app/layouts/default.server.ts", 'export const load = async ({ navigationTree }) => ({ props: { tree: await navigationTree() } });');
   const application = await createApplication({ root });
   try {
-    const body = (await application.render("/a/b/c/d/e/leaf/")).body.replace(/<!--[^>]*-->/g, "");
+    const body = (await application.render("/a/b/c/d/e/leaf/")).body.replace(/<!--[^>]*-->/g, "").replace(/>\s+</g, "><");
     const nav = /<nav [^>]*data-component="hk-nav"[^>]*>([\s\S]*?)<\/nav>/.exec(body)![1]!;
     expect([...nav.matchAll(/<details open=""><summary><span>(\w)<\/span><\/summary><ul( data-component="hk-nav-items")?/g)].map(match => [match[1], match[2] !== undefined]))
       .toEqual([["a", false], ["b", false], ["c", true], ["d", true], ["e", true]]);

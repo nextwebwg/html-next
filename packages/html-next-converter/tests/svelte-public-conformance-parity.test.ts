@@ -23,6 +23,7 @@ const baseStyle = "<style>html { color-scheme: light; } body { margin: 8px; font
 const selected = new Set([
   "HTML parser recovery keeps the first duplicate attribute",
   "keeps whitespace-only text between elements and rows inside pre",
+  "renders whitespace between inline content as one space, as a hand-written page does",
   "preserves SVG namespaces and camelCase attributes inside a native root",
   "keeps a single native root when $with scopes the root",
   "lowers to native root with prop :attr, passthrough attrs, and default slot",

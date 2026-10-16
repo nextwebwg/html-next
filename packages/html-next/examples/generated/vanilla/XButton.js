@@ -2,7 +2,7 @@
 import { attachGeneratedController, buildTemplate, writeAttribute, dispose, formatOf, keywordFormat, hostState, acceptProps, manageProps, project, fillSlot, checkFormat } from "@nextwebwg/html-next/generated-runtime";
 import "../styles/x-button.css";
 
-const T0 = ["",[],4];
+const T0 = ["",[],"\n    ",4,"\n  "];
 const T1 = ["",[]];
 let P0, P1;
 const S = { n: [], t: [], f: import.meta.url, g: "x-button" };
@@ -37,7 +37,7 @@ export function createXButton(options = {}, html) {
       if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { r.b0 = m1(d); at.before(r.b0.n); } }
     else if (r.b0 !== undefined) p1(r.b0, c, d);
   };
-  const t0 = element.firstChild;
+  const t0 = element.firstChild.nextSibling;
   const R = { n: element, v0: undefined, a0: t0, e0: t0.nextSibling, b0: undefined, f0: undefined };
   const I = { B };
   const J = project(I, children, slots);

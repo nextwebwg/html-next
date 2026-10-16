@@ -2,6 +2,7 @@ import { parseFragment } from "parse5";
 
 import type { ComponentDefinition, ElementNode, TemplateAttribute, TemplateNode } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
+import { isPreformattedElement } from "../language.js";
 import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
 import { typeScriptType } from "../type-system.js";
@@ -154,6 +155,73 @@ export function hasUnsupportedPropertyBindings(node: TemplateNode): boolean {
   return node.attributes.some((attribute) =>
     attribute.kind === "property" && resolveDomProperty(node.name, attribute.name) === undefined
   ) || node.children.some(hasUnsupportedPropertyBindings);
+}
+
+// Elements the UA stylesheet lays out as blocks: whitespace beside one starts or ends a line.
+const BLOCK_ELEMENTS = new Set(["address", "article", "aside", "blockquote", "caption", "center", "col", "colgroup", "dd", "details",
+  "dialog", "dir", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+  "hgroup", "hr", "legend", "li", "listing", "main", "menu", "nav", "ol", "optgroup", "option", "p", "plaintext", "pre", "search", "section",
+  "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul", "xmp"]);
+const WHITESPACE_RE = /^[\t\n\f\r ]+$/;
+
+function isWhitespace(node: TemplateNode): boolean {
+  return node.kind === "text" && node.expressionPlan === undefined && node.segments === undefined && WHITESPACE_RE.test(node.value);
+}
+
+/**
+ * The definition with whitespace-only text as a framework host renders it. The proposal lets a
+ * converter condense whitespace that does not render (Templating, "What observable equivalence
+ * covers"), so this drops what never renders under normal `white-space`: text at an element's edges,
+ * text beside a block-level element, and text among a select's options; the parser already drops it
+ * in table and SVG structure. Text between inline content stays, as one space each host keeps.
+ * Preformatted text stays as written.
+ */
+export function condenseWhitespace(definition: ComponentDefinition): ComponentDefinition {
+  const template = condenseNode(definition.template, "") as ElementNode;
+  return template === definition.template ? definition : { ...definition, template };
+}
+
+function condenseNode(node: TemplateNode, parent: string): TemplateNode {
+  if (node.kind === "text") return node;
+  if (node.kind === "slot") {
+    const fallback = node.fallback === undefined ? undefined : condenseChildren(node.fallback, parent, true);
+    return fallback === node.fallback ? node : { ...node, fallback: fallback! };
+  }
+  if (isPreformattedElement(node.name)) return node;
+  // A <template> carries its children into its parent's content.
+  const children = condenseChildren(node.children, node.name === "template" ? parent : node.name, node.name === "template");
+  return children === node.children ? node : { ...node, children };
+}
+
+function condenseChildren(nodes: readonly TemplateNode[], parent: string, inParent: boolean): readonly TemplateNode[] {
+  let changed = false;
+  const kept = nodes.flatMap((node, index): TemplateNode[] => {
+    if (!isWhitespace(node)) {
+      const next = condenseNode(node, parent);
+      if (next !== node) changed = true;
+      return [next];
+    }
+    changed = true;
+    // Next to a block-level box or at an element's edge, whitespace starts or ends a line, where it
+    // collapses away; a template's or fallback's edge is its parent's content, and a conditional or
+    // repeated block may render nothing, so neither counts.
+    const atLineEdge = [nodes[index - 1], nodes[index + 1]].some((neighbour) => neighbour === undefined ? !inParent
+      : neighbour.kind === "element" && neighbour.flow === undefined && BLOCK_ELEMENTS.has(neighbour.name));
+    // A select's options are its content; frameworks reject text between them.
+    if (atLineEdge || parent === "select" || parent === "optgroup") return [];
+    return [{ kind: "text", value: " " }];
+  });
+  return changed ? kept : nodes;
+}
+
+/** A space `condenseWhitespace` kept, the only whitespace-only text it leaves outside preformatted text. */
+export function isKeptSpace(node: TemplateNode | undefined): boolean {
+  return node?.kind === "text" && node.value === " " && node.expressionPlan === undefined && node.segments === undefined;
+}
+
+/** A kept space at the start or end of a `<template>`'s or slot fallback's content. */
+export function isEdgeSpace(nodes: readonly TemplateNode[], index: number): boolean {
+  return (index === 0 || index === nodes.length - 1) && isKeptSpace(nodes[index]);
 }
 
 export function escapeHtml(value: string): string {

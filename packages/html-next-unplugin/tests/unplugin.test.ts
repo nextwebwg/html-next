@@ -305,9 +305,10 @@ describe("HTML Next unplugin", () => {
     // +6 B: a root renders, at its first connection, what changed after its construction.
     // +17 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call
     // that does nothing until a component on the page asks; the request steps stay with askers.
+    // +47 B: the whitespace between the fixture's elements, which templates now keep as authored.
     // Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_744, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_791, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
