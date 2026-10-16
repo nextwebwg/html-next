@@ -46,7 +46,7 @@ export default function controller(host) {
     log.push(id + " responder " + event.detail.name);
     if (late.includes(event.detail.name)) record(event.detail.name, host.request(event.detail.name));
   });
-  (globalThis.editors ??= {})[id] = { ask: (name, detail, options) => host.request(name, detail, options), record };
+  (globalThis.editors ??= {})[id] = { ask: (name, detail, options) => host.request(name, detail, options), record, request: typeof host.request };
 }
 `;
 const notes = `<link rel="component" href="./editor.html">
@@ -60,7 +60,8 @@ const notesController = `export default function controller(host) {
   });
   host.on("link-title", (event) => event.respondWith(42));
   host.on("homepage", (event) => event.respondWith("not a url"));
-  globalThis.notes = { late: () => host.on("plugins", (event) => event.respondWith(["late"])) };
+  // A component that declares no request has no host.request.
+  globalThis.notes = { late: () => host.on("plugins", (event) => event.respondWith(["late"])), request: typeof host.request, ask: () => host.request("mention-query") };
 }
 `;
 const files: Readonly<Record<string, string>> = { "editor.html": editor, "editor.js": editorController, "notes.html": notes, "notes.js": notesController };
@@ -108,6 +109,9 @@ async function run(page: Page, target: Target): Promise<Record<string, readonly 
     await editor.record("undeclared", editor.ask("missing"));
     await editor.record("homepage", editor.ask("homepage"));`, "true");
   // The nearest responder answers once, while the request is dispatched.
+  // host.request is on the host of a component that declares a request, and nowhere else.
+  results.presence = await step(`${log}.push("inner " + editors.inner.request, "notes " + notes.request);
+    try { notes.ask(); ${log}.push("notes asked"); } catch (error) { ${log}.push("notes ask " + error.name); }`, "true");
   results.answerOnce = await step(`const editor = editors.inner;
     const capture = (event) => {
       event.respondWith("first");
@@ -153,6 +157,7 @@ const expected: Record<string, readonly string[]> = {
   setup: ['inner extensions null', 'inner mention a ["Ada","Alan"]', "inner plugins null", "inner theme null"],
   abort: ["notes abort ad", "inner stale ad AbortError", 'inner fresh ada ["Ada"]'],
   checks: ["inner link-title TypeError", "inner bad detail TypeError", "inner undeclared TypeError", "inner homepage TypeError"],
+  presence: ["inner function", "notes undefined", "notes ask TypeError"],
   answerOnce: ["again InvalidStateError", 'inner captured "first"', "late InvalidStateError"],
   progress: ["inner upload unanswered null", "inner responder image-upload", "progress 1/2", "progress 2/2", 'inner upload {"src":"blob:3"}'],
   respond: ["inner responder extensions", 'inner extensions ["bold"]'],

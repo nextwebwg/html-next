@@ -3746,8 +3746,11 @@ export interface ComponentHost {
    */
   effect(run: () => void | (() => void)): () => void;
   dispatch(event: string, detail?: unknown): boolean;
-  /** Ask the consumer a declared request. Resolves to its answer, or null when none answered. */
-  request(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown>;
+  /**
+   * Ask the consumer a declared request. Resolves to its answer, or null when none answered. Present
+   * on the host of a component that declares at least one `<request>`.
+   */
+  request?(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown>;
 }
 
 export interface ComponentProp {
@@ -3957,12 +3960,15 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     dispatch(event, detail) {
       return dispatchComponentEvent(instance.element!, event, detail, eventDeclaration(instance.definition, event));
     },
-    request(name, detail, options) {
-      const connection = instance.connected ? (instance.connection ??= new AbortController()).signal
-        : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
-      return ask(host.root, connection, name, detail, options, requestChecks(instance.definition, name),
-        (message) => warnAuthored(instance.definition, message, message));
-    },
+    // A component that declares at least one request also has `host.request`.
+    ...(instance.definition.contract.requests === undefined ? {} : {
+      request(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> {
+        const connection = instance.connected ? (instance.connection ??= new AbortController()).signal
+          : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
+        return ask(host.root, connection, name, detail, options, requestChecks(instance.definition, name),
+          (message) => warnAuthored(instance.definition, message, message));
+      },
+    }),
   };
   instance.host = Object.freeze(host);
   return instance.host;

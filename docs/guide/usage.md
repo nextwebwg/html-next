@@ -476,7 +476,7 @@ Some components need behavior from whoever uses them: an editor asks for mention
 </template>
 ```
 
-`host.request(name, detail, { signal })` resolves to the answer, or to `null` when nobody answers. Each keystroke aborts the request before it, so a slow answer to `@ad` never replaces the answer to `@ada`:
+A component that declares a request has `host.request(name, detail, { signal })`, which resolves to the answer, or to `null` when nobody answers. Each keystroke aborts the request before it, so a slow answer to `@ad` never replaces the answer to `@ada`:
 
 ```js title="src/editor.js"
 export default function controller(host) {

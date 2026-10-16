@@ -136,7 +136,9 @@ const computedGenerated = await generatedFixture("computed-counter", 7_550);
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
 // +5 B: a root renders, at its first connection, what changed after its construction while it waited
 // detached, such as a parent's bound list of objects; until then such a change never rendered.
-const dataGenerated = await generatedFixture("data-read", 7_630);
+// +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
+// does nothing until a component on the page asks.
+const dataGenerated = await generatedFixture("data-read", 7_642);
 const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000);
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
