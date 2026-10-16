@@ -11,7 +11,7 @@
 ### Changed
 
 - A definition that names an `<event>` or a `<request>` `responder`, the host event for late responders, or declares an event and a request with the same name, fails a build (`HC010`, `HC020`); the live parser warns and ignores the declaration. A request whose camelCase name equals a declared prop's fails a build (`HC011`), because a framework component takes the request's function prop under that name.
-- Every compiled component's host carries `host.request` and the late-responder relay in `host.on`, 78 to 92 B gzip; a component that declares a request also bundles the request steps and its type checks. The live browser bundle grows by 1.9 KB gzip.
+- A compiled or converted component that declares a request gives its controller a host with `host.request`, and only such a component bundles the request steps. A compiled one checks each request's detail and answer with code written for their declared types, which accepts exactly what the live runtime accepts: one request adds 1.2 KB gzip to a compiled controller component. Another compiled host carries only `host.on`'s relay of a late responder, a call that does nothing until a component on the page asks (6 to 18 B gzip). The live browser bundle grows by 1.9 KB gzip.
 
 ## 1.0.0-alpha.52
 

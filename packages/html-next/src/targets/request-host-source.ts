@@ -9,25 +9,25 @@ import { REQUESTS_SOURCE } from "../generated/requests-source.js";
  * every HTML Next bundle on the page shares; the request steps themselves are the requests helper.
  */
 export const REQUEST_HOST_SOURCE = `const requestStateKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
-type RequestRecord = { readonly g: WeakMap<Node, Promise<void>>; r?: (from: Node, name: string) => void };
-const requestRecord = (root: Element): RequestRecord =>
-  (((root.ownerDocument as unknown as Record<symbol, { requests?: RequestRecord } | undefined>)[requestStateKey] ??= {}).requests ??= { g: new WeakMap() });
+type DocumentRecord = { requests?: { readonly g: WeakMap<Node, Promise<void>> }; relay?: (from: Node, name: string) => void };
+const documentRecord = (root: Element): DocumentRecord =>
+  (root.ownerDocument as unknown as Record<symbol, DocumentRecord>)[requestStateKey] ??= {};
 
 /** Requests from inside root wait until its controller has run; the returned release ends the wait. */
 function holdController(root: Element): () => void {
-  const { g: gates } = requestRecord(root);
+  const { g: gates } = documentRecord(root).requests ??= { g: new WeakMap() };
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   gates.set(root, gate);
   return () => { if (gates.get(root) === gate) gates.delete(root); release(); };
 }
 
-/** A responder registered on root relays to the requests inside it that went unanswered. */
+/** A responder registered on root relays to the requests inside it that went unanswered, once a page asks. */
 function relayResponders(root: Element, name: string): void {
-  requestRecord(root).r?.(root, name);
+  documentRecord(root).relay?.(root, name);
 }
 
-/** A responder announcement reaches a controller only as the relay to its own root, which does not bubble. */
+/** For a component that asks: a responder announcement reaches its controller only as the relay to its root, which does not bubble. */
 function hostListener(type: string, callback: (event: Event) => unknown): (event: Event) => void {
   return (event) => { if (type !== "responder" || !event.bubbles) callback(event); };
 }
@@ -41,10 +41,6 @@ function requestConnection(): { readonly signal: (connected: boolean) => AbortSi
     end: () => { current?.abort(); current = undefined; },
   };
 }
-
-/** host.request for a name the component does not declare. */
-const undeclaredRequest = (name: string): Promise<never> =>
-  Promise.reject(new TypeError("No <request> named " + JSON.stringify(name) + " is declared."));
 `;
 
 /** The request steps a converted component that declares requests imports, one copy per target. */

@@ -52,7 +52,7 @@ interface ControllerHost {
   computed<T>(compute: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
-  request(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  request?(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
   on(type: string, callback: EventListener): () => void;
 }
 
@@ -169,10 +169,13 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       return stop;
     },
     dispatch: (name, detail) => options.dispatch(host.root, name, detail),
-    request: (name, detail, requestOptions) => options.request === undefined ? undeclaredRequest(name)
-      : options.request(host.root, requests.signal(connected), name, detail, requestOptions),
+    // A component that declares requests also has host.request.
+    ...(options.request === undefined ? {} : {
+      request: (name: string, detail?: unknown, requestOptions?: unknown) =>
+        options.request!(host.root, requests.signal(connected), name, detail, requestOptions),
+    }),
     on(type, callback) {
-      const listener: EventListener = type === "connect" || type === "disconnect" ? callback : hostListener(type, callback);
+      const listener: EventListener = type === "connect" || type === "disconnect" || options.request === undefined ? callback : hostListener(type, callback);
       const subscription: { type: string; callback: EventListener; cleanup?: () => void } = { type, callback: listener };
       subscriptions.add(subscription);
       if (type === "connect") { if (connected) connect(subscription); }

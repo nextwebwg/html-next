@@ -368,7 +368,7 @@ describe("generated controller host", () => {
     document.body.append(root);
     await flush();
     assert.ok(Object.isFrozen(host));
-    assert.deepEqual(Object.keys(host), ["root", "element", "state", "data", "on", "props", "refs", "slots", "signal", "computed", "effect", "dispatch", "request"]);
+    assert.deepEqual(Object.keys(host), ["root", "element", "state", "data", "on", "props", "refs", "slots", "signal", "computed", "effect", "dispatch"]);
     host.effect(() => { log.push(`effect ${host.state.rows.length}`); });
     const row = { id: 1, label: "a" };
     host.state.rows = [row];

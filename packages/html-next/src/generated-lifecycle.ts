@@ -29,8 +29,8 @@ export const lifecycleKey = Symbol.for("@nextwebwg/html-next.lifecycle.v1");
 interface DocumentState {
   mutationHub?: DocumentMutationHub;
   lifecycle?: LifecycleCoordinator;
-  /** The document's requests (src/requests.ts); a compiled host only relays a late responder through it. */
-  requests?: { readonly r?: (from: Node, name: string) => void };
+  /** Relays a late responder to the requests that went unanswered (src/requests.ts), once a page asks. */
+  relay?: (from: Node, name: string) => void;
 }
 
 type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };

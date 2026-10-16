@@ -310,7 +310,7 @@ export function useComponentHost(
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
     }, options.controllerSource?.definition ?? "<component>"),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
-      const entry: Subscription = { type, callback: type === "connect" || type === "disconnect" ? callback : hostListener(type, callback) };
+      const entry: Subscription = { type, callback: type === "connect" || type === "disconnect" || options.request === undefined ? callback : hostListener(type, callback) };
       subscriptions.add(entry);
       if (connected.value) activate(entry);
       return () => { if (subscriptions.delete(entry)) deactivate(entry, false); };
@@ -363,8 +363,11 @@ export function useComponentHost(
       return dispose;
     },
     dispatch,
-    request: (name: string, detail?: unknown, requestOptions?: unknown): Promise<unknown> => options.request === undefined
-      ? undeclaredRequest(name) : options.request(root.value as Element, requests.signal(connected.value), name, detail, requestOptions),
+    // A component that declares requests also has host.request.
+    ...(options.request === undefined ? {} : {
+      request: (name: string, detail?: unknown, requestOptions?: unknown): Promise<unknown> =>
+        options.request!(root.value as Element, requests.signal(connected.value), name, detail, requestOptions),
+    }),
   };
   const requests = requestConnection();
   // Each request's responder listens on the root from its first connection, before the controller runs.

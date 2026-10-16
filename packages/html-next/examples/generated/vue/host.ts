@@ -203,20 +203,16 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
 }
 
 const requestStateKey = Symbol.for('@nextwebwg/html-next.runtime.v1')
-type RequestRecord = {
-  readonly g: WeakMap<Node, Promise<void>>
-  r?: (from: Node, name: string) => void
+type DocumentRecord = {
+  requests?: { readonly g: WeakMap<Node, Promise<void>> }
+  relay?: (from: Node, name: string) => void
 }
-const requestRecord = (
-  root: Element,
-): RequestRecord => (((root.ownerDocument as unknown as Record<
-  symbol,
-  { requests?: RequestRecord } | undefined
->)[requestStateKey] ??= {}).requests ??= { g: new WeakMap() })
+const documentRecord = (root: Element): DocumentRecord =>
+  (root.ownerDocument as unknown as Record<symbol, DocumentRecord>)[requestStateKey] ??= {}
 
 /** Requests from inside root wait until its controller has run; the returned release ends the wait. */
 function holdController(root: Element): () => void {
-  const { g: gates } = requestRecord(root)
+  const { g: gates } = documentRecord(root).requests ??= { g: new WeakMap() }
   let release!: () => void
   const gate = new Promise<void>((resolve) => {
     release = resolve
@@ -228,12 +224,12 @@ function holdController(root: Element): () => void {
   }
 }
 
-/** A responder registered on root relays to the requests inside it that went unanswered. */
+/** A responder registered on root relays to the requests inside it that went unanswered, once a page asks. */
 function relayResponders(root: Element, name: string): void {
-  requestRecord(root).r?.(root, name)
+  documentRecord(root).relay?.(root, name)
 }
 
-/** A responder announcement reaches a controller only as the relay to its own root, which does not bubble. */
+/** For a component that asks: a responder announcement reaches its controller only as the relay to its root, which does not bubble. */
 function hostListener(type: string, callback: (event: Event) => unknown): (event: Event) => void {
   return (event) => {
     if (type !== 'responder' || !event.bubbles) callback(event)
@@ -257,10 +253,6 @@ function requestConnection(): {
     },
   }
 }
-
-/** host.request for a name the component does not declare. */
-const undeclaredRequest = (name: string): Promise<never> =>
-  Promise.reject(new TypeError('No <request> named ' + JSON.stringify(name) + ' is declared.'))
 
 export function dispatchToTargets(recorded: unknown, send: (target: Element) => void): void {
   const refs = recorded instanceof Set
@@ -711,7 +703,7 @@ export function useComponentHost(
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
       const entry: Subscription = {
         type,
-        callback: type === 'connect' || type === 'disconnect'
+        callback: type === 'connect' || type === 'disconnect' || options.request === undefined
           ? callback
           : hostListener(type, callback),
       }
@@ -780,16 +772,17 @@ export function useComponentHost(
       return dispose
     },
     dispatch,
-    request: (name: string, detail?: unknown, requestOptions?: unknown): Promise<unknown> =>
-      options.request === undefined
-        ? undeclaredRequest(name)
-        : options.request(
+    // A component that declares requests also has host.request.
+    ...(options.request === undefined ? {} : {
+      request: (name: string, detail?: unknown, requestOptions?: unknown): Promise<unknown> =>
+        options.request!(
           root.value as Element,
           requests.signal(connected.value),
           name,
           detail,
           requestOptions,
         ),
+    }),
   }
   const requests = requestConnection()
   // Each request's responder listens on the root from its first connection, before the controller runs.

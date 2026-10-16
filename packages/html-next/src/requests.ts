@@ -77,19 +77,22 @@ export function answerRequest(event: Event, responder: Responder<any, any>): voi
 }
 
 /**
- * The document's request record, `requests` on the record every HTML Next bundle in the realm
- * keeps on the document: the roots whose controller has not yet run its synchronous body (`g`), the
- * remembered unanswered requests (`m`), and the relay that the bundle which first remembered one
- * installed (`r`).
+ * The record every HTML Next bundle in the realm keeps on the document. Its `requests` hold the roots
+ * whose controller has not yet run its synchronous body (`g`) and the remembered unanswered requests
+ * (`m`). Its `relay` is installed by the first bundle that remembers a request, so a host that only
+ * answers calls it when present and bundles none of this module.
  */
+interface DocumentRecord {
+  requests?: RequestState;
+  relay?: (from: Node, name: string) => void;
+}
 export interface RequestState {
   readonly g: WeakMap<Node, Promise<void>>;
   m?: Map<Element, Set<string>>;
-  r?: (from: Node, name: string) => void;
 }
 const runtimeKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
-const requestState = (document: Document): RequestState =>
-  (((document as Document & { [runtimeKey]?: { requests?: RequestState } })[runtimeKey] ??= {}).requests ??= { g: new WeakMap() });
+const documentRecord = (document: Document): DocumentRecord => (document as Document & { [runtimeKey]?: DocumentRecord })[runtimeKey] ??= {};
+const requestState = (document: Document): RequestState => documentRecord(document).requests ??= { g: new WeakMap() };
 
 /**
  * Marks a root whose controller is about to run, so requests from inside it wait for its
@@ -108,7 +111,7 @@ export function holdController(root: Element): () => void {
 
 /** A responder the runtime registers on `from` for `name` relays as an announcement from there would. */
 export function relayResponders(from: Element, name: string): void {
-  requestState(from.ownerDocument).r?.(from, name);
+  documentRecord(from.ownerDocument).relay?.(from, name);
 }
 
 /**
@@ -138,7 +141,7 @@ function remember(state: RequestState, root: Element, name: string, connection: 
   let remembered = state.m;
   if (remembered === undefined) {
     const records = remembered = state.m = new Map();
-    state.r = (from, relayed) => {
+    const relay = documentRecord(root.ownerDocument).relay = (from: Node, relayed: string): void => {
       const roots = [...records].filter(([candidate, names]) => names.has(relayed) && from.contains(candidate))
         .map(([candidate]) => candidate)
         .sort((a, b) => a.compareDocumentPosition(b) & 4 /* FOLLOWING */ ? -1 : 1);
@@ -151,7 +154,7 @@ function remember(state: RequestState, root: Element, name: string, connection: 
     // The one listener for announcements: page scripts and `respond()` dispatch a bubbling `responder`.
     root.ownerDocument.addEventListener("responder", (event) => {
       const announced = (event as CustomEvent<{ name?: unknown } | null>).detail?.name;
-      if (event.bubbles && typeof announced === "string" && event.target instanceof Node) state.r!(event.target, announced);
+      if (event.bubbles && typeof announced === "string" && event.target instanceof Node) relay(event.target, announced);
     });
   }
   let names = remembered.get(root);

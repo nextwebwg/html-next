@@ -83,7 +83,7 @@ interface ControllerHost {
   computed<T>(compute: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
-  request(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  request?(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
 }
 
@@ -331,11 +331,14 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         return stop;
       },
       dispatch: (name, detail) => latest.current.dispatch(host.root, name, detail),
-      request: (name, detail, requestOptions) => latest.current.request === undefined ? undeclaredRequest(name)
-        : latest.current.request(host.root, requests.signal(connected), name, detail, requestOptions),
+      // A component that declares requests also has host.request.
+      ...(options.request === undefined ? {} : {
+        request: (name: string, detail?: unknown, requestOptions?: unknown) =>
+          latest.current.request!(host.root, requests.signal(connected), name, detail, requestOptions),
+      }),
       on(type, callback) {
         const entry: { type: string; callback: typeof callback; listener: EventListener; disposer?: () => void } = {
-          type, callback, listener: hostListener(type, callback),
+          type, callback, listener: options.request === undefined ? (event) => { callback(event); } : hostListener(type, callback),
         };
         listeners.add(entry);
         if (connected) {

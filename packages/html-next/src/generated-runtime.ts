@@ -24,7 +24,7 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
-import { ask, type RequestChecks, type RequestOptions } from "./requests.js";
+import { ask, hostListener, type RequestChecks, type RequestOptions } from "./requests.js";
 import { DataResource, type DataState } from "./data.js";
 import { propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
@@ -1019,8 +1019,6 @@ export interface GeneratedStateSpec {
   readonly r?: typeof readonlyView;
   /** Declared requests' detail and answer checks, which `host.request` applies as the live host does. */
   readonly q?: Readonly<Record<string, RequestChecks>>;
-  /** `requestDeclared`, supplied by a module that declares requests, so others do not bundle the request steps. */
-  readonly y?: typeof requestDeclared;
 }
 
 /** What `host.request` uses to abort the current connection's requests: paused, it aborts them. */
@@ -1028,21 +1026,35 @@ interface ConnectionOwner extends ReactiveOwner {
   c?: AbortController | undefined;
 }
 
-/** `host.request` for a module that declares requests: the live request steps, at the compiled root. */
-export function requestDeclared(instance: GeneratedInstance, name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> {
-  let owner = instance.a;
-  if (owner === undefined) {
-    const created: ConnectionOwner = { pause() { created.c?.abort(); created.c = undefined; }, resume() {}, stop() {} };
-    instance.o.push(owner = instance.a = created);
-  }
-  const connection = instance.c() ? (owner.c ??= new AbortController()).signal
-    : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
-  return ask(instance.e, connection, name, detail, options, instance.S.q?.[name], (message) => warnOnce(instance.S, message, message));
+type HostOn = (type: string, callback: (event: Event) => void | (() => void)) => () => void;
+
+/**
+ * The host a module that declares requests gives its controller, in place of the one the runtime
+ * built: the same capabilities with `host.request`, the live request steps at the compiled root, and
+ * an `on` whose `responder` listener hears only the relay to that root. Other modules bundle none of it.
+ */
+export function requestHost<Host extends { readonly on: HostOn }>(host: Host, instance: GeneratedInstance & { H?: unknown }): Host & {
+  readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown>;
+} {
+  const { on } = host;
+  return instance.H = Object.freeze(Object.defineProperties({}, {
+    ...Object.getOwnPropertyDescriptors(host),
+    on: { value: ((type, callback) => on(type, hostListener(type, callback) as typeof callback)) satisfies HostOn, enumerable: true },
+    request: { value: (name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> => {
+      let owner = instance.a;
+      if (owner === undefined) {
+        const created: ConnectionOwner = { pause() { created.c?.abort(); created.c = undefined; }, resume() {}, stop() {} };
+        instance.o.push(owner = instance.a = created);
+      }
+      const connection = instance.c() ? (owner.c ??= new AbortController()).signal
+        : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
+      return ask(instance.e, connection, name, detail, options, instance.S.q?.[name], (message) => warnOnce(instance.S, message, message));
+    }, enumerable: true },
+  })) as Host & { readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown> };
 }
 
-/** A declared request's checks: its detail's type, then its answer's; `null` always answers. */
-export const requestChecks = (detail: TypeCheck, answer: TypeCheck): RequestChecks =>
-  [(value) => detail(value, "$", "value").ok, (value) => answer(value, "$", "value").ok];
+/** A plain object or a null-prototype one, as a declared object or record value must be. */
+export { plainObject } from "./type-checks.js";
 
 /** A ref the host reads: an iterated one is what the iteration still renders, in document order. */
 export function iteratedRef(recorded: Record<string, unknown>, key: string): unknown {
@@ -1747,12 +1759,11 @@ export function attachGeneratedController(
       const stop = host.effect(() => {
         if (type === "connect") return untracked(() => callback(new Event(type))) as void | (() => void);
         if (type === "disconnect") return () => { if (!stopped) untracked(() => callback(new Event(type))); };
-        // `responder` reaches a controller only as the runtime's relay to its own root, which does not bubble.
-        const listener = (event: Event): void => { if (type !== "responder" || !event.bubbles) callback(event); };
+        const listener = (event: Event): void => { callback(event); };
         const target: Element = host.root;
         target.addEventListener(type, listener);
-        // A responder registered after a request went unanswered tells the asker to ask again.
-        documentState(target.ownerDocument).requests?.r?.(target, type);
+        // A responder registered after a request went unanswered tells the asker to ask again, once a page asks.
+        documentState(target.ownerDocument).relay?.(target, type);
         return () => target.removeEventListener(type, listener);
       });
       return () => { stopped = true; stop(); };
@@ -1766,7 +1777,7 @@ export function attachGeneratedController(
       get: (_target, key) => typeof key === "string" ? [] : undefined,
       has: () => false,
     }),
-    signal: <T>(initialValue: T) => createSignal(initialValue),
+    signal: createSignal,
     computed<T>(compute: () => T) {
       const computed = createComputed(scheduler, compute);
       if (!connected) computed.pause();
@@ -1779,8 +1790,6 @@ export function attachGeneratedController(
       return () => effect.stop();
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
-    request: (name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> => spec.y?.(handle, name, detail, options) ??
-      Promise.reject(new TypeError(`No <request> named \`${name}\` is declared.`)),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
   Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
