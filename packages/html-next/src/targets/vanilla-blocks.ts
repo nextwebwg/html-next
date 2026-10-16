@@ -2361,14 +2361,14 @@ export function emitBlocks(
   const rendered = plan.reads.length === 0 && aliased.length === 0 ? render
     : `((c, d) => { ${aliased.join(" ")}${plan.reads.length === 0 ? "" : " DU(c, d);"} ${render}(c, d); })`;
   // Head declarations are read again after each render, once their head joins (HU).
-  const headed = plan.head.length > 0 || plan.scripts.length > 0;
+  const headed = plan.head.length > 0;
   const update = headed ? `((c, d) => { ${rendered}(c, d); HU?.(); })` : rendered;
   // A component that declares requests gives its controller a host with `host.request`, which reads the instance.
   const scripted = (definition.scripts ?? []).some((script) => script.name !== undefined);
   const asks = definition.controller !== undefined && (Object.keys(contract.requests ?? {}).length > 0 || scripted);
   const instance = asks || hydrate || provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
-    transitionMask !== 0 || headed;
+    transitionMask !== 0 || headed || plan.scripts.length > 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
@@ -2411,7 +2411,8 @@ export function emitBlocks(
     ...plan.roots.flatMap((item, index) => item.context === undefined ? []
       : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
     ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at}, DT);`),
-    ...headed ? [`  HU = manageHead(I, () => [${plan.head.join(", ")}], [${plan.scripts.map((script) => {
+    ...headed ? [`  HU = manageHead(I, () => [${plan.head.join(", ")}]);`] : [],
+    ...plan.scripts.length > 0 ? [`  manageScripts(I, [${plan.scripts.map((script) => {
       const { load: _load, error: _error, name, ...attributes } = script.declaration;
       const declared = `{ ...${JSON.stringify(attributes)}, base: S.f, source: S.f }`;
       const run = script.load === undefined && script.error === undefined ? "() => {}"
@@ -2581,7 +2582,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "manageHead", "headValue", "headAttributes", "headJson", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "manageHead", "manageScripts", "headValue", "headAttributes", "headJson", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",

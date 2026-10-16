@@ -26,11 +26,11 @@ interface Contributor {
 interface HeadManager {
   readonly contributors: Set<Contributor>;
   /** Declared scripts by key: resolved URL and classic or module. */
-  readonly scripts: Map<string, ScriptEntry>;
+  scripts?: Map<string, ScriptEntry>;
   /** The document's import map, read once, for bare script names. */
   imports?: Readonly<Record<string, string>>;
   lazy?: IntersectionObserver;
-  readonly near: WeakMap<Element, Set<Binding>>;
+  near?: WeakMap<Element, Set<Binding>>;
   /** Each competing family's authored elements, set aside while a contribution replaces them. */
   readonly setAside: Map<string, Element[]>;
   /** Contributors' roots, so a root without a component marker still counts toward depth. */
@@ -105,7 +105,7 @@ function patch(element: Element, [, attributes, text]: HeadEntry): void {
 function managerFor(document: Document): HeadManager {
   const record = documentRecord(document);
   if (record.head !== undefined) return record.head;
-  const manager: HeadManager = { contributors: new Set(), scripts: new Map(), near: new WeakMap(), setAside: new Map(), roots: new WeakSet(),
+  const manager: HeadManager = { contributors: new Set(), setAside: new Map(), roots: new WeakSet(),
     preloads: new Set(), scheduled: false, connections: 0 };
   record.head = manager;
   // Server output carries the authored elements a family set aside, to restore as the same nodes.
@@ -315,7 +315,7 @@ interface Binding {
   ran: boolean;
 }
 
-const BEFORE: ScriptStatus = Object.freeze({ pending: false, ok: false, error: null });
+const BEFORE: ScriptStatus = /* @__PURE__ */ Object.freeze({ pending: false, ok: false, error: null });
 const URL_LIKE = /^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/;
 /** How near the viewport a lazy script's root comes before it loads, as Chromium fetches an `<img loading="lazy">`. */
 const LAZY_MARGIN = "1250px";
@@ -352,7 +352,7 @@ const isModule = (script: HTMLScriptElement): boolean => script.type.trim().toLo
 /** S2: the document's entry for a script, using an authored `<script>` for it when there is one. */
 function entryFor(document: Document, manager: HeadManager, url: string, module: boolean, fetch: string): ScriptEntry {
   const key = `${module ? "module" : "classic"} ${url}`;
-  const known = manager.scripts.get(key);
+  const known = (manager.scripts ??= new Map()).get(key);
   if (known !== undefined) return known;
   const authored = Array.from(document.scripts).find((script) => !script.hasAttribute(HEAD_MARKER) && script.hasAttribute("src") &&
     script.src === url && isModule(script) === module);
@@ -379,7 +379,7 @@ function entryFor(document: Document, manager: HeadManager, url: string, module:
       }
     },
   };
-  manager.scripts.set(key, entry);
+  manager.scripts!.set(key, entry);
   // A preload link server output wrote for the script belongs to it.
   manager.preloads.add(url);
   if (authored !== undefined) {
@@ -425,21 +425,22 @@ function whenNear(document: Document, manager: HeadManager, root: Element, bindi
   manager.lazy ??= new Observer((records) => {
     for (const record of records) {
       if (!record.isIntersecting) continue;
-      const waiting = manager.near.get(record.target);
-      manager.near.delete(record.target);
+      const waiting = manager.near!.get(record.target);
+      manager.near!.delete(record.target);
       manager.lazy!.unobserve(record.target);
       for (const near of waiting ?? []) near.call();
     }
   }, { rootMargin: LAZY_MARGIN });
-  let waiting = manager.near.get(root);
+  const near = manager.near ??= new WeakMap();
+  let waiting = near.get(root);
   if (waiting === undefined) {
-    manager.near.set(root, waiting = new Set());
+    near.set(root, waiting = new Set());
     manager.lazy.observe(root);
   }
   waiting.add(binding);
   return () => {
     if (!waiting.delete(binding) || waiting.size > 0) return;
-    manager.near.delete(root);
+    near.delete(root);
     manager.lazy?.unobserve(root);
   };
 }
@@ -565,14 +566,15 @@ export function writeServerHead(document: Document, eager: readonly DeclaredScri
 
 /**
  * A framework's server rendering, which has no document tree: each head-declaring component adds its
- * evaluated declarations and eager scripts, in render order, with its depth among them.
+ * evaluated declarations, in render order, with its depth among them, and each eager declared script.
  */
 export interface HeadCollector {
-  readonly contributions: [depth: number, entries: readonly (HeadEntry | undefined)[], eager: readonly DeclaredScript[]][];
+  readonly contributions: [depth: number, entries: readonly (HeadEntry | undefined)[]][];
+  readonly eager: DeclaredScript[];
 }
 
 export function createHeadCollector(): HeadCollector {
-  return { contributions: [] };
+  return { contributions: [], eager: [] };
 }
 
 /**
@@ -585,48 +587,30 @@ export function writeCollectedHead(document: Document, collector: HeadCollector)
     manager.contributors.add({ root: () => undefined, entries, order: ++manager.connections, depth });
   }
   manager.scheduled = true;
-  writeServerHead(document, collector.contributions.flatMap(([, , eager]) => eager));
+  writeServerHead(document, collector.eager);
 }
 
-/** A declared script as a compiled or converted component passes it: the script, its name, and its handlers. */
-export type InstanceScript = readonly [declaration: DeclaredScript, name: string | undefined,
-  run: (loaded: boolean, event: Event) => void, changed: (status: ScriptStatus) => void];
-
-/** One compiled or converted component instance's head declarations and declared scripts. */
+/** One compiled or converted component instance's head declarations. */
 export interface HeadInstance {
   /** The instance connected to a document. */
   connect(): void;
   disconnect(): void;
   /** The declarations' evaluated elements, in declared order; the head reconciles when they change. */
   update(entries: readonly (HeadEntry | undefined)[]): void;
-  /** Named scripts, for `host.scripts`. */
-  readonly scripts: Readonly<Record<string, ScriptHandle>>;
 }
 
-export function headInstance(root: () => Element | undefined, scripts: readonly InstanceScript[] = []): HeadInstance {
+export function headInstance(root: () => Element | undefined): HeadInstance {
   const entries: (HeadEntry | undefined)[] = [];
   let text = "[]";
   let leave: (() => void) | undefined;
-  let handles: ScriptHandle[] | undefined;
-  const named: Record<string, ScriptHandle> = {};
   const document = (): Document => root()?.ownerDocument ?? globalThis.document;
-  // Handles bind to the document's scripts on first use, which is the first connection or `host.scripts`.
-  const handlesFor = (): ScriptHandle[] => handles ??= scripts.map(([declaration, name, run, changed]) => {
-    const handle: ScriptHandle = declareScript(document(), declaration, root, run, () => changed(handle.status()));
-    if (name !== undefined) named[name] = handle;
-    return handle;
-  });
-  const scriptHandles = new Proxy(named, { get: (target, key) => (handlesFor(), Reflect.get(target, key)), has: (target, key) => (handlesFor(), Reflect.has(target, key)) });
   return {
     connect() {
-      if (leave !== undefined) return;
-      leave = joinHead(document(), root, entries);
-      for (const handle of handlesFor()) handle.connect();
+      leave ??= joinHead(document(), root, entries);
     },
     disconnect() {
       leave?.();
       leave = undefined;
-      for (const handle of handles ?? []) handle.disconnect();
     },
     update(next) {
       const nextText = JSON.stringify(next);
@@ -635,6 +619,33 @@ export function headInstance(root: () => Element | undefined, scripts: readonly 
       entries.splice(0, entries.length, ...next);
       if (leave !== undefined) scheduleHead(document());
     },
-    scripts: scriptHandles,
+  };
+}
+
+/** A declared script as a compiled or converted component passes it: the script, its name, and its handlers. */
+export type InstanceScript = readonly [declaration: DeclaredScript, name: string | undefined,
+  run: (loaded: boolean, event: Event) => void, changed: (status: ScriptStatus) => void];
+
+/** One compiled or converted component instance's declared scripts, connected with it. */
+export interface InstanceScripts {
+  connect(): void;
+  disconnect(): void;
+  /** Named scripts, for `host.scripts`. */
+  readonly scripts: Readonly<Record<string, ScriptHandle>>;
+}
+
+export function instanceScripts(root: () => Element | undefined, scripts: readonly InstanceScript[]): InstanceScripts {
+  let handles: ScriptHandle[] | undefined;
+  const named: Record<string, ScriptHandle> = {};
+  // Handles bind to the document's scripts on first use, which is the first connection or `host.scripts`.
+  const handlesFor = (): ScriptHandle[] => handles ??= scripts.map(([declaration, name, run, changed]) => {
+    const handle: ScriptHandle = declareScript(root()?.ownerDocument ?? globalThis.document, declaration, root, run, () => changed(handle.status()));
+    if (name !== undefined) named[name] = handle;
+    return handle;
+  });
+  return {
+    connect() { for (const handle of handlesFor()) handle.connect(); },
+    disconnect() { for (const handle of handles ?? []) handle.disconnect(); },
+    scripts: new Proxy(named, { get: (target, key) => (handlesFor(), Reflect.get(target, key)), has: (target, key) => (handlesFor(), Reflect.has(target, key)) }),
   };
 }

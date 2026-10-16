@@ -145,9 +145,14 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 const requestGenerated = await generatedFixture("controller-request", 8_180);
-// A page with a prop, a controller, a title, metadata, a preconnect and a lazy script: the prop boundary
-// (~4.4 KB, as prop-button) and the head manager with declared scripts (head.ts, ~3.7 KB gzip).
-const headGenerated = await generatedFixture("head-script", 15_200);
+// Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
+// declarations; a title and two metas (+2.0 KB: the head manager's keys, precedence, set-aside and
+// restore, and one reconciliation per update); bound JSON-LD (+0.15 KB, its serialization); a lazy
+// declared script (+2.0 KB: the script entries, status, `on:load` and lazy loading).
+const headNoneGenerated = await generatedFixture("head-none", 10_150);
+const headStaticGenerated = await generatedFixture("head-static", 12_150);
+const headJsonGenerated = await generatedFixture("head-json", 12_300);
+const headGenerated = await generatedFixture("head-script", 14_300);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -159,7 +164,7 @@ const headGenerated = await generatedFixture("head-script", 15_200);
 const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_267);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
-const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headGenerated];
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),
@@ -202,7 +207,10 @@ const nativeBuild = {
     data: dataGenerated,
     controller: controllerGenerated,
     request: requestGenerated,
-    head: headGenerated,
+    headNone: headNoneGenerated,
+    headStatic: headStaticGenerated,
+    headJson: headJsonGenerated,
+    headScript: headGenerated,
     controllerKeyed: controllerKeyedGenerated,
   },
 } as const;

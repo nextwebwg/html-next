@@ -1537,12 +1537,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ]),
     ...(!headed ? [] : [
       ...[...scriptNames.values()].map((name) => `let ${name} = $state<ScriptStatus>({ pending: false, ok: false, error: null });`),
-      "const htmlNextHeadKept: unknown[] = [];",
-      `const htmlNextHeadScripts = useHead(() => rootElement ?? null, () => ${headEntriesSource(definition, (expression) =>
-        conformingRead(expression, scope, context, lowering.value(expression.ast, scope)).source, "htmlNextHeadKept")}, ${headScriptsSource(definition, (name, event) => {
+      ...(definition.head === undefined ? [] : ["const htmlNextHeadKept: unknown[] = [];", `useHead(() => rootElement ?? null, () => ${headEntriesSource(definition, (expression) =>
+        conformingRead(expression, scope, context, lowering.value(expression.ast, scope)).source, "htmlNextHeadKept")});`]),
+      ...(definition.scripts === undefined ? [] : [`const htmlNextHeadScripts = useScripts(() => rootElement ?? null, ${headScriptsSource(definition, (name, event) => {
         const handler = handlers.findIndex((candidate) => candidate.name === name);
         return `${handlerNames.get(name)!}(${handlerSources[handler]!.includes("(event: Event)") ? event : ""})`;
-      }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptNames.get(name)!} = ${value}` }))});`,
+      }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptNames.get(name)!} = ${value}` }))});`]),
     ]),
     ...(usesController ? [
       ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, Parameters<typeof acceptsControllerWrite>[1]> = ${JSON.stringify(controllerStateTypes)};`] : []),
@@ -1579,7 +1579,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
   const headSpecifier = quote(options.headSpecifier ?? "./head.svelte");
   if (headed) script = script.replace("/* html-next head imports */", [
-    `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead"].filter((name) => new RegExp(`\\b${name}\\b`).test(script)).join(", ")} } from ${headSpecifier};`,
+    `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\b`).test(script)).join(", ")} } from ${headSpecifier};`,
     `import type { ${["DeclaredScript", "HeadEntry", "HeadScript", "ScriptStatus"].filter((name) => new RegExp(`\\b${name}\\b`).test(script)).join(", ")} } from ${headSpecifier};`,
   ].join("\n"));
   const open = script.slice(0, script.indexOf("\n"));

@@ -25,7 +25,7 @@ import {
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 import { ask, hostListener, type RequestChecks, type RequestOptions } from "./requests.js";
-import { headInstance, type DeclaredScript, type HeadEntry, type ScriptStatus } from "./head.js";
+import { headInstance, instanceScripts, type DeclaredScript, type HeadEntry, type ScriptStatus } from "./head.js";
 import { DataResource, type DataState } from "./data.js";
 import { propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
@@ -409,16 +409,28 @@ export function dataHandles(spec: GeneratedStateSpec, values: readonly unknown[]
 export type GeneratedScript = readonly [declaration: DeclaredScript, root: number, name: string | undefined, run: (loaded: boolean, event: Event) => void];
 
 /**
- * A compiled component's head declarations and declared scripts (src/head.ts), as live's instance
- * gives them: `compute` evaluates the declarations, read again after each render, and they join the
- * document head while the root is connected. A named script's status is its root, which renders as
- * a `<data>` read's does, and `host.scripts` shows it with `ready` and `load()`, tracked by name.
- * Returns what each render calls.
+ * A compiled component's head declarations (src/head.ts), as live's instance gives them: `compute`
+ * evaluates them, read again after each render, and they join the document head while the root is
+ * connected. Returns what each render calls.
  */
-export function manageHead(instance: GeneratedInstance, compute: () => readonly (HeadEntry | undefined)[], scripts: readonly GeneratedScript[] = []): () => void {
+export function manageHead(instance: GeneratedInstance, compute: () => readonly (HeadEntry | undefined)[]): () => void {
+  const head = headInstance(() => instance.e);
+  instance.o.push({
+    pause: () => head.disconnect(),
+    resume: () => { head.update(compute()); head.connect(); },
+    stop: () => head.disconnect(),
+  });
+  return () => head.update(compute());
+}
+
+/**
+ * A compiled component's declared scripts: a named script's status is its root, which renders as a
+ * `<data>` read's does, and `host.scripts` shows it with `ready` and `load()`, tracked by name.
+ */
+export function manageScripts(instance: GeneratedInstance, scripts: readonly GeneratedScript[]): void {
   const values = instance.v!;
   const tracked: Record<string, number> = {};
-  const head = headInstance(() => instance.e, scripts.map(([declaration, root, name, run]) => {
+  const declared = instanceScripts(() => instance.e, scripts.map(([declaration, root, name, run]) => {
     if (name !== undefined) tracked[name] = root;
     return [declaration, name, run, (status: ScriptStatus) => {
       if (root < 0 || name === undefined) return;
@@ -434,17 +446,12 @@ export function manageHead(instance: GeneratedInstance, compute: () => readonly 
       get pending() { return status().pending; },
       get ok() { return status().ok; },
       get error() { return status().error; },
-      get ready() { return head.scripts[name]!.ready; },
-      load: () => head.scripts[name]!.load(),
+      get ready() { return declared.scripts[name]!.ready; },
+      load: () => declared.scripts[name]!.load(),
     });
   }
   (instance as GeneratedInstance & { SC?: object }).SC = Object.freeze(handles);
-  instance.o.push({
-    pause: () => head.disconnect(),
-    resume: () => { head.update(compute()); head.connect(); },
-    stop: () => head.disconnect(),
-  });
-  return () => head.update(compute());
+  instance.o.push({ pause: () => declared.disconnect(), resume: () => declared.connect(), stop: () => declared.disconnect() });
 }
 
 /** A head binding's converted result, or the one it last accepted when this result is invalid. */

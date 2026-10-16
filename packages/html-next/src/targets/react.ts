@@ -1342,15 +1342,15 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     }) : []),
     ...(!headed ? [] : [
       ...[...scriptNames].map(([name, variable]) => `  const [${variable}, ${scriptSetters.get(name)!}] = React.useState<ScriptStatus>({ pending: false, ok: false, error: null });`),
-      "  const headKept = React.useRef<unknown[]>([]).current;",
-      `  const [headScripts, headDepth] = useHead(rootRef, ${headEntriesSource(definition, (expression) => {
+      ...(definition.head === undefined ? [] : ["  const headKept = React.useRef<unknown[]>([]).current;", `  const headDepth = useHead(rootRef, ${headEntriesSource(definition, (expression) => {
         const guard = declaredReferenceGuard(expression, scope, definition, undefined, lowering);
         const value = lowering.value(expression.ast, scope);
         return guard === undefined ? value : `((${guard}) ? ${value} : Symbol.for("html-next.invalid-result"))`;
-      })}, ${headScriptsSource(definition, (name, event) => {
+      })});`]),
+      ...(definition.scripts === undefined ? [] : [`  const headScripts = useScripts(rootRef, ${headScriptsSource(definition, (name, event) => {
         const handler = handlers.find((candidate) => candidate.name === name)!;
         return `${handlerNames.get(name)!}(${handlerTakesEvent.has(handler) ? event : ""})`;
-      }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptSetters.get(name)!}(${value})` }))});`,
+      }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptSetters.get(name)!}(${value})` }))});`]),
     ]),
     ...(usesController ? [
       `  useComponentHost(() => import(${quote(definition.controller!)}), {`,
@@ -1385,7 +1385,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
     // Server rendering reads how many head-declaring components enclose each one from this context.
-    `  return (${headed ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
+    `  return (${definition.head !== undefined ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",
     ...(usesScopedAttachments ? [
       "",
@@ -1433,7 +1433,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // The head helper's exports this component names.
   const headSpecifier = quote(options.headSpecifier ?? "./head");
   const body = !headed ? written : written.replace(HEAD_IMPORTS, [
-    `import { ${["HeadDepth", "headAttribute", "headAttributes", "headJson", "headText", "useHead"].filter((name) => new RegExp(`\\b${name}\\b`).test(written)).join(", ")} } from ${headSpecifier};`,
+    `import { ${["HeadDepth", "headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\b`).test(written)).join(", ")} } from ${headSpecifier};`,
     `import type { ${["DeclaredScript", "HeadEntry", "HeadScript", "ScriptStatus"].filter((name) => new RegExp(`\\b${name}\\b`).test(written)).join(", ")} } from ${headSpecifier};`,
   ].join("\n"));
   // The shared module's helpers this component calls: the expression helpers its lowering used,

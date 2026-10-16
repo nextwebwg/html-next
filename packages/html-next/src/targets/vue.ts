@@ -1210,16 +1210,16 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...handlerSources.flatMap((source) => ["", source]),
     ...(!headed ? [] : ["",
       ...[...scriptNames.values()].map((name) => `const ${name} = shallowRef<ScriptStatus>({ pending: false, ok: false, error: null });`),
-      "const headKept: unknown[] = [];",
-      `const headScripts = useHead(root, () => ${headEntriesSource(definition, (expression) => {
+      ...(definition.head === undefined ? [] : ["const headKept: unknown[] = [];", `useHead(root, () => ${headEntriesSource(definition, (expression) => {
         const guard = expressionGuard(expression, script, definition, undefined, lowering);
         const value = lowering.value(expression.ast, script);
         return guard === undefined ? value : `((${guard}) ? ${value} : Symbol.for("html-next.invalid-result"))`;
-      })}, ${headScriptsSource(definition, (name, event) => {
+      })});`]),
+      ...(definition.scripts === undefined ? [] : [`const headScripts = useScripts(root, ${headScriptsSource(definition, (name, event) => {
         const handler = handlers.findIndex((candidate) => candidate.name === name);
         const call = handlerNames.get(name)!;
         return handlerSources[handler]!.startsWith(`function ${call}(event`) ? `${call}(${event})` : `${call}()`;
-      }, (name) => ({ read: `${scriptNames.get(name)}.value`, write: (value) => `${scriptNames.get(name)}.value = ${value}` }))});`]),
+      }, (name) => ({ read: `${scriptNames.get(name)}.value`, write: (value) => `${scriptNames.get(name)}.value = ${value}` }))});`])]),
     ...(definition.lifecycle === undefined ? [] : ["", `useLifecycle(root, ${(["connect", "disconnect"] as const).map((type) => {
       const handler = handlers.findIndex((candidate) => candidate.name === definition.lifecycle![type]);
       if (handler < 0) return "undefined";
@@ -1271,7 +1271,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
     ...(!headed ? [] : [
-      `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead"].filter((name) => new RegExp(`\\b${name}\\(`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
+      `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\(`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
       `import type { ${["DeclaredScript", "HeadEntry", "HeadScript", "ScriptStatus"].filter((name) => new RegExp(`\\b${name}\\b`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
     ]),
     ...(context.usesHydrationControl ? [`import { ${[

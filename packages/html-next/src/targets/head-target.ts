@@ -54,27 +54,29 @@ export function headJson(kept: unknown[], slot: number, value: unknown, source: 
 }
 
 /** \`host.scripts\`: each named script's status, read from the component's own state, with \`ready\` and \`load()\`. */
-function scriptResources(scripts: readonly HeadScript[], head: () => HeadInstance | undefined): Readonly<Record<string, unknown>> {
+function scriptResources(scripts: () => readonly HeadScript[], declared: () => InstanceScripts | undefined): Readonly<Record<string, unknown>> {
   const resources: Record<string, unknown> = {};
-  for (const [, name, , read] of scripts) {
-    if (name === undefined) continue;
+  scripts().forEach(([, name], index) => {
+    if (name === undefined) return;
+    const read = (): ScriptStatus => scripts()[index]![3]();
     resources[name] = Object.freeze({
       get pending() { return read().pending; },
       get ok() { return read().ok; },
       get error() { return read().error; },
-      get ready() { return head()?.scripts[name]!.ready ?? new Promise<void>(() => {}); },
-      load: () => head()?.scripts[name]!.load() ?? new Promise<void>(() => {}),
+      get ready() { return declared()?.scripts[name]!.ready ?? new Promise<void>(() => {}); },
+      load: () => declared()?.scripts[name]!.load() ?? new Promise<void>(() => {}),
     });
-  }
+  });
   return Object.freeze(resources);
 }
 
+/** The eager scripts server rendering writes preload links for. */
 const eagerScripts = (scripts: readonly HeadScript[]): DeclaredScript[] =>
   scripts.flatMap(([declaration]) => declaration.loading === "eager" ? [declaration] : []);
 
 /** The instance's scripts, calling the component's latest handlers and state writers. */
-const instanceScripts = (scripts: () => readonly HeadScript[]): InstanceScript[] => scripts().map((script, index) =>
-  [script[0], script[1], (loaded, event) => scripts()[index]![2](loaded, event), (status) => scripts()[index]![4](status)]);
+const latestScripts = (root: () => Element | undefined, scripts: () => readonly HeadScript[]): InstanceScripts => instanceScripts(root, scripts().map((script, index) =>
+  [script[0], script[1], (loaded, event) => scripts()[index]![2](loaded, event), (status) => scripts()[index]![4](status)]));
 `;
 
 const ADAPTERS = {
@@ -84,26 +86,34 @@ ${HEAD_SOURCE}${FRAMEWORK_SOURCE}
 const HEAD_DEPTH = Symbol.for("html-next:head-depth");
 /** The server-rendering context key whose collector receives head declarations: \`renderToString(app, { [HEAD_CONTEXT]: collector })\`. */
 export const HEAD_CONTEXT = "htmlNextHead";
+const collector = (): HeadCollector | undefined => (useSSRContext() as Record<string, HeadCollector> | undefined)?.[HEAD_CONTEXT];
+const elementOf = (componentRoot: { readonly value: any }): Element | undefined => {
+  const value = componentRoot.value;
+  return value == null ? undefined : value.nodeType === 1 ? value : value.$el;
+};
 
-/**
- * A component's head declarations while it is connected; \`compute\` evaluates them. In server
- * rendering they go to the collector in the render context. Returns \`host.scripts\`.
- */
-export function useHead(componentRoot: { readonly value: any }, compute: () => readonly (HeadEntry | undefined)[], scripts: readonly HeadScript[] = []): Readonly<Record<string, unknown>> {
+/** A component's head declarations while it is connected; \`compute\` evaluates them. Server rendering collects them. */
+export function useHead(componentRoot: { readonly value: any }, compute: () => readonly (HeadEntry | undefined)[]): void {
   const depth = inject<number>(HEAD_DEPTH, 0);
   provide(HEAD_DEPTH, depth + 1);
   if (typeof window === "undefined") {
-    (useSSRContext() as Record<string, HeadCollector> | undefined)?.[HEAD_CONTEXT]?.contributions.push([depth, compute(), eagerScripts(scripts)]);
-    return scriptResources(scripts, () => undefined);
+    collector()?.contributions.push([depth, compute()]);
+    return;
   }
-  const element = (): Element | undefined => {
-    const value = componentRoot.value;
-    return value == null ? undefined : value.nodeType === 1 ? value : value.$el;
-  };
-  const head = headInstance(element, instanceScripts(() => scripts));
+  const head = headInstance(() => elementOf(componentRoot));
   watchEffect(() => head.update(compute()));
   useLifecycle(componentRoot, () => head.connect(), () => head.disconnect());
-  return scriptResources(scripts, () => head);
+}
+
+/** A component's declared scripts while it is connected. Server rendering collects the eager ones. Returns \`host.scripts\`. */
+export function useScripts(componentRoot: { readonly value: any }, scripts: readonly HeadScript[]): Readonly<Record<string, unknown>> {
+  if (typeof window === "undefined") {
+    collector()?.eager.push(...eagerScripts(scripts));
+    return scriptResources(() => scripts, () => undefined);
+  }
+  const declared = latestScripts(() => elementOf(componentRoot), () => scripts);
+  useLifecycle(componentRoot, () => declared.connect(), () => declared.disconnect());
+  return scriptResources(() => scripts, () => declared);
 }
 `,
   react: `import React from "react";
@@ -122,22 +132,28 @@ export function collectHead<T>(collector: HeadCollector, render: () => T): T {
 
 /**
  * A component's head declarations while it is connected, \`entries\` evaluated on each render.
- * Returns \`host.scripts\` and the depth its markup provides to the components inside it.
+ * Returns the depth its markup provides to the components inside it.
  */
-export function useHead(root: { readonly current: Element | null }, entries: readonly (HeadEntry | undefined)[], scripts: readonly HeadScript[] = []): readonly [Readonly<Record<string, unknown>>, number] {
+export function useHead(root: { readonly current: Element | null }, entries: readonly (HeadEntry | undefined)[]): number {
   const depth = React.useContext(HeadDepth);
-  const latest = React.useRef(scripts);
-  latest.current = scripts;
   const head = React.useRef<HeadInstance | undefined>(undefined);
-  if (typeof window === "undefined") {
-    collecting?.contributions.push([depth, entries, eagerScripts(scripts)]);
-  } else head.current ??= headInstance(() => root.current ?? undefined, instanceScripts(() => latest.current));
+  if (typeof window === "undefined") collecting?.contributions.push([depth, entries]);
+  else head.current ??= headInstance(() => root.current ?? undefined);
   React.useLayoutEffect(() => { head.current!.update(entries); });
   useLifecycle(root, () => head.current!.connect(), () => head.current!.disconnect());
+  return depth + 1;
+}
+
+/** A component's declared scripts while it is connected. Server rendering collects the eager ones. Returns \`host.scripts\`. */
+export function useScripts(root: { readonly current: Element | null }, scripts: readonly HeadScript[]): Readonly<Record<string, unknown>> {
+  const latest = React.useRef(scripts);
+  latest.current = scripts;
+  const declared = React.useRef<InstanceScripts | undefined>(undefined);
+  if (typeof window === "undefined") collecting?.eager.push(...eagerScripts(scripts));
+  else declared.current ??= latestScripts(() => root.current ?? undefined, () => latest.current);
+  useLifecycle(root, () => declared.current!.connect(), () => declared.current!.disconnect());
   // \`host.scripts\` reads each status from the latest render's state.
-  const resources = React.useMemo(() => scriptResources(scripts.map((script, index) =>
-    [script[0], script[1], script[2], () => latest.current[index]![3](), script[4]] as const), () => head.current), []);
-  return [resources, depth + 1];
+  return React.useMemo(() => scriptResources(() => latest.current, () => declared.current), []);
 }
 `,
   svelte: `import { getContext, setContext } from "svelte";
@@ -147,21 +163,28 @@ const HEAD_DEPTH = Symbol.for("html-next:head-depth");
 /** The server-rendering context key whose collector receives head declarations: \`render(App, { context: new Map([[HEAD_CONTEXT, collector]]) })\`. */
 export const HEAD_CONTEXT = "htmlNextHead";
 
-/**
- * A component's head declarations while it is connected; \`compute\` evaluates them. In server
- * rendering they go to the collector in the render context. Returns \`host.scripts\`.
- */
-export function useHead(root: () => Element | null, compute: () => readonly (HeadEntry | undefined)[], scripts: readonly HeadScript[] = []): Readonly<Record<string, unknown>> {
+/** A component's head declarations while it is connected; \`compute\` evaluates them. Server rendering collects them. */
+export function useHead(root: () => Element | null, compute: () => readonly (HeadEntry | undefined)[]): void {
   const depth = getContext<number | undefined>(HEAD_DEPTH) ?? 0;
   setContext(HEAD_DEPTH, depth + 1);
   if (typeof window === "undefined") {
-    getContext<HeadCollector | undefined>(HEAD_CONTEXT)?.contributions.push([depth, compute(), eagerScripts(scripts)]);
-    return scriptResources(scripts, () => undefined);
+    getContext<HeadCollector | undefined>(HEAD_CONTEXT)?.contributions.push([depth, compute()]);
+    return;
   }
-  const head = headInstance(() => root() ?? undefined, instanceScripts(() => scripts));
+  const head = headInstance(() => root() ?? undefined);
   $effect(() => head.update(compute()));
   useLifecycle(root, () => head.connect(), () => head.disconnect());
-  return scriptResources(scripts, () => head);
+}
+
+/** A component's declared scripts while it is connected. Server rendering collects the eager ones. Returns \`host.scripts\`. */
+export function useScripts(root: () => Element | null, scripts: readonly HeadScript[]): Readonly<Record<string, unknown>> {
+  if (typeof window === "undefined") {
+    getContext<HeadCollector | undefined>(HEAD_CONTEXT)?.eager.push(...eagerScripts(scripts));
+    return scriptResources(() => scripts, () => undefined);
+  }
+  const declared = latestScripts(() => root() ?? undefined, () => scripts);
+  useLifecycle(root, () => declared.connect(), () => declared.disconnect());
+  return scriptResources(() => scripts, () => declared);
 }
 `,
 } as const;
