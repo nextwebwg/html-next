@@ -243,7 +243,7 @@ describe("framework converter", () => {
       platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" } });
   });
 
-  it("publishes state only where a <context> reader can read it", async () => {
+  it("publishes the state the converted components read, or every state when it is public", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-published-context-"));
     temporary.push(root);
     await writeFile(join(root, "provider.html"), `<template component="x-provider" status="early" summary="Provider."><defs>
@@ -264,16 +264,16 @@ describe("framework converter", () => {
       svelte: /publishState\('([^']+)', '([^']+)'/g,
     } as const;
     for (const target of ["vue", "react", "svelte"] as const) {
-      for (const mode of ["application", "library"] as const) {
-        const outDirectory = join(root, `${target}-${mode}`);
-        const manifest = await convertComponents({ mode, target, root, outDirectory, entries: ["*.html"] });
+      for (const [mode, publicState] of [["application", false], ["library", false], ["library", true]] as const) {
+        const outDirectory = join(root, `${target}-${mode}-${publicState}`);
+        const manifest = await convertComponents({ mode, target, root, outDirectory, entries: ["*.html"], publicState });
         const published = new Set<string>();
         for (const component of manifest.components) {
           const source = await readFile(join(outDirectory, component.artifact), "utf8");
           for (const match of source.matchAll(patterns[target])) published.add(`${match[1]}:${match[2]}`);
         }
-        // A graph reader publishes its state; with no reader, only a library's slot can bring one in.
-        assert.deepEqual([...published].sort(), mode === "application" ? ["x-provider:current"] : ["x-provider:current", "x-slotted:open"], `${target} ${mode}`);
+        assert.deepEqual([...published].sort(), publicState
+          ? ["x-counter:count", "x-provider:current", "x-provider:unread", "x-slotted:open"] : ["x-provider:current"], `${target} ${mode} ${publicState}`);
       }
     }
   });
@@ -289,8 +289,9 @@ describe("framework converter", () => {
     await writeFile(join(root, "reader", "reader.html"), `<template component="x-reader" status="early" summary="Reader."><defs>
       <context name="current" from="x-provider"></context>
     </defs><span $value="$current"></span></template>`);
+    // The reader is another library's component, so the provider's state is public.
     await convertComponents({ mode: "library", target: "react", root: join(root, "provider"),
-      outDirectory: join(root, "provider-out"), entries: ["provider.html"] });
+      outDirectory: join(root, "provider-out"), entries: ["provider.html"], publicState: true });
     await convertComponents({ mode: "library", target: "react", root: join(root, "reader"),
       outDirectory: join(root, "reader-out"), entries: ["reader.html"] });
     const entry = join(root, "entry.tsx");

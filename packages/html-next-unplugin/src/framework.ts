@@ -21,6 +21,11 @@ export interface FrameworkPluginOptions {
   /** Generated ambient declarations; include this file in the consumer's TypeScript project. */
   readonly declarationsFile?: string;
   readonly publicRootURL?: string;
+  /**
+   * Publish every state to `<context>` readers, including readers outside this build. Without it,
+   * a component publishes its state only when a component in the build reads it.
+   */
+  readonly publicState?: boolean;
 }
 
 export interface FrameworkSyncResult {
@@ -92,12 +97,23 @@ class FrameworkCompiler {
   private readonly modules: string[] = [];
   private readonly locals = new Map<string, Promise<string>>();
   private readonly sourceModules = new Map<string, { content: string; imports: { start: number; end: number; source: string }[] }>();
+  /** The app's own component files, converted together as one graph into `appCache`. */
+  private readonly appSources = new Set<string>();
+  private readonly appCache: string;
+  private declaring: Promise<unknown> = Promise.resolve();
 
   get localSources(): readonly string[] { return [...this.locals.keys()]; }
 
-  constructor(private readonly options: FrameworkPluginOptions) {
+  constructor(private readonly options: FrameworkPluginOptions, private readonly outDir = "dist") {
     this.root = resolve(options.root ?? process.cwd());
     this.declarationsFile = resolve(this.root, options.declarationsFile ?? "src/html-next.d.ts");
+    this.appCache = resolve(this.root, "node_modules", ".html-next", options.target, "app");
+  }
+
+  /** The conversion options every graph shares. */
+  private get conversion() {
+    return { target: this.options.target, mode: "library" as const, ...(this.options.publicState === true ? { publicState: true } : {}),
+      ...(this.options.publicRootURL === undefined ? {} : { publicRootURL: this.options.publicRootURL }) };
   }
 
   private async linkDependencies(cache: string, packageRoot: string): Promise<void> {
@@ -139,9 +155,7 @@ class FrameworkCompiler {
     await this.linkDependencies(cache, packageRoot);
     const output = resolve(cache, "resources", identity(source));
     await rm(output, { recursive: true, force: true });
-    const manifest = await convertComponents({ target: this.options.target, mode: "library", root: packageRoot,
-      entries: [source], outDirectory: output,
-      ...(this.options.publicRootURL === undefined ? {} : { publicRootURL: this.options.publicRootURL }) });
+    const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [source], outDirectory: output });
     for (const path of manifest.sourceFiles) this.sources.add(resolve(packageRoot, path));
     return resolve(output, manifest.output.entry);
   }
@@ -198,9 +212,7 @@ class FrameworkCompiler {
     if (html.size === 0) throw new Error(`HTML Next source package contains no component resources: ${packageRoot}.`);
     const output = resolve(cache, "resources");
     await rm(output, { recursive: true, force: true });
-    const manifest = await convertComponents({ target: this.options.target, mode: "library", root: packageRoot,
-      entries: [...html], outDirectory: output,
-      ...(this.options.publicRootURL === undefined ? {} : { publicRootURL: this.options.publicRootURL }) });
+    const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [...html], outDirectory: output });
     for (const path of manifest.sourceFiles) this.sources.add(resolve(packageRoot, path));
     await rm(resolve(cache, "resource-entries"), { recursive: true, force: true });
     const names = new Map(manifest.components.map((item) => [item.tag, item.name]));
@@ -342,6 +354,12 @@ class FrameworkCompiler {
       for (const { specifier, source } of paths) this.aliases.set(specifier, await this.barrel(source, directory, cache, seen));
       for (const { specifier } of paths) await this.moduleDeclaration(specifier, this.aliases.get(specifier)!, cache);
     }
+    // The app's components convert as one graph, so each publishes the state the others read.
+    for (const source of await appComponentSources(this.root, resolve(this.root, this.outDir))) this.appSources.add(source);
+    if (this.appSources.size > 0) {
+      await this.linkDependencies(this.appCache, this.root);
+      await this.packageResources([...this.appSources], this.root, this.appCache);
+    }
     for (const input of this.options.entries ?? []) await this.localResource(resolve(this.root, input));
     await writeGenerated(this.declarationsFile, header + this.modules.join("\n\n") + "\n");
     return { aliases: this.aliases, sourceFiles: [...this.sources], declarationsFile: this.declarationsFile };
@@ -357,13 +375,34 @@ class FrameworkCompiler {
   }
 
   private async convertLocalResource(source: string): Promise<string> {
-    const cache = resolve(this.root, "node_modules", ".html-next", this.options.target, identity(source));
+    const cache = this.appSources.has(source) ? this.appCache : resolve(this.root, "node_modules", ".html-next", this.options.target, identity(source));
     const entry = await this.resource(source, this.root, cache);
-    const declaration = await this.declarations(entry, cache);
+    // The app's resources share one cache, which one declaration pass at a time may rewrite.
+    const declaring = this.declaring.then(() => this.declarations(entry, cache));
+    this.declaring = declaring.catch(() => {});
+    const declaration = await declaring;
     const sidecar = source.replace(/\.html$/, ".d.html.ts");
     await writeGenerated(sidecar, `${header}export * from ${JSON.stringify(importPath(sidecar, declaration).replace(/\.d\.ts$/, ""))};\n`);
     return entry;
   }
+}
+
+/**
+ * The app's component files: `.html` files under the root that define a component, outside its
+ * dependencies, dot-directories and build output.
+ */
+async function appComponentSources(root: string, outDir: string): Promise<string[]> {
+  const files: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    for (const item of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = resolve(directory, item.name);
+      if (item.name === "node_modules" || item.name.startsWith(".") || path === outDir) continue;
+      if (item.isDirectory()) await visit(path);
+      else if (item.isFile() && extname(item.name) === ".html" && /<template\b[^>]*\scomponent\s*=/i.test(await readFile(path, "utf8"))) files.push(path);
+    }
+  };
+  await visit(root);
+  return files;
 }
 
 /** Prepare generated framework sources and types before an editor or standalone typechecker runs. */
@@ -376,19 +415,51 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
   let current: FrameworkSyncResult;
   let server: ViteDevServer | undefined;
   let updates: Promise<void> = Promise.resolve();
+  let outDir = "dist";
   const initialize = async (root: string) => {
-    compiler = new FrameworkCompiler({ ...options, root: await realpath(resolve(options.root ?? root)) });
+    compiler = new FrameworkCompiler({ ...options, root: await realpath(resolve(options.root ?? root)) }, outDir);
     current = await compiler.prepare();
   };
+  /** Converts the app again, after a component file changes, appears or goes away. */
+  const reload = (): Promise<void> => {
+    const update = updates.then(async () => {
+      const locals = [...compiler.localSources];
+      await initialize(server?.config.root ?? compiler.root);
+      for (const path of locals) {
+        if (await exists(path)) await compiler.localResource(path);
+        else {
+          const sidecar = path.replace(/\.html$/, ".d.html.ts");
+          if ((await readFile(sidecar, "utf8").catch(() => "")).startsWith(header)) await rm(sidecar, { force: true });
+        }
+      }
+      if (server === undefined) return;
+      server.watcher.add([...compiler.sources]);
+      // A resource may export several components and types; invalidate their generated module graph together.
+      for (const module of server.moduleGraph.idToModuleMap.values()) {
+        if (module.id?.replaceAll("\\", "/").includes("/.html-next/")) server.moduleGraph.invalidateModule(module);
+      }
+      server.ws.send({ type: "full-reload" });
+    });
+    updates = update.catch(() => {});
+    return update;
+  };
+  /** A new or removed app file that may define components, which the app graph holds. */
+  const appFile = (path: string): boolean => extname(path) === ".html" && !path.split(/[\\/]/).includes("node_modules")
+    && !relative(compiler.root, path).startsWith("..");
   return {
     name: "html-next-framework",
     enforce: "pre",
     async config(config) {
+      outDir = config.build?.outDir ?? outDir;
       await initialize(resolve(config.root ?? process.cwd()));
       return { optimizeDeps: { exclude: [...current.aliases.keys()] }, resolve: { conditions: ["html-next", ...(config.resolve?.conditions ?? ["module", "browser", "development|production"])] } };
     },
     buildStart() { for (const path of current.sourceFiles) this.addWatchFile(path); },
-    configureServer(value) { server = value; server.watcher.add(current.sourceFiles); },
+    configureServer(value) {
+      server = value;
+      server.watcher.add(current.sourceFiles);
+      for (const event of ["add", "unlink"] as const) server.watcher.on(event, (path) => { if (appFile(path)) void reload(); });
+    },
     async resolveId(id, importer, resolveOptions) {
       // Requests can arrive between rapid source edits; wait until the current graph is complete.
       await updates;
@@ -412,25 +483,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
     async handleHotUpdate(context) {
       const changed = await realpath(context.file).catch(() => context.file);
       if (![...compiler.sources].some((source) => source === changed || source === context.file || changed.startsWith(`${source}${sep}`))) return;
-      const update = updates.then(async () => {
-        const locals = [...compiler.localSources];
-        await initialize(server?.config.root ?? compiler.root);
-        for (const path of locals) {
-          if (await exists(path)) await compiler.localResource(path);
-          else {
-            const sidecar = path.replace(/\.html$/, ".d.html.ts");
-            if ((await readFile(sidecar, "utf8").catch(() => "")).startsWith(header)) await rm(sidecar, { force: true });
-          }
-        }
-        server?.watcher.add([...compiler.sources]);
-        // A resource may export several components and types; invalidate their generated module graph together.
-        for (const module of context.server.moduleGraph.idToModuleMap.values()) {
-          if (module.id?.replaceAll("\\", "/").includes("/.html-next/")) context.server.moduleGraph.invalidateModule(module);
-        }
-        context.server.ws.send({ type: "full-reload" });
-      });
-      updates = update.catch(() => {});
-      await update;
+      await reload();
       return [];
     },
   };

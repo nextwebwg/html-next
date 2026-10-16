@@ -47,7 +47,7 @@ export interface SvelteConversionOptions {
   readonly hostSpecifier?: string;
   readonly connectionSpecifier?: string;
   readonly renderSpecifier?: string;
-  /** The states a \`<context>\` reader can read, from \`publishedStates\`; without it, every state is published. */
+  /** The states a `<context>` reader can read, from `publishedStates`; without it, every state is published. */
   readonly publishedStates?: ReadonlySet<string> | undefined;
   /** The request steps, which a component that declares requests imports. */
   readonly requestsSpecifier?: string;
@@ -1022,7 +1022,7 @@ function svelteImport(names: readonly string[]): string[] {
   return [names.length === 0 ? 'import type { Snippet } from "svelte";' : `import { ${[...names, "type Snippet"].join(", ")} } from "svelte";`];
 }
 
-/** The options \`rootAttributes\` takes, only those that differ from its defaults. */
+/** The options `rootAttributes` takes, only those that differ from its defaults. */
 function rootAttributeOptions(scope: string | undefined, nativeRoot: boolean, omit: readonly string[], clientOmit: readonly string[], server: string | undefined): string {
   const options = [
     ...(scope === undefined ? [] : [`scope: ${quote(scope)}`]),
@@ -1295,7 +1295,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     if (destinationCheck === undefined && !read.invalid) {
       return `  ${guard}${(proven ? increment(step, definition, destination) : undefined) ?? writeTo(nested || sameKind || declared === undefined ? read.source : `${read.source} as typeof ${destination}`)};`;
     }
-    // A \`$state\` variable is written through a setter; a path below it, through \`writePath\`.
+    // A `$state` variable is written through a setter; a path below it, through `writePath`.
     return `  ${guard}${lowering.use("write")}((next) => ${nested ? writeTo("next") : `(${writeTo("next")})`}, ${read.source}${writeCheck(destinationCheck, definition, handler, step)});`;
   }).join("\n")}\n}`)
     // A handler that never reads its event takes no parameter.

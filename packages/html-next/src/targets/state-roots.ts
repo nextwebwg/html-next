@@ -93,13 +93,10 @@ export function conformingScalarStates(definition: ComponentDefinition): Readonl
 }
 
 /**
- * The states of \`definition\` that a \`<context>\` reader can read, or undefined for every state. A
- * reader is a descendant in the logical component tree: a component in \`graph\`, which holds the
- * definition's own template components, or, in a library, content a consumer projects into one of
- * the definition's slots.
+ * The states of `definition` a build publishes to `<context>` readers: those a component in `graph`
+ * reads. Every state can be read, so a build whose readers may lie outside it publishes them all.
  */
-export function publishedStates(definition: ComponentDefinition, graph: Iterable<ComponentDefinition>, library: boolean): ReadonlySet<string> | undefined {
-  if (library && (definition.slots?.length ?? 0) > 0) return undefined;
+export function publishedStates(definition: ComponentDefinition, graph: Iterable<ComponentDefinition>): ReadonlySet<string> {
   const names = new Set<string>();
   for (const reader of graph) {
     for (const declaration of reader.declarations ?? []) {

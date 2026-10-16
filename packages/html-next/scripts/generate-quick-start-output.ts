@@ -15,8 +15,8 @@ const markdown = await readFile(page, "utf8");
 const source = /```html title="counter\.html"\n([\s\S]*?)\n```/.exec(markdown)?.[1];
 if (source === undefined) throw new Error("docs/guide/quick-start.md has no counter.html block.");
 const definition = parseComponent(source, "counter.html");
-// The adapters convert each component as a library does, so state is published only for readers.
-const options = { publishedStates: publishedStates(definition, [definition], true) };
+// A Vite build publishes only the state its components read; the counter alone reads none.
+const options = { publishedStates: publishedStates(definition, [definition]) };
 const outputs = [
   { framework: "vue", fence: 'vue title="XCounter.vue"', code: generateVueComponent(definition, options) },
   { framework: "react", fence: 'tsx title="XCounter.tsx"', code: generateReactConversion(definition, options).component },

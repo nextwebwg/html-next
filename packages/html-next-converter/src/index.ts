@@ -67,6 +67,11 @@ interface BaseConvertOptions {
   readonly root?: string;
   /** Browser URL of `root`, required when a data source is relative to its component file. */
   readonly publicRootURL?: string;
+  /**
+   * Publish every state to `<context>` readers, including readers outside this conversion. Without
+   * it, a component publishes only the states the converted components read.
+   */
+  readonly publicState?: boolean;
 }
 
 export interface ApplicationConvertOptions extends BaseConvertOptions {
@@ -495,8 +500,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         source: Object.freeze({ file: definitionURL }),
         ...(controller === undefined ? {} : { controller: relativeImport(componentPath, controller) }),
       });
-      // A state is published only where a <context> reader can read it.
-      const published = publishedStates(node.definition, definitions, options.mode === "library");
+      // A state is published only for the readers the build knows of, unless every state is public.
+      const published = options.publicState === true ? undefined : publishedStates(node.definition, definitions);
       let content: string;
       let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
       let svelteConversion: ReturnType<typeof generateSvelteConversion> | undefined;

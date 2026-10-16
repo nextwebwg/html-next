@@ -4,6 +4,8 @@
 
 ### Changed
 
+- A component publishes a state to `<context>` readers only when a component in the same build reads it, in the native Vite build (which already left out providing for components nothing reads), the framework adapter, and the converter. The `publicState` option (`--public-state` for `html-next-convert`) publishes every state, for a library whose state components outside its build read. The quick-start counter's converted components now publish nothing.
+- The Vite framework adapter converts the app's component files as one graph at startup: every `.html` under the Vite root that defines a component, outside `node_modules`, dot-directories and the build output. Each local `.html` import resolves to that file's components in the graph, and adding or removing a component file reloads it.
 - Converted Svelte components publish their state to `<context>` readers with `publishState('x-counter', 'count', () => count)` and read an ancestor's with `injectContext(...)`, both from the shared `svelte/render.svelte.ts`. Their context key is `html-next:x-counter:count`, the key converted Vue components use.
 
 ## 1.0.0-alpha.55

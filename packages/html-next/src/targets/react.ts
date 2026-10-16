@@ -85,7 +85,7 @@ const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTexta
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
-  /** The states a \`<context>\` reader can read, from \`publishedStates\`; without it, every state is published. */
+  /** The states a `<context>` reader can read, from `publishedStates`; without it, every state is published. */
   readonly publishedStates?: ReadonlySet<string> | undefined;
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly propsByTag?: ReadonlyMap<string, ReadonlySet<string>>;
@@ -123,9 +123,9 @@ interface RootAttributes {
 
 interface EventAttachment {
   readonly name: string;
-  /** Only native listeners: the element's ref is \`useNativeEvents\`'s callback. */
+  /** Only native listeners: the element's ref is `useNativeEvents`'s callback. */
   readonly listensOnly: boolean;
-  /** The root's ref alone: it is \`rootRef\` itself. */
+  /** The root's ref alone: it is `rootRef` itself. */
   readonly forwardsOnly: boolean;
   readonly scoped: boolean;
   readonly bindings: readonly EventBinding[];
