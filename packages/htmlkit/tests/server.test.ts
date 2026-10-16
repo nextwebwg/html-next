@@ -16,8 +16,8 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function serverApp(): Promise<string> {
   const root = await fixture();
   roots.push(root);
-  await write(root, "app/pages/account.html", `<template component="account-page"><meta name="hk:render" content="server"><title>Account</title><defs>
-    <prop name="user" type="string" required>User</prop><prop name="page" type="string" required>Page</prop><prop name="trace" type="string" required>Trace</prop></defs>
+  await write(root, "app/pages/account.html", `<template component="account-page"><defs>
+    <prop name="user" type="string" required>User</prop><prop name="page" type="string" required>Page</prop><prop name="trace" type="string" required>Trace</prop><meta name="hk:render" content="server"><title>Account</title></defs>
     <section><h1>{$user}</h1><p class="page">{$page}</p><p class="trace">{$trace}</p></section></template>`);
   await write(root, "app/pages/account.server.ts", `export function load({ phase, url, cookies, request, response, redirect, notFound }) {
     if (phase !== "request") throw new Error("Rendered at build time");
@@ -31,11 +31,11 @@ async function serverApp(): Promise<string> {
     return { props: { user, page: url.searchParams.get("page") ?? "1", trace: request.headers.get("x-trace") ?? "none" } };
   }`);
   // The build's link check counts server-rendered pages and endpoints, which have no file, as whole.
-  await write(root, "app/pages/login.html", '<template component="login-page"><title>Log in</title><p>Log in, then see <a href="/account/">your account</a>, <a href="/users/grace/">Grace</a>, or <a href="/api/todos">the API</a>.</p></template>');
-  await write(root, "app/pages/users/[id].html", `<template component="user-page"><meta name="hk:render" content="server"><defs>
-    <prop name="name" type="string" required>Name</prop></defs><p class="user">{$name}</p></template>`);
+  await write(root, "app/pages/login.html", '<template component="login-page"><defs><title>Log in</title></defs><p>Log in, then see <a href="/account/">your account</a>, <a href="/users/grace/">Grace</a>, or <a href="/api/todos">the API</a>.</p></template>');
+  await write(root, "app/pages/users/[id].html", `<template component="user-page"><defs>
+    <prop name="name" type="string" required>Name</prop><meta name="hk:render" content="server"></defs><p class="user">{$name}</p></template>`);
   await write(root, "app/pages/users/[id].server.ts", 'export const load = ({ params, notFound }) => params.id === "ghost" ? notFound() : { props: { name: params.id } };');
-  await write(root, "app/pages/admin.html", '<template component="admin-page"><meta name="hk:render" content="server"><p>Admin</p></template>');
+  await write(root, "app/pages/admin.html", '<template component="admin-page"><defs><meta name="hk:render" content="server"></defs><p>Admin</p></template>');
   await write(root, "app/pages/admin.server.ts", 'export const load = () => { throw new Error("The admin loader ran"); };');
   await write(root, "app/middleware.server.ts", `export default async function middleware(request, next) {
     const url = new URL(request.url);
@@ -53,7 +53,7 @@ async function serverApp(): Promise<string> {
   await write(root, "app/api/todos/[id].server.ts", `export const GET = (request, { params }) => params.id === "1" ? Response.json({ id: params.id }) : new Response(null, { status: 404 });
     export const DELETE = () => new Response(null, { status: 204 });`);
   await write(root, "app/api/fail.server.ts", 'export const GET = () => { throw new Error("database secret"); };');
-  await write(root, "app/error.html", '<template component="error-page"><title>Trouble</title><defs><prop name="status" type="number" required>Status</prop><prop name="message" type="string" required>Reason</prop></defs><section><h1>{$status}</h1><p>{$message}</p></section></template>');
+  await write(root, "app/error.html", '<template component="error-page"><defs><prop name="status" type="number" required>Status</prop><prop name="message" type="string" required>Reason</prop><title>Trouble</title></defs><section><h1>{$status}</h1><p>{$message}</p></section></template>');
   await write(root, "app/api/go.server.ts", 'export const GET = request => Response.redirect(new URL("/login/", request.url), 307);');
   await write(root, "app/api/feed.xml.server.ts", 'export const GET = () => new Response("<feed/>", { headers: { "content-type": "application/xml" } });');
   return root;
@@ -183,7 +183,7 @@ describe("request-time rendering", () => {
   it("answers with the error page when a render worker ends mid-render, and renders the next request on a new one", async () => {
     const root = await fixture();
     roots.push(root);
-    await write(root, "app/pages/live.html", '<template component="live-page"><meta name="hk:render" content="server"><title>Live</title><p>Live</p></template>');
+    await write(root, "app/pages/live.html", '<template component="live-page"><defs><meta name="hk:render" content="server"><title>Live</title></defs><p>Live</p></template>');
     // The page's loader is the last one, so its render is under way by the next macrotask.
     await write(root, "app/pages/live.server.ts", "export const load = () => { globalThis.endRenderWorkers?.(); return {}; };");
     const { outDir } = await buildApplication({ root });
@@ -229,15 +229,15 @@ describe("request-time rendering", () => {
     await write(root, "app/pages/index.server.ts", "export const load = ({ response }) => { response.status = 201; return {}; };");
     await expect(buildApplication({ root })).rejects.toThrow(/response is unavailable while prerendering/);
     await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' } });");
-    await write(root, "app/pages/items/[slug].server.ts", "export const entries = () => [{ slug: 'one' }, { slug: 'gone' }]; export const load = ({ params, notFound }) => params.slug === 'gone' ? notFound() : ({ props: { label: params.slug, tags: [] } });");
+    await write(root, "app/pages/items/[slug].server.ts", "export const entries = () => [{ slug: 'one' }, { slug: 'gone' }]; export const load = ({ params, notFound }) => params.slug === 'gone' ? notFound() : ({ props: { label: params.slug, tags: [], slug: params.slug } });");
     // A prerendered entry whose loader calls notFound() is left out of the build.
     const { outDir, routes } = await buildApplication({ root });
     expect(routes).toEqual(["/", "/items/one/"]);
     expect(existsSync(join(outDir, "items/gone"))).toBe(false);
-    await write(root, "app/pages/404.html", '<template component="missing-page"><meta name="hk:render" content="server"><p>Gone</p></template>');
+    await write(root, "app/pages/404.html", '<template component="missing-page"><defs><meta name="hk:render" content="server"></defs><p>Gone</p></template>');
     await expect(createApplication({ root })).rejects.toThrow(/not-found page takes no hk:render/);
     await rm(join(root, "app/pages/404.html"));
-    await write(root, "app/pages/login.html", '<template component="login-page"><meta name="hk:render" content="sometimes"><p>Log in</p></template>');
+    await write(root, "app/pages/login.html", '<template component="login-page"><defs><meta name="hk:render" content="sometimes"></defs><p>Log in</p></template>');
     await expect(createApplication({ root })).rejects.toThrow(/hk:render accepts content="prerender" or content="server"/);
     await rm(join(root, "app/pages/login.html"));
     await write(root, "app/middleware.server.js", "export default (request, next) => next();");

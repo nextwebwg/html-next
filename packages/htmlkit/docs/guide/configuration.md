@@ -90,6 +90,23 @@ export default defineConfig({
 
 A page's own `hk:layout` wins over its folder's layout, which wins over `layoutDefaults` and `layout`.
 
+A folder served at a second prefix, such as the current version of the docs at both `/` and
+`/v/current/`, marks that entry `alias: true`. Its pages are served and navigable there, are left
+out of [`sitemap.xml`](#search-engines), and each has a `<link rel="canonical">` to the same page
+under the folder's own prefix, unless the page sets one:
+
+```ts
+export default defineConfig({
+  pages: [
+    { dir: 'docs' },
+    { dir: 'docs', prefix: '/v/current/', alias: true },
+  ],
+});
+```
+
+A folder at two prefixes without `alias: true` on one of them is an error that names both, as is an
+alias entry without an entry for the folder itself.
+
 ## Plugins
 
 A plugin can add a page format and adjust options. This one makes `.note` files into pages:
@@ -105,7 +122,7 @@ const notes: HtmlKitPlugin = {
     compile(source, page) {
       // Each page needs its own valid component name; a hash of its path is both.
       const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
-      return `<template component="note-${name}"><article>${source}</article></template>`;
+      return `<template component="note-${name}"><defs><title>Note</title></defs><article>${source}</article></template>`;
     },
   },
 };
@@ -114,7 +131,8 @@ export default defineConfig({ plugins: [notes] });
 ```
 
 HTMLKit routes, orders, watches, renders, and builds `.note` files like `.html` pages, and errors
-name the `.note` file. While compiling, a plugin can call:
+name the `.note` file. A compiled page is an HTML Next component, so its head content and `hk:`
+settings go in its `<defs>`. While compiling, a plugin can call:
 
 - `page.href(file)` for another page's URL;
 - `page.asset(file)` to serve a file the page references, such as an image, and get its URL;
@@ -240,7 +258,7 @@ export default defineConfig({ origin: 'https://example.com', base: '/docs/', rob
 ```
 
 It lists every page in the [manifest](#build-manifest)'s `routes` except an
-[`hk:alias`](/htmlkit/routes#the-page-head) URL, whose page names its own URL as canonical, and a page
+[`hk:alias`](/htmlkit/routes#the-page-head) URL or [alias page folder](#page-folders) page, whose page names its own URL as canonical, and a page
 with `<meta name="robots" content="noindex">` (or `none`). Redirects and the not-found page are
 outside `routes`. A page with `hk:navigation="hidden"` is listed: that setting concerns navigation,
 and `noindex` takes a page out of search results. A `sitemap.xml` in `public/` is the site's own,

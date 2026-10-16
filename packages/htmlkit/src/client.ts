@@ -30,8 +30,7 @@ export type Component = readonly [factory: (options: object, html?: Record<strin
 /** The JSON that document.ts's pagePayload writes. */
 interface Payload {
   readonly version: 1;
-  readonly head: { readonly lang: string; readonly title: string; readonly description?: string;
-    readonly elements: readonly { readonly tag: string; readonly attributes: Readonly<Record<string, string>> }[] };
+  readonly head: { readonly lang: string; readonly canonical?: string };
   readonly styles: readonly string[];
   readonly modules: readonly string[];
   readonly layers: readonly { readonly component: string; readonly attributes: Readonly<Record<string, string>>;
@@ -96,11 +95,9 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
     return element;
   };
   append(next.head, "base", { href: url.href });
-  for (const element of payload.head.elements) append(next.head, element.tag, element.attributes);
-  if (payload.head.description !== undefined) append(next.head, "meta", { name: "description", content: payload.head.description });
+  if (payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
-  next.title = payload.head.title;
   next.documentElement.lang = payload.head.lang;
   // Innermost first: each layer is projected into its layout's `page` slot, as its invocation is on the server.
   const layers: Element[] = [];
@@ -130,8 +127,12 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
 function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: ClientOptions): void {
   /** The path and query whose layers the document shows. A navigation's URL commits before its layers arrive. */
   let rendered = location.pathname + location.search;
-  /** Head metadata from server documents. Elements that scripts add are never removed. */
-  let owned: Element[] = [...document.head.querySelectorAll("meta, link")];
+  /**
+   * The links HTMLKit's documents carry: stylesheets and an alias page's canonical link. HTML Next
+   * manages head declarations, marked data-component-head; elements that scripts add are never removed.
+   */
+  const shell = (head: HTMLHeadElement) => [...head.querySelectorAll("link:not([data-component-head])")];
+  let owned: Element[] = shell(document.head);
   const announcer = document.createElement("div");
   announcer.id = "hk-announcer";
   announcer.setAttribute("aria-live", "polite");
@@ -248,10 +249,10 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         return html(url, signal);
       });
       if (layers.length === 0 || layer(document, 0) === null) throw new Error(`HTMLKit cannot render ${url.href} in place: it has no layers.`);
-      // Head metadata both documents share stays; the rest is removed or added at the swap.
+      // Links both documents share stay; the rest are removed or added at the swap.
       const kept = new Set<Element>();
       const added: Element[] = [];
-      for (const element of next.head.querySelectorAll("meta, link")) {
+      for (const element of shell(next.head)) {
         const same = owned.find(candidate => !kept.has(candidate) && candidate.isEqualNode(element));
         if (same === undefined) added.push(element); else kept.add(same);
       }
@@ -269,7 +270,6 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         for (const element of owned) if (!kept.has(element)) element.remove();
         document.head.append(...added.filter(element => !sheets.includes(element as HTMLLinkElement)));
         owned = [...kept, ...added];
-        document.title = next.title;
         document.documentElement.lang = next.documentElement.lang;
         // Layouts persist while each depth renders the same component: they keep their DOM, state,
         // and controllers, and take the new rendering's props. The page layer is always replaced.
@@ -283,14 +283,18 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         // Server markup from the fallback is adopted in place, as the first page was.
         if (hydrate) adopt(layers[index]!);
         rendered = url.pathname + url.search;
-        announcer.textContent = document.title;
         watch();
       };
       signal.throwIfAborted();
+      // The swap disconnects the old page and connects the new one, and HTML Next reconciles the head
+      // once in the microtasks after it, which a view transition's update includes.
       if (typeof document.startViewTransition !== "function" || !transitions(document.styleSheets)) commit();
       else await document.startViewTransition(commit).updateCallbackDone;
       const saved = event.navigationType === "traverse" ? positions.get(event.destination.key) : undefined;
       if (saved === undefined) event.scroll(); else scrollTo(...saved);
+      // The next task, when the head holds the new page's title, announces it.
+      await new Promise(done => setTimeout(done));
+      announcer.textContent = document.title;
     } catch (error) {
       if (!committed) for (const sheet of sheets) sheet.remove();
       if (signal.aborted) return;

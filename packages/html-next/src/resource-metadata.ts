@@ -12,18 +12,3 @@ export function isResourceBuildMetadata(tag: string, attributes: Attributes): bo
   return names.includes("content") && names.every((name) => name === "name" || name === "content") &&
     (attributes.find((attribute) => attribute.name === "name")?.value.includes(":") ?? false);
 }
-
-/**
- * Metadata elements placed directly in a carrier, outside `<defs>`, which application tooling reads
- * and the component runtime ignores. Inert: active and policy-changing elements are rejected.
- */
-export function isIgnoredResourceMetadata(tag: string, attributes: Attributes): boolean {
-  if (tag !== "meta" && tag !== "title" && tag !== "link") return false;
-  if (attributes.some(attribute => attribute.name.startsWith("on"))) return false;
-  if (tag === "meta" && attributes.some(attribute => attribute.name === "http-equiv")) return false;
-  if (tag === "link") {
-    const relations = attributes.find(attribute => attribute.name === "rel")?.value.toLowerCase().split(/\s+/) ?? [];
-    if (relations.includes("component") || relations.includes("import")) return false;
-  }
-  return true;
-}

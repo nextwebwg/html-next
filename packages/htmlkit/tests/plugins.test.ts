@@ -15,7 +15,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 function notes(root: string): HtmlKitPlugin {
   return {
     name: "notes",
-    config: () => ({ headScript: "window.notes = true;", pages: [{ dir: "docs", prefix: "/v/one/" }, { dir: "docs" }],
+    config: () => ({ headScript: "window.notes = true;", pages: [{ dir: "docs", prefix: "/v/one/", alias: true }, { dir: "docs" }],
       layout: { component: join(root, "plugin/shell.html"), server: { async load({ navigation }: { navigation: (query?: NavigationQuery) => Promise<readonly NavigationItem[]> }) {
         const items = await navigation({ from: "/v/one/" });
         return { props: { links: items.map(item => item.label + (item.current === "page" ? "*" : "")).join(", ") } };
@@ -24,7 +24,9 @@ function notes(root: string): HtmlKitPlugin {
       const tag = "page-note-" + createHash("sha256").update(page.file).digest("hex").slice(0, 12);
       const body = source.replace(/@href\(([^)]+)\)/g, (_, target: string) => page.href(resolve(dirname(page.file), target)) ?? "missing")
         .replace(/@asset\(([^)]+)\)/g, (_, file: string) => page.asset(resolve(dirname(page.file), file)));
-      return `<template component="${tag}">${body}</template>`;
+      // A note's head content and hk: settings come before its <article>, and go in the page's <defs>.
+      const article = body.indexOf("<article");
+      return `<template component="${tag}"><defs>${body.slice(0, article)}</defs>${body.slice(article)}</template>`;
     } },
   };
 }

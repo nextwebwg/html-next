@@ -24,7 +24,8 @@ pages share, and swaps in the new page. There's nothing to set up.
 | A layout both pages use | Stays, with its state and controller. An open menu stays open. |
 | That layout's props | Update from its loader. `<hk-nav>` marks the new page current. |
 | The page, and any layout only one page uses | Replaced. A fresh page starts from its loader's state. |
-| `<title>`, description, and other head metadata | Update to the new page's. |
+| `<title>`, description, and other head declarations | Update to the new page's in one step, also inside a view transition. |
+| Declared scripts | Stay loaded. A script the next page declares loads once; none runs twice. |
 | Scroll position | Top of the page, or the `#fragment` in the link. Back and forward return to where you were. |
 | Keyboard focus | Starts from the top, as after a page load. |
 

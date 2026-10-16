@@ -31,7 +31,7 @@ if (runtime === "Node") {
   const files = {
     "package.json": '{"type":"module"}',
     "app/pages/index.html": page,
-    "app/pages/greet.html": '<template component="page-greet"><meta name="hk:render" content="server"><defs><prop name="text" type="string" required>Text</prop></defs><p>{$text}</p></template>',
+    "app/pages/greet.html": '<template component="page-greet"><defs><prop name="text" type="string" required>Text</prop><meta name="hk:render" content="server"></defs><p>{$text}</p></template>',
     "app/pages/greet.server.ts": 'export const load = ({ url, cookies }) => ({ props: { text: `Hello ${url.searchParams.get("name")}, visit ${cookies.get("visits")}` } });',
     "app/api/sum.server.ts": 'export const GET = request => { const { searchParams } = new URL(request.url); return Response.json({ sum: Number(searchParams.get("a")) + Number(searchParams.get("b")) }); };',
   };

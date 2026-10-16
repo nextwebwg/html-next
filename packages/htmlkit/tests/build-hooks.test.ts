@@ -11,7 +11,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function site(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-hooks-")); roots.push(root);
   await write(root, "package.json", '{"type":"module"}');
-  await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><h1>Home</h1></template>');
+  await write(root, "app/pages/index.html", '<template component="home-page"><defs><title>Home</title></defs><h1>Home</h1></template>');
   await write(root, "public/robots.txt", "User-agent: *\n");
   return root;
 }
@@ -21,7 +21,7 @@ const generator = (calls: BuildStartContext[]): HtmlKitPlugin => ({
   name: "api-generator",
   async buildStart(context) {
     calls.push(context);
-    await write(context.root, "app/pages/api.html", `<template component="api-page"><title>API</title><h1>Generated for ${context.command}</h1></template>`);
+    await write(context.root, "app/pages/api.html", `<template component="api-page"><defs><title>API</title></defs><h1>Generated for ${context.command}</h1></template>`);
   },
 });
 

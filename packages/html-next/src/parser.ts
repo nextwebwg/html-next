@@ -15,7 +15,6 @@ import {
 import { componentName, requestPropName } from "./names.js";
 import { IDENTIFIER, isIdentifier } from "./identifiers.js";
 import { HEAD_ATTRIBUTES, HEAD_LINK_RELS, SCRIPT_STANDARD_ATTRIBUTES } from "./head-rules.js";
-import { isIgnoredResourceMetadata } from "./resource-metadata.js";
 import { hasExecutableUrl } from "./sanitize.js";
 import type {
   AttributeBinding,
@@ -1927,9 +1926,9 @@ function parseComponentNodesAtSource(
       fail("HT001", "A component's markup must be exactly one element root.", source);
     }
     const name = sourceTag(node);
-    // Native template content is inert. Application metadata is declaration-only
-    // here, just as at resource scope; it never enters the rendered root or IR.
-    if (isIgnoredResourceMetadata(name, Array.from(sourceAttributes(node)))) continue;
+    if (name === "title" || name === "meta" || name === "link") {
+      fail("HS002", `A \`<${name}>\` placed directly in a carrier is invalid; a component's head content is its head declarations in \`<defs>\`.`, source);
+    }
     if (name === "props" || name === "defs") {
       if (declarationGroup !== undefined) {
         fail("HS002", "A component has one optional declaration group, one markup root, and one optional <style>.", source);

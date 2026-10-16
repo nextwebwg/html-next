@@ -29,9 +29,9 @@ export function load() {
 ```html
 <!-- app/pages/team.html -->
 <template component="page-team">
-  <title>Team</title>
   <defs>
     <prop name="people" type="list(object({ name: string, role: string }))" required>Team members</prop>
+    <title>Team</title>
   </defs>
   <ul>
     <li $each="person of $people">{$person.name}, {$person.role}</li>
@@ -48,7 +48,7 @@ import server-only packages. `@/` is the project root.
 | --- | --- |
 | `props` | Values for the page's declared `<prop>`s. |
 | `state` | Starting values for the page's declared `<state>`. |
-| `head` | `title`, `description`, or `lang` for the document head. |
+| `head` | `lang`, the document's language. Titles and metadata are [head declarations](/htmlkit/routes#the-page-head) bound to props. |
 | `data` | Private values passed on to inner loaders as `parent`; never sent to the browser. |
 
 Props and state are written into the page's HTML and its navigation data file, so **anything in
@@ -83,10 +83,10 @@ layouts' loaders, then read the request and shape the response:
 ```html
 <!-- app/pages/orders.html -->
 <template component="page-orders">
-  <meta name="hk:render" content="server">
-  <title>Orders</title>
   <defs>
     <prop name="orders" type="list(object({ id: string, total: string }))" required>Orders</prop>
+    <meta name="hk:render" content="server">
+    <title>Orders</title>
   </defs>
   <ul><li $each="order of $orders">{$order.id}: {$order.total}</li></ul>
 </template>
@@ -136,9 +136,11 @@ export const entries = () => posts.map(post => ({ slug: post.slug }));
 
 export function load({ params }) {
   const post = posts.find(post => post.slug === params.slug)!;
-  return { props: { title: post.title, body: post.body }, head: { title: post.title } };
+  return { props: { title: post.title, body: post.body } };
 }
 ```
+
+The page's `<title>{$title}</title>` in its `<defs>` puts the post's title in the document head.
 
 Development renders any value; a build renders exactly the listed ones and reports a dynamic page
 without `entries()`. Each entry gives every parameter of the page: a string for `[slug]`, and a

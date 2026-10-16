@@ -67,6 +67,11 @@ export interface PageDirectory {
   readonly layout?: string | false | RouteLayer;
   /** Skip the directory when it doesn't exist, as the default app/pages is. */
   readonly optional?: boolean;
+  /**
+   * A further mount of a directory another entry also serves: its pages are served and navigable here,
+   * left out of sitemap.xml, and name the same page under the other entry's prefix as canonical.
+   */
+  readonly alias?: boolean;
 }
 
 export interface HtmlKitPlugin {
@@ -148,22 +153,21 @@ export interface PageContext {
   watch(file: string): void;
 }
 
+/** What a loader sets on the document: its language, the `<html lang>`. */
 export interface PageHead {
-  readonly title?: string;
-  readonly description?: string;
   readonly lang?: string;
 }
 
 export interface RenderedHead extends PageHead {
-  /** Rendered native metadata, merged by identity; values are escaped on output. */
-  readonly elements?: readonly HeadElement[];
+  /**
+   * The head's elements as HTML: the application's own, with the page's head declarations reconciled
+   * into them by HTML Next, each marked `data-component-head`.
+   */
+  readonly html: string;
+  /** An alias page's canonical link to its page's own URL, which the application document carries. */
+  readonly canonical?: string;
   /** A plugin's headScript, then app/head.js, each inlined after the charset so they run before first paint. */
   readonly scripts?: readonly string[];
-}
-
-export interface HeadElement {
-  readonly tag: "meta" | "link";
-  readonly attributes: Readonly<Record<string, string>>;
 }
 
 export interface LoaderResult {
@@ -274,6 +278,8 @@ export interface ApplicationRoute extends RouteLayer {
   readonly hidden?: boolean;
   /** For an hk:alias route, the pattern of the page's own route, which navigation marks current. */
   readonly canonical?: string;
+  /** For a page in an alias page directory, the pattern of the same page under its directory's own prefix, which its canonical link names. */
+  readonly aliasOf?: string;
   /** Per-segment numeric file order; independent of URLs and component identity. */
   readonly order?: readonly (string | null)[];
   /** The (group) folders the page is in, outermost first. */

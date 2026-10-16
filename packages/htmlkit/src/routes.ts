@@ -67,7 +67,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   // folderLayouts are the _layout.html files from the page directory down to the page, outermost first.
   const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string; readonly directoryLayout?: string | false | RouteLayer;
     readonly folderLayouts: readonly RouteLayer[]; readonly notFound?: true; readonly error?: true; readonly index?: true })[] = [];
-  const add = (input: RouteInput & { readonly canonical?: string; readonly notFound?: true; readonly error?: true; readonly index?: true }, prefix: string, order?: readonly (string | null)[],
+  const add = (input: RouteInput & { readonly canonical?: string; readonly aliasOf?: string; readonly notFound?: true; readonly error?: true; readonly index?: true }, prefix: string, order?: readonly (string | null)[],
     directoryLayout?: string | false | RouteLayer, folderLayouts: readonly RouteLayer[] = [], groups: readonly RouteGroup[] = []): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
     const segments = input.pattern.slice(1, -1).split("/").filter(Boolean);
@@ -83,6 +83,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), prefix, folderLayouts,
       ...(directoryLayout === undefined ? {} : { directoryLayout }), ...(groups.length === 0 ? {} : { groups }),
       ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }),
+      ...(input.aliasOf === undefined ? {} : { aliasOf: input.aliasOf }),
       ...(input.notFound ? { notFound: true as const } : {}), ...(input.error ? { error: true as const } : {}), ...(input.index ? { index: true as const } : {}) });
   };
   // A number and a dot ("01.guide") order a file or directory and stay out of its URL. Route
@@ -142,7 +143,18 @@ export async function discover(root: string, options: DiscoveryOptions) {
     }
   };
   if (options.fileRoutes !== false) {
-    for (const { dir, prefix = "/", layout, optional } of options.pages ?? [{ dir: "app/pages", optional: true }]) {
+    const directories = options.pages ?? [{ dir: "app/pages", optional: true }];
+    // A directory has one own prefix; any further mount of it is an alias of those pages.
+    const own = new Map<string, string>();
+    for (const { dir, prefix = "/", alias } of directories) {
+      if (alias === true) continue;
+      const previous = own.get(resolve(root, dir));
+      if (previous !== undefined) {
+        throw new HtmlKitError(`Page directory ${dir} is served at ${previous} and ${prefix}; mark the further one alias: true, so its pages name the first as canonical.`, resolve(root, dir));
+      }
+      own.set(resolve(root, dir), prefix);
+    }
+    for (const { dir, prefix = "/", layout, optional, alias } of directories) {
       if (!/^\/(?:[A-Za-z0-9_-]+\/)*$/.test(prefix)) throw new HtmlKitError("Page directory prefixes need leading and trailing slashes around URL slugs.", dir);
       const directory = resolve(root, dir);
       if (!within(root, directory)) throw new HtmlKitError("Page directories must be inside the application root.", directory);
@@ -152,7 +164,11 @@ export async function discover(root: string, options: DiscoveryOptions) {
       // app/pages is optional; a configured directory must exist.
       if (!present && !optional) throw new HtmlKitError("Page directory does not exist.", directory);
       const segments = prefix.split("/").filter(Boolean);
+      const primary = own.get(directory);
+      if (alias === true && primary === undefined) throw new HtmlKitError(`The alias page directory ${dir} at ${prefix} needs an entry that serves ${dir} itself.`, directory);
+      const first = routes.length;
       if (present) await visit(directory, prefix, segments, segments.map(() => null), layout, [], []);
+      if (alias === true) for (let i = first; i < routes.length; i++) routes[i] = { ...routes[i]!, aliasOf: primary + routes[i]!.pattern.slice(prefix.length) };
     }
   }
   for (const route of options.routes ?? []) add(route, "/");
@@ -210,7 +226,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     for (const alias of resource.components.get(pageDefinition(resource, route.component).contract.tag)!.aliases) {
       if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("hk:alias needs a route path with leading and trailing slashes.", route.component);
       add({ component: route.component, ...(route.server === undefined ? {} : { server: route.server }), layouts: route.layouts,
-        pattern: route.prefix + alias.slice(1), canonical: route.pattern }, route.prefix, undefined, route.directoryLayout, route.folderLayouts);
+        pattern: route.prefix + alias.slice(1), canonical: route.pattern, ...(route.aliasOf === undefined ? {} : { aliasOf: route.aliasOf }) }, route.prefix, undefined, route.directoryLayout, route.folderLayouts);
     }
   }
   for (const prefix of Object.keys(options.layoutDefaults ?? {})) {
@@ -287,8 +303,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       if (index) folderOrders.push({ segments: route.segments, rank: metadata.order });
     }
     // A static <title> labels the page's folder in navigation trees when hk:label doesn't.
-    const title = /^<title>([^<{]*)<\/title>$/m.exec(metadata.head.replaceAll("><", ">\n<"))?.[1]?.trim()
-      .replace(/&(lt|gt|quot|#39|amp);/g, (_, name: string) => ({ lt: "<", gt: ">", quot: '"', "#39": "'", amp: "&" })[name]!);
+    const title = metadata.title;
     // The not-found page is prerendered as 404.html, and the error page renders as a build would; neither takes hk:render.
     if ((isNotFound || isError) && metadata.render !== undefined) throw new HtmlKitError(`The ${isNotFound ? "not-found" : "error"} page takes no hk:render.`, route.component);
     const discoveredRoute = { ...route, layouts, pageName, ...(order === undefined ? {} : { order }), ...(metadata.label === undefined ? {} : { label: metadata.label }),
