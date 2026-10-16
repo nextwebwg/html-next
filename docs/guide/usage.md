@@ -419,7 +419,7 @@ The live runtime needs native CSS `@scope`: Chrome 118, Safari 17.4, Firefox 146
 
 ### Loading and trust
 
-Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="application-components">`](#head) list that names its source. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
+Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="component-src">`](#head) list that names its source. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
 
 :::
 
@@ -643,13 +643,13 @@ Every element the runtime manages carries `data-component-head`. When several co
 
 A page change, such as a router replacing one page with another inside the same layout, changes the head once: the title goes straight from one page's to the next, and links both pages declare stay in place. Inside a view transition, the change happens in the transition's update.
 
-The canonical, `alternate`, `icon` and `manifest` links and the `robots`, `referrer`, `viewport`, `color-scheme` and `theme-color` metadata, with `og:url`, belong to the document. Only an application component sets them: one in the application's own source, written in the page, or loaded by URL from the page's origin or a source the page lists:
+Some entries affect the whole page, its identity for search engines and sharing, and page-wide behavior: the canonical, `alternate`, `icon` and `manifest` links, the `robots`, `referrer`, `viewport`, `color-scheme`, `theme-color` and `component-src` metadata, and `og:url`. Only an application component sets these page-wide head entries: one in the application's own source, written in the page, or loaded by URL from the page's origin or a source the page lists in `component-src`, which takes a CSP source list:
 
 ```html title="index.html"
-<meta name="application-components" content="'self' https://cdn.acme.example/ui/">
+<meta name="component-src" content="'self' https://cdn.acme.example/ui/">
 ```
 
-A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its document-authority entries are ignored with an `HL011` warning; its other head declarations apply.
+A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its page-wide head entries are ignored with an `HL011` warning; its other head declarations apply.
 
 A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations run in the browser runtime and in server rendering; Vite and converter output report them with `HT030`.
 

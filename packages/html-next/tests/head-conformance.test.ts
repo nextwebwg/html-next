@@ -15,8 +15,8 @@ import { authoredHead, expectedHead, expectedScripts, headFiles, runHeadScenario
 /**
  * Head declarations (https://nextwebwg.org/declarative-components/components#head-management) in the
  * live runtime, in Chromium, Firefox and WebKit: insertion and removal, shared and competing keys,
- * restoring the authored head as the same nodes, meta lists, the document-authority rule with and
- * without an application-components list, JSON-LD, and a page change as one reconciliation.
+ * restoring the authored head as the same nodes, meta lists, the page-wide head entry rule with and
+ * without a `component-src` list, JSON-LD, and a page change as one reconciliation.
  */
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const source = fileURLToPath(new URL("../src/", import.meta.url));
@@ -93,7 +93,7 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const listed of [false, true]) {
-      it(`${engine} reconciles the head ${listed ? "with" : "without"} an application-components list`, async () => {
+      it(`${engine} reconciles the head ${listed ? "with" : "without"} a component-src list`, async () => {
         const browser = await browserType.launch({ headless: true });
         const errors: string[] = [];
         try {

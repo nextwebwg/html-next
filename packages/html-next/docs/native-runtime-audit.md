@@ -110,7 +110,7 @@ component's markup.
 
 CSP's matching of a URL to a source list runs only inside the browser's policy checks; no API
 exposes it. `src/source-list.ts` applies the CSP Level 3 matching algorithm to the
-application-components list for the source expressions that name URLs.
+`component-src` list for the source expressions that name URLs.
 
 ## Complete live inventory
 

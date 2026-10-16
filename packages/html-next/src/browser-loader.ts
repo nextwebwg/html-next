@@ -27,16 +27,16 @@ export interface BrowserLoaderOptions {
 }
 
 /**
- * The application-components source list (components#document-authority): the first
- * `<meta name="application-components">` in the document's authored head, read once, as parsed.
+ * The `component-src` list (components#page-wide-head-entries): the first
+ * `<meta name="component-src">` in the document's authored head, read once, as parsed.
  */
 const applicationSources = new WeakMap<Document, string>();
 function applicationSourceList(root: Document): string {
   let sources = applicationSources.get(root);
   if (sources === undefined) {
-    const lists = root.head?.querySelectorAll('meta[name="application-components" i]:not([data-component-head])') ?? [];
+    const lists = root.head?.querySelectorAll('meta[name="component-src" i]:not([data-component-head])') ?? [];
     if (lists.length > 1) {
-      root.defaultView?.console.warn(`${root.URL}: HL012: Only the first <meta name="application-components"> lists application components; the others are ignored.`);
+      root.defaultView?.console.warn(`${root.URL}: HL012: Only the first <meta name="component-src"> lists application components; the others are ignored.`);
     }
     sources = lists[0]?.getAttribute("content") ?? "";
     applicationSources.set(root, sources);
@@ -44,7 +44,7 @@ function applicationSourceList(root: Document): string {
   return sources;
 }
 
-/** A resolver that also accepts cross-origin roots the application-components list names. */
+/** A resolver that also accepts cross-origin roots the `component-src` list names. */
 function documentResolver(root: Document, importMap: ImportMapLike | undefined): ResourceResolver {
   const sources = applicationSourceList(root);
   return new ResourceResolver(importMap ?? readImportMap(root), root.baseURI, root.URL, (url) => listedSourceRoot(url, sources, root.URL));

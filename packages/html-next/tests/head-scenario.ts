@@ -32,12 +32,12 @@ export const headFiles: Readonly<Record<string, string>> = {
   <script type="application/ld+json">{"@type": "Organization", "name": "{Acme}"}</script>
   <script type="application/ld+json" from:value="$schema"></script>
 </defs><section from:data-schema="$schema"></section></template>`,
-  // Reached through a bare specifier, so its document-authority entries are ignored.
+  // Reached through a bare specifier, so its page-wide head entries are ignored.
   "widget.html": `<template component="vendor-widget"><defs>
   <link rel="canonical" href="https://vendor.example/"><meta name="theme-color" content="red">
   <link rel="preconnect" href="https://vendor.example">
 </defs><div></div></template>`,
-  // An application component when the application-components list names its source.
+  // An application component when the `component-src` list names its source.
   "badge.html": `<template component="cdn-badge"><defs>
   <meta name="theme-color" content="green"><link rel="preconnect" href="https://cdn.acme.example">
 </defs><div></div></template>`,
@@ -133,7 +133,7 @@ export const expectedScripts: Steps = {
 export function authoredHead(listed: boolean): string {
   return '<meta charset="utf-8"><title>Acme</title><meta name="description" content="Site">' +
     '<link rel="preconnect" href="https://img.acme.example">' +
-    (listed ? `<meta name="application-components" content="https://cdn.acme.example/ui/">` : "");
+    (listed ? `<meta name="component-src" content="https://cdn.acme.example/ui/">` : "");
 }
 
 /** What a page records, in the page. */
@@ -237,7 +237,7 @@ export async function runHeadScenario(page: Page): Promise<Steps> {
 }
 
 const authored = ['<title>Acme</title>', '<meta name="description" content="Site">', '<link rel="preconnect" href="https://img.acme.example">'];
-const listedMeta = '<meta name="application-components" content="https://cdn.acme.example/ui/">';
+const listedMeta = '<meta name="component-src" content="https://cdn.acme.example/ui/">';
 
 /** What every implementation's head holds at each step. */
 export function expectedHead(listed: boolean): Steps {

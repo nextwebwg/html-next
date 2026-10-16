@@ -1,6 +1,6 @@
 import { fail, HtmlDiagnosticError, HtmlDiagnosticAggregateError, recoverDiagnostic, type HtmlDiagnostic } from "./diagnostics.js";
 import type { ComponentResourceResolver, ResolvedResource } from "./resolve.js";
-import { withoutDocumentAuthority } from "./head-rules.js";
+import { withoutPageWideEntries } from "./head-rules.js";
 import type { ComponentDefinition } from "./template.js";
 
 export interface FetchedComponent {
@@ -27,9 +27,9 @@ export interface ComponentGraphNode {
   readonly controller?: ControllerEdge;
   readonly shadowedByCustomElement: boolean;
   /**
-   * An imported component (components#document-authority): reached through a bare specifier, from a
+   * An imported component (components#page-wide-head-entries): reached through a bare specifier, from a
    * source the application does not list, or from another imported component. Its definition
-   * leaves out the document-authority entries only an application component contributes.
+   * leaves out the page-wide head entries only an application component contributes.
    */
   readonly imported?: true;
 }
@@ -223,10 +223,10 @@ export async function buildComponentGraph(
     if (!draft.complete) fail("HL008", `Component graph did not finish loading \`${id}\`.`);
     let definition = draft.definition;
     if (imported.has(id)) {
-      const { definition: kept, ignored } = withoutDocumentAuthority(definition);
+      const { definition: kept, ignored } = withoutPageWideEntries(definition);
       definition = kept;
       for (const entry of ignored) {
-        warn({ code: "HL011", message: `<${definition.contract.tag}> is an imported component, so its ${entry} is ignored: only an application component sets it.`,
+        warn({ code: "HL011", message: `<${definition.contract.tag}> is an imported component, so its ${entry} is ignored: it is a page-wide head entry, which only an application component sets.`,
           source: draft.url, severity: "warning" });
       }
     }

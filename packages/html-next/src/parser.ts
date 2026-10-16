@@ -1291,9 +1291,9 @@ function readHeadDeclaration(
     if ((name === undefined) === (literal("property") === undefined)) {
       fail("HC025", "A `<meta>` head declaration has one `name` or one `property`.", source);
     }
-    if (name?.toLowerCase() === "application-components") {
+    if (name?.toLowerCase() === "component-src") {
       // Only the application document's own head says which sources supply application components.
-      const message = '`<meta name="application-components">` belongs to the application document; a component\'s is ignored.';
+      const message = '`<meta name="component-src">` belongs to the application document; a component\'s is ignored.';
       if (warn === undefined) fail("HC028", message, source);
       warn({ code: "HC028", message, source, ...scope.at, severity: "warning" });
       return;
