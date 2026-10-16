@@ -79,20 +79,20 @@ of one tag and conflicting state, concurrently and in sequence, on one worker an
 that fails or exits rejects the render it was doing, which a server answers with its error page, and
 the next render starts a new worker. An idle worker doesn't keep the process alive.
 
-Each page is one render: the layers' invocations, then each layer's head bindings as a component of
-its own (`hk-head-<layer>`) with that layer's props, in a container after the page. HTMLKit keeps the
-page's markup exactly as rendered and merges each head carrier's metadata in layer order
-(`head.ts`'s `headCarrier` and `mergeHead`).
+Each page is one render of the layers' invocations, with the application document's own head
+(`renderComponents`' `head` option: the viewport meta, and an alias page's canonical link). HTML
+Next reconciles every rendered component's head declarations into it, deepest first, and returns the
+head HTML that the document assembler writes after the charset and head scripts. HTMLKit's `hk:`
+settings are left out of the definitions before they render or compile.
 
 Loaders, endpoints, and middleware are trusted application code that runs in the server's process,
 as in Nuxt and Next.js: a module loads once, so a value it keeps in a module variable is shared by
 every request. The guide says so beside the request API.
 
 `data` is private to the loader chain. Only explicit `props` and `state` become public, through
-HTML Next type validation, attribute serialization, and rendered continuation records. Titles,
-descriptions, and native metadata attributes are escaped by the document assembler. Head bindings
-reuse HTML Next's parser and renderer through inert binding carriers, since head elements are
-forbidden in component bodies. Browser entries import the page's compiled components and their
+HTML Next type validation, attribute serialization, and rendered continuation records. Head
+declarations bind through HTML Next's parser and renderer like any other binding, and the server
+renderer serializes and escapes the elements it writes. Browser entries import the page's compiled components and their
 controllers, never server loaders or their imports.
 
 ## Cost

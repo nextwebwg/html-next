@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.0-alpha.56
+
+### Breaking
+
+- HTMLKit pages and layouts declare their head content as HTML Next head declarations in `<defs>`: `<title>`, `<meta>`, `<link>`, JSON-LD and declared scripts, bound to the component's props, state and data. HTMLKit's settings, `hk:layout`, `hk:label`, `hk:order`, `hk:navigation`, `hk:render` and `hk:alias`, are `<meta>` entries there too, and HTMLKit leaves them out of the head; `hk:page` stays at the top of the file. `renderComponents` renders the head with the page, so a title, a canonical link and each meta name or property come from the deepest component that declares them, a page's over its layout's, and any component on the page may declare head content. A component reached by a bare specifier, such as `@acme/ui/card.html` or `@/components/card.html`, is an imported component, whose page-wide head entries are left out with `HL011`. Server-rendered and prerendered pages, the not-found page and the error page carry the reconciled head with `data-component-head` on each managed element and a `<link rel="preload">` for each eager declared script, and hydration adopts it. Client navigation leaves the head declarations to HTML Next, which updates them once per page change, inside a view transition's update when there is one, and never runs a declared script twice; HTMLKit swaps only its stylesheets and an alias page's canonical link. Every document starts from `<meta charset="utf-8">` and a viewport meta, which a page's own viewport replaces.
+- A `<title>`, `<meta>` or `<link>` placed directly in a `<template component>`, outside `<defs>`, is an `HS002` error in HTML Next and an HTMLKit error that names the component.
+- A loader's `head` sets only `lang`; a `title` or `description` there is an error that names the loader. `RenderedHead` is `{ html, lang?, canonical?, scripts? }`, where `html` is the head's elements as HTML; its `title`, `description` and `elements`, and the `HeadElement` type, are removed. A page payload's `head` is `{ lang, canonical? }`.
+
+To migrate a page or layout:
+
+1. Move its `<title>`, `<meta>` and `<link>` elements, `hk:` settings included, into its `<defs>`. A component without `<defs>` gets one.
+2. Write a bound title as text, `<title>{$title}</title>`; `$value` and other attributes are not head bindings. A `<meta>` binds `from:content` and a `<link>` `from:href`.
+3. Replace a loader's `head: { title, description }` with props the component declares and binds, such as `props: { title }` and `<title>{$title}</title>`.
+4. Replace a page's `<link rel="stylesheet">` with an `@import` in its `<style>`, such as `<style>@import "./page.css";</style>`.
+5. A helper component that declared a title or description now sets it while it is on the page, as the deepest component; remove head content the page should own.
+6. A page compiler (`pages.compile`) writes the page's head content and `hk:` settings into the component's `<defs>`.
+
 ## 1.0.0-alpha.55
 
 ### Added

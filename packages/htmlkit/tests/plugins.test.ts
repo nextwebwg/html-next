@@ -24,7 +24,9 @@ function notes(root: string): HtmlKitPlugin {
       const tag = "page-note-" + createHash("sha256").update(page.file).digest("hex").slice(0, 12);
       const body = source.replace(/@href\(([^)]+)\)/g, (_, target: string) => page.href(resolve(dirname(page.file), target)) ?? "missing")
         .replace(/@asset\(([^)]+)\)/g, (_, file: string) => page.asset(resolve(dirname(page.file), file)));
-      return `<template component="${tag}">${body}</template>`;
+      // A note's head content and hk: settings come before its <article>, and go in the page's <defs>.
+      const article = body.indexOf("<article");
+      return `<template component="${tag}"><defs>${body.slice(0, article)}</defs>${body.slice(article)}</template>`;
     } },
   };
 }

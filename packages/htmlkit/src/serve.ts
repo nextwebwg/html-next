@@ -8,7 +8,7 @@ import { createApplication } from "./application.js";
 import { readManifest } from "./build.js";
 import { browserPlugin, browserSources, stylesheetSources } from "./browser.js";
 import { configure, globalStylesheets, HtmlKitError, rootAlias, runHook, withPlugins, within } from "./config.js";
-import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
+import { authoredHead, documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
 import { listen, mime, nodeRequest, outputPath, sendResponse } from "./server.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
@@ -118,7 +118,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
       vite.ssrFixStacktrace(error instanceof Error ? error : new Error(String(error)));
       if (response.headersSent) { response.end(); return; }
       response.writeHead(500, { "content-type": "text/html; charset=utf-8" });
-      response.end(documentHTML(`<main><h1>Application error</h1><pre>${escapeHTML(String(error))}</pre></main>`, { title: "Application error" }));
+      response.end(documentHTML(`<main><h1>Application error</h1><pre>${escapeHTML(String(error))}</pre></main>`, { html: authoredHead + "<title>Application error</title>" }));
     });
   });
   try { await vite.listen(); await watching; }

@@ -8,9 +8,9 @@ import { loadNodeComponents } from "@nextwebwg/html-next/node-loader";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
 import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
-import { documentHTML, redirectPage, type PageAssets } from "./document.js";
+import { authoredHead, documentHTML, redirectPage, type PageAssets } from "./document.js";
 import { breadth, discover, discoverServerFiles, matchRoute, parameter, redirectTable, validSegment } from "./routes.js";
-import { applicationResource, pageDefinition } from "./resource.js";
+import { applicationResource, pageDefinition, withoutSettings } from "./resource.js";
 import { createNavigation, failurePage, pageResponse, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
 import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
@@ -49,7 +49,7 @@ export async function headScripts(options: ApplicationOptions, root: string): Pr
 
 // Every page gets the head scripts, the not-found page included, so it cannot flash either.
 export function notFoundPage(scripts: readonly string[]) {
-  const head: RenderedHead = { title: "Page not found", scripts };
+  const head: RenderedHead = { html: authoredHead + "<title>Page not found</title>", scripts };
   const body = "<main><h1>Page not found</h1></main>";
   return { head, body, html: documentHTML(body, head) };
 }
@@ -177,7 +177,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       if (layer === route) return pageDefinition(resources.get(pathToFileURL(layer.component).href)!, layer.component);
       const roots = loaded.roots.filter(id => loaded.nodes.get(id)!.url === pathToFileURL(layer.component).href);
       if (roots.length !== 1) throw new HtmlKitError("A page or layout must declare exactly one root component.", layer.component);
-      return loaded.nodes.get(roots[0]!)!.definition;
+      return withoutSettings(loaded.nodes.get(roots[0]!)!.definition);
     });
     if (definitions.at(-1)!.contract.tag !== route.pageName) {
       throw new HtmlKitError("Page component name changed; rediscover routes before rendering.", route.component);
@@ -185,11 +185,11 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     for (const definition of definitions.slice(0, -1)) {
       if (!definition.slots?.some(slot => slot.name === "page")) throw new HtmlKitError('Layout requires a slot named "page".', definition.source.file);
     }
-    const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: node.definition,
+    const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: withoutSettings(node.definition),
       styles: compileComponentStylesForBuild(node.definition.css, node.definition),
       ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }) }));
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
-      metadata: resources.get(pathToFileURL(layer.component).href)!.components.get(definitions[i]!.contract.tag)!, module: () => module(layer), origin: origin(layer) })) };
+      module: () => module(layer), origin: origin(layer) })) };
   };
 
   type Page = RenderedPage & { readonly headers?: Headers };

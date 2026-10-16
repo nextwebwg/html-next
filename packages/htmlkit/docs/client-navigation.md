@@ -82,10 +82,13 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    rendered again would bring the old page back. The parity tests found this.
    `replaceProjectedNode(current, next)` puts the new node in the old one's place in the projection
    too, as the live runtime's function of that name does.
-4. **Head metadata.** `meta` and `link` elements that came from server documents are diffed with
-   `isEqualNode`: shared ones stay, others are removed and added. Elements scripts add are left alone.
-   New stylesheets load before the swap; component styles are scoped, so only the next page's global
-   rules apply early.
+4. **Head content.** HTML Next owns the head declarations, the elements marked
+   `data-component-head`: the swap disconnects the old page and connects the new one, and its head
+   manager reconciles them once, in the microtasks after the swap, which a view transition's update
+   includes. HTMLKit diffs only its own unmarked links, stylesheets and an alias page's canonical
+   link, with `isEqualNode`: shared ones stay, others are removed and added. Elements scripts add
+   are left alone. New stylesheets load before the swap; component styles are scoped, so only the
+   next page's global rules apply early.
 5. **Route announcement** and **back and forward positions** in WebKit, above.
 
 ## Chosen approach: payloads, with the HTML as the fallback
@@ -111,7 +114,7 @@ cannot contain a dot, so `payload.json` never collides with a page's own directo
 ```json
 {
   "version": 1,
-  "head": { "lang": "en", "title": "Install", "description": "…", "elements": [{ "tag": "meta", "attributes": { "charset": "utf-8" } }] },
+  "head": { "lang": "en" },
   "styles": ["/kit/_htmlkit/page-3-….css"],
   "modules": ["/kit/_htmlkit/page-3-….js"],
   "layers": [
@@ -121,8 +124,9 @@ cannot contain a dot, so `payload.json` never collides with a page's own directo
 }
 ```
 
-- `head` is the document head the server renders: language, title, description, and metadata
-  elements. `app/head.js` is not in it; it runs once per document load.
+- `head` is what the page's document carries beyond its components: its language, and an alias
+  page's `canonical` URL. The components' head declarations come from their compiled modules.
+  `app/head.js` is not in it; it runs once per document load.
 - `styles` and `modules` are what the page's document links.
 - Each layer has its component, its invocation's prop attributes in their HTML form (defaults
   included, exactly as the server writes them), and its loader's state. Loader `data` stays private,

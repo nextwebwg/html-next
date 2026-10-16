@@ -696,7 +696,7 @@ Some entries affect the whole page, its identity for search engines and sharing,
 
 A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its page-wide head entries are ignored with an `HL011` warning; its other head declarations apply.
 
-A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations behave the same in the browser runtime, Vite output, and converted Vue, React and Svelte components, which share one head manager on the page.
+A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. A `<title>`, `<meta>`, or `<link>` placed directly in a `<template component>`, outside `<defs>`, is `HS002`. Head declarations behave the same in the browser runtime, Vite output, and converted Vue, React and Svelte components, which share one head manager on the page.
 
 ### Load a third-party script {#declared-scripts}
 

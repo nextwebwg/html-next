@@ -20,9 +20,9 @@ const seconds = Number(values.seconds);
 const connections = Number(values.connections);
 const root = fileURLToPath(new URL("../.measure/server-app/", import.meta.url));
 const files: Readonly<Record<string, string>> = {
-  "app/layouts/default.html": '<template component="site-shell"><title>Site</title><main><slot name="page"></slot></main></template>',
-  "app/pages/index.html": '<template component="page-home"><title>Home</title><h1>Home</h1></template>',
-  "app/pages/hello.html": '<template component="page-hello"><meta name="hk:render" content="server"><title>Hello</title><defs><prop name="name" type="string" required>Name</prop></defs><h1>Hello {$name}</h1></template>',
+  "app/layouts/default.html": '<template component="site-shell"><defs><title>Site</title></defs><main><slot name="page"></slot></main></template>',
+  "app/pages/index.html": '<template component="page-home"><defs><title>Home</title></defs><h1>Home</h1></template>',
+  "app/pages/hello.html": '<template component="page-hello"><defs><prop name="name" type="string" required>Name</prop><meta name="hk:render" content="server"><title>Hello</title></defs><h1>Hello {$name}</h1></template>',
   "app/pages/hello.server.ts": 'export const load = ({ url }) => ({ props: { name: url.searchParams.get("name") ?? "world" } });',
   "app/api/hello.server.ts": 'export const GET = request => Response.json({ hello: new URL(request.url).searchParams.get("name") ?? "world" });',
 };

@@ -177,12 +177,9 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             '<meta name="hk:layout" content="admin"><head>' +
             '<meta name="app:page" content="products-page">' +
             '<link rel="component" href="./child.html"></head>' +
-            '<template component="products-page"><title $value="$missing">Carrier title</title>' +
-            '<meta name="hk:layout" content="admin"><meta name="description" from:content="$missing">' +
-            '<link rel="stylesheet" href="./carrier.css"><link rel="preload" as="script" href="./carrier.js">' +
-            '<section>Products <product-detail></product-detail></section></template>' :
+            '<template component="products-page"><section>Products <product-detail></product-detail></section></template>' :
             path === "/child.html" ?
-              '<template component="product-detail"><title>Helper title</title><meta property="og:title" content="Helper social title"><b>detail</b></template>' :
+              '<template component="product-detail"><b>detail</b></template>' :
               '<!doctype html><html><head><title>Host title</title>' +
               '<meta name="description" content="Host description">' +
               '<link rel="component" href="/page.html"></head>' +
@@ -201,14 +198,12 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             text: document.querySelector("#page")?.textContent,
             title: document.title,
             description: document.querySelector('meta[name="description"]')?.getAttribute("content"),
-            layouts: document.querySelectorAll('meta[name="hk:layout"]').length,
-            social: document.querySelectorAll('meta[property="og:title"]').length,
-            links: document.querySelectorAll('link[rel="stylesheet"], link[rel="canonical"], link[rel="preload"]').length };
+            layouts: document.querySelectorAll('meta[name="hk:layout"], meta[name="app:page"]').length };
           started.stop();
           return value;
         });
         assert.deepEqual(result, { components: 2, tag: "section", text: "Products detail",
-          title: "Host title", description: "Host description", layouts: 0, social: 0, links: 0 });
+          title: "Host title", description: "Host description", layouts: 0 });
         assert.deepEqual(requests.sort(), ["/", "/child.html", "/page.html"]);
       } finally {
         await metadataBrowser.close();

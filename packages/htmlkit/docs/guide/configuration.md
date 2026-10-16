@@ -105,7 +105,7 @@ const notes: HtmlKitPlugin = {
     compile(source, page) {
       // Each page needs its own valid component name; a hash of its path is both.
       const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
-      return `<template component="note-${name}"><article>${source}</article></template>`;
+      return `<template component="note-${name}"><defs><title>Note</title></defs><article>${source}</article></template>`;
     },
   },
 };
@@ -114,7 +114,8 @@ export default defineConfig({ plugins: [notes] });
 ```
 
 HTMLKit routes, orders, watches, renders, and builds `.note` files like `.html` pages, and errors
-name the `.note` file. While compiling, a plugin can call:
+name the `.note` file. A compiled page is an HTML Next component, so its head content and `hk:`
+settings go in its `<defs>`. While compiling, a plugin can call:
 
 - `page.href(file)` for another page's URL;
 - `page.asset(file)` to serve a file the page references, such as an image, and get its URL;

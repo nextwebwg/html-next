@@ -23,7 +23,7 @@ await write("app/pages/index.html", '<template component="page-home"><h1>Home</h
 for (let group = 1; group <= 4; group++) for (let folder = 1; folder <= 2; folder++) for (let page = 1; page <= 10; page++) {
   const name = `${group}-${folder}-${page}`;
   await write(`app/pages/0${group}.(Group ${group})/folder-${group}-${folder}/${String(page).padStart(2, "0")}.page-${name}.html`,
-    `<template component="page-${name}"><title>Page ${name}</title><article><h1>Page ${name}</h1><p>Body text.</p></article></template>`);
+    `<template component="page-${name}"><defs><title>Page ${name}</title></defs><article><h1>Page ${name}</h1><p>Body text.</p></article></template>`);
 }
 await write("app/layouts/default.html", `<template component="tree-shell"><defs>
   <prop name="tree" type="list(object({ label: string, current: string, depth: number, ... }))" required>Tree</prop></defs>

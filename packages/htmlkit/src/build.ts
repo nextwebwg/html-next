@@ -1,6 +1,7 @@
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile, copyFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Manifest, ManifestChunk } from "vite";
+import { parseFragment } from "parse5";
 
 import { createApplicationInternals, headScripts, notFoundPage, type RouteGraph } from "./application.js";
 import { browserSources, stylesheetSources } from "./browser.js";
@@ -74,8 +75,7 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
     const page: ServerPage = { definitions: graph.definitions, assets, layers: graph.layers.map((layer, i) => {
       const loader = layers[i]!.server;
       if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
-      return { definition: layer.definition, metadata: { head: layer.metadata.head, propDeclarations: layer.metadata.propDeclarations },
-        ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
+      return { definition: layer.definition, ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
     }) };
     if (route === application.error) error = { ...page, route: path(route) };
     else pages[application.routes.indexOf(route)] = page;
@@ -197,8 +197,9 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       // Served at any missing path, so it has no route, manifest entry, or payload; its asset URLs are absolute.
       if (i === notFoundIndex) { notFoundHTML = documentHTML(page.body, page.head, assets); continue; }
       delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
-      if (route.canonical === undefined && !page.head.elements?.some(element => element.tag === "meta" && element.attributes.name?.toLowerCase() === "robots" &&
-        /\b(?:noindex|none)\b/i.test(element.attributes.content ?? ""))) indexed.push(page.pathname);
+      if (route.canonical === undefined && !parseFragment(page.head.html).childNodes.some(node => "tagName" in node && node.tagName === "meta" &&
+        node.attrs.some(({ name, value }) => name === "name" && value.toLowerCase() === "robots") &&
+        node.attrs.some(({ name, value }) => name === "content" && /\b(?:noindex|none)\b/i.test(value)))) indexed.push(page.pathname);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, documentHTML(page.body, page.head, assets));
       const payload = pagePayload(page, assets);

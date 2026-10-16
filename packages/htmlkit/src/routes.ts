@@ -287,8 +287,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       if (index) folderOrders.push({ segments: route.segments, rank: metadata.order });
     }
     // A static <title> labels the page's folder in navigation trees when hk:label doesn't.
-    const title = /^<title>([^<{]*)<\/title>$/m.exec(metadata.head.replaceAll("><", ">\n<"))?.[1]?.trim()
-      .replace(/&(lt|gt|quot|#39|amp);/g, (_, name: string) => ({ lt: "<", gt: ">", quot: '"', "#39": "'", amp: "&" })[name]!);
+    const title = metadata.title;
     // The not-found page is prerendered as 404.html, and the error page renders as a build would; neither takes hk:render.
     if ((isNotFound || isError) && metadata.render !== undefined) throw new HtmlKitError(`The ${isNotFound ? "not-found" : "error"} page takes no hk:render.`, route.component);
     const discoveredRoute = { ...route, layouts, pageName, ...(order === undefined ? {} : { order }), ...(metadata.label === undefined ? {} : { label: metadata.label }),

@@ -21,7 +21,7 @@ loader can read the [request](/htmlkit/loaders#rendering-on-each-request):
 ```html
 <!-- app/pages/account.html -->
 <template component="page-account">
-  <meta name="hk:render" content="server">
+  <defs><meta name="hk:render" content="server"></defs>
   …
 </template>
 ```

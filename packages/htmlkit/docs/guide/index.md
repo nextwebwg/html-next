@@ -39,7 +39,7 @@ Create your first page:
 ```html
 <!-- app/pages/index.html -->
 <template component="page-home">
-  <title>Hello</title>
+  <defs><title>Hello</title></defs>
   <main>
     <h1>Hello, HTMLKit</h1>
   </main>
