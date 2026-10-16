@@ -67,8 +67,12 @@ function reset(): void {
 
 <template>
   <div v-bind="nativeAttrs($attrs)" data-hn>
-    <button type="button" @click="increment">Count: {{ count }}</button>
-    <button type="button" @click="reset">Reset</button>
+    <button type="button" @click="increment">Count: {{ count }}</button>{{ ' ' }}<button
+      type="button"
+      @click="reset"
+    >
+      Reset
+    </button>
   </div>
 </template>
 ```
@@ -118,7 +122,7 @@ export default function XCounter(props: XCounterProps) {
         ref={rootRef}
         data-component={[nativeAttrs["data-component"], "x-counter"].filter(Boolean).join(" ")}
       >
-        <button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>
+        <button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}
         <button type="button" ref={resetEvents}>Reset</button>
       </div>
     </HtmlNextContext_XCounter_count>
@@ -161,8 +165,8 @@ The Svelte adapter generates this component when your app builds. [Set up Svelte
 </script>
 
 <div {...rootAttrs()}
-	><button type="button" onclick={increment}>Count: {count}</button
-	><button type="button" onclick={reset}>Reset</button
+	><button type="button" onclick={increment}>Count: {count}</button>
+	<button type="button" onclick={reset}>Reset</button
 ></div>
 ```
 

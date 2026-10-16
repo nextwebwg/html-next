@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 
-import { generateComponent } from "../src/generate.js";
+import { generateComponent, generateReactComponent, generateSvelteConversion, generateVueComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -49,6 +49,40 @@ describe("generateComponent", () => {
     assert.match(vue, /\[0\]/);
     assert.match(vue, /\[42\]/);
   });
+  it("writes whitespace between inline content in each framework's kept form", () => {
+    const definition = parseComponent(`<template component="x-spaces"><div>
+      <p><strong>Package:</strong> <code>x</code> and <em>a</em>
+        <em>b</em><template $if="true"> <b>c</b></template></p>
+      <ul>
+        <li>a</li>
+        <li>b</li>
+      </ul>
+      <select><option>a</option> <option>b</option></select>
+      <pre><b>1</b>
+  <b>2</b></pre>
+    </div></template>`);
+    // Formatted output breaks lines where whitespace is insignificant to the host.
+    const lines = (source: string): string => source.replaceAll(/[\t ]*\n[\t ]*/g, "\n");
+    // Vue drops whitespace with a newline between elements, where a formatter may break a line, and
+    // at a block's edge, so a kept space is an interpolation.
+    const vue = lines(generateVueComponent(definition));
+    assert.match(vue, /<strong>Package:<\/strong>\{\{ ' ' \}\}<code>x<\/code> and <em>a<\/em>\{\{ ' ' \}\}<em>b<\/em>\n<template v-if="true">\{\{ ' ' \}\}<b>c<\/b><\/template>/);
+    assert.match(vue, /<li>a<\/li>\n<li>b<\/li>/);
+    assert.match(vue, /<pre><b>1<\/b>\n<b>2<\/b><\/pre>/);
+    // JSX drops whitespace that holds a newline, so a kept space is a string expression.
+    const react = lines(generateReactComponent(definition));
+    assert.match(react, /<em>a<\/em> <em>b<\/em>/);
+    assert.match(react, /<>\n\{" "\}\n<b>c<\/b>/);
+    assert.match(react, /<li>a<\/li>\n<li>b<\/li>\n<\/ul>\n<select>\n<option>a<\/option>\n<option>b<\/option>\n<\/select>\n<pre>/);
+    assert.match(react, /<pre><b>\{"1"\}<\/b>\{"\\n  "\}<b>\{"2"\}<\/b><\/pre>/);
+    // Svelte keeps whitespace between nodes as one space, but drops it at a block's edge.
+    const svelte = generateSvelteConversion(definition).component;
+    assert.match(svelte, /<em>a<\/em> <em>b<\/em>\{#if true\}\{" "\}<b>c<\/b>\{\/if\}/);
+    assert.match(svelte, /<li>a<\/li><li>b<\/li>/);
+    assert.match(svelte, /<option>\{"a"\}<\/option><option>\{"b"\}<\/option>/);
+  });
+
+
   it("snapshots every deterministic projection", async () => {
     const source = await readFile(fixtureUrl, "utf8");
     const definition = parseComponent(source, "x-button.html");

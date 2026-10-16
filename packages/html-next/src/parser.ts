@@ -6,8 +6,8 @@ import { checkExpressionSemantics, compileExpression, compilePath, getWritablePa
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
-  isPreformattedElement,
   isReservedElement,
+  isWhitespaceDiscardingElement,
   validateDefinitionElementName,
   validateLiteralAttributeName,
   validateMvpDomProperty,
@@ -67,14 +67,9 @@ export function parseProjectedSlotContent(
   };
   const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[], refs: new Set<string>() };
   const nodes: TemplateNode[] = [];
-  for (const child of sourceChildren(template)) {
-    if (child.nodeName === "#comment") continue;
-    if (isText(child)) {
-      const value = sourceText(child);
-      if (value.trim() !== "") nodes.push(...parseText(value, scope, source));
-    } else if (isElement(child)) {
-      nodes.push(parseElement(child, definition.contract, scope, source, slotState, platform));
-    }
+  for (const child of contentNodes(template)) {
+    if (typeof child === "string") nodes.push(...parseText(child, scope, source));
+    else nodes.push(parseElement(child, definition.contract, scope, source, slotState, platform));
   }
   return nodes;
 }
@@ -126,6 +121,28 @@ function sourceChildren(element: Element): Iterable<ChildNode> {
 function sourceText(node: ChildNode): string {
   if ("value" in node) return node.value;
   return "nodeValue" in node ? node.nodeValue ?? "" : "";
+}
+
+const HTML_WHITESPACE_RE = /^[\t\n\f\r ]*$/;
+
+/**
+ * An element's text and element children. Text is kept as written, whitespace-only text included:
+ * it renders between inline content, and CSS `white-space` decides how it collapses. Text that only
+ * a comment separates is one DOM text node once rendered, so it reads as one run.
+ */
+function contentNodes(element: Element): Array<Element | string> {
+  const result: Array<Element | string> = [];
+  for (const node of sourceChildren(element)) {
+    if (isText(node)) {
+      if (typeof result.at(-1) === "string") result[result.length - 1] += sourceText(node);
+      else result.push(sourceText(node));
+    } else if (isElement(node)) result.push(node);
+  }
+  return result;
+}
+
+function isWhitespaceText(node: TemplateNode): boolean {
+  return node.kind === "text" && node.expressionPlan === undefined && node.segments === undefined && HTML_WHITESPACE_RE.test(node.value);
 }
 
 function significant(nodes: Iterable<ChildNode>): ChildNode[] {
@@ -201,8 +218,8 @@ interface ParseScope {
   readonly aliases?: ReadonlyMap<string, Writable>;
   /** How many `$each` layers enclose this point, so a `loop.index` segment names the right loop. */
   readonly loops?: number;
-  /** Inside a preformatted element, where whitespace-only text renders. */
-  readonly preformatted?: boolean;
+  /** Among table-structure or SVG-container children, where whitespace-only text never renders. */
+  readonly discardsWhitespace?: boolean;
 }
 
 /**
@@ -1456,15 +1473,17 @@ function parseElementAtSource(
   );
   // The receiving component declares these names, so a standalone consumer definition cannot
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
-  const childScope = tagName === "template" && attr(element, "slot") !== undefined
-    ? { ...nodeScope, allowUndeclared: true }
-    : isPreformattedElement(tagName) ? { ...nodeScope, preformatted: true } : nodeScope;
+  // A <template> renders its children among its parent's; a projected one, wherever its slot is.
+  const projectedTemplate = tagName === "template" && attr(element, "slot") !== undefined;
+  const discardsWhitespace = tagName === "template" && !projectedTemplate ? nodeScope.discardsWhitespace === true : isWhitespaceDiscardingElement(tagName);
+  const childScope = projectedTemplate || discardsWhitespace !== (nodeScope.discardsWhitespace === true)
+    ? { ...nodeScope, discardsWhitespace, ...(projectedTemplate ? { allowUndeclared: true } : {}) }
+    : nodeScope;
   const attributes = parseAttributes(bindingAttributes, tagName, contract, nodeScope, source, platform);
   const events = parseEvents(eventAttributes, nodeScope, source, lifecycle);
   const ref = parseRef(refName, slotState.refs, source);
   const transition = parseTransition(element, tagName, transitionValue, transitionName, nodeScope, source);
   const children: TemplateNode[] = [];
-  const childNodes = sourceChildren(element);
   // A root `$match` renders exactly one arm, so each arm may declare the same slots and refs.
   const shared = rootMatch
     ? { defaults: slotState.defaults, names: [...slotState.names], refs: [...slotState.refs] }
@@ -1472,14 +1491,12 @@ function parseElementAtSource(
   const merged = { defaults: slotState.defaults, names: new Set<string>(), refs: new Set<string>() };
   // Dynamic slots have no name to match, so arms' dynamic slots merge by position.
   const dynamicSlots: SlotContract[] = [];
-  for (const child of childNodes) {
-    if (child.nodeName === "#comment") continue;
-    if (isText(child)) {
-      const value = sourceText(child);
-      if (childScope.preformatted === true || value.trim() !== "") children.push(...parseText(value, childScope, source));
+  for (const child of contentNodes(element)) {
+    if (typeof child === "string") {
+      // A `$match`'s children are its arms; whitespace between them is layout, not content.
+      if ((flow?.kind !== "match" && !discardsWhitespace) || !HTML_WHITESPACE_RE.test(child)) children.push(...parseText(child, childScope, source));
       continue;
     }
-    if (!isElement(child)) continue;
     if (sourceTag(child) === "slot") {
       const name = attr(child, "name");
       const nameExpression = attr(child, "from:name");
@@ -1522,14 +1539,9 @@ function parseElementAtSource(
         slotState.names.add(name);
       }
       const fallback: TemplateNode[] = [];
-      for (const fallbackNode of sourceChildren(child)) {
-        if (fallbackNode.nodeName === "#comment") continue;
-        if (isText(fallbackNode)) {
-          const value = sourceText(fallbackNode);
-          if (slotScope.preformatted === true || value.trim() !== "") fallback.push(...parseText(value, slotScope, source));
-        } else if (isElement(fallbackNode)) {
-          fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
-        }
+      for (const fallbackNode of contentNodes(child)) {
+        if (typeof fallbackNode === "string") fallback.push(...parseText(fallbackNode, slotScope, source));
+        else fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
       }
       const dynamic = nameExpression !== undefined;
       const slotContract: { name?: string; dynamic: boolean; required: boolean; props?: readonly string[] } = {
@@ -1604,6 +1616,23 @@ function parseElementAtSource(
     for (const ref of merged.refs) slotState.refs.add(ref);
   }
 
+  // A component's children are projected content. Whitespace at their edges or beside content for a
+  // named slot lays out the invocation, and would otherwise reach the default slot and hide its
+  // fallback; whitespace between default-slot content stays.
+  if (tagName.includes("-") && !platform.isNativeElement(tagName)) {
+    const named = (node: TemplateNode | undefined): boolean => node?.kind === "element" &&
+      node.attributes.some((binding) => binding.kind === "literal" && binding.name === "slot" && (binding.value !== "" || node.name === "template"));
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      if (isWhitespaceText(children[index]!) && (index === 0 || index === children.length - 1 || named(children[index - 1]) || named(children[index + 1]))) {
+        children.splice(index, 1);
+      }
+    }
+  }
+  // Content directives replace the element's children, so whitespace-only text beside one is layout.
+  if (
+    attributes.some((binding) => binding.kind === "directive" || (binding.kind === "property" && binding.name === "textContent")) &&
+    children.every(isWhitespaceText)
+  ) children.length = 0;
   if (attributes.some((binding) => binding.kind === "directive") && children.length > 0) {
     fail("HT006", "A content directive cannot coexist with children.", source);
   }

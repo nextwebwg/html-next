@@ -91,6 +91,14 @@ export const definitions = [
     <ol><li $each="item of $items"><template $match><a $when="$item.href != ''">{$item.label}</a><span $else>{$item.label}</span></template></li></ol>
     <dl><template $each="item of $items"><dt $if="$item.href">{$item.label}</dt><dd $if="not $item.href">{$item.label}</dd>
     <dd $each="tag of $item.tags"><template $match><b $when="$item.href">{$tag}</b><i $else>{$tag}</i></template></dd></template></dl></section></template>`,
+  `<template component="ssr-whitespace"><defs>
+    <state name="rows" type="list(string)" value="['a', 'b']"></state>
+    <handler name="change"><set name="rows" expr:value="['c', 'a', 'b']"></set></handler>
+    </defs><section><button type="button" on:click="change">Change</button>
+    <p><strong>Package:</strong> <code>x</code> <!-- note --> and <em>a</em>
+      <em>b</em><template $if="true"> <i>c</i></template></p>
+    <p style="white-space: pre"><b>1</b>  <b>2</b>
+    <template $each="row of $rows" $key="$row"><i $value="$row"></i> </template></p></section></template>`,
 ].map((source) => parseComponent(source));
 
 export const cases = [
@@ -114,6 +122,7 @@ export const cases = [
   { name: "control flow in rows reading the row's item", html: '<ssr-row-flows id="subject"></ssr-row-flows>',
     state: { items: [{ label: "link", href: "/a/", tags: ["x", "y"] }, { label: "group", href: "", tags: ["z"] }] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
+  { name: "whitespace between inline content, in rows and under white-space: pre", html: '<ssr-whitespace id="subject"></ssr-whitespace>', state: {} },
 ] as const;
 
 /**

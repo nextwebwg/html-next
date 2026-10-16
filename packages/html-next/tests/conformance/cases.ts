@@ -86,6 +86,36 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "renders whitespace between inline content as one space, as a hand-written page does",
+    source: scene({
+      root: `<section>
+  <p id="package"><strong>Package:</strong> <code>x</code> and <em>a</em> <em>b</em></p>
+  <p id="wrapped">Tree Item
+    <code>expand</code>
+    <em>a</em>
+    <em>b</em><template $if="true"> <b>c</b></template> done</p>
+  <pre id="pre"><b>1</b> <b>2</b>
+  <b>3</b></pre>
+  <ul id="list">
+    <li>a</li>
+    <li>b</li>
+  </ul>
+  <table><tbody>
+    <tr id="row">
+      <td>1</td>
+      <td>2</td>
+    </tr>
+  </tbody></table>
+</section>`,
+      use: `<x-t id="spaces"></x-t>`,
+    }),
+    expect: {
+      probe: `return { text: ['package', 'wrapped', 'pre', 'list'].map((id) => q('#' + id).innerText),
+        rowText: Array.from(q('#row').childNodes).filter((node) => node.nodeType === 3).length };`,
+      result: { text: ["Package: x and a b", "Tree Item expand a b c done", "1 2\n  3", "a\nb"], rowText: 0 },
+    },
+  },
+  {
     name: "preserves SVG namespaces and camelCase attributes inside a native root",
     source: scene({
       tag: "icon-close",

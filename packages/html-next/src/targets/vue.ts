@@ -30,7 +30,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpressio
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { conformingScalarStates } from "./state-roots.js";
-import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -276,6 +276,9 @@ function isComponentTag(name: string): boolean {
  */
 function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context, receivingTag?: string): string {
   return nodes.map((child, index) => {
+    // Vue drops whitespace at a block's edges and, once a formatter breaks the line there, between
+    // elements, so a kept space is an interpolation.
+    if (!context.preformatted && isKeptSpace(child)) return "{{ ' ' }}";
     let markup = renderNode(child, names, context, receivingTag);
     // Authored indentation at the start or end of an element's text goes; a space between
     // siblings stays, as Vue keeps it.
@@ -836,6 +839,7 @@ export interface VueConversionOptions {
 }
 
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
+  definition = condenseWhitespace(definition);
   const { contract, template } = definition;
   const target = targetComponent(definition);
   const generics = selectorGenerics(contract.props);

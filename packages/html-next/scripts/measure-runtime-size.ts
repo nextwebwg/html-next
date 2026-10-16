@@ -149,8 +149,9 @@ const requestGenerated = await generatedFixture("controller-request", 8_180);
 // uses, 25 B for a host root that follows a root `$match` switch, as live's does, 50 B for the
 // node methods through which keyed lists also hold rows of several nodes, and 15 B for the reconcile
 // recording the rows it kept in place, so lists whose rows read their position visit only moved rows,
-// and 85 B for the platform-object check that keeps DOM nodes in state unwrapped.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_250);
+// 85 B for the platform-object check that keeps DOM nodes in state unwrapped, and 17 B for the
+// whitespace between its elements, which templates keep as authored.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_267);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated];

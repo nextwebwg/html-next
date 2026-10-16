@@ -134,6 +134,10 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             assert.deepEqual(result.parentBindings, { tag: "a", count: "7", expanded: "true", active: true,
               opacity: "0.5", refFollowsRoot: true, projectionKept: true, noNativeProp: true });
           }
+          if (fixture.name.startsWith("whitespace")) {
+            assert.match(result.after.html[0]!, /<strong>Package:<\/strong> <code>x<\/code>  and <em>a<\/em>\n {6}<em>b<\/em>/);
+            assert.match(result.after.html[0]!, /<b>1<\/b> {2}<b>2<\/b>\n {4}(?:<!--[^>]*-->)*<i>c<\/i> (?:<!--[^>]*-->)*<i>a<\/i> /);
+          }
           if (fixture.name.includes("controls")) {
             assert.deepEqual(result.control, { value: "edited before hydration", defaultValue: "authored", focused: true, selection: [2, 6] });
             assert.equal(result.editedState, "next");

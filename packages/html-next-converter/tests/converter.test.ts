@@ -205,7 +205,7 @@ describe("framework converter", () => {
 
   it("converts every successful shared conformance definition to React in both graph modes", async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 42, "review new successful conformance cases for React coverage");
+    assert.equal(successful.length, 43, "review new successful conformance cases for React coverage");
     const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -400,7 +400,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XNestedSet!)),
-      '<section data-component="x-nested-set"><button type="button">Rename</button><button type="button">Missing</button><output>Ada</output><output>Bea</output><output>1</output></section>');
+      '<section data-component="x-nested-set"><button type="button">Rename</button><button type="button">Missing</button> <output>Ada</output><output>Bea</output> <output>1</output></section>');
   });
 
   it("emits declared React data reads without a request during SSR", async () => {
@@ -437,7 +437,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XFeed!)),
-      '<section data-component="x-feed"><output class="value"></output><output class="pending">true</output><output class="ok">false</output></section>');
+      '<section data-component="x-feed"><output class="value"></output> <output class="pending">true</output><output class="ok">false</output></section>');
   });
 
   it("typechecks native React control bindings and emits only their helper", async () => {
@@ -1423,7 +1423,7 @@ void [named, functionSlot, undeclared];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<article data-component="x-app"><section data-component="x-panel"><header><h2 slot="title" data-slotted="">Title</h2></header><main><p data-slotted="">Body</p></main></section><section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section><section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section><section data-component="x-panel"><header><template slot="title" data-slotted=""><h2>Inert</h2></template></header><main><i>Empty</i></main></section></article>');
+      '<article data-component="x-app"><section data-component="x-panel"><header><h2 slot="title" data-slotted="">Title</h2></header><main><p data-slotted="">Body</p></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><template slot="title" data-slotted=""><h2>Inert</h2></template></header><main><i>Empty</i></main></section></article>');
   });
 
   it("renders repeated React scoped slots with outlet props and consumer lexical state", async () => {
@@ -1458,7 +1458,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><output>Parent</output><ul data-component="x-rows"><li data-slotted=""><b>Ada</b><em>Team</em><small>0</small></li><li data-slotted=""><b>Bea</b><em>Team</em><small>1</small></li></ul><ul data-component="x-rows"><li>Missing</li><li>Missing</li></ul></main>');
+      '<main data-component="x-app"><output>Parent</output> <ul data-component="x-rows"><li data-slotted=""><b>Ada</b><em>Team</em><small>0</small></li><li data-slotted=""><b>Bea</b><em>Team</em><small>1</small></li></ul> <ul data-component="x-rows"><li>Missing</li><li>Missing</li></ul></main>');
   });
 
   it("reports the live diagnostic when a React scoped slot has no template carrier", async () => {
@@ -1507,7 +1507,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><div data-which="row" data-x-receiver-prop-which="row" data-component="x-receiver"><b data-slotted="">Ada</b></div><div data-which="other" data-x-receiver-prop-which="other" data-component="x-receiver"><span>Fallback</span></div></main>');
+      '<main data-component="x-app"><div data-which="row" data-x-receiver-prop-which="row" data-component="x-receiver"><b data-slotted="">Ada</b></div> <div data-which="other" data-x-receiver-prop-which="other" data-component="x-receiver"><span>Fallback</span></div></main>');
   });
 
   it("marks sanitized fragment roots projected through a React slot", async () => {
@@ -1567,7 +1567,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><section data-start="1" data-x-steps-prop-start="1" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Outer one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Outer two</p><section data-slotted="" data-start="2" data-x-steps-prop-start="2" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Inner one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Inner two</p></section></section></main>');
+      '<main data-component="x-app"><section data-start="1" data-x-steps-prop-start="1" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Outer one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Outer two</p> <section data-slotted="" data-start="2" data-x-steps-prop-start="2" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Inner one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Inner two</p></section></section></main>');
     assert.throws(() => renderToStaticMarkup(createElement(module.exports.XStep!, { number: 1 })), (error: unknown) => {
       const diagnostic = error as Error & { diagnostic?: { code?: string; message?: string } };
       return diagnostic.name === "HtmlDiagnosticError" && diagnostic.diagnostic?.code === "HR009" &&
