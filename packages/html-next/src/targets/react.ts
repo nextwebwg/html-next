@@ -84,6 +84,8 @@ const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTexta
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
+  /** The states a \`<context>\` reader can read, from \`publishedStates\`; without it, every state is published. */
+  readonly publishedStates?: ReadonlySet<string> | undefined;
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly propsByTag?: ReadonlyMap<string, ReadonlySet<string>>;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
@@ -825,7 +827,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const usesTargetDispatch = handlers.some((handler) => handler.steps.some((step) => step.kind === "dispatch" && step.target !== undefined));
   const contexts = declarations.filter((declaration): declaration is ContextDeclaration => declaration.kind === "context");
-  const providedContexts = new Set(states.map((state) => state.name));
+  const providedContexts = new Set(states.map((state) => state.name).filter((name) => options.publishedStates?.has(name) ?? true));
   const usesContext = providedContexts.size > 0 || contexts.length > 0;
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
   const name = definition.contract.name;
@@ -969,7 +971,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ? "Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>"
     : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")}${dynamicSlots ? " [name: string]: ReactNode | ((props: Record<string, any>) => ReactNode);" : ""} }>`;
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
-  const contextMarkup = states.reduceRight((content, state) =>
+  const contextMarkup = states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
     `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
   const body = [
@@ -1008,7 +1010,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(usesController && target.requests.length > 0 ? [`const requestAsk = ${frameworkRequestSource(target.requests, definition.source.file)};`] : []),
     ...target.events.map((event) =>
       `const ${eventSchemas.get(event.name)!} = ${JSON.stringify({ type: declarationTypeNode(event.type, event.shape)!, init: { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable } })} as const;`),
-    ...(states.map((state) =>
+    ...(states.filter((state) => providedContexts.has(state.name)).map((state) =>
       `export const ${contextExportName(definition.contract.tag, state.name)} = componentContext<${stateType(state)}>(${quote(definition.contract.tag)}, ${quote(state.name)});`)),
     "",
     `export type ${name}Props${genericDeclaration} = Omit<React.HTMLAttributes<${rootType}>, ${["style", ...target.props.map((prop) => prop.name)].map(quote).join(" | ")}> & {`,

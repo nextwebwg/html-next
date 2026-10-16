@@ -46,6 +46,8 @@ export interface SvelteConversionOptions {
   readonly hostSpecifier?: string;
   readonly connectionSpecifier?: string;
   readonly renderSpecifier?: string;
+  /** The states a \`<context>\` reader can read, from \`publishedStates\`; without it, every state is published. */
+  readonly publishedStates?: ReadonlySet<string> | undefined;
   /** The request steps, which a component that declares requests imports. */
   readonly requestsSpecifier?: string;
   readonly controllerSpecifier?: string;
@@ -1476,7 +1478,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       return [`const ${variable} = injectContext(${quote(definition.contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
     ...stateSources,
-    ...states.map((state) => `publishState(${quote(definition.contract.tag)}, ${quote(state.name)}, () => ${code.get(state.name)});`),
+    ...states.filter((state) => options.publishedStates?.has(state.name) ?? true).map((state) => `publishState(${quote(definition.contract.tag)}, ${quote(state.name)}, () => ${code.get(state.name)});`),
     ...dataSources,
     ...computedSources,
     ...(scope.preservesRootFocus ? [

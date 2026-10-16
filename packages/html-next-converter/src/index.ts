@@ -10,6 +10,7 @@ import {
   generateReactConversion,
   generateSvelteConversion,
   HtmlDiagnosticError,
+  publishedStates,
   HtmlDiagnosticAggregateError,
   type HtmlDiagnostic,
   loadNodeComponents,
@@ -414,6 +415,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       names.set(name, { path, source });
     } catch (error) { recover(error); }
   }
+  const definitions = [...graph.nodes.values()].map((node) => node.definition);
   const slotsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition.slots ?? []] as const));
   const propsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     new Set(Object.keys(node.definition.contract.props))] as const));
@@ -462,6 +464,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         source: Object.freeze({ file: browserDefinitionURL(node.definition, source, options.publicRootURL, options.target, tag) }),
         ...(controller === undefined ? {} : { controller: relativeImport(componentPath, controller) }),
       });
+      // A state is published only where a <context> reader can read it.
+      const published = publishedStates(node.definition, definitions, options.mode === "library");
       let content: string;
       let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
       let svelteConversion: ReturnType<typeof generateSvelteConversion> | undefined;
@@ -474,6 +478,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         };
         const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "vue" ? generateVueComponent(definition, {
+          publishedStates: published,
           slotsByTag,
           propContractsByTag,
           guardNestedDepth,
@@ -484,6 +489,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           },
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
+          publishedStates: published,
           slotsByTag,
           guardNestedDepth,
           rootDecorations: decorationReceivers?.get(tag),
@@ -504,6 +510,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           dataSpecifier: relativeImport(componentPath, "svelte/data.svelte.ts").replace(/\.ts$/, ""),
           requestsSpecifier: relativeImport(componentPath, "svelte/requests.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
+          publishedStates: published,
           slotsByTag,
           propsByTag,
           propContractsByTag,
