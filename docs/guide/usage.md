@@ -682,7 +682,8 @@ A `<title>` takes inline text expressions, a `<meta>` binds `from:content`, and 
 Every element the runtime manages carries `data-component-head`. When several connected components declare the same thing:
 
 - **One title, one description.** A `<title>`, a canonical link, and each `<meta>` name or property go to the deepest component, and between two at the same depth, to the one that connected last. A page inside its layout sets the title over the layout's, and when the page leaves, the layout's title returns, in the same element.
-- **Shared links and data.** Two cards that preconnect to the same host share one element, which stays until the last of them disconnects. JSON-LD blocks share one element per text.
+- **Shared links.** Two cards that preconnect to the same host share one element, which stays until the last of them disconnects.
+- **JSON-LD.** Each JSON-LD declaration of each connected instance is its own block, so two products on a page write two blocks even when their data is identical. A bound value change updates the block's text in place, as the same node.
 - **Lists stay whole.** A component's repeated `<meta property="og:image">` entries are one list, and `og:image:width` and other sub-properties stay with the image their component declared. The deepest component's list replaces another's whole.
 - **The page's own head returns.** A title or description the document itself has is set aside, unchanged, while a component replaces it, and put back as the same element afterwards. A link the document already has, such as its own preconnect, satisfies a component's declaration of it.
 

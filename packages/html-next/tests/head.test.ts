@@ -179,6 +179,30 @@ describe("head declarations in the live runtime", () => {
     host.state.schema = null;
     await settle();
     assert.equal(document.querySelectorAll('script[type="application/ld+json"]').length, 1);
+    // A later value inserts it again.
+    host.state.schema = { "@type": "Product" };
+    await settle();
+    assert.equal(document.querySelectorAll('script[type="application/ld+json"]')[1]?.textContent, '{"@type":"Product"}');
+  });
+
+  it("gives each JSON-LD declaration of each instance its own block, updated in place", async () => {
+    const product = `<template component="x-product"><defs>
+      <prop name="name" type="string" default="Anvil">The name.</prop>
+      <script type="application/ld+json" from:value="{ name: $name }"></script>
+    </defs><section></section></template>`;
+    const { document, main, settle, head, runtime } = await page("", [product]);
+    main.innerHTML = "<x-product></x-product><x-product></x-product>";
+    await settle();
+    // Identical JSON-LD from two instances is two blocks.
+    assert.deepEqual(head(), ['<script type="application/ld+json" *>{"name":"Anvil"}</script>', '<script type="application/ld+json" *>{"name":"Anvil"}</script>']);
+    const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+    runtime.updateComponentProps(main.firstElementChild!, { name: "Hammer" });
+    await settle();
+    assert.deepEqual(head(), ['<script type="application/ld+json" *>{"name":"Hammer"}</script>', '<script type="application/ld+json" *>{"name":"Anvil"}</script>']);
+    assert.deepEqual(Array.from(document.querySelectorAll('script[type="application/ld+json"]')), blocks);
+    main.lastElementChild!.remove();
+    await settle();
+    assert.deepEqual(Array.from(document.querySelectorAll('script[type="application/ld+json"]')), [blocks[0]]);
   });
 
   it("orders new elements by their instances' tree order, then declared order", async () => {
