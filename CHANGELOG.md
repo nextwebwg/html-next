@@ -25,6 +25,7 @@
 
 ### Changed
 
+- Converted Svelte components publish their state to `<context>` readers with `publishState('x-counter', 'count', () => count)` and read an ancestor's with `injectContext(...)`, both from the shared `svelte/render.svelte.ts`. Their context key is `html-next:x-counter:count`, the key converted Vue components use.
 - A component resource's top level holds component carriers, component links, and build metadata: a `<meta name content>` whose name has a colon, such as `app:page`. Any other `<title>`, `<meta>` or `<link>` there is `HT009`; a component's head content is its head declarations.
 - Vanilla, Vue, React and Svelte output of a definition with head declarations reports `HT030`; such a component runs in the live runtime.
 
