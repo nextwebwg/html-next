@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.56
+
+### Changed
+
+- Converted Svelte components publish their state to `<context>` readers with `publishState('x-counter', 'count', () => count)` and read an ancestor's with `injectContext(...)`, both from the shared `svelte/render.svelte.ts`. Their context key is `html-next:x-counter:count`, the key converted Vue components use.
+
 ## 1.0.0-alpha.55
 
 ### Added
@@ -51,7 +57,6 @@
 
 ### Changed
 
-- Converted Svelte components publish their state to `<context>` readers with `publishState('x-counter', 'count', () => count)` and read an ancestor's with `injectContext(...)`, both from the shared `svelte/render.svelte.ts`. Their context key is `html-next:x-counter:count`, the key converted Vue components use.
 - A component resource's top level holds component carriers, component links, and build metadata: a `<meta name content>` whose name has a colon, such as `app:page`. Any other `<title>`, `<meta>` or `<link>` there is `HT009`; a component's head content is its head declarations.
 
 - `renderComponents` renders in a pool of long-lived workers, one per available CPU up to 8, each rendering one request at a time and the rest queued. Each render has its own JSDOM window and document, which the worker closes after it, its own component registry and instances, browser globals pointed at its window and restored afterwards, and its own structured-clone copies of the definitions and state; a worker keeps only its loaded modules and their static tables. A worker that fails or exits rejects the render it was doing and the next render starts a new one, and an idle worker doesn't keep the process alive. A render in a warm worker takes milliseconds; starting a worker and importing jsdom, 0.4 to 0.9 s, happens once per worker. The request-isolation test renders conflicting definitions of one tag and conflicting state concurrently and in sequence, on one worker and on three.
