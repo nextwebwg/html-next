@@ -17,8 +17,10 @@ import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 /**
  * Requests (https://nextwebwg.org/declarative-components/javascript#requests), the same scenario in
  * the live runtime, compiled Vanilla output and each converted framework: an editor asks, its
- * consumer's controller answers, a page script answers through `respond()` from another bundle, and
- * late responders relay to the requests that went unanswered.
+ * consumer's controller answers, a page script answers through `RequestEvent.respond` from another
+ * bundle, and late responders relay to the requests that went unanswered. Page script asks through
+ * `RequestEvent.request` and every kind of responder answers it, and the editor's
+ * `host.hasResponder` follows known responders as they come and go.
  */
 const editor = `<template component="ui-editor" status="early" summary="Asks its consumer." controller="./editor.js"><defs>
   <request name="mention-query" type="object({ query: string })" returns="list(string)">People matching the text after @.</request>
@@ -31,6 +33,7 @@ const editor = `<template component="ui-editor" status="early" summary="Asks its
   <request name="extensions" returns="list(string)">Extensions added to the built-in set.</request>
   <request name="theme" returns="string">The color theme.</request>
   <request name="plugins" returns="list(string)">Plugins.</request>
+  <request name="embed" returns="string">An embed's markup.</request>
 </defs><div class="editor"><span class="inside"></span></div></template>`;
 const editorController = `const late = ["extensions", "theme", "plugins"];
 export default function controller(host) {
@@ -46,7 +49,11 @@ export default function controller(host) {
     log.push(id + " responder " + event.detail.name);
     if (late.includes(event.detail.name)) record(event.detail.name, host.request(event.detail.name));
   });
-  (globalThis.editors ??= {})[id] = { ask: (name, detail, options) => host.request(name, detail, options), record, request: typeof host.request };
+  // Re-runs only when a known embed responder arrives or leaves.
+  const embed = host.computed(() => host.hasResponder("embed"));
+  host.effect(() => { log.push(id + " embed " + embed.get()); });
+  (globalThis.editors ??= {})[id] = { ask: (name, detail, options) => host.request(name, detail, options), record, request: typeof host.request,
+    has: (name) => host.hasResponder(name), hasType: typeof host.hasResponder, listenOwn: () => host.on("embed", () => {}) };
 }
 `;
 const notes = `<link rel="component" href="./editor.html">
@@ -61,7 +68,8 @@ const notesController = `export default function controller(host) {
   host.on("link-title", (event) => event.respondWith(42));
   host.on("homepage", (event) => event.respondWith("not a url"));
   // A component that declares no request has no host.request.
-  globalThis.notes = { late: () => host.on("plugins", (event) => event.respondWith(["late"])), request: typeof host.request, ask: () => host.request("mention-query") };
+  globalThis.notes = { late: () => host.on("plugins", (event) => event.respondWith(["late"])), request: typeof host.request, ask: () => host.request("mention-query"),
+    embed: () => host.on("embed", (event) => event.respondWith("notes")), hasType: typeof host.hasResponder };
 }
 `;
 const files: Readonly<Record<string, string>> = { "editor.html": editor, "editor.js": editorController, "notes.html": notes, "notes.js": notesController };
@@ -95,7 +103,7 @@ async function run(page: Page, target: Target): Promise<Record<string, readonly 
   const log = "globalThis.requestLog";
   const results: Record<string, readonly string[]> = {};
   // The editor asked in its controller's body, before its consumer's controller ran.
-  results.setup = await step("", `${log}?.length >= 4`, true);
+  results.setup = await step("", `${log}?.length >= 5`, true);
   results.abort = await step(`const editor = editors.inner;
     const first = new AbortController();
     const stale = editor.record("stale ad", editor.ask("mention-query", { query: "ad" }, { signal: first.signal }));
@@ -125,36 +133,85 @@ async function run(page: Page, target: Target): Promise<Record<string, readonly 
   results.progress = await step(`const editor = editors.inner;
     const file = new Blob(["xyz"]);
     await editor.record("upload unanswered", editor.ask("image-upload", { file }));
-    HTMLNextRequests.respond(document, "image-upload", async ({ file }, { progress }) => {
+    const { respond } = HTMLNextRequests.RequestEvent;
+    respond(document, "image-upload", async ({ file }, { progress }) => {
       progress(1, 2);
       await new Promise((resolve) => setTimeout(resolve, 5));
       progress(2, 2);
       return { src: "blob:" + file.size };
     });
     await editor.record("upload", editor.ask("image-upload", { file }, { progress: (loaded, total) => ${log}.push("progress " + loaded + "/" + total) }));`, "true");
-  results.respond = await step(`HTMLNextRequests.respond(document, "extensions", () => ["bold"]);`, `${log}.at(-1) === 'inner extensions ["bold"]'`);
+  results.respond = await step(`const { respond } = HTMLNextRequests.RequestEvent; respond(document, "extensions", () => ["bold"]);`, `${log}.at(-1) === 'inner extensions ["bold"]'`);
   results.announced = await step(`document.body.addEventListener("theme", (event) => event.respondWith("dark"));
     document.body.dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { name: "theme" } }));`, `${log}.at(-1) === 'inner theme "dark"'`);
   results.hostOn = await step("notes.late();", `${log}.at(-1) === 'inner plugins ["late"]'`);
   // An announcement that bubbles through the editor's root is not the relay to it.
   results.bubbling = await step(`document.querySelector("#inner .inside").dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { name: "theme" } }));
     await new Promise((resolve) => setTimeout(resolve, 20));`, "true");
+  // A page script asks with the same protocol: each kind of responder answers, unchecked, and it aborts and reports progress.
+  const asks = `const { request } = HTMLNextRequests.RequestEvent;
+    const asked = (label, promise) => promise.then((answer) => { ${log}.push("static " + label + " " + JSON.stringify(answer)); },
+      (error) => { ${log}.push("static " + label + " " + error.name); });`;
+  results.statics = await step(`${asks}
+    const inside = document.querySelector("#inner .inside");
+    await asked("host.on", request(inside, "mention-query", { query: "a" }));
+    await asked("unchecked", request(inside, "link-title", "x"));
+    await asked("respond", request(inside, "image-upload", { file: new Blob(["ab"]) }, { progress: (loaded, total) => ${log}.push("static progress " + loaded + "/" + total) }));
+    await asked("listener", request(inside, "theme"));
+    await asked("nobody", request(document.body, "nobody"));
+    const stale = new AbortController();
+    const pending = asked("abort", request(inside, "mention-query", { query: "ad" }, { signal: stale.signal }));
+    stale.abort();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    ${log}.push("has types " + editors.inner.hasType + " " + notes.hasType);`, "true");
+  // hasResponder sees respond(), host.on and adapter registrations on the editor's path, and follows them.
+  const tick = "await new Promise((resolve) => setTimeout(resolve, 20));";
+  results.has = await step(`const { respond, hasResponder } = HTMLNextRequests.RequestEvent;
+    const inner = editors.inner;
+    const root = document.querySelector("#inner");
+    stopEmbed();
+    ${tick}
+    const sibling = respond(document.querySelector("#direct"), "embed", () => "sibling");
+    const plain = () => {};
+    document.addEventListener("embed", plain);
+    ${log}.push("sibling " + inner.has("embed") + " " + hasResponder(root, "embed") + " " + hasResponder(document.querySelector("#direct"), "embed"));
+    document.removeEventListener("embed", plain);
+    sibling();
+    const ownStop = inner.listenOwn();
+    ${log}.push("own " + inner.has("embed") + " " + hasResponder(root, "embed"));
+    ownStop();
+    try { inner.has("missing"); } catch (error) { ${log}.push("undeclared " + error.name); }
+    ${tick}
+    const stopNotes = notes.embed();
+    ${tick}
+    stopNotes();
+    ${tick}
+    const stopMount = respond(document.querySelector("#mount"), "embed", () => "late");
+    ${tick}
+    stopMount();
+    ${tick}`, "true");
   // Disconnecting the asker aborts its pending request, and the responder's signal with it.
   results.disconnect = await step(`const pending = editors.inner.record("disconnected", editors.inner.ask("mention-query", { query: "ad" }));
     await new Promise((resolve) => setTimeout(resolve, 5));
     document.querySelector("#mount").remove();
     await pending;`, "true");
   if (!frameworks.has(target)) return results;
-  results.direct = await step("mountDirect();", `${log}.filter((line) => line.startsWith("direct ")).length >= 4`, true);
+  results.direct = await step("mountDirect();", `${log}.filter((line) => line.startsWith("direct ")).length >= 5`, true);
   const ask = `await editors.direct.record("link", editors.direct.ask("link-title", "u"));`;
   const rendered = "await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));";
   results.prop = await step(`${ask} direct.set({ linkTitle: (url) => "T2 " + url }); ${rendered} ${ask}`, "true");
   results.lateProp = await step(`direct.set({ plugins: () => ["prop plugin"] });`, `${log}.at(-1) === 'direct plugins ["prop plugin"]'`);
+  results.directStatics = await step(`${asks}
+    const inside = document.querySelector("#direct .inside");
+    await asked("prop", request(inside, "link-title", "x"));
+    await asked("event form", request(inside, "mention-query", { query: "q" }));`, "true");
+  results.directHas = await step(`direct.set({ embed: () => "prop" }); ${tick} ${rendered} direct.set({ embed: undefined }); ${tick} ${rendered}`, "true");
   return results;
 }
 
 const expected: Record<string, readonly string[]> = {
-  setup: ['inner extensions null', 'inner mention a ["Ada","Alan"]', "inner plugins null", "inner theme null"],
+  setup: ["inner embed true", 'inner extensions null', 'inner mention a ["Ada","Alan"]', "inner plugins null", "inner theme null"],
   abort: ["notes abort ad", "inner stale ad AbortError", 'inner fresh ada ["Ada"]'],
   checks: ["inner link-title TypeError", "inner bad detail TypeError", "inner undeclared TypeError", "inner homepage TypeError"],
   presence: ["inner function", "notes undefined", "notes ask TypeError"],
@@ -164,14 +221,24 @@ const expected: Record<string, readonly string[]> = {
   announced: ["inner responder theme", 'inner theme "dark"'],
   hostOn: ["inner responder plugins", 'inner plugins ["late"]'],
   bubbling: [],
+  statics: [
+    'static host.on ["Ada","Alan"]', "static unchecked 42", "static progress 1/2", "static progress 2/2", 'static respond {"src":"blob:2"}',
+    'static listener "dark"', "static nobody null", "notes abort ad", "static abort AbortError", "has types function undefined",
+  ],
+  has: [
+    "inner embed false", "sibling false false true", "own false true", "undeclared TypeError",
+    "inner embed true", "inner embed false", "inner embed true", "inner embed false",
+  ],
   // Every request's signal follows the asker's connection, so the answered ones abort too.
   disconnect: ["notes abort a", "notes abort ada", "notes abort ad", "inner disconnected AbortError"],
 };
 const expectedFramework: Record<string, readonly string[]> = {
   ...expected,
-  direct: ['direct extensions ["bold"]', 'direct mention a ["event a"]', "direct plugins null", 'direct theme "dark"'],
+  direct: ["direct embed false", 'direct extensions ["bold"]', 'direct mention a ["event a"]', "direct plugins null", 'direct theme "dark"'],
   prop: ['direct link "T1 u"', 'direct link "T2 u"'],
   lateProp: ["direct responder plugins", 'direct plugins ["prop plugin"]'],
+  directStatics: ['static prop "T2 x"', 'static event form ["event q"]'],
+  directHas: ["direct embed true", "direct embed false"],
 };
 
 /** Each framework mounts the editor directly too, answering through its function prop and event form. */
@@ -212,7 +279,7 @@ describe.skipIf(!enabled)("requests in the live runtime, compiled output and con
     for (const [name, contents] of Object.entries(files)) await writeFile(join(directory, name), contents);
     // A page script's own bundle: respond() shares the document's requests with every other bundle.
     responder = join(directory, "respond.js");
-    await build({ stdin: { contents: `export { respond } from ${JSON.stringify(join(htmlNextSource, "requests.ts"))};`, resolveDir: directory, loader: "ts" },
+    await build({ stdin: { contents: `export { RequestEvent } from ${JSON.stringify(join(htmlNextSource, "requests.ts"))};`, resolveDir: directory, loader: "ts" },
       outfile: responder, bundle: true, format: "iife", globalName: "HTMLNextRequests", platform: "browser", target: ["es2022"] });
     const live = join(directory, "live.js");
     await build({ entryPoints: [join(htmlNextSource, "browser-loader.ts")],
@@ -296,6 +363,12 @@ mount(App, { target: document.querySelector("#mount")! });
           });
           await page.goto("https://app.example/");
           await page.addScriptTag({ path: responder });
+          // A page responder registered before any component mounts.
+          await page.evaluate(() => {
+            const scope = globalThis as unknown as { HTMLNextRequests: { RequestEvent: { respond(target: EventTarget, name: string, answer: () => string): () => void } }; stopEmbed: () => void };
+            const { respond } = scope.HTMLNextRequests.RequestEvent;
+            scope.stopEmbed = respond(document, "embed", () => "doc");
+          });
           await page.addScriptTag({ path: bundles.get(target)! });
           if (target === "live") {
             await page.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents());

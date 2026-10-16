@@ -61,16 +61,20 @@ export interface ComponentHostOptions {
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
   /** The paths, from a state root, that handler and bound-control writes changed since the last call. */
   readonly written?: () => readonly (readonly unknown[])[];
-  /** Asks one of the component's declared requests. */
-  request?(root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  /** Asks one of the component's declared requests; its \`has\` builds \`host.hasResponder\`. */
+  readonly request?: ((root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: any) => Promise<unknown>)
+    & { readonly has?: (host: any, own: string[]) => (name: string) => boolean };
   /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
   readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
+  /** Each named declared script, which a controller reads as \`host.scripts\`. */
+  readonly scripts?: Readonly<Record<string, unknown>>;
 }
 
 interface ControllerHost {
   readonly root: Element;
   readonly state: Record<string, unknown>;
   readonly data: Readonly<Record<string, unknown>>;
+  readonly scripts: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {
     readonly value: unknown;
     readonly inputValue: unknown;
@@ -84,6 +88,7 @@ interface ControllerHost {
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
   request?(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  hasResponder?(name: string): boolean;
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
 }
 
@@ -129,10 +134,18 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     let lastRoot: Element | null = null;
     let generation = 0;
     const effects = new Map<() => void, { pause(): void; execute(): void }>();
+    // A listener's known responder (k), and for a request's function prop or event form whether one is set (r).
     const listeners = new Set<{
       type: string; callback: (event: Event) => void | (() => void); listener: EventListener;
-      disposer?: () => void;
+      disposer?: () => void; k?: (() => void) | undefined; r?: () => boolean;
     }>();
+    type Listener = typeof listeners extends Set<infer L> ? L : never;
+    // How many known responders the controller's host.on keeps on its own root, by name.
+    const own: string[] = [];
+    const known = (entry: Listener, target: Element | null): void => {
+      entry.k?.();
+      entry.k = target === null || entry.r?.() === false ? undefined : knownResponder(target, entry.type, entry.r ? undefined : own);
+    };
     const lifecycle = (type: "connect" | "disconnect"): void => {
       for (const entry of [...listeners]) {
         if (entry.type !== type) continue;
@@ -145,6 +158,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         if (entry.type === "connect" || entry.type === "disconnect") continue;
         if (attach) element.addEventListener(entry.type, entry.listener);
         else element.removeEventListener(entry.type, entry.listener);
+        known(entry, attach ? element : null);
         // A responder registered after a request went unanswered tells the asker to ask again.
         if (attach) relayResponders(element, entry.type);
       }
@@ -231,6 +245,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       },
       state: namespaces.state,
       data: namespaces.data,
+      scripts: options.scripts ?? Object.freeze({}),
       props: Object.freeze(propHandles),
       refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
         get: (_target, name) => {
@@ -336,28 +351,33 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         request: (name: string, detail?: unknown, requestOptions?: unknown) =>
           latest.current.request!(host.root, requests.signal(connected), name, detail, requestOptions),
       }),
-      on(type, callback) {
-        const entry: { type: string; callback: typeof callback; listener: EventListener; disposer?: () => void } = {
-          type, callback, listener: options.request === undefined ? (event) => { callback(event); } : hostListener(type, callback),
-        };
-        listeners.add(entry);
-        if (connected) {
-          if (type === "connect") {
-            const disposer = callback(new Event("connect"));
-            if (typeof disposer === "function") entry.disposer = disposer;
-          } else if (type !== "disconnect") {
-            host.root.addEventListener(type, entry.listener);
-            relayResponders(host.root, type);
-          }
-        }
-        return () => {
-          if (!listeners.delete(entry)) return;
-          if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, entry.listener);
-          entry.disposer?.();
-          entry.disposer = undefined;
-        };
-      },
+      on(type, callback) { return listen(type, callback); },
     };
+    function listen(type: string, callback: (event: Event) => void | (() => void), set?: () => boolean): () => void {
+      const entry: Listener = {
+        type, callback, listener: options.request === undefined ? (event) => { callback(event); } : hostListener(type, callback),
+      };
+      if (set !== undefined) entry.r = set;
+      listeners.add(entry);
+      if (connected) {
+        if (type === "connect") {
+          const disposer = callback(new Event("connect"));
+          if (typeof disposer === "function") entry.disposer = disposer;
+        } else if (type !== "disconnect") {
+          host.root.addEventListener(type, entry.listener);
+          known(entry, host.root);
+          relayResponders(host.root, type);
+        }
+      }
+      return () => {
+        if (!listeners.delete(entry)) return;
+        if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, entry.listener);
+        known(entry, null);
+        entry.disposer?.();
+        entry.disposer = undefined;
+      };
+    }
+    if (options.request?.has !== undefined) host.hasResponder = options.request.has(host, own);
     const load = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve().then(loader).then((candidate) => {
       if (typeof (candidate as { default?: unknown } | null)?.default !== "function") throw moduleDiagnostic("HJ002", latest.current);
       return candidate as ControllerModule;
@@ -367,12 +387,16 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     });
     // Each request's responder listens on the root from its first connection, before the controller runs.
     const responderNames = Object.keys(options.responders ?? {});
-    for (const name of responderNames) host.on(name, (event) => latest.current.responders?.[name]?.()?.(event));
+    const responderSet = (name: string) => (): boolean => latest.current.responders?.[name]?.() !== undefined;
+    for (const name of responderNames) listen(name, (event) => latest.current.responders?.[name]?.()?.(event), responderSet(name));
     const responding = new Map(responderNames.map((name) => [name, options.responders![name]!() !== undefined]));
-    // A function prop or event form set later relays for its request, as a late host.on does.
+    // A function prop or event form set later is a known responder, and relays for its request, as a late host.on does.
     const relayLateResponders = (): void => {
       for (const name of responderNames) {
-        const set = latest.current.responders?.[name]?.() !== undefined;
+        const set = responderSet(name)();
+        if (set !== responding.get(name) && connected && root !== null) {
+          for (const entry of listeners) if (entry.r !== undefined && entry.type === name) known(entry, root);
+        }
         if (set && !responding.get(name) && connected && root !== null) relayResponders(root, name);
         responding.set(name, set);
       }
@@ -412,6 +436,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         lifecycle("connect");
         return;
       }
+      // Before the controller first runs, the only connect listener is host.hasResponder's.
+      lifecycle("connect");
       // Requests from inside this root wait until the controller has run, or failed to load.
       const release = releaseController = holdController(next);
       void load().then(async (module) => {

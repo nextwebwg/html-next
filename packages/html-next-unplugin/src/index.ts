@@ -247,6 +247,8 @@ function componentCapabilities(definition: ComponentDefinition): readonly string
   if (definition.controller !== undefined) capabilities.add("controllers");
   for (const declaration of definition.declarations ?? []) capabilities.add(declaration.kind);
   if (definition.contract.requests !== undefined) capabilities.add("request");
+  if (definition.head !== undefined) capabilities.add("head");
+  if (definition.scripts !== undefined) capabilities.add("scripts");
   visitTemplate(definition.template, capabilities);
   return Object.freeze([...capabilities].sort());
 }
@@ -286,7 +288,10 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   }
   const entryURLs = [...new Set([...localURLs, ...[...packageEntries.values()].flat().map((file) => pathToFileURL(file).href)])];
   if (entryURLs.length === 0) throw new Error("HTML Next requires at least one component entry or an installed HTML source package.");
+  // An installed package's components are imported, so their page-wide head entries are left out.
+  const packageRoots = installed.map((library) => pathToFileURL(`${library.directory}${sep}`).href);
   const graph = await loadNodeComponents(entryURLs, { baseURL: pathToFileURL(`${root}${sep}`).href, collectDiagnostics,
+    isApplicationURL: (url) => !packageRoots.some((prefix) => url.startsWith(prefix)),
     ...(resolveStylesheet === undefined ? {} : { resolveStylesheet }),
     stylesheetAssetURL: url => url.startsWith("file:") ? `/@fs/${fileURLToPath(url).split(sep).join("/")}${new URL(url).search}${new URL(url).hash}` : url,
   });
@@ -347,6 +352,8 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         // Each component the template invokes, by the module exporting its factory.
         invocations: new Map([...invocations.edges.get(node.id) ?? []].map(([tag, url]) =>
           [tag, { module: componentId(url), definition: graph.nodes.get(url)!.definition }])),
+        // A declared script beside its definition is a Vite asset: its served URL in development, its emitted one in a build.
+        scriptURL: (src) => `${fileURLToPath(new URL(src, node.url))}?url`,
       }));
       const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
       if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);

@@ -54,6 +54,7 @@ config.test!.include = [
   "packages/html-next-converter/tests/svelte-*-parity.test.ts",
   "packages/html-next-converter/tests/event-containment-parity.test.ts",
   "packages/html-next-converter/tests/request-parity.test.ts",
+  "packages/html-next-converter/tests/head-parity.test.ts",
   "packages/html-next-converter/tests/library-distribution.test.ts",
   "packages/html-next-unplugin/tests/framework.test.ts",
 ];

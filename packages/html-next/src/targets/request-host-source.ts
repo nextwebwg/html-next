@@ -5,11 +5,16 @@ import { REQUESTS_SOURCE } from "../generated/requests-source.js";
  * What every converted controller host does for requests, whether or not its component declares
  * any: it holds back requests from inside its root until its controller has run, relays a responder
  * its controller registers late, and gives `host.on("responder")` only the relay to its own root.
- * It mirrors `holdController`, `relayResponders` and `hostListener` in src/requests.ts, on the record
- * every HTML Next bundle on the page shares; the request steps themselves are the requests helper.
+ * It records the responders its controller's `host.on` and its function props add, for `hasResponder`.
+ * It mirrors `holdController`, `relayResponders`, `knownResponder` and `hostListener` in src/requests.ts,
+ * on the record every HTML Next bundle on the page shares; the request steps themselves are the
+ * requests helper.
  */
 export const REQUEST_HOST_SOURCE = `const requestStateKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
-type DocumentRecord = { requests?: { readonly g: WeakMap<Node, Promise<void>> }; relay?: (from: Node, name: string) => void };
+type DocumentRecord = {
+  requests?: { readonly g: WeakMap<Node, Promise<void>> }; relay?: (from: Node, name: string) => void;
+  k?: WeakMap<EventTarget, string[]>; w?: Set<(name: string) => void>;
+};
 const documentRecord = (root: Element): DocumentRecord =>
   (root.ownerDocument as unknown as Record<symbol, DocumentRecord>)[requestStateKey] ??= {};
 
@@ -25,6 +30,23 @@ function holdController(root: Element): () => void {
 /** A responder registered on root relays to the requests inside it that went unanswered, once a page asks. */
 function relayResponders(root: Element, name: string): void {
   documentRecord(root).relay?.(root, name);
+}
+
+/** Records a responder hasResponder can see on root until the returned function runs; own lists its controller's. */
+function knownResponder(root: Element, name: string, own?: string[]): () => void {
+  const record = documentRecord(root);
+  const known = record.k ??= new WeakMap();
+  const names = known.get(root) ?? known.set(root, []).get(root)!;
+  const change = (add: boolean): void => {
+    for (const list of own === undefined ? [names] : [names, own]) {
+      if (add) list.push(name);
+      else list.splice(list.indexOf(name), 1);
+    }
+    record.w?.forEach((changed) => changed(name));
+  };
+  change(true);
+  let held = true;
+  return () => { if (held) { held = false; change(false); } };
 }
 
 /** For a component that asks: a responder announcement reaches its controller only as the relay to its root, which does not bubble. */

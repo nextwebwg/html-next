@@ -26,7 +26,7 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { dynamicSlotNames, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { dynamicSlotNames, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
 import { fail } from "../diagnostics.js";
 import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
@@ -82,6 +82,8 @@ interface Root {
   readonly data?: DataDeclaration;
   /** A root `$with`'s expression: the alias keeps its last conforming value, and follows the reads. */
   readonly alias?: CompiledExpression;
+  /** A named declared script's status, by its index among the definition's scripts; these follow the reads. */
+  readonly script?: number;
 }
 
 /** A lowered expression in the supported subset. */
@@ -272,6 +274,10 @@ export interface BlockPlan {
   readonly transitions?: string;
   /** The compiled handlers the root's `on:connect` and `on:disconnect` run. */
   readonly lifecycle: readonly { readonly type: "connect" | "disconnect"; readonly handler: string }[];
+  /** Each head declaration's element, as a source evaluated after each render (src/head.ts). */
+  readonly head: readonly string[];
+  /** Each declared script: its status root (-1 for an unnamed one) and the handlers its `on:load` and `on:error` run. */
+  readonly scripts: readonly { readonly declaration: ScriptDeclaration; readonly root: number; readonly load?: string; readonly error?: string }[];
 }
 
 /** What the parser already rules out; reaching it is a compiler defect, reported at build time. */
@@ -821,7 +827,10 @@ function compileRoots(definition: ComponentDefinition): Root[] {
     const type = compactType(normalizeType(prop.type));
     return { name, type, initial: "null" };
   });
-  return [...states, ...computeds, ...contexts, ...props, ...reads];
+  // A named declared script's status reads as a `<data>` read's state does, starting before insertion.
+  const scripts: Root[] = (definition.scripts ?? []).flatMap((script, index) => script.name === undefined ? []
+    : [{ name: script.name, type: "?" as const, initial: "{ pending: false, ok: false, error: null }", script: index }]);
+  return [...states, ...computeds, ...contexts, ...props, ...reads, ...scripts];
 }
 
 
@@ -1501,7 +1510,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
         });
       }
     }
-    const props = Object.keys(definition.contract.props).length + roots.filter((item) => item.data !== undefined || item.alias !== undefined).length;
+    const props = Object.keys(definition.contract.props).length + roots.filter((item) => item.data !== undefined || item.alias !== undefined || item.script !== undefined).length;
     // Each read's parameters, checked as live's `evalConforming` reads them; `from` ones also recorded,
     // so a change to what they read re-requests, as live's request effect re-runs. A whole list or
     // object sent as a parameter also records its contents, so an in-place change re-requests too.
@@ -1522,7 +1531,30 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       const name = definition.lifecycle?.[type];
       return name === undefined ? [] : [{ type, handler: planner.handler(name).name }];
     });
-    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle,
+    const scripts = (definition.scripts ?? []).map((declaration, at) => ({
+      declaration, root: roots.findIndex((item) => item.script === at),
+      ...declaration.load === undefined ? {} : { load: planner.handler(declaration.load).name },
+      ...declaration.error === undefined ? {} : { error: planner.handler(declaration.error).name },
+    }));
+    let slots = 0;
+    // A binding keeps the value it last accepted when a result is invalid, as live's head effects do (HK).
+    const bound = (expression: CompiledExpression, convert: string): string =>
+      `headValue(HK, ${slots++}, ${planner.checked(expression, planner.scope).source}, ${convert})`;
+    const head = (definition.head ?? []).map((declaration): string => {
+      if (declaration.kind === "title") {
+        const parts = declaration.text.flatMap((node) => node.segments ?? [node]).map((segment) =>
+          segment.expressionPlan === undefined ? JSON.stringify(segment.value) : `(${bound(segment.expressionPlan, "toText")} ?? "")`);
+        return `["title", [], ${parts.length === 0 ? '""' : parts.join(" + ")}]`;
+      }
+      if (declaration.kind === "json") {
+        if (declaration.value === undefined) return `["script", [["type", "application/ld+json"]], ${JSON.stringify(declaration.text)}]`;
+        return `((t) => t === null ? undefined : ["script", [["type", "application/ld+json"]], t])(headJson(S, HK, ${slots++}, ${planner.checked(declaration.value, planner.scope).source}, ${JSON.stringify(declaration.value.source)}))`;
+      }
+      return `[${JSON.stringify(declaration.kind)}, headAttributes([${declaration.attributes.map((attribute) => attribute.kind === "literal"
+        ? `[${JSON.stringify(attribute.name)}, ${JSON.stringify(attribute.value)}]`
+        : `[${JSON.stringify(attribute.name)}, ${bound(attribute.expressionPlan!, `(x) => toAttribute(x, ${JSON.stringify(attribute.name)})`)}]`).join(", ")}])]`;
+    });
+    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
       aliased: roots.flatMap((item, index) => item.alias === undefined ? [] : [{ index, value: planner.checked(item.alias, planner.scope) }]),
@@ -1688,8 +1720,12 @@ export function emitBlocks(
   noContextReaders = false,
   /** The factory also adopts a server-rendered root (see `adoptTree`). */
   hydrate = false,
+  /** A bundler module whose default export is a relative declared script's URL (`GenerationOptions.scriptURL`). */
+  scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
 ): string {
   const { contract } = definition;
+  // A script relative to the definition resolves at build time, through the bundler, to the URL it serves.
+  const scriptImports = (definition.scripts ?? []).map((script) => /^\.\.?\//.test(script.src) ? scriptURL?.(script.src, definition) : undefined);
   const blocks = plan.blocks;
   const selectorRoot = (binding: Binding, region: Region): number => {
     if (binding.kind !== "class" || region.key === undefined || binding.exact !== undefined) return -1;
@@ -2326,13 +2362,17 @@ export function emitBlocks(
   // A root `$with` keeps its last conforming value, refreshed before the template renders.
   const aliased = plan.aliased.map(({ index, value }) => `{ const x = ${convertible(value)}; if (x !== NONCONFORMING && !Object.is(x, v[${index}])) { v[${index}] = x; ${
     index < 29 ? `c |= ${rootBit(index)};` : `c |= ${OVERFLOW}; d.set(${index}, 1);`} } }`);
-  const update = plan.reads.length === 0 && aliased.length === 0 ? render
+  const rendered = plan.reads.length === 0 && aliased.length === 0 ? render
     : `((c, d) => { ${aliased.join(" ")}${plan.reads.length === 0 ? "" : " DU(c, d);"} ${render}(c, d); })`;
+  // Head declarations are read again after each render, once their head joins (HU).
+  const headed = plan.head.length > 0;
+  const update = headed ? `((c, d) => { ${rendered}(c, d); HU?.(); })` : rendered;
   // A component that declares requests gives its controller a host with `host.request`, which reads the instance.
-  const asks = definition.controller !== undefined && Object.keys(contract.requests ?? {}).length > 0;
+  const scripted = (definition.scripts ?? []).some((script) => script.name !== undefined);
+  const asks = definition.controller !== undefined && (Object.keys(contract.requests ?? {}).length > 0 || scripted);
   const instance = asks || hydrate || provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
-    transitionMask !== 0;
+    transitionMask !== 0 || headed || plan.scripts.length > 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
@@ -2367,6 +2407,7 @@ export function emitBlocks(
         `    if (${guard(maskOf(item.recorded!))}) { const ${item.record} = []; ${convertible(item.recorded!)}; if (${rootsWritten(item.recorded!).replace(/^ \|\| /, "") || "false"} || readsChanged(DQ${at}.${item.record}, ${item.record})) DR${at}(); }`)),
       "  };",
     ],
+    ...headed ? ["  const HK = [];", "  let HU;"] : [],
     // A context provider tells its readers after each render.
     `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : asks ? "(host) => C(host, I)" : "C"}${
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
@@ -2374,6 +2415,16 @@ export function emitBlocks(
     ...plan.roots.flatMap((item, index) => item.context === undefined ? []
       : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
     ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at}, DT);`),
+    ...headed ? [`  HU = manageHead(I, () => [${plan.head.join(", ")}]);`] : [],
+    ...plan.scripts.length > 0 ? [`  manageScripts(I, [${plan.scripts.map((script, at) => {
+      const { load: _load, error: _error, name, ...attributes } = script.declaration;
+      const { src: _src, ...fetched } = attributes;
+      const declared = `{ ...${JSON.stringify(scriptImports[at] === undefined ? attributes : fetched)}, ${scriptImports[at] === undefined ? "" : `src: SU${at}, `}base: S.f, source: S.f }`;
+      const run = script.load === undefined && script.error === undefined ? "() => {}"
+        : `(l, e) => { ${script.load === undefined ? "" : `if (l) ${script.load}(e);`}${script.load !== undefined && script.error !== undefined ? " else " : ""}${
+          script.error === undefined ? "" : `${script.load === undefined ? "if (!l) " : ""}${script.error}(e);`} }`;
+      return `[${declared}, ${script.root}, ${name === undefined ? "undefined" : JSON.stringify(name)}, ${run}]`;
+    }).join(", ")}]);`] : [],
     ...(propNames.length > 0 ? ["  manageProps(I);"] : []),
     ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
@@ -2536,7 +2587,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "manageHead", "manageScripts", "headValue", "headAttributes", "headJson", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
@@ -2544,8 +2595,9 @@ export function emitBlocks(
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
-  // The controller of a component that declares requests receives `requestHost`'s host.
+  // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
+  if (scripted && definition.controller !== undefined) helpers.push("scriptHost");
   // Decimal operations are `binaryValue`'s last argument; their names are also common authored names.
   helpers.push(...Object.values(DECIMAL).filter((name) => `${source}\n${stateSpec}`.includes(`, ${name})`)));
   // A root without children, and an arm without them, build no prototype.
@@ -2562,6 +2614,7 @@ export function emitBlocks(
       return `import { ${factory} } from ${JSON.stringify(invoked.module)};`;
     }),
     ...(definition.controller === undefined ? [] : [`import * as controller from ${JSON.stringify(definition.controller)};`]),
+    ...scriptImports.flatMap((specifier, at) => specifier === undefined ? [] : [`import SU${at} from ${JSON.stringify(specifier)};`]),
     `import "../styles/${contract.tag}.css";`,
     "",
     ...registration === "" ? [] : [registration],
@@ -2581,8 +2634,10 @@ export function emitBlocks(
     ...(propsSpec === undefined ? [] : [propsSpec]),
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
     // A component that declares requests gives its controller the host with `host.request`.
-    ...(definition.controller === undefined ? [] : [requests.length === 0 ? "const C = (host) => controller.default(host);"
-      : "const C = (host, I) => controller.default(requestHost(host, I));"]),
+    // A component that declares named scripts gives it the host with `host.scripts`.
+    ...(definition.controller === undefined ? [] : [requests.length === 0 && !scripted ? "const C = (host) => controller.default(host);"
+      : `const C = (host, I) => controller.default(${[requests.length > 0 ? "requestHost" : "", scripted ? "scriptHost" : ""].filter(Boolean)
+        .reduce((wrapped, wrap) => `${wrap}(${wrapped}, I)`, "host")});`]),
     "",
     source,
     "",

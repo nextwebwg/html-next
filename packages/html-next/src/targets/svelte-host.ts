@@ -29,10 +29,13 @@ export interface ComponentHostOptions {
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
-  /** Asks one of the component's declared requests. */
-  request?(root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  /** Asks one of the component's declared requests; its \`has\` builds \`host.hasResponder\`. */
+  readonly request?: ((root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: any) => Promise<unknown>)
+    & { readonly has?: (host: any, own: string[]) => (name: string) => boolean };
   /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
   readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
+  /** Each named declared script, which a controller reads as \`host.scripts\`. */
+  readonly scripts?: Readonly<Record<string, unknown>>;
 }
 
 interface ControllerHost {
@@ -40,6 +43,7 @@ interface ControllerHost {
   readonly element: Element;
   readonly state: Record<string, unknown>;
   readonly data: Readonly<Record<string, unknown>>;
+  readonly scripts: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {
     readonly value: unknown;
     readonly inputValue: unknown;
@@ -53,6 +57,7 @@ interface ControllerHost {
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
   request?(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  hasResponder?(name: string): boolean;
   on(type: string, callback: EventListener): () => void;
 }
 
@@ -94,7 +99,16 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   const requests = requestConnection();
   let releaseController: (() => void) | undefined;
   const effects = new Map<() => void, () => void>();
-  const subscriptions = new Set<{ type: string; callback: EventListener; cleanup?: () => void }>();
+  // A subscription's known responder (k), and for a request's function prop or event form whether one is set (r).
+  const subscriptions = new Set<{ type: string; callback: EventListener; cleanup?: () => void; k?: (() => void) | undefined; r?: () => boolean }>();
+  type Subscription = typeof subscriptions extends Set<infer S> ? S : never;
+  // How many known responders the controller's host.on keeps on its own root, by name.
+  const own: string[] = [];
+  const known = (subscription: Subscription, target: Element | null): void => {
+    subscription.k?.();
+    subscription.k = target === null || subscription.r?.() === false ? undefined
+      : knownResponder(target, subscription.type, subscription.r ? undefined : own);
+  };
   const connect = (subscription: { callback: EventListener; cleanup?: () => void }): void => {
     const result = (subscription.callback as (event: Event) => unknown)(new Event("connect"));
     if (typeof result === "function") subscription.cleanup = result as () => void;
@@ -116,6 +130,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     get root() { return (root ?? lastRoot)!; },
     get element() { return host.root; },
     ...controllerNamespaces(options, options.definition),
+    scripts: options.scripts ?? Object.freeze({}),
     props: Object.freeze(propHandles),
     refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
       get: (_target, name) => {
@@ -174,36 +189,44 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       request: (name: string, detail?: unknown, requestOptions?: unknown) =>
         options.request!(host.root, requests.signal(connected), name, detail, requestOptions),
     }),
-    on(type, callback) {
-      const listener: EventListener = type === "connect" || type === "disconnect" || options.request === undefined ? callback : hostListener(type, callback);
-      const subscription: { type: string; callback: EventListener; cleanup?: () => void } = { type, callback: listener };
-      subscriptions.add(subscription);
-      if (type === "connect") { if (connected) connect(subscription); }
-      else if (type !== "disconnect" && connected) {
-        host.root.addEventListener(type, listener);
-        // A responder registered after a request went unanswered tells the asker to ask again.
-        relayResponders(host.root, type);
-      }
-      return () => {
-        if (!subscriptions.delete(subscription)) return;
-        if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, listener);
-        subscription.cleanup?.();
-        subscription.cleanup = undefined;
-      };
-    },
+    on(type, callback) { return listen(type, callback); },
   };
+  function listen(type: string, callback: EventListener, set?: () => boolean): () => void {
+    const listener: EventListener = type === "connect" || type === "disconnect" || options.request === undefined ? callback : hostListener(type, callback);
+    const subscription: Subscription = { type, callback: listener };
+    if (set !== undefined) subscription.r = set;
+    subscriptions.add(subscription);
+    if (type === "connect") { if (connected) connect(subscription); }
+    else if (type !== "disconnect" && connected) {
+      host.root.addEventListener(type, listener);
+      known(subscription, host.root);
+      // A responder registered after a request went unanswered tells the asker to ask again.
+      relayResponders(host.root, type);
+    }
+    return () => {
+      if (!subscriptions.delete(subscription)) return;
+      if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, listener);
+      known(subscription, null);
+      subscription.cleanup?.();
+      subscription.cleanup = undefined;
+    };
+  }
+  if (options.request?.has !== undefined) host.hasResponder = options.request.has(host, own);
   Object.freeze(host);
   // Each request's responder listens on the root from its first connection, before the controller runs.
   const responders = Object.entries(options.responders ?? {});
-  for (const [name, read] of responders) host.on(name, (event) => read()?.(event));
-  // A function prop or event form set later relays for its request, as a late host.on does.
+  for (const [name, read] of responders) listen(name, (event) => read()?.(event), () => untrack(read) !== undefined);
+  // A function prop or event form set later is a known responder, and relays for its request, as a late host.on does.
   if (responders.length > 0) {
     let responding = untrack(() => responders.map(([, read]) => read() !== undefined));
     $effect(() => {
       const now = responders.map(([, read]) => read() !== undefined);
       untrack(() => {
         const element = root;
-        if (element !== null && connected) now.forEach((set, index) => { if (set && !responding[index]) relayResponders(element, responders[index]![0]); });
+        if (element !== null && connected) {
+          for (const subscription of subscriptions) if (subscription.r !== undefined) known(subscription, element);
+          now.forEach((set, index) => { if (set && !responding[index]) relayResponders(element, responders[index]![0]); });
+        }
         responding = now;
       });
     });
@@ -226,6 +249,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     }
     for (const subscription of [...subscriptions]) {
       if (subscription.type !== "connect" && subscription.type !== "disconnect") host.root.removeEventListener(subscription.type, subscription.callback);
+      known(subscription, null);
       const dispose = subscription.cleanup; subscription.cleanup = undefined; dispose?.();
     }
     for (const pause of [...effects.values()]) pause();
@@ -241,6 +265,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         if (subscription.type !== "connect" && subscription.type !== "disconnect") {
           root.removeEventListener(subscription.type, subscription.callback);
           next!.addEventListener(subscription.type, subscription.callback);
+          known(subscription, next);
         }
       }
       root = next;
@@ -255,6 +280,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       if (subscription.type === "connect") connect(subscription);
       else if (subscription.type !== "disconnect") {
         next.addEventListener(subscription.type, subscription.callback);
+        known(subscription, next);
         relayResponders(next, subscription.type);
       }
     }

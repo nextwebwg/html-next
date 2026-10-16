@@ -94,11 +94,27 @@ meta lists with their sub-properties, and setting aside and restoring the docume
 as the same nodes. `src/head.ts` fills it with one manager per document on the document record that
 every HTML Next bundle shares. It walks `document.head`'s children once per reconciliation and
 changes only elements whose target changed. Depth counts the component roots around an instance's
-root (`data-component`, converted Vue's `data-hn`, and the roots of head contributors).
+root (`data-component`, converted Vue's `data-hn`, and the roots of head contributors). Compiled
+output imports it through `generated-runtime`, and converted Vue, React and Svelte components carry
+its source in their `head` helper, so every implementation on a page joins the same manager. A
+framework's server rendering has no document tree: its helper records each component's depth among
+head-declaring components through the framework's context, and render order stands for tree order.
+
+A declared script is an ordinary `<script>` inserted through the DOM: the browser fetches and runs
+it, applies CSP, Subresource Integrity, CORS and mixed-content blocking, evaluates a module URL once,
+and fires `load` or `error`. A preload link from server output lets the inserted element reuse its
+fetch. The remaining gap is sharing one element per URL and type among components, reading its
+status, settling `ready` once, and running each connection's `on:load` or `on:error`. The DOM
+records no "has loaded" flag on a script element, so an authored script found later counts as
+loaded when it is a parser-inserted classic script without `async` or `defer` (its `async` property
+is false) or the document has loaded. `loading="lazy"` uses one `IntersectionObserver` with a
+1,250 px root margin, Chromium's distance for `<img loading="lazy">` on a fast connection: the
+platform exposes no query for its lazy-loading distance, and an image probe would change the
+component's markup.
 
 CSP's matching of a URL to a source list runs only inside the browser's policy checks; no API
 exposes it. `src/source-list.ts` applies the CSP Level 3 matching algorithm to the
-application-components list for the source expressions that name URLs.
+`component-src` list for the source expressions that name URLs.
 
 ## Complete live inventory
 

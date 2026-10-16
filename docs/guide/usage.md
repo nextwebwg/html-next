@@ -419,7 +419,7 @@ The live runtime needs native CSS `@scope`: Chrome 118, Safari 17.4, Firefox 146
 
 ### Loading and trust
 
-Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="application-components">`](#head) list that names its source. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
+Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="component-src">`](#head) list that names its source. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
 
 :::
 
@@ -504,13 +504,16 @@ export default function controller(host) {
 }
 ```
 
-A page script answers with `respond()`, which takes a function that returns the answer:
+A page script answers with `RequestEvent.respond`, which takes a function that returns the answer:
 
 ```js title="src/setup.js"
-import { respond } from "@nextwebwg/html-next";
+import { RequestEvent } from "@nextwebwg/html-next";
 
+const { respond } = RequestEvent;
 respond(document, "mention-query", ({ query }, { signal }) => searchPeople(query, { signal }));
 ```
+
+`respond`, `request` and `hasResponder` are static methods of `RequestEvent` that never read `this`, so they work destructured.
 
 :::
 
@@ -578,8 +581,9 @@ export default function controller(host) {
 ```
 
 ```js title="src/upload-setup.js"
-import { respond } from "@nextwebwg/html-next";
+import { RequestEvent } from "@nextwebwg/html-next";
 
+const { respond } = RequestEvent;
 respond(document, "image-upload", ({ file }, { signal, progress }) => uploadImage(file, {
   signal,
   onprogress: (loaded, total) => progress(loaded, total), // XMLHttpRequest upload progress
@@ -600,7 +604,7 @@ export default function controller(host) {
 }
 ```
 
-`respond()` announces its responder when it adds its listener. A page script that listens itself announces with a bubbling event:
+`respond` announces its responder when it adds its listener. A page script that listens itself announces with a bubbling event:
 
 ```js
 element.addEventListener("extensions", (event) => event.respondWith([Highlight]));
@@ -608,6 +612,47 @@ element.dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { na
 ```
 
 A consumer controller's later `host.on("extensions", …)`, and a function prop or event listener a framework sets after mounting, reach the waiting component the same way without dispatching an announcement.
+
+### Show a feature only when someone answers
+
+`host.hasResponder(name)` is `true` while a responder that HTML Next knows about answers a declared request: one added with `RequestEvent.respond`, a consumer controller's `host.on(name, …)`, or a framework function prop or event listener. It is a reactive read, so `host.effect` and `host.computed` run again when a responder arrives or leaves. An editor shows its "Insert image" button only while something stores images:
+
+```html title="src/editor.html"
+<template component="ui-editor" controller="./editor.js">
+  <defs>
+    <request name="image-upload" type="object">…</request>
+    <state name="canUpload" type="boolean" value="false"></state>
+  </defs>
+  <div>
+    <button type="button" from:hidden="!$canUpload">Insert image</button>
+    <div class="editor"></div>
+  </div>
+</template>
+```
+
+```js title="src/editor.js"
+export default function controller(host) {
+  host.effect(() => { host.state.canUpload = host.hasResponder("image-upload"); });
+}
+```
+
+The button shows when `respond(document, "image-upload", …)` ran before the editor mounted, and appears when it runs later. Calling the function `respond` returned hides it again.
+
+It looks for responders on the component's root, its ancestors, the document and the window: a responder in a sibling subtree doesn't count, and neither does the component's own controller listening on its own root. A plain `addEventListener` still answers requests, but the DOM can't list an element's listeners, so `hasResponder` returns `false` for it. Register with `respond` to be found.
+
+### Ask from a page script
+
+Code without a `host`, such as a hand-written custom element, asks with `RequestEvent.request(target, name, detail, { signal, progress })`. The request is the same `RequestEvent`, so every kind of responder answers it, the signal aborts it and the progress callback hears it. Nothing declares it, so neither the detail nor the answer is checked; type the answer with the generic:
+
+```ts title="src/photo-field.ts"
+import { RequestEvent } from "@nextwebwg/html-next";
+
+const { request, hasResponder } = RequestEvent;
+const image = await request<{ src: string }>(this, "image-upload", { file }, { signal });
+const canUpload = hasResponder(this, "image-upload");   // now, not reactive
+```
+
+An unanswered `request` resolves `null` and isn't remembered for late responders, which only a component's controller hears.
 
 ## Add to the document head {#head}
 
@@ -643,15 +688,106 @@ Every element the runtime manages carries `data-component-head`. When several co
 
 A page change, such as a router replacing one page with another inside the same layout, changes the head once: the title goes straight from one page's to the next, and links both pages declare stay in place. Inside a view transition, the change happens in the transition's update.
 
-The canonical, `alternate`, `icon` and `manifest` links and the `robots`, `referrer`, `viewport`, `color-scheme` and `theme-color` metadata, with `og:url`, belong to the document. Only an application component sets them: one in the application's own source, written in the page, or loaded by URL from the page's origin or a source the page lists:
+Some entries affect the whole page, its identity for search engines and sharing, and page-wide behavior: the canonical, `alternate`, `icon` and `manifest` links, the `robots`, `referrer`, `viewport`, `color-scheme`, `theme-color` and `component-src` metadata, and `og:url`. Only an application component sets these page-wide head entries: one in the application's own source, written in the page, or loaded by URL from the page's origin or a source the page lists in `component-src`, which takes a CSP source list:
 
 ```html title="index.html"
-<meta name="application-components" content="'self' https://cdn.acme.example/ui/">
+<meta name="component-src" content="'self' https://cdn.acme.example/ui/">
 ```
 
-A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its document-authority entries are ignored with an `HL011` warning; its other head declarations apply.
+A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its page-wide head entries are ignored with an `HL011` warning; its other head declarations apply.
 
-A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations run in the browser runtime; Vite and converter output report them with `HT030`.
+A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations behave the same in the browser runtime, Vite output, and converted Vue, React and Svelte components, which share one head manager on the page.
+
+### Load a third-party script {#declared-scripts}
+
+A component that needs a third-party SDK declares its script in `<defs>`. The runtime inserts an ordinary `<script>` into `document.head`, once per URL and type, and never removes it, so the browser fetches and runs it once under the page's Content Security Policy, however many components declare it. The [declared scripts section of the proposal](https://nextwebwg.org/declarative-components/components#declared-scripts) defines the behavior.
+
+```html title="src/checkout-form.html"
+<template component="checkout-form" controller="./checkout-form.js">
+  <defs>
+    <prop name="pk" type="string" required>The Stripe publishable key.</prop>
+    <event name="paymentready"></event>
+    <handler name="announceReady"><dispatch event="paymentready"></dispatch></handler>
+
+    <link rel="preconnect" href="https://js.stripe.com">
+    <script name="stripe" src="https://js.stripe.com/v3/" loading="lazy" on:load="announceReady"></script>
+  </defs>
+
+  <form>
+    <div $ref="card"></div>
+    <p $if="$stripe.error" role="alert">Payments are unavailable right now.</p>
+    <p $if="$stripe.pending">Loading the secure payment form…</p>
+    <button>Pay</button>
+  </form>
+</template>
+```
+
+```js title="src/checkout-form.js"
+export default function controller(host) {
+  let card;
+  host.on("connect", () => {
+    host.scripts.stripe.ready.then(() => {
+      if (!host.root.isConnected) return;
+      card = Stripe(host.props.pk.value).elements().create("card");
+      card.mount(host.refs.card);
+    }, () => {});
+  });
+  host.on("disconnect", () => { card?.destroy(); card = undefined; });
+}
+```
+
+- `loading="eager"`, the default, inserts the script when an instance connects; `lazy` when its root comes within 1,250 pixels of the viewport; `manual` when the controller calls `host.scripts.name.load()`.
+- `$stripe.pending`, `.ok` and `.error` read the script's status, and `host.scripts.stripe` adds `ready`, a promise that settles once with the script, and `load()`.
+- `on:load` and `on:error` run a handler once for each connection, as soon as the script settles: when it fires `load` or `error`, or straight away when it already has. A connection that ends first gets neither, and a reconnected form announces again.
+- `type="module"`, `integrity`, `crossorigin`, `referrerpolicy` and `fetchpriority` are copied onto the inserted element. Declarations of one script that disagree on `integrity`, `crossorigin` or `referrerpolicy` fail with `HR011` for the later one. A bare `src`, such as `@acme/maps/v2.js`, resolves through the page's import map (`HR012` when it maps nothing).
+- A `<script>` the page already has with the same URL is used instead of inserting another.
+- A relative `src`, such as `./vendor/sdk.js`, is relative to the component's file. A Vite build serves and emits it as an asset; the converter resolves it against `publicRootURL`.
+- Under a nonce-based policy, the runtime puts the nonce of the `<link rel="component">` or inline `<template component>` that imported the definition on the scripts it inserts. Under `'strict-dynamic'` or an origin allowlist such as `script-src 'self' https://js.stripe.com`, nothing more is needed.
+
+Server rendering with `renderComponents(html, { definitions, head })` returns the page's `head` as well: the application's own head elements, the components' contributions reconciled into it, each replaced element in a `<template data-component-head="set-aside">`, and a `<link rel="preload" as="script">`, or `modulepreload`, for each eager script. It never writes an executing `<script>`. Hydration adopts those elements, restores the set-aside ones as the same nodes when no component sets them, and inserts each eager script once, served from its preload.
+
+Converted components render the head on the server through their framework. Each target's `head` helper collects the head declarations the render reached, and `writeCollectedHead` writes them into a document holding the application's own head, with the same set-aside templates and preload links:
+
+::: framework-vue
+
+```ts title="server.ts"
+import { renderToString } from "@vue/server-renderer";
+import { createHeadCollector, HEAD_CONTEXT, writeCollectedHead } from "./generated/vue/head";
+
+const collector = createHeadCollector();
+const body = await renderToString(app, { [HEAD_CONTEXT]: collector });
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
+::: framework-react
+
+```tsx title="server.tsx"
+import { renderToString } from "react-dom/server";
+import { collectHead, createHeadCollector, writeCollectedHead } from "./generated/react/head";
+
+const collector = createHeadCollector();
+const body = collectHead(collector, () => renderToString(<App />));
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
+::: framework-svelte
+
+```ts title="server.ts"
+import { render } from "svelte/server";
+import { createHeadCollector, HEAD_CONTEXT, writeCollectedHead } from "./generated/svelte/head.svelte";
+
+const collector = createHeadCollector();
+const { body } = render(App, { context: new Map([[HEAD_CONTEXT, collector]]) });
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
+Serialize `document.head` into the page. The client hydrates as usual and adopts the head the server wrote.
 
 ## When you need more
 

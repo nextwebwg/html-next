@@ -1,0 +1,11 @@
+<template component="head-script" status="experimental" summary="Head declaration bundle-size fixture: a title, two metadata entries, bound JSON-LD and a declared script.">
+  <defs>
+    <prop name="label" type="string" default="Pricing">The page's name.</prop>
+    <title>{$label} · Acme</title>
+    <meta name="description" from:content="$label">
+    <meta property="og:title" from:content="$label">
+    <script type="application/ld+json" from:value="{ name: $label }"></script>
+    <script name="stripe" src="https://js.stripe.com/v3/" loading="lazy"></script>
+  </defs>
+  <main from:aria-busy="$stripe.pending"><h1>{$label}</h1></main>
+</template>

@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { it } from "vitest";
 
+import { assembleComponentPackage } from "@nextwebwg/html-next";
+
 import { convertComponents } from "../src/index.js";
 
 const run = promisify(execFile);
@@ -86,6 +88,38 @@ it("types an invocation's literal props as the values the live runtime parses", 
       moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true, noEmit: true },
       include: ["vue/**/*.vue", "vue/**/*.ts"] }));
     try { await run(process.execPath, [checker, "-p", join(directory, "tsconfig.json")], { cwd: directory }); }
+    catch (error) { assert.fail((error as { stdout: string }).stdout); }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
+
+it("types an invocation's literal props in an assembled package's Vue output", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "html-next-vue-package-literal-props-"));
+  try {
+    const source = join(directory, "source");
+    const out = join(directory, "out");
+    await mkdir(source);
+    await writeFile(join(source, "x-child.html"), `<template component="x-child"><defs>
+      <prop name="flag" type="boolean" default="false">A flag.</prop>
+      <prop name="count" type="number" default="0">A count.</prop>
+    </defs><span>child</span></template>`);
+    await writeFile(join(source, "x-frame.html"), `<template component="x-frame"><div><slot></slot></div></template>`);
+    // These sources sort before the child they invoke, so assembly reads every contract before generating.
+    await writeFile(join(source, "a-direct.html"), `<link rel="component" href="./x-child.html">
+<template component="x-direct"><div><x-child flag count="3"></x-child></div></template>`);
+    await writeFile(join(source, "a-wrapped.html"), `<link rel="component" href="./x-child.html"><link rel="component" href="./x-frame.html">
+<template component="x-wrapped"><x-frame><x-child flag count="3"></x-child></x-frame></template>`);
+    await assembleComponentPackage({ name: "literal-props", version: "0.0.0", outDirectory: out,
+      components: ["a-direct.html", "a-wrapped.html", "x-child.html", "x-frame.html"].map((file) => ({ source: join(source, file) })) });
+    for (const name of ["XDirect", "XWrapped"]) {
+      assert.match(await readFile(join(out, "vue", `${name}.vue`), "utf8"), /<XChild :flag="true" :count="3" \/>/);
+    }
+    await symlink(modules, join(out, "node_modules"), "dir");
+    await writeFile(join(out, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, skipLibCheck: true, module: "ESNext",
+      moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true, noEmit: true },
+      include: ["vue/**/*.vue", "vue/**/*.ts"] }));
+    try { await run(process.execPath, [checker, "-p", join(out, "tsconfig.json")], { cwd: out }); }
     catch (error) { assert.fail((error as { stdout: string }).stdout); }
   } finally {
     await rm(directory, { recursive: true, force: true });

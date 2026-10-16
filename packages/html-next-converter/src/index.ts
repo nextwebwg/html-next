@@ -41,6 +41,7 @@ import {
   reactDepthArtifact,
   reactRenderArtifact,
   requestsHelperArtifact,
+  headHelperArtifact,
   type DiagnosticLocation,
   type ComponentGraph,
   type TemplateNode,
@@ -216,7 +217,7 @@ function componentRelativeDataSource(source: string): boolean {
 }
 
 function browserDefinitionURL(
-  definition: { readonly declarations?: readonly { readonly kind: string; readonly source?: string }[] },
+  definition: { readonly declarations?: readonly { readonly kind: string; readonly source?: string }[]; readonly scripts?: readonly { readonly src: string }[] },
   source: string,
   publicRootURL: string | undefined,
   target: FrameworkTarget,
@@ -227,11 +228,35 @@ function browserDefinitionURL(
   if (relativeData && publicRootURL === undefined) {
     throw new FrameworkConversionError(target, source, tag, "component-relative <data src> requires publicRootURL, the browser URL corresponding to the conversion root");
   }
+  if (definition.scripts?.some((script) => relativeScript(script.src)) === true && publicRootURL === undefined) {
+    throw new FrameworkConversionError(target, source, tag, "a component-relative declared <script src> requires publicRootURL, the browser URL corresponding to the conversion root");
+  }
   if (publicRootURL === undefined) return "";
   if (!publicRootURL.endsWith("/") || !/^(?:\/|https?:\/\/)/.test(publicRootURL) || /[?#]/.test(publicRootURL) || source.startsWith("../")) {
     throw new FrameworkConversionError(target, source, tag, "publicRootURL must be an HTTP(S) or root-relative directory URL, and the component must be inside the conversion root");
   }
   return `${publicRootURL}${source.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** A declared script's `src` relative to its definition, as `./sdk.js` or `../vendor/sdk.js`. */
+function relativeScript(src: string): boolean {
+  return /^\.\.?\//.test(src);
+}
+
+/**
+ * The definition's declared scripts with each relative `src` resolved, at build time, against the
+ * definition's browser URL, as the live runtime resolves it against the definition's URL.
+ */
+function browserScripts<T extends { readonly src: string }>(scripts: readonly T[], definitionURL: string): readonly T[];
+function browserScripts<T extends { readonly src: string }>(scripts: readonly T[] | undefined, definitionURL: string): readonly T[] | undefined;
+function browserScripts<T extends { readonly src: string }>(scripts: readonly T[] | undefined, definitionURL: string): readonly T[] | undefined {
+  if (scripts === undefined || !scripts.some((script) => relativeScript(script.src))) return scripts;
+  const base = new URL(definitionURL, "https://html-next.invalid/");
+  return Object.freeze(scripts.map((script) => {
+    if (!relativeScript(script.src)) return script;
+    const resolved = new URL(script.src, base);
+    return Object.freeze({ ...script, src: resolved.origin === base.origin && !/^https?:/.test(definitionURL) ? `${resolved.pathname}${resolved.search}${resolved.hash}` : resolved.href });
+  }));
 }
 
 /** Only graphs with an invocation cycle or a path past 32 nested components need HR008 checks. */
@@ -453,13 +478,19 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error), getDiagnosticLocation(node.definition));
         }
       }
+      const definitionURL = browserDefinitionURL(node.definition, source, options.publicRootURL, options.target, tag);
+      const scripts = browserScripts(node.definition.scripts, definitionURL);
       const definition = Object.freeze({
         ...node.definition,
+        ...(scripts === undefined || scripts === node.definition.scripts ? {} : {
+          scripts,
+          contract: Object.freeze({ ...node.definition.contract, scripts: browserScripts(node.definition.contract.scripts!, definitionURL) }),
+        }),
         ...(options.target !== "react" && node.definition.stylesheets !== undefined ? {
           css: node.definition.stylesheets.map(sheet => wrapStylesheetConditions(sheet.css, sheet.conditions)).join("\n") + "\n" + node.definition.css,
           stylesheets: [],
         } : {}),
-        source: Object.freeze({ file: browserDefinitionURL(node.definition, source, options.publicRootURL, options.target, tag) }),
+        source: Object.freeze({ file: definitionURL }),
         ...(controller === undefined ? {} : { controller: relativeImport(componentPath, controller) }),
       });
       let content: string;
@@ -503,6 +534,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           controlSpecifier: relativeImport(componentPath, "svelte/control.ts").replace(/\.ts$/, ""),
           dataSpecifier: relativeImport(componentPath, "svelte/data.svelte.ts").replace(/\.ts$/, ""),
           requestsSpecifier: relativeImport(componentPath, "svelte/requests.ts").replace(/\.ts$/, ""),
+          headSpecifier: relativeImport(componentPath, "svelte/head.svelte.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
           slotsByTag,
           propsByTag,
@@ -519,6 +551,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           depthSpecifier: reactHelperSpecifier("depth"),
           renderSpecifier: reactHelperSpecifier("render"),
           requestsSpecifier: reactHelperSpecifier("requests"),
+          headSpecifier: reactHelperSpecifier("head"),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         })).component;
       } catch (error) {
@@ -642,6 +675,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     claim(reactRenderArtifact(), "helper");
   }
   if (neededHelpers.has("requests")) claim(requestsHelperArtifact(options.target), "helper");
+  if (neededHelpers.has("head")) claim(headHelperArtifact(options.target), "helper");
   if (options.target === "react" && reactStyles) {
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
   }

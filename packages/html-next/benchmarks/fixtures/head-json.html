@@ -1,0 +1,10 @@
+<template component="head-json" status="experimental" summary="Head declaration bundle-size fixture: a title, two metadata entries and bound JSON-LD.">
+  <defs>
+    <prop name="label" type="string" default="Pricing">The page's name.</prop>
+    <title>{$label} · Acme</title>
+    <meta name="description" from:content="$label">
+    <meta property="og:title" from:content="$label">
+    <script type="application/ld+json" from:value="{ name: $label }"></script>
+  </defs>
+  <main><h1>{$label}</h1></main>
+</template>

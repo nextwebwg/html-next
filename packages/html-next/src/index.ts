@@ -13,6 +13,8 @@ export {
   importsVueControl,
   importsVueProps,
   importsVueRequests,
+  importsVueHead,
+  headHelperArtifact,
   requestsHelperArtifact,
   vueHostArtifact,
   vueHtmlArtifact,
@@ -58,7 +60,7 @@ export {
   type ControllerModule,
 } from "./controller.js";
 export { DataResource } from "./data.js";
-export { RequestEvent, respond, type RequestEventInit, type RequestOptions, type Responder, type ResponderInit } from "./requests.js";
+export { RequestEvent, type RequestEventInit, type RequestOptions, type Responder, type ResponderInit } from "./requests.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 export type * from "./graph.js";
 export type * from "./resolve.js";
