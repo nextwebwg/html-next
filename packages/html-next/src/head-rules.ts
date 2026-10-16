@@ -18,35 +18,38 @@ export const HEAD_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
 /** A declared script's standard attributes, copied onto the element the runtime inserts. */
 export const SCRIPT_STANDARD_ATTRIBUTES = ["integrity", "crossorigin", "referrerpolicy", "fetchpriority"] as const;
 
-/** Head entries that set policy or identity for the whole document (components#document-authority). */
-const AUTHORITY_RELS = new Set(["canonical", "alternate", "icon", "manifest"]);
-const AUTHORITY_NAMES = new Set(["robots", "referrer", "viewport", "color-scheme", "theme-color", "application-components"]);
+/**
+ * Page-wide head entries: they affect the whole page, its identity for search engines and sharing,
+ * and page-wide behavior (components#page-wide-head-entries).
+ */
+const PAGE_WIDE_RELS = new Set(["canonical", "alternate", "icon", "manifest"]);
+const PAGE_WIDE_NAMES = new Set(["robots", "referrer", "viewport", "color-scheme", "theme-color", "component-src"]);
 
 function literal(declaration: Extract<HeadDeclaration, { kind: "meta" | "link" }>, name: string): string | undefined {
   const attribute = declaration.attributes.find((candidate) => candidate.name === name && candidate.kind === "literal");
   return attribute?.kind === "literal" ? attribute.value : undefined;
 }
 
-/** What makes a head declaration a document-authority entry, or undefined when it is not one. */
-export function documentAuthority(declaration: HeadDeclaration): string | undefined {
+/** What makes a head declaration a page-wide head entry, or undefined when it is not one. */
+export function pageWideEntry(declaration: HeadDeclaration): string | undefined {
   if (declaration.kind === "link") {
     const rel = literal(declaration, "rel")?.trim().toLowerCase();
-    return rel !== undefined && AUTHORITY_RELS.has(rel) ? `<link rel="${rel}">` : undefined;
+    return rel !== undefined && PAGE_WIDE_RELS.has(rel) ? `<link rel="${rel}">` : undefined;
   }
   if (declaration.kind !== "meta") return undefined;
   const name = literal(declaration, "name")?.toLowerCase();
-  if (name !== undefined) return AUTHORITY_NAMES.has(name) ? `<meta name="${name}">` : undefined;
+  if (name !== undefined) return PAGE_WIDE_NAMES.has(name) ? `<meta name="${name}">` : undefined;
   return literal(declaration, "property") === "og:url" ? '<meta property="og:url">' : undefined;
 }
 
 /**
- * An imported component's definition without its document-authority entries, which only an
+ * An imported component's definition without its page-wide head entries, which only an
  * application component contributes, and the entries it left out.
  */
-export function withoutDocumentAuthority(definition: ComponentDefinition): { readonly definition: ComponentDefinition; readonly ignored: readonly string[] } {
-  const ignored = (definition.head ?? []).flatMap((declaration) => documentAuthority(declaration) ?? []);
+export function withoutPageWideEntries(definition: ComponentDefinition): { readonly definition: ComponentDefinition; readonly ignored: readonly string[] } {
+  const ignored = (definition.head ?? []).flatMap((declaration) => pageWideEntry(declaration) ?? []);
   if (ignored.length === 0) return { definition, ignored };
-  const head = definition.head!.filter((declaration) => documentAuthority(declaration) === undefined);
+  const head = definition.head!.filter((declaration) => pageWideEntry(declaration) === undefined);
   const { head: _head, ...rest } = definition;
   return { definition: Object.freeze(head.length === 0 ? rest : { ...rest, head: Object.freeze(head) }), ignored };
 }

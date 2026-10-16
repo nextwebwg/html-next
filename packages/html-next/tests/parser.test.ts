@@ -1264,7 +1264,7 @@ describe("head declarations", () => {
       ["HC027", '<link rel="canonical" href="https://a.example/"><link rel="canonical" href="https://b.example/">'],
       ["HC027", '<link rel="preconnect" href="https://a.example"><link rel="preconnect" href="https://a.example">'],
       ["HC020", '<state name="stripe" value="1"></state><script name="stripe" src="https://js.stripe.com/v3/"></script>'],
-      ["HC028", '<meta name="application-components" content="*">'],
+      ["HC028", '<meta name="component-src" content="*">'],
       ["HT010", '<script src="https://a.example/a.js" on:load="missing"></script>'],
       ["HT007", '<script src="javascript:alert(1)"></script>'],
       ["HT009", "<handler name=\"nested\"><meta name=\"description\" content=\"Nested\"></handler>"],
@@ -1278,11 +1278,11 @@ describe("head declarations", () => {
     expectDiagnostic("HT009", page("", '<main><script src="https://a.example/a.js"></script></main>'));
   });
 
-  it("rejects the same elements read by the browser's parser, and ignores a component's application-components list", () => {
+  it("rejects the same elements read by the browser's parser, and ignores a component's `component-src` list", () => {
     const warnings: string[] = [];
     const virtualConsole = new VirtualConsole();
     virtualConsole.on("warn", (message: string) => warnings.push(message));
-    const { document } = new JSDOM(page(`<title>Checkout</title><meta name="application-components" content="*">
+    const { document } = new JSDOM(page(`<title>Checkout</title><meta name="component-src" content="*">
       <script type="application/ld+json">{"@type": "Product"}</script>`) +
       page("<script>alert(1)</script>").replace("page-checkout", "page-inline") +
       page('<meta http-equiv="refresh" content="0">').replace("page-checkout", "page-refresh"), { virtualConsole }).window;

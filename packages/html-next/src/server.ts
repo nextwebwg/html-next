@@ -10,10 +10,18 @@ export interface ServerRenderOptions {
   readonly url?: string;
   /** Declared initial state, keyed by a selector for rendered component roots. */
   readonly state?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** The application document's own head content, which the components' head declarations start from. */
+  readonly head?: string;
 }
 
 export interface RenderedComponents {
   readonly html: string;
+  /**
+   * The document head: the application's own elements, with the rendered components' head
+   * declarations reconciled into it, set-aside elements in their templates, and a preload link for
+   * each eager declared script, every managed element marked `data-component-head`.
+   */
+  readonly head: string;
   readonly css: string;
   /** Component tags and tested state names for the carrier delivering this compiled CSS. */
   readonly styleOwnership: Readonly<Record<string, readonly string[]>>;
