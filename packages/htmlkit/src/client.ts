@@ -31,7 +31,7 @@ export type Component = readonly [factory: (options: object, html?: Record<strin
 interface Payload {
   readonly version: 1;
   readonly head: { readonly lang: string; readonly title: string; readonly description?: string;
-    readonly elements: readonly { readonly tag: string; readonly attributes: Readonly<Record<string, string>> }[] };
+    readonly elements: readonly { readonly tag: string; readonly attributes: Readonly<Record<string, string>>; readonly text?: string }[] };
   readonly styles: readonly string[];
   readonly modules: readonly string[];
   readonly layers: readonly { readonly component: string; readonly attributes: Readonly<Record<string, string>>;
@@ -71,6 +71,8 @@ export function page(runtime: Runtime, options: ClientOptions, pageComponents: R
   document.dispatchEvent(new Event("hk:ready"));
 }
 
+/** The head metadata a page owns, which navigation swaps. */
+const metadata = 'meta, link, script[type="application/ld+json"]';
 const layer = (root: Document, index: number) => root.getElementById(`hk-layer-${index}`);
 const fresh = (time: number) => performance.now() - time < 30_000;
 const loaded = async (url: string, signal?: AbortSignal): Promise<Response> => {
@@ -96,7 +98,8 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
     return element;
   };
   append(next.head, "base", { href: url.href });
-  for (const element of payload.head.elements) append(next.head, element.tag, element.attributes);
+  // A JSON-LD script is a data block, which never runs.
+  for (const element of payload.head.elements) append(next.head, element.tag, element.attributes).textContent = element.text ?? "";
   if (payload.head.description !== undefined) append(next.head, "meta", { name: "description", content: payload.head.description });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
@@ -131,7 +134,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   /** The pathname whose layers the document shows. A navigation's URL commits before its layers arrive. */
   let rendered = location.pathname;
   /** Head metadata from server documents. Elements that scripts add are never removed. */
-  let owned: Element[] = [...document.head.querySelectorAll("meta, link")];
+  let owned: Element[] = [...document.head.querySelectorAll(metadata)];
   const announcer = document.createElement("div");
   announcer.id = "hk-announcer";
   announcer.setAttribute("aria-live", "polite");
@@ -251,7 +254,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       // Head metadata both documents share stays; the rest is removed or added at the swap.
       const kept = new Set<Element>();
       const added: Element[] = [];
-      for (const element of next.head.querySelectorAll("meta, link")) {
+      for (const element of next.head.querySelectorAll(metadata)) {
         const same = owned.find(candidate => !kept.has(candidate) && candidate.isEqualNode(element));
         if (same === undefined) added.push(element); else kept.add(same);
       }

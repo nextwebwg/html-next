@@ -82,13 +82,23 @@ export function notFoundPage(scripts: readonly string[]) {
   return { head, body, html: documentHTML(body, head) };
 }
 
+/** What app/error.html receives: the status and its standard reason phrase, never the error itself. */
+interface Failure { readonly status: 500; readonly message: string }
+
+/** The page for a failure without app/error.html, or when it fails too. */
+function errorPage({ status, message }: Failure, pathname: string, scripts: readonly string[]): RenderedPage {
+  const head: RenderedHead = { title: message, scripts };
+  const body = `<main><h1>${escapeHTML(message)}</h1></main>`;
+  return { status, pathname, head, body, html: documentHTML(body, head), css: "", components: [], layers: [] };
+}
+
 /** assets supplies a serving adapter's browser modules and stylesheets for fetch(). */
 export async function createApplication(input: ApplicationOptions = {}, moduleServer?: ViteDevServer,
   assets?: (page: RenderedPage) => PageAssets): Promise<Application> {
   const options = await withPlugins(input);
   const config = configure(options);
   const redirects = redirectTable(config.base, options.redirects);
-  const { routes, notFound: notFoundRoute, sources, files, watched } = await discover(config.root, { ...options, base: config.base });
+  const { routes, notFound: notFoundRoute, error: errorRoute, sources, files, watched } = await discover(config.root, { ...options, base: config.base });
   // A dynamic page's entries are checked the same way when they are listed.
   const shadowed = routes.find(route => route.params.length === 0 && redirects.has(config.base + route.pattern.slice(1)));
   if (shadowed !== undefined) throw new HtmlKitError(`The redirects option also redirects ${shadowed.pattern}, which is this page's URL.`, shadowed.component);
@@ -257,14 +267,14 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     return Object.freeze({ ...(index > 0 ? { previous: items[index - 1]! } : {}), ...(index < items.length - 1 ? { next: items[index + 1]! } : {}) });
   };
   const application: Application = {
-    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), navigation, navigationTree, files, watchFiles: watched,
+    ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), ...(errorRoute === undefined ? {} : { error: errorRoute }), navigation, navigationTree, files, watchFiles: watched,
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
       if (missing !== undefined) throw new HtmlKitError(`Static entries() must enumerate parameters: ${missing.params.join(", ")}.`, origin(missing));
       return [...paths.keys()].sort();
     },
-    async render(pathname, signal = new AbortController().signal) {
+    async render(pathname, signal = new AbortController().signal, failure?: Failure) {
       signal.throwIfAborted();
       const notFound = () => ({ status: 404 as const, pathname, ...notFoundPage(scripts), css: "", components: [], layers: [] });
       // A path starting with // would name another origin; no page lives there, for documents or payloads.
@@ -275,11 +285,12 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       // The redirects option precedes pages, with or without the trailing slash.
       const configured = redirects.get(url.pathname.endsWith("/") ? url.pathname : url.pathname + "/");
       if (configured !== undefined) return redirected(configured, 308);
-      const matched = matchRoute(routes, url.pathname, config.base);
-      // Unmatched paths render app/pages/404.html through its layouts, or the built-in page.
-      if (matched === undefined && notFoundRoute === undefined) return notFound();
-      const { route, params } = matched ?? { route: notFoundRoute!, params: {} };
-      const status = matched === undefined ? 404 as const : 200 as const;
+      const matched = failure === undefined ? matchRoute(routes, url.pathname, config.base) : undefined;
+      // Unmatched paths render app/pages/404.html and failures app/error.html, through their layouts, or a built-in page.
+      const fallback = failure === undefined ? notFoundRoute : errorRoute;
+      if (matched === undefined && fallback === undefined) return failure === undefined ? notFound() : errorPage(failure, url.pathname, scripts);
+      const { route, params } = matched ?? { route: fallback!, params: {} };
+      const status = failure?.status ?? (matched === undefined ? 404 as const : 200 as const);
       const layers = [...route.layouts, route];
       // Vite owns module caching and dependency invalidation. Per-render results never enter
       // a shared cache; HTML Next owns the DOM worker and declarative component semantics.
@@ -310,7 +321,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
             if (resolved === null || resolved.external) throw new HtmlKitError(`Cannot resolve component import ${specifier}.`, url);
             packages.set(`${url}\0${specifier}`, packageResource(resolved.id));
           }
-          return { url, source };
+          return { url, source: "source" in parsed ? parsed.source : source };
         },
         resolvePackage: (specifier, parentURL) => {
           const resolved = packages.get(`${parentURL}\0${specifier}`);
@@ -334,8 +345,11 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const attributes: Record<string, string>[] = [];
       let parent: Readonly<Record<string, unknown>> = Object.freeze({});
       let head: RenderedHead = {};
-      // An alias marks its page's own entry current.
-      const current = route.canonical === undefined ? url.pathname : config.base + route.canonical.slice(1);
+      // An alias marks its page's own URL current, with the alias's parameters.
+      const current = route.canonical === undefined ? url.pathname : config.base + route.canonical.slice(1).split("/").filter(Boolean).map(segment => {
+        const value = params[parameter(segment) ?? ""];
+        return (value === undefined ? [segment] : [value].flat().map(encodeURIComponent)).map(part => part + "/").join("");
+      }).join("");
       for (const layer of layers) {
         signal.throwIfAborted();
         const loaded = await module(layer);
@@ -352,7 +366,10 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
           },
           get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", origin(layer)); } };
         let result: LoaderResult;
-        try { result = loaded.load === undefined ? {} : await loaded.load(context); }
+        // app/error.html takes the failure's status and message as the props it declares.
+        const supplied = failure === undefined || layer !== route ? {} : { props: Object.fromEntries(Object.entries(failure)
+          .filter(([name]) => Object.hasOwn(layerDefinitions[results.length]!.contract.props, name))) };
+        try { result = loaded.load === undefined ? supplied : await loaded.load(context); }
         catch (error) { if (error instanceof Redirect) return redirected(error.location, error.status); throw error; }
         if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", origin(layer));
         results.push(result);
@@ -364,6 +381,11 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
           definition => invocation(definition.contract.tag, attributes[index]!, "hk-head", "", false));
       }
       if (scripts.length > 0) head = { ...head, scripts };
+      // An alias names its page's own URL canonical, unless the page names one.
+      const elements = head.elements ?? [];
+      if (route.canonical !== undefined && !current.includes("[") && !elements.some(element => element.tag === "link" && element.attributes.rel?.toLowerCase().split(/\s+/).includes("canonical"))) {
+        head = { ...head, elements: [...elements, { tag: "link", attributes: { rel: "canonical", href: (options.origin === undefined ? "" : config.origin) + current } }] };
+      }
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       const rendered: RenderedLayer[] = layers.map((_layer, i) => ({ component: layerDefinitions[i]!.contract.tag,
         attributes: attributes[i]!, ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
@@ -390,13 +412,15 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const pages = config.base + "_htmlkit/pages/";
       const payload = pathname.startsWith(pages) ? /^(.*\/)?payload\.json$/.exec(pathname.slice(pages.length)) : null;
       if (payload !== null) {
-        const page = await application.render(config.base + (payload[1] ?? ""), request.signal);
+        const page = await application.render(config.base + (payload[1] ?? ""), request.signal).catch((error: unknown) => { report(error, request.signal); });
+        // A failed page has no payload, so the browser loads its document, the error page.
+        if (page === undefined) return new Response(null, { status: 500 });
         const data = page.status === 200 && payloadPath(config.base, page.pathname) === pathname
           ? pagePayload(page, assets?.(page) ?? { styles: [], modules: [] }) : undefined;
         return new Response(data === undefined || request.method === "HEAD" ? null : JSON.stringify(data),
           { status: data === undefined ? 404 : 200, headers: { "content-type": "application/json" } });
       }
-      const page = await application.render(pathname, request.signal);
+      const page = await application.render(pathname, request.signal).catch((error: unknown) => failed(error, pathname, request.signal));
       if (page.location !== undefined) {
         return new Response(request.method === "HEAD" ? null : page.html,
           { status: page.status, headers: { location: page.location, "content-type": "text/html; charset=utf-8" } });
@@ -406,6 +430,18 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         { status: page.status, headers: { "content-type": "text/html; charset=utf-8" } });
     },
     async close() { if (ownsServer) await server.close(); },
+  };
+  /**
+   * A loader or render failure answers with app/error.html and a safe message; the error itself goes
+   * to the console. The development server, which supplies the module server, shows the error instead.
+   */
+  const report = (error: unknown, signal: AbortSignal): void => { if (!ownsServer || signal.aborted) throw error; console.error(error); };
+  const failed = async (error: unknown, pathname: string, signal: AbortSignal): Promise<RenderedPage> => {
+    report(error, signal);
+    const failure: Failure = { status: 500, message: "Internal Server Error" };
+    const render = application.render as (pathname: string, signal: AbortSignal, failure: Failure) => Promise<RenderedPage>;
+    // The error page shares the site's layouts, so a failing layout fails it too; the built-in page answers then.
+    return render(pathname, signal, failure).catch((again: unknown) => { report(again, signal); return errorPage(failure, pathname, scripts); });
   };
   return application;
 }

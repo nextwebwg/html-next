@@ -62,7 +62,10 @@ htmlkit.config.ts optional settings
 
 `npm run build` writes the site to `dist/`. Upload that folder to any static host, and set the
 host's "page not found" response to `404.html` (your [not-found page](/htmlkit/routes#the-not-found-page), when
-`app/pages/404.html` exists). `npm run preview` serves `dist/` locally first.
+`app/pages/404.html` exists). `npm run preview` serves `dist/` locally first. The build checks each
+link to the site's own pages and fails on one that leads to a missing page or anchor
+([link check](/htmlkit/configuration#link-check)). With an `origin`, it also writes
+[`sitemap.xml`](/htmlkit/configuration#search-engines).
 
 The commands take an optional project folder (`htmlkit dev site`), `--base /docs/` to serve the site
 under a path, `--origin` for absolute URLs, `--out-dir`, `--port`, and `--host`. Flags override the

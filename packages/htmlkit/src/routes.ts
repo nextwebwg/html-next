@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -66,8 +66,8 @@ export async function discover(root: string, options: DiscoveryOptions) {
   // Each route remembers its page directory's prefix, which page aliases are relative to.
   // folderLayouts are the _layout.html files from the page directory down to the page, outermost first.
   const routes: (Omit<ApplicationRoute, "pageName"> & { readonly prefix: string; readonly directoryLayout?: string | false | RouteLayer;
-    readonly folderLayouts: readonly RouteLayer[]; readonly notFound?: true; readonly index?: true })[] = [];
-  const add = (input: RouteInput & { readonly canonical?: string; readonly notFound?: true; readonly index?: true }, prefix: string, order?: readonly (string | null)[],
+    readonly folderLayouts: readonly RouteLayer[]; readonly notFound?: true; readonly error?: true; readonly index?: true })[] = [];
+  const add = (input: RouteInput & { readonly canonical?: string; readonly notFound?: true; readonly error?: true; readonly index?: true }, prefix: string, order?: readonly (string | null)[],
     directoryLayout?: string | false | RouteLayer, folderLayouts: readonly RouteLayer[] = [], groups: readonly RouteGroup[] = []): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
     const segments = input.pattern.slice(1, -1).split("/").filter(Boolean);
@@ -83,7 +83,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), prefix, folderLayouts,
       ...(directoryLayout === undefined ? {} : { directoryLayout }), ...(groups.length === 0 ? {} : { groups }),
       ...(order === undefined ? {} : { order }), ...(input.canonical === undefined ? {} : { canonical: input.canonical }),
-      ...(input.notFound ? { notFound: true as const } : {}), ...(input.index ? { index: true as const } : {}) });
+      ...(input.notFound ? { notFound: true as const } : {}), ...(input.error ? { error: true as const } : {}), ...(input.index ? { index: true as const } : {}) });
   };
   // A number and a dot ("01.guide") order a file or directory and stay out of its URL. Route
   // segments cannot contain dots, so the prefix is never part of a name.
@@ -148,10 +148,18 @@ export async function discover(root: string, options: DiscoveryOptions) {
     }
   }
   for (const route of options.routes ?? []) add(route, "/");
+  // app/error.html renders failures through the site's layout. Like the not-found page, it is no route.
+  const errorPage = resolve(root, "app/error.html");
+  if (existsSync(errorPage)) {
+    if (["ts", "js"].some(extension => existsSync(resolve(root, `app/error.server.${extension}`)))) {
+      throw new HtmlKitError("app/error.html has no loader: it receives status and message as props.", errorPage);
+    }
+    add({ component: errorPage, pattern: "/", error: true }, "/");
+  }
 
   // A plugin page links to another page's first static URL, and serves the files it references.
   const pageURLs = new Map<string, string>();
-  for (const route of routes) if (route.params.length === 0 && !route.notFound && !pageURLs.has(route.component)) pageURLs.set(route.component, base + route.pattern.slice(1));
+  for (const route of routes) if (route.params.length === 0 && !route.notFound && !route.error && !pageURLs.has(route.component)) pageURLs.set(route.component, base + route.pattern.slice(1));
   const realRoot = await realpath(root);
   const sources = new Map<string, string>();
   const files = new Map<string, string>();
@@ -189,7 +197,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   // Page aliases are further routes for the same page, relative to its page directory. The loop
   // also reaches the aliases it appends, which it skips.
   for (const route of routes) {
-    if (route.canonical !== undefined || route.notFound) continue;
+    if (route.canonical !== undefined || route.notFound || route.error) continue;
     const { resource } = await resourceOf(route.component);
     for (const alias of resource.components.get(pageDefinition(resource, route.component).contract.tag)!.aliases) {
       if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("hk:alias needs a route path with leading and trailing slashes.", route.component);
@@ -202,6 +210,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   }
   const patterns = new Map<string, string>();
   for (const route of routes) {
+    if (route.error) continue;
     const normalized = route.segments.map(segment => ["", "[]", "[...]", "[[...]]"][breadth(segment)] || segment.toLowerCase()).join("/");
     if (patterns.has(normalized)) throw new HtmlKitError(`Route conflict: ${patterns.get(normalized)} and ${route.component} (${route.pattern}).`, route.component);
     patterns.set(normalized, `${route.component} (${route.pattern})`);
@@ -209,6 +218,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
   const pageNames = new Map<string, { component: string; pattern: string; identity: string }>();
   const discovered: ApplicationRoute[] = [];
   let notFound: ApplicationRoute | undefined;
+  let error: ApplicationRoute | undefined;
   const folderOrders: { readonly segments: readonly string[]; readonly rank: string }[] = [];
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
   // A layout name is the site's layouts entry, then its app/layouts/<name>.html (the name itself),
@@ -220,7 +230,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     const plugins = (options as PluginOptions)[pluginLayouts];
     return plugins !== undefined && Object.hasOwn(plugins, name) ? plugins[name] : undefined;
   };
-  for (const { prefix: _prefix, directoryLayout, folderLayouts, notFound: isNotFound, index, ...route } of routes) {
+  for (const { prefix: _prefix, directoryLayout, folderLayouts, notFound: isNotFound, error: isError, index, ...route } of routes) {
     const { identity, resource } = await resourceOf(route.component);
     const pageName = pageDefinition(resource, route.component).contract.tag;
     const previous = pageNames.get(pageName);
@@ -263,7 +273,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     // hk:order takes the place of the number-and-dot prefix on the page's own last segment; on a
     // folder's index page, that segment is the folder's, so it orders the folder (below).
     let order = route.order;
-    if (metadata.order !== undefined && route.canonical === undefined && !isNotFound) {
+    if (metadata.order !== undefined && route.canonical === undefined && !isNotFound && !isError) {
       if (route.segments.length === 0) throw new HtmlKitError("hk:order on the site's home page has no folder to order; it orders a page among its folder's pages.", route.component);
       order = [...route.segments.slice(0, -1).map((_, i) => route.order?.[i] ?? null), metadata.order];
       if (index) folderOrders.push({ segments: route.segments, rank: metadata.order });
@@ -274,6 +284,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
     const discoveredRoute = { ...route, layouts, pageName, ...(order === undefined ? {} : { order }), ...(metadata.label === undefined ? {} : { label: metadata.label }),
       ...(title ? { title } : {}), ...(metadata.hidden ? { hidden: true } : {}) };
     if (isNotFound) notFound = discoveredRoute;
+    else if (isError) error = discoveredRoute;
     else discovered.push(discoveredRoute);
   }
   // Every page in a folder whose index page sets hk:order takes that rank for the folder's segment.
@@ -285,7 +296,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       discovered[i] = { ...route, order };
     }
   }
-  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), sources, files, watched };
+  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), ...(error === undefined ? {} : { error }), sources, files, watched };
 }
 export function matchRoute(routes: readonly ApplicationRoute[], pathname: string, base: string) {
   if (!pathname.startsWith(base)) return undefined;

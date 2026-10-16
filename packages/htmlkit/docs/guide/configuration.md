@@ -23,7 +23,7 @@ export default defineConfig({
 | Option | Default | Does |
 | --- | --- | --- |
 | `base` | `/` | Serves the site under a path, such as `/docs/`. |
-| `origin` | `http://localhost` | The site's origin, used for `url` in loaders. |
+| `origin` | `http://localhost` | The site's origin, used for `url` in loaders. Setting it writes [`sitemap.xml`](#search-engines). |
 | `outDir` | `dist` | Where `build` writes the site. |
 | `layout` | `default` when `app/layouts/default.html` exists | The layout name for every page, or `false` for none. |
 | `layouts` | none | [Named layouts](#named-layouts) beside `app/layouts/`, such as `{ home: { component: 'theme/home.html' } }`. |
@@ -35,6 +35,8 @@ export default defineConfig({
 | `css` | none | Page-wide stylesheets for rules such as `html` and `body`, for example `['@/styles/page.css']`. Components keep their own styles. |
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
 | `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
+| `robots` | none | `true`, or the text of `robots.txt`, for the build to write ([search engines](#search-engines)). |
+| `linkCheck` | `error` | What `build` does with a [broken internal link](#link-check): `error` fails the build, and `warn` reports it. |
 
 A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`. Each selects the outermost
 layout; a folder's `_layout.html` nests inside it ([nested layouts](/htmlkit/routes#nested-layouts)).
@@ -201,8 +203,9 @@ a file doesn't rerun it. Its context has:
 | `root` | The absolute project root. |
 | `base` | The `base` option, such as `/docs/`. |
 
-`buildEnd(context)` runs once the build has written every page, asset, and the
-[manifest](#build-manifest), and before the new output replaces `outDir`. Its context has:
+`buildEnd(context)` runs once the build has written every page, asset, `sitemap.xml` and `robots.txt`,
+and the [manifest](#build-manifest), and before the [link check](#link-check) and the new output
+replacing `outDir`. Links to the files it writes pass the link check. Its context has:
 
 | Field | Value |
 | --- | --- |
@@ -218,6 +221,60 @@ exists, so a plugin can't replace a page, a public file, or another plugin's fil
 Plugins run each hook in the order they're listed. If a hook throws, the build fails with an error
 that names the plugin and the hook, and the previous `outDir` stays as it was. `htmlkit preview`
 and `createApplication` don't run either hook.
+
+## Search engines
+
+With `origin` set, `htmlkit build` writes `sitemap.xml` at the site's base, listing each page at its
+own URL:
+
+```ts
+export default defineConfig({ origin: 'https://example.com', base: '/docs/', robots: true });
+```
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.com/docs/</loc></url>
+<url><loc>https://example.com/docs/guide/</loc></url>
+</urlset>
+```
+
+It lists every page in the [manifest](#build-manifest)'s `routes` except an
+[`hk:alias`](/htmlkit/routes#the-page-head) URL, whose page names its own URL as canonical, and a page
+with `<meta name="robots" content="noindex">` (or `none`). Redirects and the not-found page are
+outside `routes`. A page with `hk:navigation="hidden"` is listed: that setting concerns navigation,
+and `noindex` takes a page out of search results. A `sitemap.xml` in `public/` is the site's own,
+and the build keeps it.
+
+`robots` writes `robots.txt`. `true` allows every crawler, and a string is the file's text. With
+`origin` set, the file ends with a `Sitemap` line, unless the text has one:
+
+```text
+User-agent: *
+Allow: /
+Sitemap: https://example.com/docs/sitemap.xml
+```
+
+Crawlers read `robots.txt` at the origin's root, so for a site under a base path, the host places it
+there. A `robots.txt` in `public/` beside the `robots` option is an error.
+
+## Link check
+
+`htmlkit build` reads every page it wrote, along with its redirect pages and `404.html`, and checks
+each `<a href>` and `<area href>` that leads under `base`. The build fails on a link to a page or file
+that isn't in the output, or to a `#fragment` that names no `id` (or `<a name>`) in its page. A
+fragment-only link such as `#install` checks the page it's on. The error names each page and link:
+
+```text
+Broken internal links:
+  /docs/guide/ links to /docs/missing/, which is no page or file in the build.
+  /docs/guide/ links to #nowhere, and /docs/guide/ has no element with id "nowhere".
+```
+
+Links to other sites and to paths outside `base` pass as written, as do `#`, `#top`, and text
+fragments (`#:~:text=`). A link without its trailing slash, such as `/docs/guide`, finds the page at
+`/docs/guide/`. The check reads the built HTML, so it covers the links and ids the server rendered.
+`linkCheck: 'warn'` reports the same links as a warning and finishes the build.
 
 ## Build manifest
 

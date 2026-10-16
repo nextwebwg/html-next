@@ -30,7 +30,7 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
     const path = join(root, file); await mkdir(dirname(path), { recursive: true }); await writeFile(path, contents);
   };
   const guides = (await readdir(contentRoot)).filter(file => file.endsWith(".md")).sort();
-  const navigation = [{ label: "Overview", href: base }, ...guides.map(file => ({ label: basename(file, ".md"), href: `${base}guide/${basename(file, ".md")}/` })),
+  const navigation = [{ label: "Overview", href: base }, ...guides.map(file => ({ label: basename(file, ".md"), href: `${base}guide/${file === "index.md" ? "" : basename(file, ".md") + "/"}` })),
     { label: "Counter reference", href: base + "reference/counter/" }];
   await write("package.json", '{"name":"htmlkit-docs-proof","private":true,"type":"module"}\n');
   await write("app/layouts/default.html", `<template component="proof-shell" controller="./shell.ts"><title>HTMLKit documentation proof</title><meta name="description" content="HTML Next application documentation."><defs>
@@ -70,13 +70,16 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
           const [pathname, hash] = href.split("#", 2);
           const name = basename(pathname!.replace(/\/$/, ""));
           const guide = name === "html-next" ? "index" : name;
-          target = guides.includes(`${guide}.md`) ? `${base}guide/${guide}/${hash === undefined ? "" : "#" + hash}` : "https://nextwebwg.org" + href;
+          // index.md is the guide folder's page.
+          target = guides.includes(`${guide}.md`) ? `${base}guide/${guide === "index" ? "" : guide + "/"}${hash === undefined ? "" : "#" + hash}` : "https://nextwebwg.org" + href;
         } else if (href.startsWith("/") && !href.startsWith("//")) target = "https://nextwebwg.org" + href;
         return `<a href="${escapeHTML(target)}"${title == null ? "" : ` title="${escapeHTML(title)}"`}>${this.parser.parseInline(tokens)}</a>`;
       },
       heading({ tokens, depth }) {
-        const text = this.parser.parseInline(tokens);
-        const stem = text.replace(/<[^>]*>/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "heading";
+        // A trailing {#name} sets the heading's id, as the guide's site renders it.
+        const [, authored, named] = /^(.*?)\s*(?:\{#([A-Za-z0-9_-]+)\})?$/s.exec(this.parser.parseInline(tokens))!;
+        const text = authored!;
+        const stem = named ?? (text.replace(/<[^>]*>/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "heading");
         const count = ids.get(stem) ?? 0; ids.set(stem, count + 1);
         const id = count === 0 ? stem : `${stem}-${count}`;
         return `<h${depth} id="${id}"><a href="#${id}">${text}</a></h${depth}>`;

@@ -209,6 +209,40 @@ paths.
 </template>
 ```
 
+## The error page
+
+`app/error.html` is the page for a request whose page fails: a loader throws, or the page doesn't
+render. It renders through its layout with status 500, and receives the `status` and `message` props
+when it declares them. `message` is the status's reason phrase, `Internal Server Error`. The error
+itself goes to the server's console, so its message and stack stay out of the page.
+
+```html
+<!-- app/error.html -->
+<template component="page-error">
+  <title>Something went wrong</title>
+  <defs>
+    <prop name="status" type="number" required>Status</prop>
+    <prop name="message" type="string" required>Reason</prop>
+  </defs>
+  <main>
+    <h1>{$status}: {$message}</h1>
+    <p><a href="/">Go to the home page</a></p>
+  </main>
+</template>
+```
+
+| Where | When a page fails |
+| --- | --- |
+| `application.fetch` | It answers 500 with `app/error.html`. The page's payload answers 500, so client navigation loads the error page's document. |
+| `htmlkit dev` | It answers 500 with the error and its stack, to fix in development. |
+| `htmlkit build` | The build fails with the error, and the previous `dist/` stays. A static build has no error page, because each of its pages rendered. |
+| `htmlkit preview` | It serves the built pages, which rendered during the build. |
+
+Like the not-found page, it is not a route: no URL serves it, and navigation doesn't list it. It
+takes its layout as a page does, from `hk:layout`, the `layout` option, or `default.html`, and it
+has no loader of its own. When the layout's loader is what fails, or when there is no
+`app/error.html`, HTMLKit answers with a plain "Internal Server Error" page.
+
 ## Redirects
 
 The `redirects` option sends old URLs to their new place. Each key is an application path, and each
@@ -247,7 +281,8 @@ checking data, use [`redirect()`](/htmlkit/loaders#redirecting).
 head. A page's tag replaces a layout's tag with the same identity: the `<title>`, a `<meta>` with the
 same `name` or `property`, the canonical `<link>`, and an alternate `<link>` with the same `hreflang`.
 A page's `og:image` tags replace the layout's as a set. Every other `<link>`, such as a stylesheet, is
-kept from both. Only `<title>`, `<meta>`, and `<link>` may go in the head. They can use the page's props:
+kept from both. `<title>`, `<meta>`, `<link>`, and [JSON-LD](#structured-data) may go in the head.
+The first three can use the page's props:
 
 ```html
 <template component="page-post">
@@ -263,6 +298,28 @@ kept from both. Only `<title>`, `<meta>`, and `<link>` may go in the head. They 
 
 A loader can also set `head: { title, description, lang }`.
 
+### Structured data
+
+A `<script type="application/ld+json">` in a page or layout puts
+[JSON-LD](https://json-ld.org/) structured data in the head, for search engines. It is an HTML data
+block, whose text browsers keep as data. HTMLKit checks that it is valid JSON, naming the file and line of
+invalid JSON, and writes it as static JSON, so `{$title}` inside it is text. Every layer's
+scripts are kept, so a layout's `WebSite` sits beside a page's `BlogPosting`, and client navigation
+swaps them with the page:
+
+```html
+<template component="page-post">
+  <title>First post</title>
+  <script type="application/ld+json">
+    { "@context": "https://schema.org", "@type": "BlogPosting", "headline": "First post" }
+  </script>
+  <article>…</article>
+</template>
+```
+
+The script has only its `type` attribute. HTMLKit writes `<` in its JSON as `<`, so a string
+holding `</script>` keeps the script whole.
+
 Settings that start with `hk:` configure HTMLKit and never reach the page:
 
 | Metadata | Does |
@@ -272,7 +329,7 @@ Settings that start with `hk:` configure HTMLKit and never reach the page:
 | `hk:label` | Sets the page's label in [navigation](/htmlkit/navigation). |
 | `hk:order` | Sets the page's place in [navigation](/htmlkit/navigation#ordering-pages), in place of its file name's number. |
 | `hk:navigation` | `content="hidden"` keeps the page out of navigation. |
-| `hk:alias` | Adds another URL for the page, such as `content="/start/"`. |
+| `hk:alias` | Adds another URL for the page, such as `content="/start/"`. Its page has a canonical link to the page's own URL, unless the page sets one, and [`sitemap.xml`](/htmlkit/configuration#search-engines) lists only the page's own URL. |
 
 ## A script before first paint
 
