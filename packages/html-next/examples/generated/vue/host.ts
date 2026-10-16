@@ -206,6 +206,8 @@ const requestStateKey = Symbol.for('@nextwebwg/html-next.runtime.v1')
 type DocumentRecord = {
   requests?: { readonly g: WeakMap<Node, Promise<void>> }
   relay?: (from: Node, name: string) => void
+  k?: WeakMap<EventTarget, string[]>
+  w?: Set<(name: string) => void>
 }
 const documentRecord = (root: Element): DocumentRecord =>
   (root.ownerDocument as unknown as Record<symbol, DocumentRecord>)[requestStateKey] ??= {}
@@ -227,6 +229,28 @@ function holdController(root: Element): () => void {
 /** A responder registered on root relays to the requests inside it that went unanswered, once a page asks. */
 function relayResponders(root: Element, name: string): void {
   documentRecord(root).relay?.(root, name)
+}
+
+/** Records a responder hasResponder can see on root until the returned function runs; own lists its controller's. */
+function knownResponder(root: Element, name: string, own?: string[]): () => void {
+  const record = documentRecord(root)
+  const known = record.k ??= new WeakMap()
+  const names = known.get(root) ?? known.set(root, []).get(root)!
+  const change = (add: boolean): void => {
+    for (const list of own === undefined ? [names] : [names, own]) {
+      if (add) list.push(name)
+      else list.splice(list.indexOf(name), 1)
+    }
+    record.w?.forEach((changed) => changed(name))
+  }
+  change(true)
+  let held = true
+  return () => {
+    if (held) {
+      held = false
+      change(false)
+    }
+  }
 }
 
 /** For a component that asks: a responder announcement reaches its controller only as the relay to its root, which does not bubble. */
@@ -538,14 +562,16 @@ export interface ComponentHostOptions {
   /** Each named declared script, which a controller reads as `host.scripts`. */
   readonly scripts?: Readonly<Record<string, unknown>>
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean
-  /** Asks one of the component's declared requests. */
-  request?(
-    root: Element,
-    connection: AbortSignal,
-    name: string,
-    detail?: unknown,
-    options?: unknown,
-  ): Promise<unknown>
+  /** Asks one of the component's declared requests; its `has` builds `host.hasResponder`. */
+  readonly request?:
+    & ((
+      root: Element,
+      connection: AbortSignal,
+      name: string,
+      detail?: unknown,
+      options?: any,
+    ) => Promise<unknown>)
+    & { readonly has?: (host: any, own: string[]) => (name: string) => boolean }
   /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
   readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>
 }
@@ -632,20 +658,30 @@ export function useComponentHost(
   const stops: Array<() => void> = []
   const connected = shallowRef(false)
   const pauses = new Map<() => void, () => void>()
-  const subscriptions = new Set<
-    {
-      type: string
-      callback: (event: Event) => void | (() => void)
-      target?: Element | undefined
-      cleanup?: void | (() => void)
-    }
-  >()
+  // A subscription's known responder (k), and for a request's function prop or event form whether one is set (r).
+  const subscriptions = new Set<{
+    type: string
+    callback: (event: Event) => void | (() => void)
+    target?: Element | undefined
+    cleanup?: void | (() => void)
+    k?: (() => void) | undefined
+    r?: () => boolean
+  }>()
   type Subscription = typeof subscriptions extends Set<infer S> ? S : never
+  // How many known responders the controller's host.on keeps on its own root, by name.
+  const own: string[] = []
+  const track = (entry: Subscription): void => {
+    entry.k?.()
+    entry.k = entry.target === undefined || entry.r?.() === false
+      ? undefined
+      : knownResponder(entry.target, entry.type, entry.r ? undefined : own)
+  }
   const activate = (entry: Subscription): void => {
     if (entry.type === 'connect') entry.cleanup = entry.callback(new Event('connect'))
     else if (entry.type !== 'disconnect') {
       entry.target = root.value ?? undefined
       entry.target?.addEventListener(entry.type, entry.callback as EventListener)
+      track(entry)
       // A responder registered after a request went unanswered tells the asker to ask again.
       if (entry.target !== undefined) relayResponders(entry.target, entry.type)
     }
@@ -653,6 +689,7 @@ export function useComponentHost(
   const deactivate = (entry: Subscription, disconnecting: boolean): void => {
     entry.target?.removeEventListener(entry.type, entry.callback as EventListener)
     entry.target = undefined
+    track(entry)
     const cleanup = entry.cleanup
     entry.cleanup = undefined
     cleanup?.()
@@ -704,17 +741,7 @@ export function useComponentHost(
     }, options.controllerSource?.definition ?? '<component>'),
     scripts: options.scripts ?? Object.freeze({}),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
-      const entry: Subscription = {
-        type,
-        callback: type === 'connect' || type === 'disconnect' || options.request === undefined
-          ? callback
-          : hostListener(type, callback),
-      }
-      subscriptions.add(entry)
-      if (connected.value) activate(entry)
-      return () => {
-        if (subscriptions.delete(entry)) deactivate(entry, false)
-      }
+      return listen(type, callback)
     },
     props: Object.freeze(propHandles),
     refs: Object.defineProperties(
@@ -787,13 +814,39 @@ export function useComponentHost(
         ),
     }),
   }
+  function listen(
+    type: string,
+    callback: (event: Event) => void | (() => void),
+    set?: () => boolean,
+  ): () => void {
+    const entry: Subscription = {
+      type,
+      callback: type === 'connect' || type === 'disconnect' || options.request === undefined
+        ? callback
+        : hostListener(type, callback),
+    }
+    if (set !== undefined) entry.r = set
+    subscriptions.add(entry)
+    if (connected.value) activate(entry)
+    return () => {
+      if (subscriptions.delete(entry)) deactivate(entry, false)
+    }
+  }
+  if (options.request?.has !== undefined) {
+    Object.assign(host, { hasResponder: options.request.has(host, own) })
+  }
   const requests = requestConnection()
   // Each request's responder listens on the root from its first connection, before the controller runs.
   const responders = Object.entries(options.responders ?? {})
-  for (const [name, read] of responders) host.on(name, (event) => read()?.(event))
-  // A function prop or event form set later relays for its request, as a late host.on does.
+  for (const [name, read] of responders) {
+    listen(name, (event) =>
+      read()?.(event), () =>
+      read() !== undefined)
+  }
+  // A function prop or event form set later is a known responder, and relays for its request, as a late host.on does.
   if (responders.length > 0) {
     watch(() => responders.map(([, read]) => read() !== undefined), (now, before) => {
+      for (const entry of subscriptions) if (entry.r !== undefined) track(entry)
       const element = root.value
       if (element === null || !connected.value) return
       now.forEach((set, index) => {

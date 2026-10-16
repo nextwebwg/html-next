@@ -31,6 +31,9 @@ interface DocumentState {
   lifecycle?: LifecycleCoordinator;
   /** Relays a late responder to the requests that went unanswered (src/requests.ts), once a page asks. */
   relay?: (from: Node, name: string) => void;
+  /** Each target's known responders and who hears them change (src/requests.ts `knownResponder`). */
+  k?: WeakMap<EventTarget, string[]>;
+  w?: Set<(name: string) => void>;
 }
 
 type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };

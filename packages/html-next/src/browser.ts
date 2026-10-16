@@ -22,7 +22,7 @@ browserGlobal[browserRuntimeKey] = state;
 /** Resolves once the components the document links have loaded. */
 export const ready = state.ready;
 export type { StartedBrowserComponents };
-/** Page scripts answer a component's requests with `respond()`, or listen for its `RequestEvent`. */
-export { RequestEvent, respond } from "./requests.js";
+/** Page scripts ask, answer and check requests with `RequestEvent`'s static methods, or listen for a `RequestEvent`. */
+export { RequestEvent } from "./requests.js";
 
 browserGlobal.HTMLNext ??= Object.freeze({ ready });

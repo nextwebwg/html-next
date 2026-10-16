@@ -504,13 +504,16 @@ export default function controller(host) {
 }
 ```
 
-A page script answers with `respond()`, which takes a function that returns the answer:
+A page script answers with `RequestEvent.respond`, which takes a function that returns the answer:
 
 ```js title="src/setup.js"
-import { respond } from "@nextwebwg/html-next";
+import { RequestEvent } from "@nextwebwg/html-next";
 
+const { respond } = RequestEvent;
 respond(document, "mention-query", ({ query }, { signal }) => searchPeople(query, { signal }));
 ```
+
+`respond`, `request` and `hasResponder` are static methods of `RequestEvent` that never read `this`, so they work destructured.
 
 :::
 
@@ -578,8 +581,9 @@ export default function controller(host) {
 ```
 
 ```js title="src/upload-setup.js"
-import { respond } from "@nextwebwg/html-next";
+import { RequestEvent } from "@nextwebwg/html-next";
 
+const { respond } = RequestEvent;
 respond(document, "image-upload", ({ file }, { signal, progress }) => uploadImage(file, {
   signal,
   onprogress: (loaded, total) => progress(loaded, total), // XMLHttpRequest upload progress
@@ -600,7 +604,7 @@ export default function controller(host) {
 }
 ```
 
-`respond()` announces its responder when it adds its listener. A page script that listens itself announces with a bubbling event:
+`respond` announces its responder when it adds its listener. A page script that listens itself announces with a bubbling event:
 
 ```js
 element.addEventListener("extensions", (event) => event.respondWith([Highlight]));
@@ -608,6 +612,47 @@ element.dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { na
 ```
 
 A consumer controller's later `host.on("extensions", …)`, and a function prop or event listener a framework sets after mounting, reach the waiting component the same way without dispatching an announcement.
+
+### Show a feature only when someone answers
+
+`host.hasResponder(name)` is `true` while a responder that HTML Next knows about answers a declared request: one added with `RequestEvent.respond`, a consumer controller's `host.on(name, …)`, or a framework function prop or event listener. It is a reactive read, so `host.effect` and `host.computed` run again when a responder arrives or leaves. An editor shows its "Insert image" button only while something stores images:
+
+```html title="src/editor.html"
+<template component="ui-editor" controller="./editor.js">
+  <defs>
+    <request name="image-upload" type="object">…</request>
+    <state name="canUpload" type="boolean" value="false"></state>
+  </defs>
+  <div>
+    <button type="button" from:hidden="!$canUpload">Insert image</button>
+    <div class="editor"></div>
+  </div>
+</template>
+```
+
+```js title="src/editor.js"
+export default function controller(host) {
+  host.effect(() => { host.state.canUpload = host.hasResponder("image-upload"); });
+}
+```
+
+The button shows when `respond(document, "image-upload", …)` ran before the editor mounted, and appears when it runs later. Calling the function `respond` returned hides it again.
+
+It looks for responders on the component's root, its ancestors, the document and the window: a responder in a sibling subtree doesn't count, and neither does the component's own controller listening on its own root. A plain `addEventListener` still answers requests, but the DOM can't list an element's listeners, so `hasResponder` returns `false` for it. Register with `respond` to be found.
+
+### Ask from a page script
+
+Code without a `host`, such as a hand-written custom element, asks with `RequestEvent.request(target, name, detail, { signal, progress })`. The request is the same `RequestEvent`, so every kind of responder answers it, the signal aborts it and the progress callback hears it. Nothing declares it, so neither the detail nor the answer is checked; type the answer with the generic:
+
+```ts title="src/photo-field.ts"
+import { RequestEvent } from "@nextwebwg/html-next";
+
+const { request, hasResponder } = RequestEvent;
+const image = await request<{ src: string }>(this, "image-upload", { file }, { signal });
+const canUpload = hasResponder(this, "image-upload");   // now, not reactive
+```
+
+An unanswered `request` resolves `null` and isn't remembered for late responders, which only a component's controller hears.
 
 ## Add to the document head {#head}
 
