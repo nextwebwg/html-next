@@ -324,8 +324,9 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation", 
   let development: ApplicationServer;
   beforeAll(async () => {
     root = await site();
-    await buildApplication({ root, base: "/kit/" });
-    await buildApplication({ root, base: "/kit/", outDir: "visible", prefetch: "visible" });
+    // The links include a missing page, for the not-found page.
+    await buildApplication({ root, base: "/kit/", linkCheck: "warn" });
+    await buildApplication({ root, base: "/kit/", outDir: "visible", prefetch: "visible", linkCheck: "warn" });
     preview = await previewApplication({ root, port: 0 });
     visible = await previewApplication({ root, outDir: "visible", port: 0 });
     development = await devApplication({ root, base: "/kit/", port: 0 });

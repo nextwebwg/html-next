@@ -4,7 +4,7 @@ export interface ApplicationOptions {
   readonly root?: string;
   /** Absolute URL path prefix, for example /docs/. */
   readonly base?: string;
-  /** Canonical origin used by static loaders; defaults to http://localhost. */
+  /** Canonical origin used by static loaders, sitemap.xml, and alias pages' canonical links; defaults to http://localhost. */
   readonly origin?: string;
   readonly outDir?: string;
   /** Discover app/pages by default; disable for an entirely registered route table. */
@@ -42,6 +42,16 @@ export interface ApplicationOptions {
    * application path or an http(s) URL. Requests answer 308; static builds write a redirect page.
    */
   readonly redirects?: Readonly<Record<string, string>>;
+  /**
+   * The build's robots.txt: true allows every crawler, and a string is the file's rules. With origin
+   * set, the file ends with a Sitemap line for the build's sitemap.xml.
+   */
+  readonly robots?: boolean | string;
+  /**
+   * What a build does with a link under base to a page, file, or #fragment the output lacks: "error"
+   * (default) fails the build, and "warn" reports the links and builds.
+   */
+  readonly linkCheck?: "error" | "warn";
 }
 
 export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
@@ -279,7 +289,7 @@ export interface BrowserDefinition {
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
-  readonly status: 200 | 404 | RedirectStatus;
+  readonly status: 200 | 404 | 500 | RedirectStatus;
   readonly pathname: string;
   /** A redirect's Location; html is then its redirect page. */
   readonly location?: string;
@@ -305,6 +315,8 @@ export interface Application {
   readonly routes: readonly ApplicationRoute[];
   /** app/pages/404.html, which renders every unmatched path with status 404; it is not a route. */
   readonly notFound?: ApplicationRoute;
+  /** app/error.html, which fetch renders with status 500 when a loader or render fails; it is not a route. */
+  readonly error?: ApplicationRoute;
   /** Files that plugin pages reference through PageContext.asset, by deployment-relative path. */
   readonly files: ReadonlyMap<string, string>;
   /** The absolute paths page plugins passed to page.watch(), which the development server watches. */
@@ -317,7 +329,7 @@ export interface Application {
   render(pathname: string, signal?: AbortSignal): Promise<RenderedPage>;
   /**
    * Serve pages for a native Request, on any runtime with fetch types: GET and HEAD under base, redirects, 308 to
-   * a route's trailing-slash URL, 404, and 405. Documents include browser modules only when the
+   * a route's trailing-slash URL, 404, 405, and 500 with app/error.html when a page fails. Documents include browser modules only when the
    * serving adapter supplies them, as the development server does.
    */
   fetch(request: Request): Promise<Response>;

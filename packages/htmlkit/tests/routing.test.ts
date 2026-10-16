@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -139,3 +139,21 @@ it("writes a redirect page at each old URL and lists redirects in the manifest",
   // A redirect from a page's own URL would leave the page unreachable.
   await expect(buildApplication({ root, redirects: { "/docs/static/": "/" } })).rejects.toThrow(/also redirects \/docs\/static\/, which is this page's URL/);
 }, 60_000);
+
+it("refuses a symbolic-link page or page folder, naming it, as it refuses symbolic-link public assets", async () => {
+  const root = await site({});
+  await write(root, "other/page.html", '<template component="page-other"><h1>Other</h1></template>');
+  await write(root, "other/data.json", "{}");
+  // Files beside the pages that aren't pages, such as data a loader reads, may be links.
+  await symlink(join(root, "other/data.json"), join(root, "app/pages/data.json"));
+  await symlink(join(root, "other/page.html"), join(root, "app/pages/_shared.html"));
+  expect((await discoverRoutes(root)).map(route => route.pattern)).toEqual(["/"]);
+  await symlink(join(root, "other/page.html"), join(root, "app/pages/page.html"));
+  await expect(discoverRoutes(root)).rejects.toThrow(`${join(root, "app/pages/page.html")}: Pages and page folders must not be symbolic links`);
+  await rm(join(root, "app/pages/page.html"));
+  await symlink(join(root, "other"), join(root, "app/pages/linked"));
+  await expect(discoverRoutes(root)).rejects.toThrow(`${join(root, "app/pages/linked")}: Pages and page folders must not be symbolic links`);
+  await rm(join(root, "app/pages/linked"));
+  await symlink(join(root, "other"), join(root, "public"));
+  await expect(buildApplication({ root })).rejects.toThrow("Public assets must not be symbolic links");
+});

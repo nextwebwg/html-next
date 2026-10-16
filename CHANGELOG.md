@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-alpha.54
+
+### Added
+
+- HTMLKit renders `app/error.html` when a page's loader throws or its rendering fails. `application.fetch` answers 500 with the error page through its layout, with its `status` and `message` props set when it declares them: `500` and the reason phrase `Internal Server Error`. The error itself goes to `console.error`. A failed page's payload answers 500, so client navigation loads the error page's document. When the layout's own loader fails, or without `app/error.html`, a plain "Internal Server Error" page answers. `htmlkit dev` answers 500 with the error and its stack, and `htmlkit build` fails with the error. The error page is not a route; `Application.error` names it, and `app/error.server.ts` is an error, since the page takes its props from the failure.
+- With `origin` set, `htmlkit build` writes `sitemap.xml` at the base, listing each page in the manifest's `routes` except `hk:alias` URLs and pages with `<meta name="robots" content="noindex">` or `none`. Pages with `hk:navigation="hidden"` are listed. A `sitemap.xml` in `public/` is kept as the site's own. An alias page has a `<link rel="canonical">` to its page's own URL, absolute with `origin` set, unless the page sets one.
+- The `robots` option writes `robots.txt`: `true` allows every crawler, and a string is the file's text. With `origin` set, the file ends with a `Sitemap` line for `sitemap.xml`, unless the text has one. A `public/robots.txt` beside the option is an error.
+- `htmlkit build` checks the links in the pages, redirect pages and `404.html` it wrote, after `buildEnd`. A link under `base` to a page or file missing from the output, or to a `#fragment` naming no `id` or `<a name>` in its page, fails the build with each source page and link. Fragment-only links check their own page. `linkCheck: "warn"` reports the same links as a warning and finishes the build.
+
+### Fixed
+
+- A symbolic link in an HTMLKit page folder that would be a page, such as `docs/page.md` linking to `../other/page.md`, or a page folder, is an error that names it, as a symbolic link in `public/` is. Links whose names start with `_` or `.`, and links to files that aren't pages, stay as they are. To serve pages kept elsewhere, add their folder to the `pages` option.
+- The HTMLKit documentation proof links the guide's index page at `/guide/` and gives a heading with a trailing `{#name}` that id, as the guide's site does.
+- An `hk:alias` of a dynamic page marks its page's own URL, with the alias's parameters, current in navigation.
+
 ## 1.0.0-alpha.53
 
 ### Added

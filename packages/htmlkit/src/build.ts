@@ -6,7 +6,8 @@ import { createApplication, headScripts, notFoundPage } from "./application.js";
 import { browserSources, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
 import { configure, globalStylesheets, HtmlKitError, runHook, withPlugins, within } from "./config.js";
-import { documentHTML, pagePayload, payloadPath, redirectPage } from "./document.js";
+import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage } from "./document.js";
+import { checkLinks } from "./links.js";
 import { matchRoute, redirectTable } from "./routes.js";
 import type { ApplicationOptions, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
@@ -72,6 +73,9 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     if (entries.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
     await copyPublic(resolve(config.root, "public"), stage);
     if (await exists(join(stage, "_htmlkit"))) throw new HtmlKitError("Public asset collision: _htmlkit is reserved for generated assets.");
+    if (options.robots !== undefined && options.robots !== false && await exists(join(stage, "robots.txt"))) {
+      throw new HtmlKitError("Public asset collision: robots.txt is generated from the robots option.");
+    }
     const pages = [];
     const sources = new Map<string, string>();
     const redirects: ManifestRedirect[] = [...redirectTable(config.base, options.redirects)].map(([from, to]) => ({ from, to, status: 308 }));
@@ -97,6 +101,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     const manifest = JSON.parse(await readFile(join(stage, "_htmlkit/vite-manifest.json"), "utf8")) as Manifest;
     const bundles = new Map(Object.values(manifest).filter(chunk => chunk.isEntry).map(chunk => [chunk.name, chunk]));
     const delivery = [];
+    // sitemap.xml lists each page at its own URL: no alias, redirect, not-found page, or page marked noindex.
+    const indexed: string[] = [];
     let notFoundHTML = notFoundPage(await headScripts(options, config.root)).html;
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]!;
@@ -121,6 +127,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       // Served at any missing path, so it has no route, manifest entry, or payload; its asset URLs are absolute.
       if (i === notFoundIndex) { notFoundHTML = documentHTML(page.body, page.head, assets); continue; }
       delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
+      if (route.canonical === undefined && !page.head.elements?.some(element => element.tag === "meta" && element.attributes.name?.toLowerCase() === "robots" &&
+        /\b(?:noindex|none)\b/i.test(element.attributes.content ?? ""))) indexed.push(page.pathname);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, documentHTML(page.body, page.head, assets));
       const payload = pagePayload(page, assets);
@@ -140,6 +148,16 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, redirectPage(to).html);
     }
+    // A public sitemap.xml is the site's own and stays as it is.
+    if (options.origin !== undefined && !await exists(join(stage, "sitemap.xml"))) {
+      await writeFile(join(stage, "sitemap.xml"), '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+        indexed.map(pathname => `<url><loc>${escapeHTML(config.origin + pathname)}</loc></url>\n`).join("") + "</urlset>\n");
+    }
+    if (options.robots !== undefined && options.robots !== false) {
+      const rules = options.robots === true ? "User-agent: *\nAllow: /\n" : options.robots.replace(/\n?$/, "\n");
+      const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
+      await writeFile(join(stage, "robots.txt"), rules + sitemap);
+    }
     const routes = delivery.map(page => page.pathname);
     const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };
     await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify(published, null, 2) + "\n");
@@ -156,6 +174,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
           throw error;
         }
       } });
+    // After buildEnd, so the files plugins add are link targets too.
+    await checkLinks(stage, config.origin, config.base, [...routes, ...redirects.map(redirect => redirect.from), config.base + "404.html"], options.linkCheck);
     const previous = await exists(config.outDir);
     if (previous) await rename(config.outDir, backup);
     try { await rename(stage, config.outDir); }

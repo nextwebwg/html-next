@@ -47,6 +47,8 @@ export function configure(options: ApplicationOptions) {
   }
   const prefetch = options.prefetch ?? "interaction";
   if (!["interaction", "visible", "none"].includes(prefetch)) throw new HtmlKitError('prefetch must be "interaction", "visible", or "none".');
+  if (![undefined, "error", "warn"].includes(options.linkCheck)) throw new HtmlKitError('linkCheck must be "error" or "warn".');
+  if (!["undefined", "boolean", "string"].includes(typeof options.robots)) throw new HtmlKitError("robots must be true, false, or the text of robots.txt.");
   return { root, base, origin: origin.origin, outDir, prefetch };
 }
 
