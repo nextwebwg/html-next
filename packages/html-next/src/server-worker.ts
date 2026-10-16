@@ -12,8 +12,10 @@ import {
   installProjectedSlotParser,
   lowerDocument,
   registerComponentDefinitions,
+  renderServerHead,
   serializeRenderedForm,
 } from "./runtime.js";
+import { HEAD_MARKER } from "./head.js";
 import type { RenderedComponents, ServerRenderReply, ServerRenderRequest } from "./server.js";
 
 // The browser constructors the runtime reads as globals, pointed at each render's own window.
@@ -40,6 +42,9 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
     const view = dom.window;
     for (const name of globals) Object.defineProperty(globalThis, name, { value: view[name], configurable: true });
     const document = view.document;
+    // The application document's own head: reconciliation starts from it (H1).
+    document.head.innerHTML = request.head ?? "";
+    const authored = new Set<Element>(Array.from(document.head.children));
     document.body.innerHTML = request.html;
     registerComponentDefinitions(request.definitions, document, compileComponentStylesForBuild);
     lowerDocument(document, { connect: false });
@@ -59,8 +64,10 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
       if (++pass > 32) fail("HR008", "Component invocations nested deeper than the lowering limit.");
       await new Promise<void>((resolve) => setImmediate(resolve));
     } while (lowerDocument(document, { connect: false }) > 0);
+    renderServerHead(document);
     return {
       html: serializeRenderedForm(document.body),
+      head: Array.from(document.head.children, (element) => authored.has(element) || element.hasAttribute(HEAD_MARKER) ? element.outerHTML : "").join(""),
       css: hoistStylesheetNamespaces(Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n")),
       styleOwnership: Object.assign({}, ...Array.from(document.head.querySelectorAll("style[data-html-next-component-styles]"),
         (style) => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}"))) as Record<string, string[]>,

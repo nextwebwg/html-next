@@ -254,8 +254,8 @@ describe("component graph", () => {
   });
 });
 
-describe("imported components and document authority", () => {
-  // Document-authority entries, and one ordinary head declaration each component keeps.
+describe("imported components and page-wide head entries", () => {
+  // Page-wide head entries, and one ordinary head declaration each component keeps.
   const head = (tag: string, dependencies = ""): string => `${dependencies}<template component="${tag}"><defs>
     <title>${tag}</title><link rel="canonical" href="https://${tag}.example/"><link rel="alternate" hreflang="fr" href="/fr/">
     <link rel="icon" href="/${tag}.png"><link rel="manifest" href="/app.webmanifest">
@@ -264,7 +264,7 @@ describe("imported components and document authority", () => {
     <link rel="preconnect" href="https://${tag}.example"></defs><div></div></template>`;
   const kept = (definition: { head?: readonly { kind: string }[] }): string[] => (definition.head ?? []).map((declaration) => declaration.kind);
 
-  it("leaves out an imported component's document-authority entries, with a warning, and keeps the rest", async () => {
+  it("leaves out an imported component's page-wide head entries, with a warning, and keeps the rest", async () => {
     const warnings: string[] = [];
     const graph = await buildComponentGraph(["./app.html", "@ui/widget.html"], {
       resolver: resolver(),
@@ -307,7 +307,7 @@ describe("imported components and document authority", () => {
   });
 });
 
-describe("application-components source list", () => {
+describe("`component-src` list", () => {
   const document = "https://acme.example/app/";
   it("matches URLs by CSP source expressions, with 'self' always included", () => {
     const cases: readonly (readonly [string, string, boolean])[] = [

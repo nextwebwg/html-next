@@ -28,7 +28,8 @@ import { compileComponentStylesForVue, VUE_ROOT_ATTRIBUTE } from "../component-s
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import type { PropContract } from "../types.js";
-import { rejectHeadDeclarations, targetComponent } from "./backend.js";
+import { targetComponent } from "./backend.js";
+import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { conformingScalarStates } from "./state-roots.js";
 import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
@@ -44,11 +45,18 @@ export const VUE_REQUESTS_SPECIFIER = "./requests";
 export function importsVueRequests(source: string): boolean {
   return new RegExp(`from ['"]${VUE_REQUESTS_SPECIFIER}['"]`).test(source);
 }
+
+/** The head helper a Vue component that declares head content imports. */
+export const VUE_HEAD_SPECIFIER = "./head";
+
+export function importsVueHead(source: string): boolean {
+  return new RegExp(`from ['"]${VUE_HEAD_SPECIFIER}['"]`).test(source);
+}
 import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 import { handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
-const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
+const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "shallowRef", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
@@ -835,15 +843,14 @@ export interface VueConversionOptions {
   readonly guardNestedDepth?: boolean;
   /** Public graph output can relocate components into nested source-mirrored directories. */
   readonly importSpecifier?: (tag: string) => string;
-  readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests") => string;
-  /** The states a \`<context>\` reader can read, from \`publishedStates\`; without it, every state is published. */
+  readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests" | "head") => string;
+  /** The states a `<context>` reader can read, from `publishedStates`; without it, every state is published. */
   readonly publishedStates?: ReadonlySet<string> | undefined;
 }
 
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
   definition = condenseWhitespace(definition);
   const { contract, template } = definition;
-  rejectHeadDeclarations(definition, "Vue");
   const target = targetComponent(definition);
   const generics = selectorGenerics(contract.props);
   const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
@@ -920,6 +927,17 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
     ] }, nullable: false });
   }
+  const scriptNames = new Map<string, string>();
+  for (const script of definition.scripts ?? []) {
+    if (script.name === undefined) continue;
+    const name = identifiers.take(script.name, "Script");
+    scriptNames.set(script.name, name);
+    define(script.name, name, `${name}.value`, { type: { kind: "object", open: false, fields: [
+      { name: "pending", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "error", type: UNKNOWN.type, optional: false },
+    ] }, nullable: false });
+  }
   for (const value of computedValues) {
     const name = identifiers.take(value.name, "Computed");
     stateNames.set(value, name);
@@ -953,7 +971,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const styles = compileComponentStylesForVue(definition.css, definition);
   const controlled = definition.controller !== undefined;
   const dispatches = events.length > 0 || controlled;
-  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined;
+  const headed = declaresHead(definition);
+  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed;
   const context: Context = {
     definition,
     ...(options.slotsByTag === undefined ? {} : { slotsByTag: options.slotsByTag }),
@@ -1191,6 +1210,18 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(!dispatches ? [] : ["", ...checkSources, dispatchSource]),
     ...handlerSources.flatMap((source) => ["", source]),
+    ...(!headed ? [] : ["",
+      ...[...scriptNames.values()].map((name) => `const ${name} = shallowRef<ScriptStatus>({ pending: false, ok: false, error: null });`),
+      ...(definition.head === undefined ? [] : ["const headKept: unknown[] = [];", `useHead(root, () => ${headEntriesSource(definition, (expression) => {
+        const guard = expressionGuard(expression, script, definition, undefined, lowering);
+        const value = lowering.value(expression.ast, script);
+        return guard === undefined ? value : `((${guard}) ? ${value} : Symbol.for("html-next.invalid-result"))`;
+      })});`]),
+      ...(definition.scripts === undefined ? [] : [`const headScripts = useScripts(root, ${headScriptsSource(definition, (name, event) => {
+        const handler = handlers.findIndex((candidate) => candidate.name === name);
+        const call = handlerNames.get(name)!;
+        return handlerSources[handler]!.startsWith(`function ${call}(event`) ? `${call}(${event})` : `${call}()`;
+      }, (name) => ({ read: `${scriptNames.get(name)}.value`, write: (value) => `${scriptNames.get(name)}.value = ${value}` }))});`])]),
     ...(definition.lifecycle === undefined ? [] : ["", `useLifecycle(root, ${(["connect", "disconnect"] as const).map((type) => {
       const handler = handlers.findIndex((candidate) => candidate.name === definition.lifecycle![type]);
       if (handler < 0) return "undefined";
@@ -1207,6 +1238,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       data: new Map(data.map((value) => [value.name, dataNames.get(value)!])),
       context: new Map(contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!])),
       hydrationInstanceName,
+      scripts: scriptNames.size > 0,
     }, options.controllerSpecifier ?? definition.controller),
   );
   // `props` is named only when the script reads it; the template reads props by name.
@@ -1240,6 +1272,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       `import type { ${REQUEST_TYPES.join(", ")} } from ${quote(options.helperSpecifier?.("requests") ?? VUE_REQUESTS_SPECIFIER)};`,
     ]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
+    ...(!headed ? [] : [
+      `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\(`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
+      `import type { ${["DeclaredScript", "HeadEntry", "HeadScript", "ScriptStatus"].filter((name) => new RegExp(`\\b${name}\\b`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
+    ]),
     ...(context.usesHydrationControl ? [`import { ${[
       ...(rootMarkup.includes("readBoundControl(") ? ["readBoundControl"] : []),
       ...(rootMarkup.includes("v-bind-control=") ? ["vBindControl"] : []),
@@ -1277,6 +1313,7 @@ function hostSource(
     readonly data: ReadonlyMap<string, string>;
     readonly context: ReadonlyMap<string, string>;
     readonly hydrationInstanceName: string;
+    readonly scripts: boolean;
   },
   controllerSpecifier?: string,
 ): string[] {
@@ -1313,6 +1350,7 @@ function hostSource(
     ...(values.computed.size === 0 ? [] : [`  computed: ${record(values.computed)},`]),
     ...(values.data.size === 0 ? [] : [`  data: ${record(values.data)},`]),
     ...(values.context.size === 0 ? [] : [`  context: ${record(values.context)},`]),
+    ...(values.scripts ? ["  scripts: headScripts,"] : []),
     ...(requests.length === 0 ? [] : [
       `  request: ${frameworkRequestSource(requests, definition.source.file)},`,
       `  responders: ${respondersSource(requests, (name) => `props.${name}`, (request) => `props.${request.callbackName}`)},`,

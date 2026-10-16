@@ -45,7 +45,7 @@ export class ResourceResolver implements ComponentResourceResolver {
   readonly #listedRoot: ((url: string) => string | undefined) | undefined;
 
   /**
-   * `listedRoot` names the URL prefix the application's application-components list approves for a
+   * `listedRoot` names the URL prefix the application's `component-src` list approves for a
    * cross-origin root, if any; a root there is live project source within that prefix.
    */
   constructor(map: ImportMapLike = {}, baseURL = "file:///", applicationURL = baseURL, listedRoot?: (url: string) => string | undefined) {
@@ -66,7 +66,7 @@ export class ResourceResolver implements ComponentResourceResolver {
         if (listed !== undefined) return Object.freeze({ url: url.href, trustRoot: listed });
         fail(
           "HL010",
-          `Cross-origin component root \`${url.href}\` requires an application-owned import-map entry or an application-components listing.`,
+          `Cross-origin component root \`${url.href}\` requires an application-owned import-map entry or a component-src listing.`,
           this.#baseURL,
         );
       }

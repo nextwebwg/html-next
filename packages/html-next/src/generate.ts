@@ -29,12 +29,13 @@ import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
 import { VUE_PROPS_PATH, vuePropsModule } from "./targets/vue-props.js";
 import { requestsArtifact as makeRequestsArtifact } from "./targets/request-host-source.js";
+import { headHelperArtifact as makeHeadArtifact } from "./targets/head-target.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.53";
+export const GENERATOR_VERSION = "1.0.0-alpha.55";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -60,6 +61,17 @@ export interface GenerationOptions {
    * DOM in place (see `docs/compiled-direct-path.md`, Hydration).
    */
   readonly hydrate?: boolean;
+  /**
+   * A bundler's module specifier for a declared script whose `src` is relative to the definition,
+   * whose default export is the script's emitted or served URL, such as Vite's `?url` import.
+   * Without one, a relative `src` resolves against the generated module's URL at runtime.
+   */
+  readonly scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined;
+  /**
+   * The linked graph's definitions, by tag. Their slots and props type converted Vue invocations as
+   * the converter's do; `invocations`' definitions when omitted.
+   */
+  readonly definitions?: ReadonlyMap<string, ComponentDefinition>;
 }
 
 /** A component another's template invokes: the module exporting its factory, and its definition. */
@@ -73,8 +85,13 @@ export function generateComponent(
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true);
-  const vue = convertedToVue(definition);
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL);
+  const graph = options?.definitions
+    ?? new Map([...options?.invocations ?? []].map(([tag, invoked]) => [tag, invoked.definition] as const));
+  const vue = convertedToVue(definition, {
+    slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
+    propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
+  });
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
   const styles = (definition.stylesheets?.length ?? 0) > 0
@@ -110,6 +127,11 @@ export function vueControlArtifact(): GeneratedArtifact {
 /** Feature-specific typed-prop boundary for Vue components that declare props. */
 export function vuePropsArtifact(): GeneratedArtifact {
   return Object.freeze({ path: VUE_PROPS_PATH, content: vuePropsModule(GENERATOR_VERSION) });
+}
+
+/** The head manager and framework adapter converted components that declare head content import. */
+export function headHelperArtifact(target: "vue" | "react" | "svelte"): GeneratedArtifact {
+  return makeHeadArtifact(target, GENERATOR_VERSION);
 }
 
 /** The request steps converted components that declare requests import, for one framework target. */
@@ -204,7 +226,7 @@ export { importsVueHost } from "./targets/vue-host.js";
 export { importsVueHtml } from "./targets/vue-html.js";
 export { importsVueControl } from "./targets/vue-control.js";
 export { importsVueProps } from "./targets/vue-props.js";
-export { importsVueRequests } from "./targets/vue.js";
+export { importsVueHead, importsVueRequests } from "./targets/vue.js";
 
 export type { ComponentDefinition } from "./template.js";
 
@@ -212,9 +234,9 @@ export type { ComponentDefinition } from "./template.js";
  * The Vue conversion, or nothing when the definition uses a construct Vue conversion does not map
  * yet. HTML Next's own outputs do not depend on it; `generateVueComponent` reports the reason.
  */
-function convertedToVue(definition: ComponentDefinition): string | undefined {
+function convertedToVue(definition: ComponentDefinition, options: VueConversionOptions): string | undefined {
   try {
-    return generateVue(inlineStylesheetSources(definition), GENERATOR_VERSION);
+    return generateVue(inlineStylesheetSources(definition), GENERATOR_VERSION, options);
   } catch (error) {
     if (error instanceof HtmlDiagnosticError && /^HT03\d$/.test(error.diagnostic.code)) return undefined;
     throw error;

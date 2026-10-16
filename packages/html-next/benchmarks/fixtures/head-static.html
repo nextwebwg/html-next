@@ -1,0 +1,9 @@
+<template component="head-static" status="experimental" summary="Head declaration bundle-size fixture: a title and two metadata entries.">
+  <defs>
+    <prop name="label" type="string" default="Pricing">The page's name.</prop>
+    <title>{$label} · Acme</title>
+    <meta name="description" from:content="$label">
+    <meta property="og:title" from:content="$label">
+  </defs>
+  <main><h1>{$label}</h1></main>
+</template>

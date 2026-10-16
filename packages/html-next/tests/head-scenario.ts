@@ -32,22 +32,108 @@ export const headFiles: Readonly<Record<string, string>> = {
   <script type="application/ld+json">{"@type": "Organization", "name": "{Acme}"}</script>
   <script type="application/ld+json" from:value="$schema"></script>
 </defs><section from:data-schema="$schema"></section></template>`,
-  // Reached through a bare specifier, so its document-authority entries are ignored.
+  // Reached through a bare specifier, so its page-wide head entries are ignored.
   "widget.html": `<template component="vendor-widget"><defs>
   <link rel="canonical" href="https://vendor.example/"><meta name="theme-color" content="red">
   <link rel="preconnect" href="https://vendor.example">
 </defs><div></div></template>`,
-  // An application component when the application-components list names its source.
+  // An application component when the `component-src` list names its source.
   "badge.html": `<template component="cdn-badge"><defs>
   <meta name="theme-color" content="green"><link rel="preconnect" href="https://cdn.acme.example">
 </defs><div></div></template>`,
+};
+
+/** Declared scripts: an eager one two components share, a lazy one far below the fold, and a manual one. */
+export const scriptFiles: Readonly<Record<string, string>> = {
+  "scripts.html": `<template component="saved-cards"><defs>
+  <state name="loads" type="number" value="0"></state>
+  <handler name="loaded"><set name="loads" expr:value="$loads + 1"></set></handler>
+  <script name="sdk" src="https://js.example/sdk.js" crossorigin="anonymous" on:load="loaded"></script>
+</defs><ul from:data-loads="$loads" from:data-ok="$sdk.ok" from:data-pending="$sdk.pending"></ul></template>
+<template component="pay-badge"><defs><script src="https://js.example/sdk.js" crossorigin></script></defs><b></b></template>
+<template component="checkout-form"><defs>
+  <state name="loads" type="number" value="0"></state>
+  <handler name="loaded"><set name="loads" expr:value="$loads + 1"></set></handler>
+  <script name="lazy" src="https://js.example/lazy.js" loading="lazy" on:load="loaded"></script>
+</defs><form from:data-loads="$loads" from:data-pending="$lazy.pending"></form></template>
+<template component="map-view" controller="./maps.js"><defs>
+  <script name="maps" src="https://js.example/maps.js" type="module" loading="manual"></script>
+</defs><div from:data-ok="$maps.ok" from:data-pending="$maps.pending"></div></template>`,
+  "maps.js": `export default function controller(host) {
+  globalThis.loadMaps = () => host.scripts.maps.load().then(() => "loaded", () => "failed");
+}\n`,
+};
+
+/** Each script counts its runs; the shared one arrives late, so a connection can end before it settles. */
+export const scriptSources: Readonly<Record<string, string>> = Object.fromEntries(["sdk", "lazy", "maps"].map((name) =>
+  [`${name}.js`, `(globalThis.runs ??= {}).${name} = (globalThis.runs.${name} ?? 0) + 1;\n`]));
+
+declare global {
+  var scripts: {
+    mount(): void;
+    remove(id: string): void;
+    restore(id: string): void;
+    unmount(): void;
+  };
+}
+
+/** Runs the declared-script scenario: sharing, handlers per connection, lazy and manual loading. */
+export async function runScriptScenario(page: Page): Promise<Steps> {
+  const settle = (): Promise<void> => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 20))));
+  const read = (): Promise<unknown> => page.evaluate(() => {
+    const root = (id: string) => document.getElementById(id);
+    return {
+      scripts: Array.from(document.querySelectorAll("script[data-component-head]"), (script) => (script as HTMLScriptElement).src.split("/").at(-1)),
+      runs: (globalThis as unknown as { runs?: Record<string, number> }).runs ?? {},
+      a: [root("a")?.getAttribute("data-loads"), root("a")?.hasAttribute("data-pending"), root("a")?.hasAttribute("data-ok")],
+      b: [root("b")?.getAttribute("data-loads"), root("b")?.hasAttribute("data-pending")],
+      lazy: root("lazy")?.getAttribute("data-loads"),
+      maps: [root("maps")?.hasAttribute("data-pending"), root("maps")?.hasAttribute("data-ok")],
+    };
+  });
+  const steps: Steps = {};
+  await page.evaluate(() => scripts.mount());
+  await settle();
+  steps.mounted = await read();
+  // b's connection ends before the shared script settles, and its next connection gets its own handler.
+  await page.evaluate(() => scripts.remove("b"));
+  await settle();
+  await page.evaluate(() => scripts.restore("b"));
+  await page.waitForFunction(() => document.getElementById("a")?.getAttribute("data-loads") === "1");
+  await settle();
+  steps.loaded = await read();
+  await page.evaluate(() => scripts.remove("a"));
+  await settle();
+  await page.evaluate(() => scripts.restore("a"));
+  await settle();
+  steps.reconnected = await read();
+  await page.evaluate(() => document.getElementById("lazy")!.scrollIntoView());
+  await page.waitForFunction(() => document.getElementById("lazy")?.getAttribute("data-loads") === "1");
+  steps.near = await read();
+  steps.manual = await page.evaluate(() => (globalThis as unknown as { loadMaps(): Promise<string> }).loadMaps());
+  await settle();
+  steps.loadedMaps = await read();
+  await page.evaluate(() => scripts.unmount());
+  await settle();
+  steps.unmounted = await page.evaluate(() => document.querySelectorAll("script[data-component-head]").length);
+  return steps;
+}
+
+export const expectedScripts: Steps = {
+  mounted: { scripts: ["sdk.js"], runs: {}, a: ["0", true, false], b: ["0", true], lazy: "0", maps: [false, false] },
+  loaded: { scripts: ["sdk.js"], runs: { sdk: 1 }, a: ["1", false, true], b: ["1", false], lazy: "0", maps: [false, false] },
+  reconnected: { scripts: ["sdk.js"], runs: { sdk: 1 }, a: ["2", false, true], b: ["1", false], lazy: "0", maps: [false, false] },
+  near: { scripts: ["sdk.js", "lazy.js"], runs: { sdk: 1, lazy: 1 }, a: ["2", false, true], b: ["1", false], lazy: "1", maps: [false, false] },
+  manual: "loaded",
+  loadedMaps: { scripts: ["sdk.js", "lazy.js", "maps.js"], runs: { sdk: 1, lazy: 1, maps: 1 }, a: ["2", false, true], b: ["1", false], lazy: "1", maps: [false, true] },
+  unmounted: 3,
 };
 
 /** The application document's own head. */
 export function authoredHead(listed: boolean): string {
   return '<meta charset="utf-8"><title>Acme</title><meta name="description" content="Site">' +
     '<link rel="preconnect" href="https://img.acme.example">' +
-    (listed ? `<meta name="application-components" content="https://cdn.acme.example/ui/">` : "");
+    (listed ? `<meta name="component-src" content="https://cdn.acme.example/ui/">` : "");
 }
 
 /** What a page records, in the page. */
@@ -151,7 +237,7 @@ export async function runHeadScenario(page: Page): Promise<Steps> {
 }
 
 const authored = ['<title>Acme</title>', '<meta name="description" content="Site">', '<link rel="preconnect" href="https://img.acme.example">'];
-const listedMeta = '<meta name="application-components" content="https://cdn.acme.example/ui/">';
+const listedMeta = '<meta name="component-src" content="https://cdn.acme.example/ui/">';
 
 /** What every implementation's head holds at each step. */
 export function expectedHead(listed: boolean): Steps {

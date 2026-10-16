@@ -8,13 +8,15 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
-import { authoredHead, expectedHead, headFiles, runHeadScenario } from "./head-scenario.js";
+import { parseComponentResource } from "../src/source-parser.js";
+import { renderComponents } from "../src/server.js";
+import { authoredHead, expectedHead, expectedScripts, headFiles, runHeadScenario, runScriptScenario, scriptFiles, scriptSources } from "./head-scenario.js";
 
 /**
  * Head declarations (https://nextwebwg.org/declarative-components/components#head-management) in the
  * live runtime, in Chromium, Firefox and WebKit: insertion and removal, shared and competing keys,
- * restoring the authored head as the same nodes, meta lists, the document-authority rule with and
- * without an application-components list, JSON-LD, and a page change as one reconciliation.
+ * restoring the authored head as the same nodes, meta lists, the page-wide head entry rule with and
+ * without a `component-src` list, JSON-LD, and a page change as one reconciliation.
  */
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const source = fileURLToPath(new URL("../src/", import.meta.url));
@@ -44,6 +46,37 @@ globalThis.app = {
   unmount() { mount().replaceChildren(); },
 };`;
 
+const liveScripts = `const mount = () => document.querySelector("#mount");
+const removed = new Map();
+globalThis.scripts = {
+  mount() {
+    mount().innerHTML = '<saved-cards id="a"></saved-cards><saved-cards id="b"></saved-cards><pay-badge></pay-badge>' +
+      '<div style="height: 6000px"></div><checkout-form id="lazy"></checkout-form><map-view id="maps"></map-view>';
+  },
+  remove(id) { const root = document.getElementById(id); removed.set(id, root); root.remove(); },
+  restore(id) { mount().prepend(removed.get(id)); },
+  unmount() { mount().replaceChildren(); },
+};`;
+
+/** Serves the scripts, counting requests; the shared one arrives late. */
+async function routeScripts(page: import("playwright").Page, body: () => string): Promise<string[]> {
+  const requested: string[] = [];
+  await page.route(/^https:\/\/(?:app|js)\.example\//, async (route) => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split("/").at(-1)!;
+    const headers = { "access-control-allow-origin": "*" };
+    if (url.hostname === "js.example") {
+      requested.push(name);
+      if (name === "sdk.js") await new Promise((resolve) => setTimeout(resolve, 400));
+      return route.fulfill({ contentType: "text/javascript", body: scriptSources[name]!, headers });
+    }
+    if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: body(), headers });
+    const file = scriptFiles[name] ?? headFiles[name];
+    return file === undefined ? route.fulfill({ status: 404 }) : route.fulfill({ contentType: name.endsWith(".js") ? "text/javascript" : "text/html", body: file, headers });
+  });
+  return requested;
+}
+
 describe.skipIf(!enabled)("head declarations in the live runtime, in every engine", () => {
   let directory = "";
   let bundle = "";
@@ -60,7 +93,7 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const listed of [false, true]) {
-      it(`${engine} reconciles the head ${listed ? "with" : "without"} an application-components list`, async () => {
+      it(`${engine} reconciles the head ${listed ? "with" : "without"} a component-src list`, async () => {
         const browser = await browserType.launch({ headless: true });
         const errors: string[] = [];
         try {
@@ -93,5 +126,105 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
         }
       });
     }
+
+    it(`${engine} shares declared scripts and runs on:load once per connection, with lazy and manual loading`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      const errors: string[] = [];
+      try {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(10_000);
+        page.on("pageerror", (error) => errors.push(error.message));
+        const requested = await routeScripts(page, () => '<!doctype html><head><title>Scripts</title></head><body><link rel="component" href="/scripts.html"><div id="mount"></div></body>');
+        await page.goto("https://app.example/");
+        await page.addScriptTag({ path: bundle });
+        await page.evaluate(() => (window as unknown as { HtmlNextLive: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLive.startBrowserComponents());
+        await page.addScriptTag({ content: liveScripts });
+        assert.deepEqual(await runScriptScenario(page), expectedScripts);
+        // The browser fetched each script once.
+        assert.deepEqual(requested, ["sdk.js", "lazy.js", "maps.js"]);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} hydrates server output: adopts its head, inserts an eager script once from its preload, and restores the set-aside title`, async () => {
+      const checkout = `<template component="page-checkout"><defs>
+        <state name="loads" type="number" value="0"></state>
+        <handler name="loaded"><set name="loads" expr:value="$loads + 1"></set></handler>
+        <title>Checkout · Acme</title><link rel="preconnect" href="https://js.example">
+        <script name="sdk" src="https://js.example/sdk.js" crossorigin="anonymous" on:load="loaded"></script>
+      </defs><main from:data-loads="$loads"><p>Pay</p></main></template>`;
+      const files = { "checkout.html": checkout };
+      const rendered = await renderComponents('<page-checkout id="checkout"></page-checkout>', {
+        definitions: parseComponentResource(checkout, "https://app.example/checkout.html").definitions,
+        head: "<title>Acme</title>", url: "https://app.example/",
+      });
+      const browser = await browserType.launch({ headless: true });
+      const errors: string[] = [];
+      try {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(10_000);
+        page.on("pageerror", (error) => errors.push(error.message));
+        const requested: string[] = [];
+        await page.route(/^https:\/\/(?:app|js)\.example\//, async (route) => {
+          const url = new URL(route.request().url());
+          const name = url.pathname.split("/").at(-1)!;
+          const headers = { "access-control-allow-origin": "*" };
+          if (url.hostname === "js.example") {
+            requested.push(name);
+            return route.fulfill({ contentType: "text/javascript", body: scriptSources[name]!, headers });
+          }
+          if (url.pathname === "/") {
+            return route.fulfill({ contentType: "text/html; charset=utf-8", headers,
+              body: `<!doctype html><head><meta charset="utf-8">${rendered.head}</head><body><link rel="component" href="/checkout.html"><div id="mount">${rendered.html}</div></body>` });
+          }
+          return route.fulfill({ contentType: "text/html", body: files[name as keyof typeof files], headers });
+        });
+        await page.goto("https://app.example/");
+        const before = await page.evaluate(() => {
+          const kept = globalThis as unknown as Record<string, unknown>;
+          kept.serverTitle = document.querySelector("title");
+          kept.authoredTitle = document.querySelector<HTMLTemplateElement>("template[data-component-head]")?.content.firstElementChild;
+          return { title: document.title, preloads: document.querySelectorAll('link[rel="preload"]').length, scripts: document.scripts.length };
+        });
+        assert.deepEqual(before, { title: "Checkout · Acme", preloads: 1, scripts: 0 });
+        await page.addScriptTag({ path: bundle });
+        await page.evaluate(() => (window as unknown as { HtmlNextLive: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLive.startBrowserComponents());
+        await page.waitForFunction(() => document.getElementById("checkout")?.getAttribute("data-loads") === "1");
+        const read = () => page.evaluate(() => {
+          const kept = globalThis as unknown as Record<string, unknown>;
+          return { sameTitle: kept.serverTitle === document.querySelector("title"), title: document.title,
+            templates: document.querySelectorAll("template[data-component-head]").length,
+            preload: document.querySelectorAll('link[rel="preload"][data-component-head]').length,
+            scripts: document.querySelectorAll('script[src="https://js.example/sdk.js"]').length,
+            runs: (globalThis as unknown as { runs?: Record<string, number> }).runs?.sdk ?? 0,
+            loads: document.getElementById("checkout")?.getAttribute("data-loads") ?? null };
+        });
+        assert.deepEqual(await read(), { sameTitle: true, title: "Checkout · Acme", templates: 0, preload: 1, scripts: 1, runs: 1, loads: "1" });
+        // A new connection runs on:load again without inserting or running the script again.
+        await page.evaluate(async () => {
+          const root = document.getElementById("checkout")!;
+          root.remove();
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          document.querySelector("#mount")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+        // While the form was away the authored title returned, so a new managed title replaced it again.
+        assert.deepEqual(await read(), { sameTitle: false, title: "Checkout · Acme", templates: 0, preload: 1, scripts: 1, runs: 1, loads: "2" });
+        // With no component setting a title, the authored node returns: the same object.
+        const restored = await page.evaluate(async () => {
+          document.querySelector("#mount")!.replaceChildren();
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          const kept = globalThis as unknown as Record<string, unknown>;
+          return { same: kept.authoredTitle === document.querySelector("title"), title: document.title };
+        });
+        assert.deepEqual(restored, { same: true, title: "Acme" });
+        assert.deepEqual(requested, ["sdk.js"]);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
   }
 });

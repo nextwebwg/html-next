@@ -82,7 +82,7 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
         `| \`${request.name}\` | ${typeSource(request.contract.type)} | ${typeSource(request.contract.returns)} or \`null\` | \`${request.propName}\` | ${cell(request.contract.description ?? "—")} |`
       ),
       "",
-      "Answer a request in a consumer's controller with `host.on(name, (event) => event.respondWith(answer))`, in a page script with `respond(target, name, fn)`, or in a framework with its function prop. An unanswered request resolves `null`.",
+      "Answer a request in a consumer's controller with `host.on(name, (event) => event.respondWith(answer))`, in a page script with `RequestEvent.respond(target, name, fn)`, or in a framework with its function prop. An unanswered request resolves `null`.",
       "",
     ]),
     "## Usage",

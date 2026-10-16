@@ -69,6 +69,27 @@ describe("HTML Next unplugin", () => {
     assert.doesNotMatch(css, /@import|@styles|file:\/\/|\/@fs\//);
   });
 
+  it("emits a component-relative declared script as an asset, which the compiled component loads by its built URL", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-script-asset-"));
+    temporary.push(root);
+    await mkdir(join(root, "components", "vendor"), { recursive: true });
+    await writeFile(join(root, "components", "vendor", "sdk.js"), "globalThis.sdkLoaded = true;\n");
+    await writeFile(join(root, "components", "checkout.html"), '<template component="x-checkout"><defs><script name="sdk" src="./vendor/sdk.js"></script></defs><form from:aria-busy="$sdk.pending"></form></template>');
+    await writeFile(join(root, "main.js"), `export { createXCheckout } from ${JSON.stringify(componentsModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["components/checkout.html"], manifestFile: false })],
+      resolve: { alias: generatedRuntimeAlias },
+      build: { minify: false, assetsInlineLimit: 0, rollupOptions: { input: join(root, "main.js"), preserveEntrySignatures: "exports-only" } } });
+    const assets = await readdir(join(root, "dist", "assets"));
+    const sdk = assets.find((name) => /^sdk-.+\.js$/.test(name));
+    assert.ok(sdk !== undefined, assets.join(", "));
+    assert.equal(await readFile(join(root, "dist", "assets", sdk), "utf8"), "globalThis.sdkLoaded = true;\n");
+    const bundle = (await Promise.all(assets.filter((name) => name.endsWith(".js") && name !== sdk).map((name) => readFile(join(root, "dist", "assets", name), "utf8")))).join("\n");
+    assert.ok(bundle.includes(`/assets/${sdk}`), "the compiled component names the emitted script");
+    // The declaration's literal `src` is replaced by the asset's URL.
+    assert.doesNotMatch(bundle, /"src":\s*"\.\/vendor\/sdk\.js"/);
+    assert.match(bundle, /src: [\w$]+,\s*base:/);
+  });
+
   it("consumes a packed component folder with native factories and no configured entries", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-native-package-"));
     temporary.push(root);
@@ -306,9 +327,10 @@ describe("HTML Next unplugin", () => {
     // +17 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call
     // that does nothing until a component on the page asks; the request steps stay with askers.
     // +47 B: the whitespace between the fixture's elements, which templates now keep as authored.
+    // +70 B: `host.on` records each listener as a known responder for `hasResponder`.
     // Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_791, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_861, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

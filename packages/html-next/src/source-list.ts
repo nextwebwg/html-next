@@ -1,5 +1,5 @@
 /**
- * The application-components source list (components#document-authority): a CSP source list whose
+ * The `component-src` list (components#page-wide-head-entries): a CSP source list whose
  * matching URLs supply application components. It always includes `'self'`.
  *
  * CSP's own matching runs only inside the browser's policy checks, so this is the "Does url match

@@ -3,7 +3,7 @@ import { dirname, posix, relative, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
-import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, requestsHelperArtifact, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
+import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, importsVueHead, headHelperArtifact, requestsHelperArtifact, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { parseComponentResource } from "./source-graph.js";
@@ -178,13 +178,17 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
           moduleDependencies,
         );
       }
-      const generated = config.sourceOnly ? [] : generateComponent(generatedDefinition(definition, controller));
-      for (const artifact of generated) {
-        if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
-        files.set(artifact.path, artifact.content);
-      }
     }
     files.set(source, { copy: sourcePath });
+  }
+  // Every definition is read first, so each component's invocations are typed by the contracts it invokes.
+  const byTag = new Map(definitions.map((definition) => [definition.contract.tag, definition] as const));
+  for (const definition of config.sourceOnly ? [] : definitions) {
+    const controller = controllers.get(definition.contract.tag);
+    for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag })) {
+      if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
+      files.set(artifact.path, artifact.content);
+    }
   }
 
   for (const edge of config.passThrough ?? []) {
@@ -225,6 +229,11 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const requests = requestsHelperArtifact("vue");
     if (files.has(requests.path)) throw new Error(`Package artifact collision at ${requests.path}.`);
     files.set(requests.path, requests.content);
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueHead(content))) {
+    const head = headHelperArtifact("vue");
+    if (files.has(head.path)) throw new Error(`Package artifact collision at ${head.path}.`);
+    files.set(head.path, head.content);
   }
   const publicNames = new Set<string>();
   for (const definition of definitions) {
