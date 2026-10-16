@@ -230,11 +230,13 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const attributes: Record<string, string>[] = [];
   let parent: Readonly<Record<string, unknown>> = Object.freeze({});
   let lang: string | undefined;
-  // An alias marks its page's own URL current, with the alias's parameters.
-  const current = route.canonical === undefined ? url.pathname : base + route.canonical.slice(1).split("/").filter(Boolean).map(segment => {
+  // A pattern's URL with this request's parameters.
+  const at = (pattern: string) => base + pattern.slice(1).split("/").filter(Boolean).map(segment => {
     const value = params[parameter(segment) ?? ""];
     return (value === undefined ? [segment] : [value].flat().map(encodeURIComponent)).map(part => part + "/").join("");
   }).join("");
+  // An alias marks its page's own URL current, with the alias's parameters.
+  const current = route.canonical === undefined ? url.pathname : at(route.canonical);
   for (const layer of layers) {
     signal.throwIfAborted();
     const loaded = await layer.module();
@@ -288,10 +290,12 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     if (layer.state !== undefined) state[`#${id}`] = layer.state;
     body = invocation(layer.component, layer.attributes, id, body, i > 0);
   }
-  // An alias names its page's own URL canonical, unless a component on the page declares one.
-  const canonical = route.canonical !== undefined && !current.includes("[") && !input.definitions.some(definition => definition.head?.some(declaration =>
+  // An alias names its page's own URL canonical, and a page in an alias page directory the same page
+  // under its directory's own prefix, unless a component on the page declares one.
+  const own = route.aliasOf === undefined ? route.canonical === undefined ? undefined : current : at(route.aliasOf);
+  const canonical = own !== undefined && !own.includes("[") && !input.definitions.some(definition => definition.head?.some(declaration =>
     declaration.kind === "link" && declaration.attributes.some(attribute => attribute.kind === "literal" && attribute.name === "rel" && attribute.value.trim().toLowerCase() === "canonical")))
-    ? input.canonicalOrigin + current : undefined;
+    ? input.canonicalOrigin + own : undefined;
   const output = await renderComponents(body, { definitions: input.definitions, url: url.href, state,
     head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
   signal.throwIfAborted();

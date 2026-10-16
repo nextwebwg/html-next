@@ -2,6 +2,10 @@
 
 ## 1.0.0-alpha.56
 
+### Added
+
+- A `pages` entry with `alias: true` serves a page folder at a further prefix, such as the current docs at both `/` and `/v/current/`. Its pages are served and navigable there, left out of `sitemap.xml`, and each has a `<link rel="canonical">` to the same page under the folder's own prefix, unless the page sets one; an `hk:alias` of such a page names the same URL. `ApplicationRoute.aliasOf` is that page's own pattern. One folder at two prefixes without `alias: true` on one of them is an error that names both, and so is an alias entry without an entry for the folder itself.
+
 ### Breaking
 
 - HTMLKit pages and layouts declare their head content as HTML Next head declarations in `<defs>`: `<title>`, `<meta>`, `<link>`, JSON-LD and declared scripts, bound to the component's props, state and data. HTMLKit's settings, `hk:layout`, `hk:label`, `hk:order`, `hk:navigation`, `hk:render` and `hk:alias`, are `<meta>` entries there too, and HTMLKit leaves them out of the head; `hk:page` stays at the top of the file. `renderComponents` renders the head with the page, so a title, a canonical link and each meta name or property come from the deepest component that declares them, a page's over its layout's, and any component on the page may declare head content. A component reached by a bare specifier, such as `@acme/ui/card.html` or `@/components/card.html`, is an imported component, whose page-wide head entries are left out with `HL011`. Server-rendered and prerendered pages, the not-found page and the error page carry the reconciled head with `data-component-head` on each managed element and a `<link rel="preload">` for each eager declared script, and hydration adopts it. Client navigation leaves the head declarations to HTML Next, which updates them once per page change, inside a view transition's update when there is one, and never runs a declared script twice; HTMLKit swaps only its stylesheets and an alias page's canonical link. Every document starts from `<meta charset="utf-8">` and a viewport meta, which a page's own viewport replaces.

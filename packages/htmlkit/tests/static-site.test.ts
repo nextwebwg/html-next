@@ -138,6 +138,38 @@ describe("sitemap.xml and robots.txt", () => {
     expect(await readFile(join(result.outDir, "robots.txt"), "utf8")).toBe("User-agent: *\nAllow: /\nSitemap: https://example.com/docs/sitemap.xml\n");
   }, 60_000);
 
+  it("serves an alias page directory with canonical links to its own prefix, and lists only that one", async () => {
+    const root = await site();
+    await write(root, "docs/index.html", '<template component="docs-home"><defs><title>Docs</title></defs><h1>Docs</h1></template>');
+    await write(root, "docs/guide.html", '<template component="docs-guide"><defs><title>Guide</title><meta name="hk:alias" content="/start/"></defs><h1>Guide</h1></template>');
+    await write(root, "docs/posts/[slug].html", '<template component="docs-post"><defs><title>Post</title></defs><h1>Post</h1></template>');
+    await write(root, "docs/posts/[slug].server.ts", "export const entries = () => [{ slug: 'a&b' }];");
+    const pages = [{ dir: "docs", prefix: "/v/current/", alias: true }, { dir: "docs", prefix: "/docs/" }];
+    const result = await buildApplication({ root, origin: "https://example.com", fileRoutes: true, pages });
+    expect(await readFile(join(result.outDir, "sitemap.xml"), "utf8")).toBe(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.com/docs/</loc></url>
+<url><loc>https://example.com/docs/guide/</loc></url>
+<url><loc>https://example.com/docs/posts/a%26b/</loc></url>
+</urlset>
+`);
+    const canonical = async (path: string) => [...(await readFile(join(result.outDir, path, "index.html"), "utf8")).matchAll(/<link rel="canonical" href="([^"]*)"/g)].map(match => match[1]);
+    expect(await canonical("v/current")).toEqual(["https://example.com/docs/"]);
+    expect(await canonical("v/current/guide")).toEqual(["https://example.com/docs/guide/"]);
+    expect(await canonical("v/current/posts/a&b")).toEqual(["https://example.com/docs/posts/a%26b/"]);
+    expect(await canonical("v/current/start")).toEqual(["https://example.com/docs/guide/"]);
+    expect(await canonical("docs/guide")).toEqual([]);
+    // Still a site of its own to navigate.
+    const application = await createApplication({ root, pages });
+    try {
+      expect((await application.navigation({ from: "/v/current/" })).map(item => item.href)).toEqual(["/v/current/", "/v/current/guide/", "/v/current/posts/a%26b/"]);
+    } finally { await application.close(); }
+    // Two own prefixes for one directory would list each page twice.
+    await expect(buildApplication({ root, pages: [{ dir: "docs", prefix: "/v/current/" }, { dir: "docs", prefix: "/docs/" }] }))
+      .rejects.toThrow("Page directory docs is served at /v/current/ and /docs/; mark the further one alias: true");
+    await expect(buildApplication({ root, pages: [{ dir: "docs", prefix: "/v/current/", alias: true }] })).rejects.toThrow("needs an entry that serves docs itself");
+  }, 60_000);
+
   it("keeps a public sitemap, writes robots.txt from its text, and gives aliases a path canonical without origin", async () => {
     const root = await site();
     await write(root, "app/pages/about.html", '<template component="about-page"><defs><title>About</title><meta name="hk:alias" content="/old-about/"></defs><h1>About</h1></template>');

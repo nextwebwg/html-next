@@ -197,7 +197,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       // Served at any missing path, so it has no route, manifest entry, or payload; its asset URLs are absolute.
       if (i === notFoundIndex) { notFoundHTML = documentHTML(page.body, page.head, assets); continue; }
       delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
-      if (route.canonical === undefined && !parseFragment(page.head.html).childNodes.some(node => "tagName" in node && node.tagName === "meta" &&
+      if (route.canonical === undefined && route.aliasOf === undefined && !parseFragment(page.head.html).childNodes.some(node => "tagName" in node && node.tagName === "meta" &&
         node.attrs.some(({ name, value }) => name === "name" && value.toLowerCase() === "robots") &&
         node.attrs.some(({ name, value }) => name === "content" && /\b(?:noindex|none)\b/i.test(value)))) indexed.push(page.pathname);
       await mkdir(dirname(path), { recursive: true });

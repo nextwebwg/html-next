@@ -67,6 +67,11 @@ export interface PageDirectory {
   readonly layout?: string | false | RouteLayer;
   /** Skip the directory when it doesn't exist, as the default app/pages is. */
   readonly optional?: boolean;
+  /**
+   * A further mount of a directory another entry also serves: its pages are served and navigable here,
+   * left out of sitemap.xml, and name the same page under the other entry's prefix as canonical.
+   */
+  readonly alias?: boolean;
 }
 
 export interface HtmlKitPlugin {
@@ -273,6 +278,8 @@ export interface ApplicationRoute extends RouteLayer {
   readonly hidden?: boolean;
   /** For an hk:alias route, the pattern of the page's own route, which navigation marks current. */
   readonly canonical?: string;
+  /** For a page in an alias page directory, the pattern of the same page under its directory's own prefix, which its canonical link names. */
+  readonly aliasOf?: string;
   /** Per-segment numeric file order; independent of URLs and component identity. */
   readonly order?: readonly (string | null)[];
   /** The (group) folders the page is in, outermost first. */
