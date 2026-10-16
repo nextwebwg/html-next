@@ -1212,6 +1212,29 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.match(source, /useDataRead\(result, \{\s+source: '\.\/api\/feed',\s+definition: '\/app\/components\/feed\.html',/);
   });
 
+  it("resolves a component-relative declared script against the definition's public URL, at build time", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-converter-script-relative-"));
+    temporary.push(root);
+    await mkdir(join(root, "components", "pay"), { recursive: true });
+    await writeFile(join(root, "components", "pay", "checkout.html"), `<template component="x-checkout" status="early" summary="Checkout."><defs>
+      <script name="sdk" src="../vendor/sdk.js"></script><script src="https://js.stripe.com/v3/"></script>
+    </defs><form from:aria-busy="$sdk.pending"></form></template>`);
+    for (const target of ["vue", "react", "svelte"] as const) {
+      const outDirectory = join(root, `generated-${target}`);
+      await assert.rejects(
+        () => convertComponents({ mode: "application", entries: ["components/pay/checkout.html"], target, root, outDirectory }),
+        (error) => error instanceof FrameworkConversionError && error.message.includes("publicRootURL"),
+      );
+      for (const [publicRootURL, resolved] of [["/app/", "/app/components/vendor/sdk.js"], ["https://cdn.example/site/", "https://cdn.example/site/components/vendor/sdk.js"]] as const) {
+        const manifest = await convertComponents({ mode: "application", entries: ["components/pay/checkout.html"], target, root, outDirectory, publicRootURL });
+        const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+        assert.match(source, new RegExp(`["']?src["']?: ['"]${resolved.replaceAll(".", "\\.").replaceAll("/", "\\/")}['"]`), `${target} ${publicRootURL}`);
+        assert.match(source, /["']?src["']?: ['"]https:\/\/js\.stripe\.com\/v3\/['"]/);
+        assert.doesNotMatch(source, /\.\.\/vendor\/sdk\.js/);
+      }
+    }
+  });
+
   it("copies the controller beside the component and imports it", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-converter-controller-"));
     temporary.push(root);

@@ -1720,8 +1720,12 @@ export function emitBlocks(
   noContextReaders = false,
   /** The factory also adopts a server-rendered root (see `adoptTree`). */
   hydrate = false,
+  /** A bundler module whose default export is a relative declared script's URL (`GenerationOptions.scriptURL`). */
+  scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
 ): string {
   const { contract } = definition;
+  // A script relative to the definition resolves at build time, through the bundler, to the URL it serves.
+  const scriptImports = (definition.scripts ?? []).map((script) => /^\.\.?\//.test(script.src) ? scriptURL?.(script.src, definition) : undefined);
   const blocks = plan.blocks;
   const selectorRoot = (binding: Binding, region: Region): number => {
     if (binding.kind !== "class" || region.key === undefined || binding.exact !== undefined) return -1;
@@ -2412,9 +2416,10 @@ export function emitBlocks(
       : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
     ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at}, DT);`),
     ...headed ? [`  HU = manageHead(I, () => [${plan.head.join(", ")}]);`] : [],
-    ...plan.scripts.length > 0 ? [`  manageScripts(I, [${plan.scripts.map((script) => {
+    ...plan.scripts.length > 0 ? [`  manageScripts(I, [${plan.scripts.map((script, at) => {
       const { load: _load, error: _error, name, ...attributes } = script.declaration;
-      const declared = `{ ...${JSON.stringify(attributes)}, base: S.f, source: S.f }`;
+      const { src: _src, ...fetched } = attributes;
+      const declared = `{ ...${JSON.stringify(scriptImports[at] === undefined ? attributes : fetched)}, ${scriptImports[at] === undefined ? "" : `src: SU${at}, `}base: S.f, source: S.f }`;
       const run = script.load === undefined && script.error === undefined ? "() => {}"
         : `(l, e) => { ${script.load === undefined ? "" : `if (l) ${script.load}(e);`}${script.load !== undefined && script.error !== undefined ? " else " : ""}${
           script.error === undefined ? "" : `${script.load === undefined ? "if (!l) " : ""}${script.error}(e);`} }`;
@@ -2609,6 +2614,7 @@ export function emitBlocks(
       return `import { ${factory} } from ${JSON.stringify(invoked.module)};`;
     }),
     ...(definition.controller === undefined ? [] : [`import * as controller from ${JSON.stringify(definition.controller)};`]),
+    ...scriptImports.flatMap((specifier, at) => specifier === undefined ? [] : [`import SU${at} from ${JSON.stringify(specifier)};`]),
     `import "../styles/${contract.tag}.css";`,
     "",
     ...registration === "" ? [] : [registration],

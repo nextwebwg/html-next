@@ -180,6 +180,8 @@ component's root is connected, a declared script's status is the component's own
 `createHeadCollector()` gathers what a render reached (through Vue's render context, Svelte's
 `render` context, or React's `collectHead`), and `writeCollectedHead(document, collector)` writes it
 into the application's own head, which hydration adopts. A component installed from a package is
-an imported component, so its page-wide head entries are left out.
+an imported component, so its page-wide head entries are left out. A declared script whose `src`
+is relative to its component, such as `./vendor/sdk.js`, resolves at conversion against the
+component's `publicRootURL` URL, which it requires, as a component-relative `<data src>` does.
 
 Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).
