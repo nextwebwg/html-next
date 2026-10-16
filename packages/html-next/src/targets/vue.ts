@@ -28,7 +28,7 @@ import { compileComponentStylesForVue, VUE_ROOT_ATTRIBUTE } from "../component-s
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import type { PropContract } from "../types.js";
-import { targetComponent } from "./backend.js";
+import { rejectHeadDeclarations, targetComponent } from "./backend.js";
 import { conformingScalarStates } from "./state-roots.js";
 import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
@@ -841,6 +841,7 @@ export interface VueConversionOptions {
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
   definition = condenseWhitespace(definition);
   const { contract, template } = definition;
+  rejectHeadDeclarations(definition, "Vue");
   const target = targetComponent(definition);
   const generics = selectorGenerics(contract.props);
   const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));

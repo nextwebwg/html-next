@@ -419,7 +419,7 @@ The live runtime needs native CSS `@scope`: Chrome 118, Safari 17.4, Firefox 146
 
 ### Loading and trust
 
-Same-origin component links work directly. Loading a component root from another origin requires an import-map entry. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
+Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="application-components">`](#head) list that names its source. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
 
 :::
 
@@ -608,6 +608,50 @@ element.dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { na
 ```
 
 A consumer controller's later `host.on("extensions", …)`, and a function prop or event listener a framework sets after mounting, reach the waiting component the same way without dispatching an announcement.
+
+## Add to the document head {#head}
+
+A component declares what it adds to `document.head` in its `<defs>`: a `<title>`, `<meta>` entries, `<link>` resource hints and metadata links, and JSON-LD data blocks. While an instance is connected, the runtime adds them to the head; when it disconnects, they leave. The [head declarations section of the proposal](https://nextwebwg.org/declarative-components/components#head-declarations) defines the behavior.
+
+```html title="src/pages/article.html"
+<template component="page-article">
+  <defs>
+    <prop name="slug" type="string" required>The article's URL slug.</prop>
+    <data name="article" src="/api/articles/{slug}"
+          type="object({ title: string, summary: string, schema: object })">
+      <param name="slug" from:value="$slug">
+    </data>
+
+    <title>{$article.value.title} · Field Notes</title>
+    <meta name="description" from:content="$article.value.summary">
+    <link rel="preconnect" href="https://images.example">
+    <script type="application/ld+json" from:value="$article.value.schema"></script>
+  </defs>
+
+  <article><h1>{$article.value.title}</h1></article>
+</template>
+```
+
+A `<title>` takes inline text expressions, a `<meta>` binds `from:content`, and a `<link>` binds `from:href`. A JSON-LD block holds literal JSON, copied unchanged, or binds its whole value with `from:value`: the runtime writes the object or list as JSON with every `<` escaped as `<`, so a value can never close the element, and a `null` value leaves the block out, as here while the article loads. A `<link>` uses `preconnect`, `dns-prefetch`, `preload`, `modulepreload`, `prefetch`, `canonical`, `alternate`, `icon`, `manifest`, `author`, `license`, `help`, `privacy-policy` or `terms-of-service`.
+
+Every element the runtime manages carries `data-component-head`. When several connected components declare the same thing:
+
+- **One title, one description.** A `<title>`, a canonical link, and each `<meta>` name or property go to the deepest component, and between two at the same depth, to the one that connected last. A page inside its layout sets the title over the layout's, and when the page leaves, the layout's title returns, in the same element.
+- **Shared links and data.** Two cards that preconnect to the same host share one element, which stays until the last of them disconnects. JSON-LD blocks share one element per text.
+- **Lists stay whole.** A component's repeated `<meta property="og:image">` entries are one list, and `og:image:width` and other sub-properties stay with the image their component declared. The deepest component's list replaces another's whole.
+- **The page's own head returns.** A title or description the document itself has is set aside, unchanged, while a component replaces it, and put back as the same element afterwards. A link the document already has, such as its own preconnect, satisfies a component's declaration of it.
+
+A page change, such as a router replacing one page with another inside the same layout, changes the head once: the title goes straight from one page's to the next, and links both pages declare stay in place. Inside a view transition, the change happens in the transition's update.
+
+The canonical, `alternate`, `icon` and `manifest` links and the `robots`, `referrer`, `viewport`, `color-scheme` and `theme-color` metadata, with `og:url`, belong to the document. Only an application component sets them: one in the application's own source, written in the page, or loaded by URL from the page's origin or a source the page lists:
+
+```html title="index.html"
+<meta name="application-components" content="'self' https://cdn.acme.example/ui/">
+```
+
+A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its document-authority entries are ignored with an `HL011` warning; its other head declarations apply.
+
+A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations run in the browser runtime; Vite and converter output report them with `HT030`.
 
 ## When you need more
 

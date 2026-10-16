@@ -1176,3 +1176,123 @@ describe("requests", () => {
     assert.deepEqual(warnings.map((warning) => warning.split(": ").slice(0, 2).join(": ")), ["editor.html: HC010", "editor.html: HC020"]);
   });
 });
+
+describe("head declarations", () => {
+  const page = (defs: string, root = "<main></main>"): string =>
+    `<template component="page-checkout" status="early" summary="Takes a payment."><defs>${defs}</defs>${root}</template>`;
+
+  it("reads titles, metadata, links, JSON-LD and declared scripts from <defs>", () => {
+    const definition = parseComponent(page(`
+      <prop name="pk" type="string" required>The publishable key.</prop>
+      <state name="ready" type="boolean" value="false"></state>
+      <handler name="enable"><set name="ready" value="true"></set></handler>
+      <title>{$pk} · Checkout</title>
+      <meta name="description" from:content="$pk">
+      <meta property="og:image" content="/card.png"><meta property="og:image:width" content="1200">
+      <link rel="preconnect" href="https://js.stripe.com" crossorigin>
+      <link rel="canonical" from:href="$pk">
+      <script type="application/ld+json">{"@type": "Product", "name": "{literal braces}"}</script>
+      <script type="application/ld+json" from:value="$pk"></script>
+      <script name="stripe" src="https://js.stripe.com/v3/" loading="lazy" on:load="enable" on:error="enable"
+              integrity="sha384-abc" crossorigin="anonymous" referrerpolicy="no-referrer" fetchpriority="low"></script>
+      <script src="https://maps.example/sdk.js" type="module"></script>`, `<main from:aria-busy="$stripe.pending" from:title="$pk"></main>`), "checkout.html");
+    const head = definition.head!;
+    assert.deepEqual(head.map((declaration) => declaration.kind), ["title", "meta", "meta", "meta", "link", "link", "json", "json"]);
+    const title = head[0] as Extract<typeof head[number], { kind: "title" }>;
+    assert.deepEqual(title.text[0]!.segments?.map((segment) => segment.expressionPlan?.source ?? segment.value), ["$pk", " · Checkout"]);
+    const description = head[1] as Extract<typeof head[number], { kind: "meta" | "link" }>;
+    assert.deepEqual(description.attributes.map((attribute) => [attribute.kind, attribute.name]), [["literal", "name"], ["attribute", "content"]]);
+    // Literal JSON-LD is inert text: braces in it are not expressions.
+    assert.equal((head[6] as { text?: string }).text, '{"@type": "Product", "name": "{literal braces}"}');
+    assert.equal((head[7] as { value?: { source: string } }).value?.source, "$pk");
+    assert.deepEqual(definition.scripts, [
+      { src: "https://js.stripe.com/v3/", loading: "lazy", name: "stripe", load: "enable", error: "enable", integrity: "sha384-abc",
+        crossorigin: "anonymous", referrerpolicy: "no-referrer", fetchpriority: "low" },
+      { src: "https://maps.example/sdk.js", loading: "eager", type: "module" },
+    ]);
+    // The contract lists the scripts a component loads, without its handlers.
+    assert.deepEqual(definition.contract.scripts, [
+      { src: "https://js.stripe.com/v3/", loading: "lazy", name: "stripe", integrity: "sha384-abc", crossorigin: "anonymous",
+        referrerpolicy: "no-referrer", fetchpriority: "low" },
+      { src: "https://maps.example/sdk.js", loading: "eager", type: "module" },
+    ]);
+    // Whitespace between head declarations is insignificant, as between other declarations, and never renders.
+    const spaced = parseComponent(page('\n  <title>Pay</title>\n  <meta name="description" content="Pay.">\n  ', "<main>\n</main>"));
+    const compact = parseComponent(page('<title>Pay</title><meta name="description" content="Pay.">', "<main>\n</main>"));
+    assert.deepEqual(spaced.head, compact.head);
+    assert.deepEqual(spaced.template, compact.template);
+    const plain = parseComponent(page(""));
+    assert.equal(plain.head, undefined);
+    assert.equal(plain.scripts, undefined);
+    assert.equal(plain.contract.scripts, undefined);
+  });
+
+  it("rejects policy elements, inline code and attributes a head element does not define", () => {
+    const invalid: readonly (readonly [string, string])[] = [
+      ["HC025", '<meta http-equiv="refresh" content="0; url=https://evil.example/">'],
+      ["HC025", '<meta http-equiv="content-security-policy" content="script-src *">'],
+      ["HC025", '<meta charset="utf-8">'],
+      ["HC025", "<base href=\"https://evil.example/\">"],
+      ["HC025", '<link rel="stylesheet" href="./page.css">'],
+      ["HC025", '<link rel="import" href="./other.html">'],
+      ["HC025", '<link rel="search" href="/opensearch.xml">'],
+      ["HC025", '<link rel="preconnect" href="https://a.example" blocking="render">'],
+      ["HC025", '<link rel="preconnect" href="https://a.example" onload="run()">'],
+      ["HC025", '<link rel="preconnect" from:rel="$x" href="https://a.example">'],
+      ["HC025", '<link rel="preconnect">'],
+      ["HC025", "<script>alert(1)</script>"],
+      ["HC025", '<script type="importmap">{"imports": {}}</script>'],
+      ["HC025", '<script type="speculationrules">{}</script>'],
+      ["HC025", '<script type="text/plain" src="https://a.example/a.js"></script>'],
+      ["HC025", '<script src="https://a.example/a.js">run()</script>'],
+      ["HC025", '<script src="https://a.example/a.js" async></script>'],
+      ["HC025", '<script src="https://a.example/a.js" defer></script>'],
+      ["HC025", '<script src="https://a.example/a.js" nonce="abc"></script>'],
+      ["HC025", '<script src="https://a.example/a.js" blocking="render"></script>'],
+      ["HC025", '<script src="https://a.example/a.js" loading="idle"></script>'],
+      ["HC025", '<script src="https://a.example/a.js" loading="manual"></script>'],
+      ["HC025", '<script src=""></script>'],
+      ["HC025", '<meta name="description">'],
+      ["HC025", '<meta name="description" property="og:description" content="Both">'],
+      ["HC025", '<meta name="description" content="Literal" from:content="$x">'],
+      ["HC025", "<title lang=\"en\">Pricing</title>"],
+      ["HC026", '<script type="application/ld+json">{"@type": "Product",}</script>'],
+      ["HC026", '<script type="application/ld+json"></script>'],
+      ["HC026", '<script type="application/ld+json" from:value="$x">{"@type": "Product"}</script>'],
+      ["HC026", '<script type="application/ld+json" id="schema">{}</script>'],
+      ["HC027", "<title>One</title><title>Two</title>"],
+      ["HC027", '<link rel="canonical" href="https://a.example/"><link rel="canonical" href="https://b.example/">'],
+      ["HC027", '<link rel="preconnect" href="https://a.example"><link rel="preconnect" href="https://a.example">'],
+      ["HC020", '<state name="stripe" value="1"></state><script name="stripe" src="https://js.stripe.com/v3/"></script>'],
+      ["HC028", '<meta name="application-components" content="*">'],
+      ["HT010", '<script src="https://a.example/a.js" on:load="missing"></script>'],
+      ["HT007", '<script src="javascript:alert(1)"></script>'],
+      ["HT009", "<handler name=\"nested\"><meta name=\"description\" content=\"Nested\"></handler>"],
+    ];
+    for (const [code, defs] of invalid) {
+      assert.throws(() => parseComponent(page(`<state name="x" value="1"></state>${defs}`), "checkout.html"),
+        (error: unknown) => error instanceof HtmlDiagnosticError && error.diagnostic.code === code, `${code}: ${defs}`);
+    }
+    // Head elements never render, so they remain invalid in the markup.
+    expectDiagnostic("HT009", page("", '<main><meta name="description" content="Nested"></main>'));
+    expectDiagnostic("HT009", page("", '<main><script src="https://a.example/a.js"></script></main>'));
+  });
+
+  it("rejects the same elements read by the browser's parser, and ignores a component's application-components list", () => {
+    const warnings: string[] = [];
+    const virtualConsole = new VirtualConsole();
+    virtualConsole.on("warn", (message: string) => warnings.push(message));
+    const { document } = new JSDOM(page(`<title>Checkout</title><meta name="application-components" content="*">
+      <script type="application/ld+json">{"@type": "Product"}</script>`) +
+      page("<script>alert(1)</script>").replace("page-checkout", "page-inline") +
+      page('<meta http-equiv="refresh" content="0">').replace("page-checkout", "page-refresh"), { virtualConsole }).window;
+    const [checkout, inline, refresh] = document.querySelectorAll("template");
+    const definition = parseBrowserComponent(checkout!, "checkout.html");
+    assert.deepEqual(definition.head?.map((declaration) => declaration.kind), ["title", "json"]);
+    assert.deepEqual(warnings.map((warning) => warning.split(": ").slice(0, 2).join(": ")), ["checkout.html: HC028"]);
+    // The browser parses scripts in <defs> inertly; the definition is rejected without running one.
+    for (const carrier of [inline!, refresh!]) {
+      assert.throws(() => parseBrowserComponent(carrier, "page.html"), (error: unknown) => error instanceof HtmlDiagnosticError && error.diagnostic.code === "HC025");
+    }
+  });
+});

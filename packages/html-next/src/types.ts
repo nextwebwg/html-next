@@ -65,6 +65,26 @@ export interface ComponentContract {
   readonly props: Readonly<Record<string, PropContract>>;
   /** Declared `<request>`s by name: what the controller asks its consumer. Omitted when none. */
   readonly requests?: Readonly<Record<string, RequestContract>>;
+  /** Declared `<script src>` elements, in declared order: the code the component loads. Omitted when none. */
+  readonly scripts?: readonly ScriptContract[];
+}
+
+/**
+ * A declared script: an ordinary `<script>` the runtime inserts into `document.head` once per URL
+ * and type, when an instance calls for it. Its standard attributes are copied onto that element.
+ */
+export interface ScriptContract {
+  /** The name its status takes in expressions and `host.scripts`. */
+  readonly name?: string;
+  /** As written: a URL, resolved against the definition, or a bare name, resolved through the import map. */
+  readonly src: string;
+  readonly type?: "module";
+  /** When the runtime inserts the element: on connection, near the viewport, or on `load()`. */
+  readonly loading: "eager" | "lazy" | "manual";
+  readonly integrity?: string;
+  readonly crossorigin?: string;
+  readonly referrerpolicy?: string;
+  readonly fetchpriority?: string;
 }
 
 /**

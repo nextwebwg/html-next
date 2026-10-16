@@ -12,7 +12,7 @@ import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js"
 import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { targetComponent } from "./backend.js";
+import { rejectHeadDeclarations, targetComponent } from "./backend.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
@@ -811,6 +811,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
 
 /** React component source and its feature-specific companion artifacts. */
 export function generateReactOutput(definition: ComponentDefinition, version: string, options: ReactConversionOptions = {}): ReactConversionOutput {
+  rejectHeadDeclarations(definition, "React");
   definition = condenseWhitespace(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;

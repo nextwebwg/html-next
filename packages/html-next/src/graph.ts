@@ -1,5 +1,6 @@
 import { fail, HtmlDiagnosticError, HtmlDiagnosticAggregateError, recoverDiagnostic, type HtmlDiagnostic } from "./diagnostics.js";
 import type { ComponentResourceResolver, ResolvedResource } from "./resolve.js";
+import { withoutDocumentAuthority } from "./head-rules.js";
 import type { ComponentDefinition } from "./template.js";
 
 export interface FetchedComponent {
@@ -25,6 +26,12 @@ export interface ComponentGraphNode {
   readonly dependencies: readonly string[];
   readonly controller?: ControllerEdge;
   readonly shadowedByCustomElement: boolean;
+  /**
+   * An imported component (components#document-authority): reached through a bare specifier, from a
+   * source the application does not list, or from another imported component. Its definition
+   * leaves out the document-authority entries only an application component contributes.
+   */
+  readonly imported?: true;
 }
 
 export interface ComponentGraph {
@@ -45,6 +52,10 @@ export interface BuildGraphOptions {
   readonly parseComponentResource: ComponentResourceParser;
   readonly prepareStyles?: (definition: ComponentDefinition, resource: ResolvedResource) => Promise<ComponentDefinition>;
   readonly isCustomElementRegistered?: (tag: string) => boolean;
+  /** Whether a definition's final URL supplies application components; a bare specifier never does. */
+  readonly isApplicationURL?: (url: string) => boolean;
+  /** Receives warnings outside check mode, such as an imported component's ignored entries. */
+  readonly warn?: (diagnostic: HtmlDiagnostic) => void;
 }
 
 export interface ParsedComponentResource {
@@ -65,6 +76,8 @@ export type ComponentResourceParser = (
   sourceText: string,
   source: string,
 ) => ParsedComponentResource | DiagnosedComponentResource;
+
+const URL_LIKE = /^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/;
 
 function byKey([left]: readonly [string, unknown], [right]: readonly [string, unknown]): number {
   return left.localeCompare(right);
@@ -92,8 +105,15 @@ export async function buildComponentGraph(
 
   // Cache resources separately from definitions: one fetch can supply several graph nodes.
   const resources = new Map<string, readonly string[]>();
-  const load = async (resource: ResolvedResource): Promise<readonly string[]> => {
-    try { return await loadResource(resource); }
+  // Definitions an import reached through a bare specifier or an unlisted source; a resource reached
+  // both ways is imported, and so is everything reached from one.
+  const imports = new Set<string>();
+  const load = async (resource: ResolvedResource, specifier: string): Promise<readonly string[]> => {
+    try {
+      const ids = await loadResource(resource);
+      if (!URL_LIKE.test(specifier)) for (const id of ids) imports.add(id);
+      return ids;
+    }
     catch (error) {
       recoverDiagnostic(error, report);
       // Cache failed resources as well, so shared invalid dependencies are checked once.
@@ -124,6 +144,7 @@ export async function buildComponentGraph(
     if (redirected !== undefined) return redirected;
 
     const parsed = options.parseComponentResource(response.source, finalURL);
+    const listed = options.isApplicationURL?.(finalURL) ?? true;
     if ("diagnostics" in parsed && parsed.diagnostics.length > 0) {
       recoverDiagnostic(new HtmlDiagnosticAggregateError(parsed.diagnostics), report);
     }
@@ -135,6 +156,7 @@ export async function buildComponentGraph(
       }
       const id = parsed.definitions.length === 1 ? finalURL : `${finalURL}#${tag}`;
       tags.set(tag, id);
+      if (!listed) imports.add(id);
       drafts.set(id, {
         url: finalURL, trustRoot: resource.trustRoot, definition, dependencies: [],
         shadowedByCustomElement: options.isCustomElementRegistered?.(tag) ?? false,
@@ -154,7 +176,7 @@ export async function buildComponentGraph(
     for (const specifier of parsed.dependencies) {
       try {
         const dependency = options.resolver.resolveDependency(specifier, finalURL, resource.trustRoot);
-        for (const id of await load(dependency)) dependencies.add(id);
+        for (const id of await load(dependency, specifier)) dependencies.add(id);
       } catch (error) { recoverDiagnostic(error, report); }
     }
     for (const id of ids) {
@@ -181,21 +203,39 @@ export async function buildComponentGraph(
   const roots: string[] = [];
   for (const specifier of rootSpecifiers) {
     try {
-      for (const id of await load(options.resolver.resolveRoot(specifier))) {
+      for (const id of await load(options.resolver.resolveRoot(specifier), specifier)) {
         if (!roots.includes(id)) roots.push(id);
       }
     } catch (error) { recoverDiagnostic(error, report); }
   }
   if (diagnostics.some((diagnostic) => diagnostic.severity !== "warning")) throw new HtmlDiagnosticAggregateError(diagnostics);
 
+  const imported = new Set<string>();
+  const reach = (id: string): void => {
+    if (imported.has(id)) return;
+    imported.add(id);
+    for (const dependency of drafts.get(id)?.dependencies ?? []) reach(dependency);
+  };
+  for (const id of imports) reach(id);
+  const warn = report ?? options.warn ?? ((diagnostic: HtmlDiagnostic) => console.warn(`${diagnostic.source}: ${diagnostic.code}: ${diagnostic.message}`));
   const nodeEntries: Array<readonly [string, ComponentGraphNode]> = [];
   for (const [id, draft] of Array.from(drafts).sort(byKey)) {
     if (!draft.complete) fail("HL008", `Component graph did not finish loading \`${id}\`.`);
+    let definition = draft.definition;
+    if (imported.has(id)) {
+      const { definition: kept, ignored } = withoutDocumentAuthority(definition);
+      definition = kept;
+      for (const entry of ignored) {
+        warn({ code: "HL011", message: `<${definition.contract.tag}> is an imported component, so its ${entry} is ignored: only an application component sets it.`,
+          source: draft.url, severity: "warning" });
+      }
+    }
     nodeEntries.push([id, Object.freeze({
       id,
       url: draft.url,
       trustRoot: draft.trustRoot,
-      definition: draft.definition,
+      definition,
+      ...(imported.has(id) ? { imported: true as const } : {}),
       dependencies: Object.freeze(Array.from(draft.dependencies)),
       ...(draft.controller === undefined ? {} : { controller: draft.controller }),
       shadowedByCustomElement: draft.shadowedByCustomElement,

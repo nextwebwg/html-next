@@ -65,6 +65,7 @@ import {
   type TypeNode,
 } from "./type-system.js";
 import { ask, hostListener, relayResponders, type RequestChecks, type RequestOptions } from "./requests.js";
+import { flushHead, joinHead, scheduleHead, type HeadEntry } from "./head.js";
 import type {
   AttributeBinding,
   ComponentDefinition,
@@ -2835,6 +2836,7 @@ function prepareRuntimeInvocation(
       return () => run(lifecycle.disconnect, "disconnect");
     }, 2, false));
   }
+  if (definition.head !== undefined) instanceEffects.push(...headOwners(invocation.ownerDocument, instance, scope, definition));
   const renderRootNode: ElementNode = rootWith === undefined
     ? rootNode
     : (({ flow: _flow, ...body }) => body)(rootNode);
@@ -2871,6 +2873,52 @@ function prepareRuntimeInvocation(
     instance,
     replace: !hydration,
   };
+}
+
+/**
+ * A component's head declarations (src/head.ts): one connection-owned contribution, and an effect
+ * per declaration that evaluates its element. A binding whose result is invalid keeps the value it
+ * last accepted, as an element's binding does.
+ */
+function headOwners(document: Document, instance: RuntimeInstance, scope: ReactiveScope, definition: ComponentDefinition): ReactiveOwner[] {
+  const entries: (HeadEntry | undefined)[] = [];
+  const owners: ReactiveOwner[] = [createEffect(scope.scheduler,
+    () => joinHead(document, () => untracked(() => instance.rootElement.get()) ?? instance.element, entries), 2, false)];
+  for (const [index, declaration] of definition.head!.entries()) {
+    const accepted: (string | null)[] = [];
+    // A binding's result, or the last one it accepted when this one is invalid.
+    const bound = (slot: number, expression: CompiledExpression, convert: (value: Value) => string | null | typeof NONCONFORMING): string | null => {
+      const value = evalConforming(expression, scope, definition);
+      const converted = value === NONCONFORMING ? value : convert(value);
+      if (converted !== NONCONFORMING) accepted[slot] = converted;
+      return accepted[slot] ?? null;
+    };
+    owners.push(createEffect(scope.scheduler, () => {
+      let entry: HeadEntry | undefined;
+      if (declaration.kind === "title") {
+        entry = ["title", [], declaration.text.flatMap((node) => node.segments ?? [node]).map((segment, slot) =>
+          segment.expressionPlan === undefined ? segment.value : bound(slot, segment.expressionPlan, toText)).join("")];
+      } else if (declaration.kind === "json") {
+        const text = declaration.value === undefined ? declaration.text! : bound(0, declaration.value, (value) => {
+          if (value === null || value === ABSENT) return null;
+          if (typeof value === "object") return JSON.stringify(value).replaceAll("<", "\\u003c");
+          warnAuthored(definition, `head:json:${declaration.value!.source}`, `JSON-LD \`${declaration.value!.source}\` must be an object or a list.`);
+          return NONCONFORMING;
+        });
+        // A null value omits the block.
+        entry = text === null ? undefined : ["script", [["type", "application/ld+json"]], text];
+      } else {
+        entry = [declaration.kind, declaration.attributes.flatMap((attribute, slot): [string, string][] => {
+          const value = attribute.kind === "literal" ? attribute.value
+            : bound(slot, attribute.expressionPlan!, (result) => toAttribute(result, attribute.name));
+          return value === null || (isUrlAttribute(attribute.name) && hasExecutableUrl(value)) ? [] : [[attribute.name, value]];
+        })];
+      }
+      entries[index] = entry;
+      scheduleHead(document);
+    }, 2, false));
+  }
+  return owners;
 }
 
 /** Capture the closest component owner while an invocation still sits in its authored tree. */
@@ -3423,6 +3471,8 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       for (const node of mutation.removedNodes) collect(node);
     }
     for (const element of changed) synchronize(element);
+    // A mutation batch is one update: its head changes apply once, in the same update.
+    flushHead(root);
   });
   const coordinator: LifecycleCoordinator = {
     add(element, record) {
@@ -4076,6 +4126,8 @@ export function observeDocument(
         }
       } catch (error) { report(error); }
     }
+    // A mutation batch is one update: its head changes apply once, in the same update.
+    flushHead(root);
   };
   state.release = (element) => {
     if (connected.has(element)) disconnect(element);

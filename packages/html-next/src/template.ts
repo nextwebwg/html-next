@@ -1,4 +1,4 @@
-import type { ComponentContract } from "./types.js";
+import type { ComponentContract, ScriptContract } from "./types.js";
 import type { CompiledExpression, WritablePath } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 
@@ -15,6 +15,25 @@ export interface ComponentDefinition {
   readonly root?: ComponentRoot;
   /** The handlers the native root's `on:connect` and `on:disconnect` name. */
   readonly lifecycle?: ComponentLifecycle;
+  /** What an instance adds to `document.head` while connected, in declared order. */
+  readonly head?: readonly HeadDeclaration[];
+  /** The declared `<script src>` elements, in declared order. */
+  readonly scripts?: readonly ScriptDeclaration[];
+}
+
+/**
+ * A head declaration in `<defs>`: a `<title>`, whose text may hold inline expressions; a `<meta>` or
+ * `<link>`, whose `content` or `href` may be bound; or a JSON-LD block, literal or bound as a whole.
+ */
+export type HeadDeclaration =
+  | { readonly kind: "title"; readonly text: readonly TextNode[] }
+  | { readonly kind: "meta" | "link"; readonly attributes: readonly (LiteralAttribute | AttributeBinding)[] }
+  | { readonly kind: "json"; readonly text?: string; readonly value?: CompiledExpression };
+
+/** A declared `<script src>`: its contract and the handlers its `on:load` and `on:error` name. */
+export interface ScriptDeclaration extends ScriptContract {
+  readonly load?: string;
+  readonly error?: string;
 }
 
 /** Handlers run each time the component connects to, and disconnects from, a document. */
