@@ -1,5 +1,5 @@
 import { fail, type HtmlDiagnostic } from "./diagnostics.js";
-import { isIgnoredResourceMetadata } from "./resource-metadata.js";
+import { isResourceBuildMetadata } from "./resource-metadata.js";
 import type { ParsedComponentResource } from "./graph.js";
 import { parseComponentNodes, parseProjectedSlotContent } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
@@ -108,12 +108,12 @@ export function parseBrowserComponentResource(
   for (const node of container.content.childNodes) {
     if (carrierSet.has(node) || node.nodeType === 8 ||
       (node.nodeType === 3 && (node.nodeValue ?? "").trim() === "")) continue;
-    if (node.nodeType === 1 && isIgnoredResourceMetadata((node as Element).localName, Array.from((node as Element).attributes))) continue;
+    if (node.nodeType === 1 && isResourceBuildMetadata((node as Element).localName, Array.from((node as Element).attributes))) continue;
     if (
       node.nodeType !== 1 || (node as Element).localName !== "link" ||
       (node as Element).getAttribute("rel") !== "component"
     ) {
-      fail("HT009", "A component resource may contain only dependency links, inert component carriers, and non-policy-changing metadata.", source);
+      fail("HT009", "A component resource may contain only dependency links, inert component carriers, and build metadata: a <meta name content> whose name has a colon, such as app:page.", source);
     }
     const href = (node as Element).getAttribute("href");
     if (href === null || href.trim() === "") {

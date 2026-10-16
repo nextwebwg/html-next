@@ -21,6 +21,7 @@ config.test!.include = [
   "packages/html-next/tests/browser-loader.test.ts",
   "packages/html-next/tests/conformance.test.ts",
   "packages/html-next/tests/forms.test.ts",
+  "packages/html-next/tests/head-conformance.test.ts",
   "packages/html-next/tests/runtime.test.ts",
   "packages/html-next/tests/sanitize.test.ts",
   "packages/html-next/tests/source-adapters.test.ts",

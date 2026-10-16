@@ -5,6 +5,7 @@ import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import type { FetchedComponent } from "../src/graph.js";
 import { buildComponentGraph, parseComponentResource } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
+import { listedSourceRoot, matchesSourceList } from "../src/source-list.js";
 
 const root = "https://cdn.example/ui/1/";
 const resolver = () => new ResourceResolver({ imports: { "@ui/": root } }, "https://app.example/");
@@ -36,13 +37,8 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 }
 
 describe("component graph", () => {
-  it("ignores resource metadata with or without head wrappers while retaining component edges", async () => {
-    const metadata = '<meta name="hk:layout" content="admin">' +
-      '<meta name="description" content="Imported description" from:content="$missing">' +
-      '<meta property="og:title" content="Imported social title">' +
-      '<title $value="$missing">Imported title</title>' +
-      '<link rel="stylesheet" href="./ignored.css">' +
-      '<link rel="canonical" href="https://other.example/">';
+  it("ignores build metadata with or without head wrappers while retaining component edges", async () => {
+    const metadata = '<meta name="hk:layout" content="admin"><meta name="app:page" content="x-app">';
     for (const prefix of [metadata, `<head>${metadata}</head>`]) {
       const fixtures = fetcher({
         [`${root}app.html`]: prefix + component("x-app", '<link rel="component" href="./child.html">'),
@@ -57,6 +53,16 @@ describe("component graph", () => {
       assert.equal(parsed.definitions.length, 1);
       assert.deepEqual(parsed.dependencies, []);
       assert.deepEqual(parsed.definition.contract, parseComponentResource(component("x-app"), "page.html").definition.contract);
+    }
+  });
+
+  it("rejects head content at resource scope, where it would belong to no component", () => {
+    for (const content of ['<title>Imported title</title>', '<meta name="description" content="Imported description">',
+      '<meta property="og:title" content="Imported social title">', '<link rel="stylesheet" href="./ignored.css">',
+      '<link rel="canonical" href="https://other.example/">', '<meta name="app:page" content="x-app" onclick="run()">',
+      '<script type="application/ld+json">{}</script>', '<style>p { color: red; }</style>']) {
+      assert.throws(() => parseComponentResource(content + component("x-app"), "page.html"),
+        (error: unknown) => error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT009", content);
     }
   });
 
@@ -244,6 +250,109 @@ describe("component graph", () => {
       fetchComponent: fetcher({
         [`${root}app.html`]: component("x-app").replace("<div>", `<div onclick="bad()">`),
       }).fetchComponent,
+    }));
+  });
+});
+
+describe("imported components and document authority", () => {
+  // Document-authority entries, and one ordinary head declaration each component keeps.
+  const head = (tag: string, dependencies = ""): string => `${dependencies}<template component="${tag}"><defs>
+    <title>${tag}</title><link rel="canonical" href="https://${tag}.example/"><link rel="alternate" hreflang="fr" href="/fr/">
+    <link rel="icon" href="/${tag}.png"><link rel="manifest" href="/app.webmanifest">
+    <meta name="robots" content="noindex"><meta name="Referrer" content="no-referrer"><meta name="viewport" content="width=1">
+    <meta name="color-scheme" content="dark"><meta name="theme-color" content="red"><meta property="og:url" content="https://${tag}.example/">
+    <link rel="preconnect" href="https://${tag}.example"></defs><div></div></template>`;
+  const kept = (definition: { head?: readonly { kind: string }[] }): string[] => (definition.head ?? []).map((declaration) => declaration.kind);
+
+  it("leaves out an imported component's document-authority entries, with a warning, and keeps the rest", async () => {
+    const warnings: string[] = [];
+    const graph = await buildComponentGraph(["./app.html", "@ui/widget.html"], {
+      resolver: resolver(),
+      warn: (diagnostic) => warnings.push(`${diagnostic.code} ${diagnostic.message}`),
+      fetchComponent: fetcher({
+        "https://app.example/app.html": head("x-app"),
+        // A relative edge from an imported component is imported too.
+        [`${root}widget.html`]: head("x-widget", '<link rel="component" href="./part.html">'),
+        [`${root}part.html`]: head("x-part"),
+      }).fetchComponent,
+    });
+    const node = (tag: string) => graph.nodes.get(graph.tags.get(tag)!)!;
+    assert.equal(node("x-app").imported, undefined);
+    assert.equal(kept(node("x-app").definition).length, 12);
+    for (const tag of ["x-widget", "x-part"]) {
+      assert.equal(node(tag).imported, true);
+      assert.deepEqual(kept(node(tag).definition), ["title", "link"]);
+    }
+    assert.equal(warnings.length, 20);
+    assert.match(warnings[0]!, /^HL011 <x-part> is an imported component, so its <link rel="canonical"> is ignored/);
+    assert.ok(warnings.some((warning) => warning.includes('<meta name="referrer">')));
+  });
+
+  it("treats a resource reached both ways as imported, and an unlisted source as imported", async () => {
+    const both = await buildComponentGraph(["./app.html"], {
+      resolver: new ResourceResolver({ imports: { "@app/": "https://app.example/" } }, "https://app.example/"),
+      warn: () => {},
+      fetchComponent: fetcher({
+        "https://app.example/app.html": head("x-app", '<link rel="component" href="./shared.html"><link rel="component" href="@app/shared.html">'),
+        "https://app.example/shared.html": head("x-shared"),
+      }).fetchComponent,
+    });
+    assert.equal(both.nodes.get("https://app.example/app.html")!.imported, undefined);
+    assert.equal(both.nodes.get("https://app.example/shared.html")!.imported, true);
+    const unlisted = await buildComponentGraph(["./app.html"], {
+      resolver: resolver(), warn: () => {}, isApplicationURL: (url) => !url.endsWith("/app.html"),
+      fetchComponent: fetcher({ "https://app.example/app.html": head("x-app") }).fetchComponent,
+    });
+    assert.equal(unlisted.nodes.get("https://app.example/app.html")!.imported, true);
+  });
+});
+
+describe("application-components source list", () => {
+  const document = "https://acme.example/app/";
+  it("matches URLs by CSP source expressions, with 'self' always included", () => {
+    const cases: readonly (readonly [string, string, boolean])[] = [
+      ["https://acme.example/ui/x.html", "", true],
+      ["http://acme.example/ui/x.html", "", false],
+      ["https://cdn.acme.example/ui/x.html", "", false],
+      ["https://cdn.acme.example/ui/x.html", "'self' https://cdn.acme.example/ui/", true],
+      ["https://cdn.acme.example/other/x.html", "https://cdn.acme.example/ui/", false],
+      ["https://cdn.acme.example/ui/x.html", "https://cdn.acme.example/ui/x.html", true],
+      ["https://cdn.acme.example/ui/y.html", "https://cdn.acme.example/ui/x.html", false],
+      ["https://cdn.acme.example/ui/x.html", "cdn.acme.example", true],
+      ["https://cdn.acme.example/ui/x.html", "*.acme.example", true],
+      ["https://acme.example.evil/ui/x.html", "*.acme.example", false],
+      ["https://cdn.acme.example:8443/x.html", "https://cdn.acme.example", false],
+      ["https://cdn.acme.example:8443/x.html", "https://cdn.acme.example:*", true],
+      ["https://cdn.acme.example:443/x.html", "https://cdn.acme.example:443", true],
+      ["https://any.example/x.html", "https:", true],
+      ["https://any.example/x.html", "*", true],
+      ["https://cdn.acme.example/ui/x.html", "http://cdn.acme.example/ui/", true],
+      ["https://cdn.acme.example/ui/x.html", "'none' 'unsafe-inline' 'nonce-abc'", false],
+    ];
+    for (const [url, sources, expected] of cases) assert.equal(matchesSourceList(url, sources, document), expected, `${url} in ${sources}`);
+  });
+
+  it("names the prefix a listed source approves for a cross-origin root", () => {
+    assert.equal(listedSourceRoot("https://cdn.acme.example/ui/a/x.html", "https://cdn.acme.example/ui/", document), "https://cdn.acme.example/ui/");
+    assert.equal(listedSourceRoot("https://cdn.acme.example/ui/x.html", "https://cdn.acme.example", document), "https://cdn.acme.example/");
+    assert.equal(listedSourceRoot("https://cdn.acme.example/ui/x.html", "https://cdn.acme.example/ui/x.html", document), "https://cdn.acme.example/ui/");
+    assert.equal(listedSourceRoot("https://cdn.acme.example/ui/x.html", "", document), undefined);
+  });
+
+  it("lets the application-owned list approve a cross-origin live root, whose edges stay inside its prefix", async () => {
+    const listed = new ResourceResolver({}, document, document, (url) => listedSourceRoot(url, "https://cdn.acme.example/ui/", document));
+    const graph = await buildComponentGraph(["https://cdn.acme.example/ui/app.html"], {
+      resolver: listed, fetchComponent: fetcher({
+        "https://cdn.acme.example/ui/app.html": component("x-app", '<link rel="component" href="./child.html">'),
+        "https://cdn.acme.example/ui/child.html": component("x-child"),
+      }).fetchComponent,
+    });
+    assert.deepEqual([...graph.tags.keys()], ["x-app", "x-child"]);
+    await expectDiagnostic("HL003", () => buildComponentGraph(["https://cdn.acme.example/ui/escape.html"], {
+      resolver: listed, fetchComponent: fetcher({ "https://cdn.acme.example/ui/escape.html": component("x-escape", '<link rel="component" href="../other.html">') }).fetchComponent,
+    }));
+    await expectDiagnostic("HL010", () => buildComponentGraph(["https://cdn.acme.example/other/app.html"], {
+      resolver: listed, fetchComponent: fetcher({}).fetchComponent,
     }));
   });
 });

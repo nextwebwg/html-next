@@ -6,6 +6,7 @@ import { parseBrowserComponent, parseBrowserComponentResource } from "./browser-
 import { createStylesheetLoader } from "./stylesheet-resources.js";
 import { parseStylesheetInBrowser } from "./stylesheet-resources-browser.js";
 import { holdController } from "./requests.js";
+import { listedSourceRoot, matchesSourceList } from "./source-list.js";
 import {
   getComponentHost,
   installComponentGraph,
@@ -22,6 +23,30 @@ export interface BrowserLoaderOptions {
   readonly importer?: ModuleImporter;
   readonly registry?: ComponentRegistry;
   readonly onError?: (error: unknown) => void;
+}
+
+/**
+ * The application-components source list (components#document-authority): the first
+ * `<meta name="application-components">` in the document's authored head, read once, as parsed.
+ */
+const applicationSources = new WeakMap<Document, string>();
+function applicationSourceList(root: Document): string {
+  let sources = applicationSources.get(root);
+  if (sources === undefined) {
+    const lists = root.head?.querySelectorAll('meta[name="application-components" i]:not([data-component-head])') ?? [];
+    if (lists.length > 1) {
+      root.defaultView?.console.warn(`${root.URL}: HL012: Only the first <meta name="application-components"> lists application components; the others are ignored.`);
+    }
+    sources = lists[0]?.getAttribute("content") ?? "";
+    applicationSources.set(root, sources);
+  }
+  return sources;
+}
+
+/** A resolver that also accepts cross-origin roots the application-components list names. */
+function documentResolver(root: Document, importMap: ImportMapLike | undefined): ResourceResolver {
+  const sources = applicationSourceList(root);
+  return new ResourceResolver(importMap ?? readImportMap(root), root.baseURI, root.URL, (url) => listedSourceRoot(url, sources, root.URL));
 }
 
 function readImportMap(root: Document): ImportMapLike {
@@ -48,11 +73,7 @@ async function loadWithStylesheets(
 ): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
   const root = options.document ?? document;
   const request = options.fetch ?? fetch;
-  const resolver = new ResourceResolver(
-    options.importMap ?? readImportMap(root),
-    root.baseURI,
-    root.URL,
-  );
+  const resolver = documentResolver(root, options.importMap);
   const fetchResource = async (url: string): Promise<{ url: string; source: string }> => {
       const response = await request(url);
       if (!response.ok) throw new TypeError(`Component request \`${url}\` failed with ${response.status}.`);
@@ -71,6 +92,7 @@ async function loadWithStylesheets(
     parseComponentResource: (sourceText, source) =>
       parseBrowserComponentResource(sourceText, source, root),
     isCustomElementRegistered: (tag) => root.defaultView?.customElements.get(tag) !== undefined,
+    isApplicationURL: (url) => matchesSourceList(url, applicationSourceList(root), root.URL),
   });
   const registry = options.registry ?? new ComponentRegistry();
   registry.addGraph(graph, (node) => loadController(node, options.importer));
@@ -105,7 +127,7 @@ export async function startBrowserComponents(
 ): Promise<StartedBrowserComponents> {
   // The live delivery discovers definitions authored in the page, so teach the runtime to read
   // them. A build-time graph imports the runtime directly and never carries the parser.
-  const resolver = new ResourceResolver(options.importMap ?? readImportMap(root), root.baseURI, root.URL);
+  const resolver = documentResolver(root, options.importMap);
   const styles = createStylesheetLoader({
     parse: css => parseStylesheetInBrowser(css, root),
     fetch: async url => {

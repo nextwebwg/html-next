@@ -74,6 +74,32 @@ dependency. Finding each operand's places by rounding rather than by writing its
 operation near 20 ns (200 ns with the text). A whole-number operand needs no search, and compiled
 components call plain operators where both operands are statically whole.
 
+## Head declarations
+
+`document.head` already holds and applies every element a component declares: `<title>` sets the
+document title, `<meta>` and `<link>` keep their HTML meaning (a preconnect connects, a canonical
+link is read by crawlers), and a JSON-LD `<script>` is an inert data block. Ordinary DOM insertion,
+removal, attribute writes and `textContent` change them, and CSP, CORS and mixed-content rules apply
+because each one is an ordinary element. `MutationObserver` batches are the update boundary: the
+runtime connects and disconnects the instances of one batch, then reconciles once at the batch's end,
+so a page change is one head change. A view transition's update callback runs the router's DOM
+change, whose mutation records are delivered before the callback's promise settles, so that
+reconciliation runs inside the update. `queueMicrotask` schedules the reconciliation a binding change
+needs.
+
+The platform has no notion of several sources contributing one head element. The remaining gap is
+the proposal's [head management](https://nextwebwg.org/declarative-components/components#head-management)
+steps: keys, precedence by component depth and connection order, reference-counted shared elements,
+meta lists with their sub-properties, and setting aside and restoring the document's own elements
+as the same nodes. `src/head.ts` fills it with one manager per document on the document record that
+every HTML Next bundle shares. It walks `document.head`'s children once per reconciliation and
+changes only elements whose target changed. Depth counts the component roots around an instance's
+root (`data-component`, converted Vue's `data-hn`, and the roots of head contributors).
+
+CSP's matching of a URL to a source list runs only inside the browser's policy checks; no API
+exposes it. `src/source-list.ts` applies the CSP Level 3 matching algorithm to the
+application-components list for the source expressions that name URLs.
+
 ## Complete live inventory
 
 The production browser entry currently contains 164,726 attributed minified raw bytes plus 21

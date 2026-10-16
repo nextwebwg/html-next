@@ -9,7 +9,7 @@ import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
-import { targetComponent } from "./backend.js";
+import { rejectHeadDeclarations, targetComponent } from "./backend.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
@@ -1059,6 +1059,7 @@ interface RootScope extends Scope {
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, version: string, options: SvelteConversionOptions = {}): SvelteConversionOutput {
+  rejectHeadDeclarations(definition, "Svelte");
   definition = condenseWhitespace(definition);
   const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);

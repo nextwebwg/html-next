@@ -173,13 +173,9 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           const path = new URL(route.request().url()).pathname;
           requests.push(path);
           const body = path === "/page.html" ?
+            // Build metadata at resource scope; a component's head content is its <defs> head declarations.
             '<meta name="hk:layout" content="admin"><head>' +
-            '<title $value="$missing">Imported title</title>' +
-            '<meta name="description" content="Imported description" from:content="$missing">' +
-            '<meta property="og:title" content="Imported social title">' +
-            '<link rel="stylesheet" href="./ignored.css">' +
-            '<link rel="canonical" href="https://other.example/">' +
-            '<link rel="preload" as="script" href="./ignored.js">' +
+            '<meta name="app:page" content="products-page">' +
             '<link rel="component" href="./child.html"></head>' +
             '<template component="products-page"><title $value="$missing">Carrier title</title>' +
             '<meta name="hk:layout" content="admin"><meta name="description" from:content="$missing">' +

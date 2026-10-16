@@ -3,6 +3,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/browser-source.ts",
     "packages/html-next/src/contract.ts",
     "packages/html-next/src/diagnostics.ts",
+    "packages/html-next/src/head-rules.ts",
     "packages/html-next/src/language.ts",
     "packages/html-next/src/names.ts",
     "packages/html-next/src/identifiers.ts",
@@ -25,6 +26,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/expression.ts",
     "packages/html-next/src/expression-parser.ts",
     "packages/html-next/src/format.ts",
+    "packages/html-next/src/head.ts",
     "packages/html-next/src/hydration-value.ts",
     "packages/html-next/src/reactivity.ts",
     "packages/html-next/src/rendered-form.ts",
@@ -59,6 +61,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/graph.ts",
     "packages/html-next/src/resource-metadata.ts",
     "packages/html-next/src/resolve.ts",
+    "packages/html-next/src/source-list.ts",
   ],
 } as const;
 

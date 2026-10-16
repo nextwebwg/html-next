@@ -2977,7 +2977,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             sanitizedContent: document.querySelector("article")?.innerHTML };
         })()`);
         assert.deepEqual(result, {
-          errors: ["HT009", "HL001"], executed: false, definitions: 0,
+          errors: ["HC025", "HL001"], executed: false, definitions: 0,
           contentName: null, sanitizedContent: "",
         });
       } finally {

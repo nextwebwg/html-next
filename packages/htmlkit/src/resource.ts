@@ -23,7 +23,6 @@ function renamed(name: string | undefined, file: string): void {
 
 /** Native HTML parsing determines resource nodes; HTML Next owns component syntax. */
 export function applicationResource(source: string, file: string) {
-  const parsed = parseComponentResource(source, file);
   const configuration = new Map<string, string>();
   const components = new Map<string, ComponentMetadata>();
   const fragment = parseFragment(source);
@@ -39,6 +38,8 @@ export function applicationResource(source: string, file: string) {
       throw new HtmlKitError('Page and layout metadata belongs inside its owning <template component>; only hk:page selects the file entry outside it.', file);
     }
   }
+  // HTMLKit's own file-level rules first, so their diagnostics name what HTMLKit expects.
+  const parsed = parseComponentResource(source, file);
   for (const node of fragment.childNodes) {
     if (!("tagName" in node)) continue;
     const tag = node.attrs.find(attribute => attribute.name === "component")?.value;

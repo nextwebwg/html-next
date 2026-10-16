@@ -14,8 +14,11 @@ import {
 } from "./language.js";
 import { componentName, requestPropName } from "./names.js";
 import { IDENTIFIER, isIdentifier } from "./identifiers.js";
+import { HEAD_ATTRIBUTES, HEAD_LINK_RELS, SCRIPT_STANDARD_ATTRIBUTES } from "./head-rules.js";
 import { isIgnoredResourceMetadata } from "./resource-metadata.js";
+import { hasExecutableUrl } from "./sanitize.js";
 import type {
+  AttributeBinding,
   ComponentDefinition,
   ComponentDeclaration,
   ComponentLifecycle,
@@ -24,6 +27,9 @@ import type {
   EventBinding,
   Flow,
   HandlerStep,
+  HeadDeclaration,
+  LiteralAttribute,
+  ScriptDeclaration,
   SlotContract,
   SortKey,
   TemplateAttribute,
@@ -181,10 +187,18 @@ function validateDeclarationContent(...args: Parameters<typeof validateDeclarati
   return withDiagnosticLocation(sourceLocation(args[0]), () => validateDeclarationContentAtSource(...args));
 }
 
-function validateDeclarationContentAtSource(element: Element, source: string): void {
+/** The elements `<defs>` may hold as direct children to add to the document head. */
+const HEAD_ELEMENT_RE = /^(?:title|meta|link|script)$/;
+
+function validateDeclarationContentAtSource(element: Element, source: string, defs = false): void {
   for (const child of sourceChildren(element)) {
     if (!isElement(child)) continue;
     const name = sourceTag(child);
+    // Head declarations are read, attribute by attribute, with the other declarations.
+    if (defs && HEAD_ELEMENT_RE.test(name)) continue;
+    if (defs && name === "base") {
+      fail("HC025", "`<base>` would rebase every relative URL in the document; it is not a head declaration.", source);
+    }
     if (name === "link") {
       fail("HL001", "External definition dependencies require the application-owned graph resolver.", source);
     }
@@ -851,7 +865,10 @@ function readDeclarations(
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
   onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
   warn?: ComponentParserPlatform["warn"],
-): { declarations: ComponentDeclaration[]; scope: ParseScope; requests?: Record<string, RequestContract> } {
+): {
+  declarations: ComponentDeclaration[]; scope: ParseScope; requests?: Record<string, RequestContract>;
+  head?: HeadDeclaration[]; scripts?: ScriptDeclaration[];
+} {
   const declarations: ComponentDeclaration[] = [];
   const roots = new Set(Object.keys(contract.props));
   const writableRoots = new Set<string>();
@@ -884,10 +901,22 @@ function readDeclarations(
       const fail: DiagnosticFail = locatedFail(element);
       elements.push(element);
       const kind = sourceTag(element);
-      if (!/^(?:prop|type|state|computed|data|context|handler|event|request)$/.test(kind)) {
+      if (!/^(?:prop|type|state|computed|data|context|handler|event|request)$/.test(kind) && !HEAD_ELEMENT_RE.test(kind)) {
         fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
       }
       if (kind === "type") continue;
+      if (HEAD_ELEMENT_RE.test(kind)) {
+        // A named declared script shares the flat namespace: `$stripe` reads its status.
+        const scriptName = kind === "script" ? attr(element, "name") : undefined;
+        if (scriptName === undefined) continue;
+        if (!isIdentifier(scriptName)) fail("HC013", `Script name \`${scriptName}\` is not a valid expression identifier.`, source);
+        if (names.has(scriptName) || Object.hasOwn(contract.props, scriptName)) {
+          fail("HC020", `Declaration \`${scriptName}\` collides in the flat component scope.`, source);
+        }
+        names.add(scriptName);
+        roots.add(scriptName);
+        continue;
+      }
       const name = attr(element, "name") ?? "";
       if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
       if ((kind === "event" || kind === "request") && name === "responder") {
@@ -952,6 +981,9 @@ function readDeclarations(
 
   const declarationScope = { roots, writableRoots, handlers, report: onDiagnostic ?? warn };
   const requests: Record<string, RequestContract> = {};
+  const head: HeadDeclaration[] = [];
+  const scripts: ScriptDeclaration[] = [];
+  const headKeys = new Set<string>();
   for (const element of elements) {
     if (invalid?.has(element) || ignored.has(element)) continue;
     const scope = { ...declarationScope, at: sourceLocation(element) };
@@ -959,6 +991,11 @@ function readDeclarations(
       const fail: DiagnosticFail = locatedFail(element);
       const kind = sourceTag(element);
       if (kind === "prop" || kind === "type") continue;
+      if (HEAD_ELEMENT_RE.test(kind)) {
+        withDiagnosticLocation(sourceLocation(element), () =>
+          readHeadDeclaration(element, scope, source, head, scripts, headKeys, warn));
+        continue;
+      }
       const name = attr(element, "name")!;
 
       if (kind === "request") {
@@ -1127,7 +1164,152 @@ function readDeclarations(
       }
     }
   }
-  return { declarations, scope: declarationScope, ...(Object.keys(requests).length === 0 ? {} : { requests }) };
+  return {
+    declarations, scope: declarationScope,
+    ...(Object.keys(requests).length === 0 ? {} : { requests }),
+    ...(head.length === 0 ? {} : { head }),
+    ...(scripts.length === 0 ? {} : { scripts }),
+  };
+}
+
+const LOADING_RE = /^(?:eager|lazy|manual)$/;
+
+/**
+ * Reads one head declaration in `<defs>` (components#head-elements): a `<title>`, `<meta>`,
+ * `<link>`, JSON-LD block, or declared `<script src>`. Policy elements, inline code and attributes
+ * HTML does not define for the element are invalid, so the definition is rejected.
+ */
+function readHeadDeclaration(
+  element: Element,
+  scope: ParseScope,
+  source: string,
+  head: HeadDeclaration[],
+  scripts: ScriptDeclaration[],
+  keys: Set<string>,
+  warn: ComponentParserPlatform["warn"],
+): void {
+  const tag = sourceTag(element);
+  const attributes = Array.from(sourceAttributes(element));
+  const literal = (name: string): string | undefined => attributes.find((attribute) => attribute.name === name)?.value;
+  const once = (key: string, what: string): void => {
+    if (keys.has(key)) fail("HC027", `A definition declares ${what} once.`, source);
+    keys.add(key);
+  };
+  for (const { name } of attributes) {
+    if (name === "blocking") fail("HC025", "The render-blocking `blocking` attribute is invalid in a definition.", source);
+    if (name === "nonce") fail("HC025", "A `nonce` comes from the application, never from a definition.", source);
+    if (/^on(?!:)/i.test(name) || (name.startsWith("on:") && tag !== "script")) {
+      fail("HC025", `<${tag} ${name}> is an event-handler attribute; a head declaration cannot run code.`, source);
+    }
+  }
+  if (tag === "script") {
+    const type = literal("type")?.trim().toLowerCase();
+    if (type === "application/ld+json") {
+      for (const { name } of attributes) {
+        if (name !== "type" && name !== "from:value") fail("HC026", `A JSON-LD block takes only \`type\` and \`from:value\`, not \`${name}\`.`, source);
+      }
+      const text = textContent(element);
+      const bound = literal("from:value");
+      if (bound !== undefined) {
+        if (text.trim() !== "") fail("HC026", "A JSON-LD block has literal content or `from:value`, not both.", source);
+        head.push({ kind: "json", value: compileScopedExpression(bound, scope, source) });
+        return;
+      }
+      try { JSON.parse(text); }
+      catch { fail("HC026", "A JSON-LD block's content is not valid JSON.", source); }
+      head.push({ kind: "json", text });
+      return;
+    }
+    const src = literal("src");
+    if (src === undefined) {
+      fail("HC025", "An inline executable `<script>` is invalid in a definition; declare the script by its `src`.", source);
+    }
+    if (type !== undefined && type !== "" && type !== "module") {
+      fail("HC025", type === "importmap"
+        ? "An import map is invalid in a definition; only the application document's import map resolves bare names."
+        : `A declared script is classic or \`type="module"\`, not \`type="${type}"\`.`, source);
+    }
+    if (textContent(element).trim() !== "") fail("HC025", "A declared `<script src>` cannot also contain code.", source);
+    if (src.trim() === "") fail("HC025", "A declared script requires a non-empty `src`.", source);
+    if (hasExecutableUrl(src)) fail("HT007", "Literal `src` contains an executable URL.", source);
+    const declaration: { -readonly [K in keyof ScriptDeclaration]: ScriptDeclaration[K] } = { src, loading: "eager" };
+    for (const { name, value } of attributes) {
+      if (name === "src" || name === "type") continue;
+      if (name === "name") declaration.name = value;
+      else if (name === "loading") {
+        if (!LOADING_RE.test(value)) fail("HC025", `A declared script loads \`eager\`, \`lazy\` or \`manual\`, not \`${value}\`.`, source);
+        declaration.loading = value as ScriptDeclaration["loading"];
+      } else if (name === "on:load" || name === "on:error") {
+        if (!scope.handlers.has(value)) fail("HT010", `Event binding \`${name}\` names undeclared handler \`${value}\`.`, source);
+        declaration[name === "on:load" ? "load" : "error"] = value;
+      } else if ((SCRIPT_STANDARD_ATTRIBUTES as readonly string[]).includes(name)) {
+        declaration[name as typeof SCRIPT_STANDARD_ATTRIBUTES[number]] = value;
+      } else if (name === "async" || name === "defer") {
+        fail("HC025", `\`${name}\` adds nothing to a declared script: a script inserted through the DOM runs as soon as it arrives.`, source);
+      } else {
+        fail("HC025", `A declared script does not accept \`${name}\`.`, source);
+      }
+    }
+    if (type === "module") declaration.type = "module";
+    if (declaration.loading === "manual" && declaration.name === undefined) {
+      fail("HC025", 'A `loading="manual"` script requires a `name`, so a controller can call `load()`.', source);
+    }
+    scripts.push(declaration);
+    return;
+  }
+  const allowed = HEAD_ATTRIBUTES[tag]!;
+  const bindable = tag === "meta" ? "content" : tag === "link" ? "href" : undefined;
+  const parsed: (LiteralAttribute | AttributeBinding)[] = [];
+  for (const { name, value } of attributes) {
+    if (bindable !== undefined && name === `from:${bindable}`) {
+      parsed.push({ kind: "attribute", name: bindable, expression: value, expressionPlan: compileScopedExpression(value, scope, source) });
+      continue;
+    }
+    if (tag === "meta" && (name === "http-equiv" || name === "charset")) {
+      fail("HC025", `\`<meta ${name}>\` sets document policy or encoding; it is invalid in a definition.`, source);
+    }
+    if (!allowed.has(name)) {
+      fail("HC025", name.includes(":") || name.startsWith("$") || name.startsWith(".")
+        ? `<${tag}> binds ${bindable === undefined ? "nothing" : `only \`from:${bindable}\``}; \`${name}\` is not a head binding.`
+        : `<${tag}> does not accept \`${name}\`.`, source);
+    }
+    validateLiteralAttributeName(name, source, value);
+    parsed.push({ kind: "literal", name, value });
+  }
+  const has = (name: string): boolean => parsed.some((attribute) => attribute.name === name);
+  if (tag === "title") {
+    once("title", "one `<title>`");
+    head.push({ kind: "title", text: parseText(textContent(element), scope, source) as TextNode[] });
+    return;
+  }
+  if (bindable !== undefined && !has(bindable)) fail("HC025", `<${tag}> requires \`${bindable}\` or \`from:${bindable}\`.`, source);
+  if (parsed.filter((attribute) => attribute.name === bindable).length > 1) {
+    fail("HC025", `<${tag}> takes \`${bindable}\` or \`from:${bindable}\`, not both.`, source);
+  }
+  if (tag === "meta") {
+    const name = literal("name");
+    if ((name === undefined) === (literal("property") === undefined)) {
+      fail("HC025", "A `<meta>` head declaration has one `name` or one `property`.", source);
+    }
+    if (name?.toLowerCase() === "application-components") {
+      // Only the application document's own head says which sources supply application components.
+      const message = '`<meta name="application-components">` belongs to the application document; a component\'s is ignored.';
+      if (warn === undefined) fail("HC028", message, source);
+      warn({ code: "HC028", message, source, ...scope.at, severity: "warning" });
+      return;
+    }
+  } else {
+    const rel = literal("rel")?.trim().toLowerCase() ?? "";
+    if (/(?:^|\s)stylesheet(?:\s|$)/.test(rel)) {
+      fail("HC025", "`<link rel=\"stylesheet\">` is not a head declaration: a component's CSS is its scoped `<style>`, including `@import`.", source);
+    }
+    if (/(?:^|\s)import(?:\s|$)/.test(rel)) fail("HC025", "HTML Imports (`<link rel=\"import\">`) are invalid in a definition.", source);
+    if (!HEAD_LINK_RELS.has(rel)) fail("HC025", `\`<link rel="${rel}">\` is not a head declaration.`, source);
+    const href = literal("href");
+    if (rel === "canonical") once("canonical", "one canonical link");
+    else if (href !== undefined) once(`link ${rel} ${href}`, `one \`<link rel="${rel}" href="${href}">\``);
+  }
+  head.push({ kind: tag as "meta" | "link", attributes: parsed });
 }
 
 const NULL_TYPE: TypeNode = { kind: "terminal", name: "null" };
@@ -1754,7 +1936,7 @@ function parseComponentNodesAtSource(
       }
       declarationGroup = node;
       legacyProps = name === "props";
-      validateDeclarationContent(node, source);
+      validateDeclarationContent(node, source, !legacyProps);
     } else if (name === "style") {
       if (style !== undefined) {
         fail("HS002", "A component has one optional declaration group, one markup root, and one optional <style>.", source);
@@ -1811,9 +1993,12 @@ function parseComponentNodesAtSource(
     platform.onDiagnostic,
   );
 
-  const { declarations, scope: declarationScope, requests } = readDeclarations(legacyProps ? undefined : declarationGroup, propContract, source, platform.warnInvalidDeclaration, platform.onDiagnostic, platform.warn);
+  const { declarations, scope: declarationScope, requests, head, scripts } = readDeclarations(legacyProps ? undefined : declarationGroup, propContract, source, platform.warnInvalidDeclaration, platform.onDiagnostic, platform.warn);
   // The same object, so it keeps its diagnostic location; the definition freezes it below.
-  const contract: ComponentContract = requests === undefined ? propContract : Object.assign(propContract, { requests });
+  const contract: ComponentContract = Object.assign(propContract, {
+    ...(requests === undefined ? {} : { requests }),
+    ...(scripts === undefined ? {} : { scripts: scripts.map(({ load: _load, error: _error, ...script }) => script) }),
+  });
   let scope = declarationScope;
   if (legacyProps && platform.onDiagnostic !== undefined && declarationGroup !== undefined) {
     const roots = new Set(scope.roots);
@@ -1857,6 +2042,8 @@ function parseComponentNodesAtSource(
     slots: SlotContract[];
     root: NonNullable<ComponentDefinition["root"]>;
     lifecycle?: ComponentLifecycle;
+    head?: readonly HeadDeclaration[];
+    scripts?: readonly ScriptDeclaration[];
   } = {
     source: { file: source },
     contract,
@@ -1874,5 +2061,7 @@ function parseComponentNodesAtSource(
   };
   if (controller !== undefined) definition.controller = controller;
   if (Object.keys(lifecycle).length > 0) definition.lifecycle = lifecycle;
+  if (head !== undefined) definition.head = head;
+  if (scripts !== undefined) definition.scripts = scripts;
   return deepFreeze(definition);
 }

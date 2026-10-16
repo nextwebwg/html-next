@@ -3,7 +3,7 @@ import { parseFragment, type DefaultTreeAdapterTypes } from "parse5";
 import { parseComponentNodes } from "./parser.js";
 import { getDomInterface, resolveDomProperty } from "./platform.js";
 import { fail, recoverDiagnostic, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { isIgnoredResourceMetadata } from "./resource-metadata.js";
+import { isResourceBuildMetadata } from "./resource-metadata.js";
 import type { DiagnosedComponentResource, ParsedComponentResource } from "./graph.js";
 import type { ComponentDefinition } from "./template.js";
 
@@ -80,10 +80,10 @@ function readComponentResource(sourceText: string, source: string, onDiagnostic?
         const href = node.attrs.find((attr) => attr.name === "href")?.value;
         if (href === undefined || href.trim() === "") fail("HL006", "A component dependency link requires a non-empty `href`.", source, nodeLocation(node));
         dependencies.push(href);
-      } else if ("tagName" in node && isIgnoredResourceMetadata(node.tagName, node.attrs)) {
+      } else if ("tagName" in node && isResourceBuildMetadata(node.tagName, node.attrs)) {
         continue;
       } else {
-        fail("HT009", "A component resource may contain only dependency links, inert component carriers, and non-policy-changing metadata.", source, nodeLocation(node));
+        fail("HT009", "A component resource may contain only dependency links, inert component carriers, and build metadata: a <meta name content> whose name has a colon, such as app:page.", source, nodeLocation(node));
       }
     } catch (error) { recoverDiagnostic(error, onDiagnostic); }
   }
