@@ -100,10 +100,11 @@ describe("Node component rendering", () => {
   }
 
   it("rejects the render of a worker that ends, and renders the next one on a new worker", async () => {
-    const lost = conflicting(3);
+    // The rejection arrives while the workers end, so its handler is attached first.
+    const lost = assert.rejects(conflicting(3), /exited without a result/);
     await new Promise((resolve) => setImmediate(resolve));
     await closeRenderWorkers();
-    await assert.rejects(lost, /exited without a result/);
+    await lost;
     isolated(await conflicting(4), 4);
   });
 
