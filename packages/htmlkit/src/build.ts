@@ -73,6 +73,9 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     if (entries.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
     await copyPublic(resolve(config.root, "public"), stage);
     if (await exists(join(stage, "_htmlkit"))) throw new HtmlKitError("Public asset collision: _htmlkit is reserved for generated assets.");
+    if (options.robots !== undefined && options.robots !== false && await exists(join(stage, "robots.txt"))) {
+      throw new HtmlKitError("Public asset collision: robots.txt is generated from the robots option.");
+    }
     const pages = [];
     const sources = new Map<string, string>();
     const redirects: ManifestRedirect[] = [...redirectTable(config.base, options.redirects)].map(([from, to]) => ({ from, to, status: 308 }));
@@ -151,7 +154,6 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
         indexed.map(pathname => `<url><loc>${escapeHTML(config.origin + pathname)}</loc></url>\n`).join("") + "</urlset>\n");
     }
     if (options.robots !== undefined && options.robots !== false) {
-      if (await exists(join(stage, "robots.txt"))) throw new HtmlKitError("Public asset collision: robots.txt is generated from the robots option.");
       const rules = options.robots === true ? "User-agent: *\nAllow: /\n" : options.robots.replace(/\n?$/, "\n");
       const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
       await writeFile(join(stage, "robots.txt"), rules + sitemap);

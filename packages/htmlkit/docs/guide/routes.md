@@ -284,8 +284,7 @@ checking data, use [`redirect()`](/htmlkit/loaders#redirecting).
 head. A page's tag replaces a layout's tag with the same identity: the `<title>`, a `<meta>` with the
 same `name` or `property`, the canonical `<link>`, and an alternate `<link>` with the same `hreflang`.
 A page's `og:image` tags replace the layout's as a set. Every other `<link>`, such as a stylesheet, is
-kept from both. `<title>`, `<meta>`, `<link>`, and [JSON-LD](#structured-data) may go in the head.
-The first three can use the page's props:
+kept from both. Only `<title>`, `<meta>`, and `<link>` may go in the head. They can use the page's props:
 
 ```html
 <template component="page-post">
@@ -300,28 +299,6 @@ The first three can use the page's props:
 ```
 
 A loader can also set `head: { title, description, lang }`.
-
-### Structured data
-
-A `<script type="application/ld+json">` in a page or layout puts
-[JSON-LD](https://json-ld.org/) structured data in the head, for search engines. It is an HTML data
-block, whose text browsers keep as data. HTMLKit checks that it is valid JSON, naming the file and line of
-invalid JSON, and writes it as static JSON, so `{$title}` inside it is text. Every layer's
-scripts are kept, so a layout's `WebSite` sits beside a page's `BlogPosting`, and client navigation
-swaps them with the page:
-
-```html
-<template component="page-post">
-  <title>First post</title>
-  <script type="application/ld+json">
-    { "@context": "https://schema.org", "@type": "BlogPosting", "headline": "First post" }
-  </script>
-  <article>…</article>
-</template>
-```
-
-The script has only its `type` attribute. HTMLKit writes `<` in its JSON as `<`, so a string
-holding `</script>` keeps the script whole.
 
 Settings that start with `hk:` configure HTMLKit and never reach the page:
 

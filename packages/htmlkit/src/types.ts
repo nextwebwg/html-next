@@ -162,10 +162,8 @@ export interface RenderedHead extends PageHead {
 }
 
 export interface HeadElement {
-  readonly tag: "meta" | "link" | "script";
+  readonly tag: "meta" | "link";
   readonly attributes: Readonly<Record<string, string>>;
-  /** A JSON-LD script's JSON, with < escaped so it never ends the element. */
-  readonly text?: string;
 }
 
 export interface LoaderResult {

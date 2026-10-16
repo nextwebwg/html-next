@@ -321,7 +321,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
             if (resolved === null || resolved.external) throw new HtmlKitError(`Cannot resolve component import ${specifier}.`, url);
             packages.set(`${url}\0${specifier}`, packageResource(resolved.id));
           }
-          return { url, source: "source" in parsed ? parsed.source : source };
+          return { url, source };
         },
         resolvePackage: (specifier, parentURL) => {
           const resolved = packages.get(`${parentURL}\0${specifier}`);

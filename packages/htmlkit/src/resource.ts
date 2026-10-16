@@ -11,8 +11,6 @@ interface ComponentMetadata {
   /** Extra route patterns for a page, relative to its page directory's prefix. */
   readonly aliases: readonly string[];
   readonly head: string;
-  /** Each <script type="application/ld+json">, as validated JSON safe to inline. */
-  readonly jsonLd: readonly string[];
   readonly propDeclarations: string;
 }
 
@@ -23,30 +21,10 @@ function renamed(name: string | undefined, file: string): void {
 
 /** Native HTML parsing determines resource nodes; HTML Next owns component syntax. */
 export function applicationResource(source: string, file: string) {
-  const fragment = parseFragment(source, { sourceCodeLocationInfo: true });
-  // JSON-LD is head data that HTML Next's carrier metadata leaves out, so HTML Next reads the page
-  // without it: each script becomes spaces, which keeps diagnostics' lines and columns.
-  const jsonLd = new Map<string, string[]>();
-  let stripped = source;
-  for (const node of fragment.childNodes) {
-    const tag = "tagName" in node && node.tagName === "template" ? node.attrs.find(attribute => attribute.name === "component")?.value : undefined;
-    if (tag === undefined) continue;
-    for (const child of (node as DefaultTreeAdapterMap["template"]).content.childNodes) {
-      if (!("tagName" in child) || child.tagName !== "script" || child.attrs.find(attribute => attribute.name === "type")?.value.trim().toLowerCase() !== "application/ld+json") continue;
-      const { startLine, startOffset, endOffset } = child.sourceCodeLocation!;
-      if (child.attrs.length !== 1) throw new HtmlKitError(`The JSON-LD script at line ${startLine} takes only its type attribute.`, file);
-      const text = child.childNodes.map(text => "value" in text ? text.value : "").join("");
-      let value: unknown;
-      try { value = JSON.parse(text); }
-      catch (error) { throw new HtmlKitError(`The JSON-LD script at line ${startLine} is not valid JSON: ${(error as Error).message}`, file); }
-      // Escaping < keeps </script> and <!-- in strings from ending or changing the element.
-      jsonLd.set(tag, [...jsonLd.get(tag) ?? [], JSON.stringify(value).replaceAll("<", "\\u003c")]);
-      stripped = stripped.slice(0, startOffset) + source.slice(startOffset, endOffset).replace(/[^\n]/g, " ") + stripped.slice(endOffset);
-    }
-  }
-  const parsed = parseComponentResource(stripped, file);
+  const parsed = parseComponentResource(source, file);
   const configuration = new Map<string, string>();
   const components = new Map<string, ComponentMetadata>();
+  const fragment = parseFragment(source);
   for (const node of fragment.childNodes) {
     if (!("tagName" in node) || !["meta", "title", "link"].includes(node.tagName)) continue;
     const name = node.attrs.find(attribute => attribute.name === "name")?.value;
@@ -86,9 +64,9 @@ export function applicationResource(source: string, file: string) {
     const defs = children.find(child => "tagName" in child && child.tagName === "defs");
     const propDeclarations = defs !== undefined && "childNodes" in defs ?
       defs.childNodes.filter(child => "tagName" in child && child.tagName === "prop").map(child => serializeOuter(child)).join("") : "";
-    components.set(tag, { ...configuration, aliases, head: head.join(""), jsonLd: jsonLd.get(tag) ?? [], propDeclarations });
+    components.set(tag, { ...configuration, aliases, head: head.join(""), propDeclarations });
   }
-  return { definitions: parsed.definitions, dependencies: parsed.dependencies, configuration, components, source: stripped };
+  return { definitions: parsed.definitions, dependencies: parsed.dependencies, configuration, components };
 }
 
 export function pageDefinition(resource: ReturnType<typeof applicationResource>, file: string): ComponentDefinition {

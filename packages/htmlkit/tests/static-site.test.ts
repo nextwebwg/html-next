@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApplication, createApplication, devApplication, type HtmlKitPlugin } from "../src/index.js";
+import { checkLinks } from "../src/links.js";
 import { write } from "./fixture.js";
 
 const roots: string[] = [];
@@ -137,57 +138,26 @@ describe("sitemap.xml and robots.txt", () => {
     expect(await readFile(join(result.outDir, "robots.txt"), "utf8")).toBe("User-agent: *\nAllow: /\nSitemap: https://example.com/docs/sitemap.xml\n");
   }, 60_000);
 
-  it("writes no sitemap without origin, keeps a public one, and writes robots.txt from its text", async () => {
-    const root = await pages();
+  it("keeps a public sitemap, writes robots.txt from its text, and gives aliases a path canonical without origin", async () => {
+    const root = await site();
+    await write(root, "app/pages/about.html", '<template component="about-page"><title>About</title><meta name="hk:alias" content="/old-about/"><h1>About</h1></template>');
     // An alias's own canonical link stays.
     await write(root, "app/pages/hidden.html", '<template component="hidden-page"><title>Hidden</title><link rel="canonical" href="https://elsewhere.example/"><meta name="hk:alias" content="/also-hidden/"><h1>Hidden</h1></template>');
-    let result = await buildApplication({ root, robots: "User-agent: *\nDisallow: /private/" });
-    expect(existsSync(join(result.outDir, "sitemap.xml"))).toBe(false);
-    expect(await readFile(join(result.outDir, "old-about/index.html"), "utf8")).toContain('<link rel="canonical" href="/about/">');
-    expect((await readFile(join(result.outDir, "also-hidden/index.html"), "utf8")).match(/rel="canonical"[^>]*/g)).toEqual(['rel="canonical" href="https://elsewhere.example/"']);
-    expect(await readFile(join(result.outDir, "robots.txt"), "utf8")).toBe("User-agent: *\nDisallow: /private/\n");
+    const application = await createApplication({ root });
+    try {
+      const canonical = async (path: string) => (await application.render(path)).head.elements?.filter(element => element.attributes.rel === "canonical").map(element => element.attributes.href);
+      expect(await canonical("/old-about/")).toEqual(["/about/"]);
+      expect(await canonical("/also-hidden/")).toEqual(["https://elsewhere.example/"]);
+    } finally { await application.close(); }
     await write(root, "public/sitemap.xml", "<urlset>own</urlset>");
-    result = await buildApplication({ root, origin: "https://example.com", robots: "User-agent: *\nSitemap: https://example.com/maps.xml\n" });
+    const result = await buildApplication({ root, origin: "https://example.com", robots: "User-agent: *\nSitemap: https://example.com/maps.xml\n" });
     expect(await readFile(join(result.outDir, "sitemap.xml"), "utf8")).toBe("<urlset>own</urlset>");
     expect(await readFile(join(result.outDir, "robots.txt"), "utf8")).toBe("User-agent: *\nSitemap: https://example.com/maps.xml\n");
+    // Both fail before any page renders.
     await write(root, "public/robots.txt", "User-agent: *\n");
     await expect(buildApplication({ root, robots: true })).rejects.toThrow("robots.txt is generated");
     await expect(buildApplication({ root, robots: 1 as unknown as boolean })).rejects.toThrow("robots must be");
   }, 60_000);
-});
-
-describe("JSON-LD", () => {
-  it("renders each layer's JSON-LD script as inert, validated JSON", async () => {
-    const root = await site();
-    await write(root, "app/layouts/default.html", `<template component="site-shell"><title>Site</title>
-      <script type="application/ld+json">{ "@type": "WebSite", "name": "Kit" }</script><defs><prop name="brand" type="string" required>Brand</prop></defs>
-      <main><header>{$brand}</header><slot name="page"></slot></main></template>`);
-    await write(root, "app/pages/article.html", `<template component="article-page"><title>Article</title>
-      <script type="application/ld+json">{"@type": "Article", "headline": "\\u003c/script>\\u003cscript>alert(1)\\u003c/script> <b> {$brand}"}</script>
-      <h1>Article</h1></template>`);
-    const application = await createApplication({ root });
-    try {
-      const page = await application.render("/article/");
-      expect(page.html).toContain('<script type="application/ld+json">{"@type":"WebSite","name":"Kit"}</script>');
-      expect(page.html).toContain('<script type="application/ld+json">{"@type":"Article","headline":"\\u003c/script>\\u003cscript>alert(1)\\u003c/script> \\u003cb> {$brand}"}</script>');
-      expect(page.html).not.toContain("<script>alert");
-      expect(page.body).not.toContain("ld+json");
-      // Client navigation swaps them in from the payload.
-      const payload = await (await application.fetch(new Request("http://localhost/_htmlkit/pages/article/payload.json"))).json();
-      expect(payload.head.elements.filter((element: { tag: string }) => element.tag === "script").map((element: { text: string }) => JSON.parse(element.text)["@type"]))
-        .toEqual(["WebSite", "Article"]);
-    } finally { await application.close(); }
-  });
-
-  it("names the line of invalid JSON and refuses other scripts", async () => {
-    const root = await site();
-    await write(root, "app/pages/article.html", '<template component="article-page">\n<script type="application/ld+json">{"@type": }</script><h1>Article</h1></template>');
-    await expect(createApplication({ root })).rejects.toThrow(/article\.html: The JSON-LD script at line 2 is not valid JSON/);
-    await write(root, "app/pages/article.html", '<template component="article-page"><script type="application/ld+json" id="ld">{}</script><h1>Article</h1></template>');
-    await expect(createApplication({ root })).rejects.toThrow("takes only its type attribute");
-    await write(root, "app/pages/article.html", '<template component="article-page"><script>alert(1)</script><h1>Article</h1></template>');
-    await expect(createApplication({ root })).rejects.toThrow("HT001");
-  });
 });
 
 describe("the internal link check", () => {
@@ -206,31 +176,31 @@ describe("the internal link check", () => {
 
   it("passes links to pages, files, redirects, and anchors in the build", async () => {
     const root = await linked();
-    const result = await buildApplication({ root, base: "/docs/", redirects: { "/start/": "/guide/" }, plugins: [search] });
+    const result = await buildApplication({ root, base: "/docs/", redirects: { "/start/": "/guide/" }, plugins: [search], robots: "User-agent: *\nDisallow: /private/" });
     expect(result.routes).toEqual(["/docs/", "/docs/guide/"]);
+    // Without origin, the build writes no sitemap.xml, and robots.txt is the option's text.
+    expect(existsSync(join(result.outDir, "sitemap.xml"))).toBe(false);
+    expect(await readFile(join(result.outDir, "robots.txt"), "utf8")).toBe("User-agent: *\nDisallow: /private/\n");
   }, 60_000);
 
-  it("fails the build on a missing page, file, or anchor, naming the page and the link", async () => {
+  it("fails on a missing page, file, or anchor, naming the page and the link, or warns", async () => {
     const root = await linked();
-    await buildApplication({ root, base: "/docs/", redirects: { "/start/": "/guide/" }, plugins: [search] });
     await write(root, "app/pages/guide.html", `<template component="guide-page"><title>Guide</title><article><h2 id="install">Install</h2><a name="named">Named</a>
       <a href="/docs/missing/">Missing</a> <a href="#nowhere">Nowhere</a> <a href="/docs/#gone">Gone</a> <a href="../file.txt">File</a></article></template>`);
-    const failure = buildApplication({ root, base: "/docs/", redirects: { "/start/": "/missing-too/" }, plugins: [search] });
-    await expect(failure).rejects.toThrow([
+    const broken = [
       "Broken internal links:",
       "  /docs/guide/ links to /docs/missing/, which is no page or file in the build.",
       '  /docs/guide/ links to #nowhere, and /docs/guide/ has no element with id "nowhere".',
       '  /docs/guide/ links to /docs/#gone, and /docs/ has no element with id "gone".',
       "  /docs/guide/ links to ../file.txt, which is no page or file in the build.",
       "  /docs/start/ links to /docs/missing-too/, which is no page or file in the build.",
-    ].join("\n"));
-    // The previous output stays.
-    expect(await readFile(join(root, "dist/guide/index.html"), "utf8")).not.toContain("Missing");
-    // linkCheck: "warn" reports the same links and builds.
+    ].join("\n");
+    // One build: "warn" reports the links and finishes; the check then fails on the same built HTML.
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await buildApplication({ root, base: "/docs/", redirects: { "/start/": "/missing-too/" }, plugins: [search], linkCheck: "warn" });
-    expect(warned).toHaveBeenCalledWith(expect.stringContaining("/docs/guide/ links to /docs/missing/"));
-    expect(await readFile(join(root, "dist/guide/index.html"), "utf8")).toContain("Missing");
+    const result = await buildApplication({ root, base: "/docs/", redirects: { "/start/": "/missing-too/" }, plugins: [search], linkCheck: "warn" });
+    expect(warned).toHaveBeenCalledWith(broken);
+    expect(await readFile(join(result.outDir, "guide/index.html"), "utf8")).toContain("Missing");
+    await expect(checkLinks(result.outDir, "http://localhost", "/docs/", ["/docs/", "/docs/guide/", "/docs/start/", "/docs/404.html"])).rejects.toThrow(broken);
     await expect(buildApplication({ root, linkCheck: "off" as "warn" })).rejects.toThrow('linkCheck must be "error" or "warn".');
   }, 60_000);
 });

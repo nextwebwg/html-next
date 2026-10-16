@@ -43,7 +43,6 @@ async function site(): Promise<string> {
   // Shared stylesheet imports put each page's graph in one stylesheet, which client navigation loads.
   await write(root, "app/styles/heading.css", "h1 { border-bottom: 2px solid rgb(7, 8, 9); }");
   await write(root, "app/pages/guide/index.html", `<template component="guide-page" controller="./guide.ts"><title>Guide</title><meta name="description" content="Guide page"><meta name="hk:label" content="Guide">
-    <script type="application/ld+json">{"@type": "TechArticle", "name": "Guide"}</script>
     <article><h1>Guide</h1></article><style>@import "@/app/styles/heading.css"; :host { color: rgb(4, 5, 6); }</style></template>`);
   await write(root, "app/pages/guide/guide.ts", "export default function(host) { host.root.dataset.ready = 'guide'; }");
   await write(root, "app/pages/guide/install.html", `<template component="install-page"><title>Install</title><meta name="hk:label" content="Install">
@@ -158,12 +157,10 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
         shared: getComputedStyle(document.querySelector("#hk-layer-1 h1")!).borderBottomColor,
         current: [...document.querySelectorAll("nav a")].map(link => [link.getAttribute("href"), link.getAttribute("aria-current")]),
         description: document.querySelector('meta[name="description"]')?.getAttribute("content"), announced: document.getElementById("hk-announcer")!.textContent,
-        focus: document.activeElement === document.body, background: getComputedStyle(document.body).backgroundColor,
-        jsonLd: [...document.querySelectorAll('script[type="application/ld+json"]')].map(script => script.textContent) };
+        focus: document.activeElement === document.body, background: getComputedStyle(document.body).backgroundColor };
     })).toEqual({ kept: true, connections: "1", expanded: "true", page: "guide-page", ready: "guide", color: "rgb(4, 5, 6)", shared: "rgb(7, 8, 9)",
       current: [["/kit/", "false"], ["/kit/guide/", "page"], ["/kit/guide/install/", "false"], ["/kit/items/one/", "false"], ["/kit/items/two/", "false"]],
-      description: "Guide page", announced: "Guide", focus: true, background: built ? "rgba(0, 0, 0, 0)" : "rgb(9, 9, 9)",
-      jsonLd: ['{"@type":"TechArticle","name":"Guide"}'] });
+      description: "Guide page", announced: "Guide", focus: true, background: built ? "rgba(0, 0, 0, 0)" : "rgb(9, 9, 9)" });
 
     // A touch prefetches at once.
     await page.locator("#items").evaluate(link => link.dispatchEvent(new Event("touchstart", { bubbles: true })));

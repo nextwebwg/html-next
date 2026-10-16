@@ -12,8 +12,7 @@ export function documentHTML(body: string, head: RenderedHead, assets: PageAsset
   const elements = head.elements ?? defaultHeadElements;
   const charset = elements.filter(element => element.tag === "meta" && element.attributes.charset !== undefined);
   const html = (list: readonly HeadElement[]) =>
-    list.map(element => `<${element.tag}${Object.entries(element.attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>` +
-      (element.tag === "script" ? `${element.text ?? ""}</script>` : "")).join("");
+    list.map(element => `<${element.tag}${Object.entries(element.attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>`).join("");
   // Head scripts precede stylesheets, which would otherwise delay it until they load.
   return `<!doctype html>\n<html lang="${escapeHTML(head.lang ?? "en")}"><head>${html(charset)}` +
     (head.scripts ?? []).map(script => `<script>${script}</script>`).join("") + html(elements.filter(element => !charset.includes(element))) +

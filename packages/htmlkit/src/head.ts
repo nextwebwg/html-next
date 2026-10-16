@@ -69,8 +69,6 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
     for (let i = elements.length - 1; i >= 0; i--) if (replaced.has(identity(elements[i]!) ?? "")) elements.splice(i, 1);
     elements.push(...current);
   }
-  // Every layer's JSON-LD is kept, as a layout's WebSite beside a page's Article.
-  elements.push(...metadata.jsonLd.map(text => ({ tag: "script" as const, attributes: { type: "application/ld+json" }, text })));
   // Only PageHead fields: an untyped loader's extra head keys must not reach the document assembler.
   const loaded = Object.entries(result.head ?? {}).filter(([name]) => name === "title" || name === "description" || name === "lang");
   return { ...previous, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...Object.fromEntries(loaded),
