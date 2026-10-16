@@ -164,7 +164,8 @@ jobs:
           npm install --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/packs/*.tgz
           cp "$GITHUB_WORKSPACE/packages/htmlkit/scripts/runtime-smoke.mjs" .
       - working-directory: ${{ runner.temp }}/consumer
-        run: deno run -A runtime-smoke.mjs && bun runtime-smoke.mjs
+        # Node builds the application whose server entry Deno and Bun then run.
+        run: node runtime-smoke.mjs && deno run -A runtime-smoke.mjs && bun runtime-smoke.mjs
 
   required:
     name: Required

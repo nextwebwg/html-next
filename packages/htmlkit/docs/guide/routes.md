@@ -194,7 +194,7 @@ all three layouts; going to `/blog/` keeps only `default`.
 ## The not-found page
 
 `app/pages/404.html` is the page for any URL that matches no page. It renders through its layout like
-any other page, with status 404, in development, `preview`, and `application.fetch`. `npm run build`
+any other page, with status 404, in development, `preview`, `htmlkit start`, and `application.fetch`. `npm run build`
 writes it to `404.html`. It is not a route: `/404/` is not one of the site's pages, and navigation
 doesn't list it. Its loader receives the requested URL, except in the built `404.html`, which a static
 host serves for every missing path. Without the file, HTMLKit serves a plain "Page not found" page.
@@ -214,7 +214,8 @@ paths.
 
 ## The error page
 
-`app/error.html` is the page for a request whose page fails: a loader throws, or the page doesn't
+`app/error.html` is the page for a request that fails: a loader, an [endpoint](/htmlkit/server), or
+middleware throws, or the page doesn't
 render. It renders through its layout with status 500, and receives the `status` and `message` props
 when it declares them. `message` is the status's reason phrase, `Internal Server Error`. The error
 itself goes to the server's console, so its message and stack stay out of the page.
@@ -240,6 +241,7 @@ itself goes to the server's console, so its message and stack stay out of the pa
 | `htmlkit dev` | It answers 500 with the error and its stack, to fix in development. |
 | `htmlkit build` | The build fails with the error, and the previous `dist/` stays. A static build has no error page, because each of its pages rendered. |
 | `htmlkit preview` | It serves the built pages, which rendered during the build. |
+| `htmlkit start` | It answers 500 with `app/error.html`, which the build includes in the server when pages render on request or there are endpoints or middleware. |
 
 Like the not-found page, it is not a route: no URL serves it, and navigation doesn't list it. It
 takes its layout as a page does, from `hk:layout`, the `layout` option, or `default.html`, and it
@@ -261,7 +263,7 @@ export default defineConfig({
 });
 ```
 
-The development server and `application.fetch` answer `/getting-started/` and `/getting-started`
+The development server, `htmlkit start`, and `application.fetch` answer `/getting-started/` and `/getting-started`
 with a 308 and a `Location` header. A static build writes a page at each old URL, for hosts such as
 GitHub Pages, which serve files as they are. The page refreshes to the new URL at once, names it as
 canonical, and links to it for readers who stay on the page:
@@ -310,6 +312,7 @@ Settings that start with `hk:` configure HTMLKit and never reach the page:
 | `hk:order` | Sets the page's place in [navigation](/htmlkit/navigation#ordering-pages), in place of its file name's number. |
 | `hk:navigation` | `content="hidden"` keeps the page out of navigation. |
 | `hk:alias` | Adds another URL for the page, such as `content="/start/"`. Its page has a canonical link to the page's own URL, unless the page sets one, and [`sitemap.xml`](/htmlkit/configuration#search-engines) lists only the page's own URL. |
+| `hk:render` | `content="server"` renders the page on each request instead of at build time ([details](/htmlkit/loaders#rendering-on-each-request)). |
 
 ## A script before first paint
 
@@ -327,6 +330,8 @@ allow it with a `'sha256-…'` hash of its text.
 ## Details
 
 - Two files that produce the same URL are an error that names both files.
+- `app/api` holds [endpoints](/htmlkit/server#endpoints), at paths without a trailing slash, and
+  `app/middleware.server.ts` is [middleware](/htmlkit/server#middleware).
 - Literal URL segments take priority over parameters, and parameters over
   [catch-alls](#catch-all-pages).
 - Pages, layouts, and components link other components with

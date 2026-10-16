@@ -1,96 +1,128 @@
 # Request-time server rendering design
 
-HTMLKit's first production adapter is static. A future request adapter should reuse the route
-manifest, layout chain, loader result contract, component graph, and HTML Next rendering/adoption
-path. Authored pages must not change when a route moves from prerendering to request-time delivery.
-Page entry names, route patterns, and browser bundle locations stay separate in both adapters.
-Named/default layout selection and `hk:page` selection resolve before loader execution;
-declarative head metadata belongs to each selected component carrier, is rendered from that layer's props, and is merged by the same
-identity rules in either adapter. No browser head subscription is required for document navigation.
-This is a tooling implementation design, not a component-language specification.
+HTMLKit renders a page at build time or on each request through one render kernel, so a page's
+authored files don't change when it moves between the two. Route matching, layout selection,
+`hk:page` selection, the loader result contract, head merging, and the HTML Next rendering and
+adoption path are the same in both. A page's `hk:render` metadata chooses: `prerender`, the default,
+or `server`. This is a tooling implementation design, not a component-language specification; the
+[deployment guide](./guide/deployment.md) describes the behavior for authors.
 
 ## Shared work and adapter responsibilities
 
-`Application.fetch(request)` is the request entry point that a production adapter will build on.
-Today the development server serves every page through it, and CI runs it on Deno and Bun. It still
-supplies the static `prerender` context described below.
+`src/server.ts` is the request-time core, and it imports nothing from Vite:
 
-The current application pipeline already separates route matching and static entry enumeration.
-`entries()` is a deployment operation; `render()` matches a concrete pathname and runs a fresh
-layout/page loader chain. Both file and registered routes become the same `ApplicationRoute`.
+- `renderRoute` runs a route's loaders, outermost first, serializes their props into standard
+  component invocations, merges head metadata, and renders through HTML Next's `renderComponents`.
+  Without a request it builds the prerender context, whose `request`, `cookies`, and `response`
+  throw a diagnostic; with one it builds the request context.
+- `respond` answers a `Request`: a page payload URL becomes its page's URL, middleware runs, then
+  the redirects table, endpoints (paths without a trailing slash), and pages (GET and HEAD, 308 to
+  the trailing slash).
+- `createNavigation` answers `navigation()`, `navigationTree()`, `breadcrumbs()`, and `pager()` from
+  routes and the concrete page URLs.
 
-A request adapter will compile Node loader modules into a server artifact and browser entry/CSS
-maps into a client artifact. It will not run the Vite development server in production. The shared
-render kernel will accept a resolved route, parameters, a context factory, and a cancellation signal.
-The current static context factory supplies a canonical URL and rejects request access. A new
-request factory will supply the actual URL and native `Request` with `phase: 'request'`. Extending
-the public `LoadContext` to a discriminated union lets loaders narrow before using request inputs.
-Existing static loaders continue to work unchanged.
+Two applications supply the rest of a `Pipeline`:
 
 ```text
 Request
-  -> adapter validates method and deployment base
-  -> manifest matches pathname, with literals before parameters
-  -> fresh request context and layout/page loader results
-  -> props/state serialized into standard component invocations
-  -> HTML Next renderComponents in an independent DOM worker
-  -> document plus prebuilt browser/CSS URLs
-  -> Response (including status, headers, and cancellation policy)
+  -> payload URL to page URL -> middleware(request, next)
+  -> redirects -> endpoint (exported method, or 405 with Allow)
+  -> page match -> prerendered: application.render / the build's file
+                -> server: renderRoute with the request
+  -> Response (status, headers, Set-Cookie, body)
 ```
 
-The deployment adapter owns HTTP status/headers, host validation, cookies, redirects, errors,
-request limits, and response delivery. The platform owns matching, composition, public input
-serialization, and browser entry selection. HTML Next owns component semantics and each render's
-DOM realm. Endpoint/action APIs, redirects returned by loaders, streaming, and adapters for edge
-runtimes require later implementation decisions; this delivery invents none of those contracts.
+- `createApplication` (development, `application.fetch`) loads loaders, endpoints, and middleware
+  through Vite's module runner and each route's component graph through `loadNodeComponents`. A
+  prerendered page renders at its canonical `origin` URL, as the build renders it.
+- The build writes `_htmlkit/server/entry.js`, whose default export is `serverApplication`'s result.
+  The entry carries the server data as JSON: path-free routes, the navigation catalog, head scripts,
+  redirects, and each server route's component definitions, head metadata, and browser assets. Vite
+  builds the server-rendered pages' loaders, the endpoints, and the middleware to
+  `_htmlkit/server/<id>.js` in a production worker, with packages left as imports; the entry imports
+  each on first use. Prerendered pages and assets are served from the output's files, and
+  `_htmlkit/server/` itself never is.
+
+`startApplication` (`htmlkit start`) adapts `node:http` to `Request` and `Response`: the method, the
+URL from the `Host` header, raw headers, a streamed body for other methods, and an abort signal for
+a closed response. It writes `getSetCookie()`'s values as separate headers and streams the body.
+Deno and Bun take the entry's `fetch` as it is. CI runs the built entry on Node, Deno, and Bun from
+packed packages (`scripts/runtime-smoke.mjs`).
 
 ## Isolation and public data
 
 For simultaneous `/items/alice/` and `/items/bob/` requests, matching creates distinct parameter
-objects. Each request gets its own `Request`, abort signal, parent-data chain, loader results,
-invocation markup, and initial state map. HTML Next renders each in an independent worker with a
-separate DOM and browser constructors. Only immutable build metadata and asset manifests may be
-shared. One request's result must never enter a global route-data or rendered-output cache.
+objects. Each request gets its own `Request`, abort signal, cookie map, response status and headers,
+parent-data chain, loader results, invocation markup, and initial state map. Only immutable build
+data and asset URLs are shared, and no request's result enters a shared cache. A test renders two
+requests with different cookies at once and checks neither sees the other's.
 
-The DOM worker does **not** isolate application loader globals. Today's static/development loaders
-are trusted application code and Vite caches their modules. A Node request adapter must either
-enforce stateless loader modules or execute loader chains in request-isolated workers. The proposed
-first adapter uses request-isolated loader workers, with a structured-clone protocol for URL,
-method, approved headers, parameters, and loader results. It reconstructs a native `Request`
-inside that worker. Do not pass live request bodies, privileged platform handles, or browser
-controllers across that protocol. Size limits, termination on abort, and worker disposal belong
-to the adapter and must be tested before it becomes production-supported. Pooling is deferred.
+### Render workers
+
+HTML Next's `renderComponents` renders in a pool of long-lived workers, the number of available
+CPUs up to 8 unless `setRenderWorkers(count)` sets another (`htmlkit --render-workers`, or
+`startApplication({ renderWorkers })`). Each worker renders one request at a time and the others
+wait in a queue. Every render gets:
+
+- its own JSDOM window and document, created for the render and closed after it;
+- browser globals (`Node`, `Element`, `HTMLElement`, `Event`, and the rest the runtime reads) pointed
+  at that window during the render and restored afterwards;
+- its own component registry, which belongs to the document, and its own component instances,
+  reactive state, and bindings, which belong to the document's elements;
+- its own copies of the definitions, state, and URL, which arrive as structured clones.
+
+A worker keeps only what loading its modules creates: jsdom, the HTML Next runtime, the
+`Intl.DurationFormat` polyfill, the projected-slot parser the runtime installs once, and the
+runtime's static tables, such as SVG attribute names. It caches no definitions, documents, or
+rendered output. HTML Next's request-isolation test renders requests with conflicting definitions
+of one tag and conflicting state, concurrently and in sequence, on one worker and on three. A worker
+that fails or exits rejects the render it was doing, which a server answers with its error page, and
+the next render starts a new worker. An idle worker doesn't keep the process alive.
+
+Each page is one render: the layers' invocations, then each layer's head bindings as a component of
+its own (`hk-head-<layer>`) with that layer's props, in a container after the page. HTMLKit keeps the
+page's markup exactly as rendered and merges each head carrier's metadata in layer order
+(`head.ts`'s `headCarrier` and `mergeHead`).
+
+Loaders, endpoints, and middleware are trusted application code that runs in the server's process,
+as in Nuxt and Next.js: a module loads once, so a value it keeps in a module variable is shared by
+every request. The guide says so beside the request API.
 
 `data` is private to the loader chain. Only explicit `props` and `state` become public, through
-the existing HTML Next type validation, attribute serialization, and rendered continuation records.
-Titles, descriptions, and native metadata attributes are escaped by the document assembler. Head
-bindings reuse HTML Next's parser and renderer through inert binding carriers, since actual head
-elements are forbidden in component bodies. Only declared props enter that scope: browser reads,
-controller execution, and mutable browser state do not become server head dependencies.
-Browser entries import the page's compiled
-components and their controllers, never server loaders or their imports. Authentication/session values must
-stay in private loader data unless deliberately reduced to public presentation values.
+HTML Next type validation, attribute serialization, and rendered continuation records. Titles,
+descriptions, and native metadata attributes are escaped by the document assembler. Head bindings
+reuse HTML Next's parser and renderer through inert binding carriers, since head elements are
+forbidden in component bodies. Browser entries import the page's compiled components and their
+controllers, never server loaders or their imports.
 
-Tests for the future adapter must prove two concurrent requests with distinct cookies and params
-cannot contaminate each other's HTML, even when an application tries to store data in module
-globals. They must also prove canceled requests dispose loader/render workers, private values do
-not appear in HTML or browser assets, and static/request renderings with equal public input adopt
-with equal observable behavior. No caching should be added before its keys and privacy policy are
-explicitly reviewed.
+## Cost
+
+`pnpm --filter @nextwebwg/htmlkit measure:server` builds a small site and loads `htmlkit start` with
+keep-alive clients. A render in a warm worker takes a few milliseconds to create its document and a
+few more to render and serialize a small page; starting a worker and importing jsdom takes 0.4 to
+0.9 s, which each worker pays once. With 16 connections on a shared machine (load average about 22):
+
+| Route | Requests/s | p50 | p99 |
+| --- | --- | --- | --- |
+| Prerendered page | 6,852 | 1.5 ms | 17.2 ms |
+| Server-rendered page, with a layout | 997 | 14.0 ms | 45.1 ms |
+| Endpoint | 15,914 | 0.8 ms | 4.9 ms |
+
+The same pool and single render make builds faster: building the examples and the docs proof takes
+3.2 s on the same machine.
 
 ## Native mechanisms and the remaining gap
 
-Native `URL`, `Request`, `Response`, `fetch`, and `AbortSignal` cover URL parsing, HTTP values,
-network reads, and cancellation. Native anchors and the Navigation API carry routing; client
-navigation renders each page from its module and data payload, or its static document
-([client-navigation.md](./client-navigation.md)). A request adapter must not prefetch payloads for
-links on screen, since each would run loaders. HTML Next already provides named-slot composition, typed props/state, isolated Node
-DOM rendering, rendered continuation serialization, MutationObserver-based adoption, controller
-connection/disposal, and browser read resumption. Vite supplies module resolution, TypeScript
-transformation, asset bundling, and development watching.
+Native `URL`, `Request`, `Response`, `Headers`, `fetch`, and `AbortSignal` cover URL parsing, HTTP
+values, cookies (the `Cookie` and `Set-Cookie` headers), network reads, and cancellation; HTMLKit
+adds a parsed cookie map and nothing else. Native anchors and the Navigation API carry routing;
+client navigation renders each page from its module and data payload, whose URL carries the page's
+query, or its server document ([client-navigation.md](./client-navigation.md)). HTML Next provides
+named-slot composition, typed props and state, isolated DOM rendering, rendered continuation
+serialization, adoption, controller connection and disposal, and browser read resumption. Vite
+supplies module resolution, TypeScript transformation, asset bundling, and development watching.
 
-The remaining platform layer is application policy: file/registered route discovery and matching,
-layout ordering, server loader sequencing, document metadata, deployment URL composition, and
-adapter output. No custom browser observer, parser, reactive scheduler, or hydration engine is
-needed. Production request delivery and isolation of application loaders remain the future
-adapter's concrete work; static generation does not pretend to supply a reader's request.
+The platform layer is application policy: file and registered route discovery and matching, layout
+ordering, loader sequencing, document metadata, deployment URL composition, the request pipeline,
+and the Node adapter. No custom browser observer, parser, reactive scheduler, or hydration engine is
+needed.

@@ -107,7 +107,7 @@ describe("application platform", () => {
       expect(html).not.toContain("@vite/client");
       expect(await (await handle(new Request("http://localhost/", { method: "HEAD" }))).text()).toBe("");
       const redirect = await handle(new Request("http://localhost/items/one?query"));
-      expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/items/one/"]);
+      expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/items/one/?query"]);
       expect(await (await handle(new Request("http://localhost/items/one/"))).text()).toContain("kit: one");
       expect((await handle(new Request("http://localhost/missing/"))).status).toBe(404);
       // A leading // would name another origin; it is simply not a page here.
@@ -503,7 +503,7 @@ describe("application platform", () => {
   it("diagnoses request-only inputs, missing props, missing layout slots, and output collisions", async () => {
     const root = await app();
     await write(root, "app/pages/index.server.ts", "export function load(context) { return { props: { asset: context.request.url } }; }");
-    await expect(buildApplication({ root })).rejects.toThrow(/request.*static/i);
+    await expect(buildApplication({ root })).rejects.toThrow(/request is unavailable while prerendering/);
     await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: {} });");
     await expect(buildApplication({ root })).rejects.toThrow(/required prop/i);
     await write(root, "app/layouts/default.html", '<template component="bad-layout"><main>Missing projection</main></template>');

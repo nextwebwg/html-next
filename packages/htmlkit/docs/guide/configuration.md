@@ -1,7 +1,7 @@
 ---
 title: Configuration
-order: 5
-blurb: htmlkit.config.ts · plugins · build hooks · build manifest · using HTMLKit from code
+order: 7
+blurb: htmlkit.config.ts · plugins · build hooks · build manifest · command line · using HTMLKit from code
 eyebrow: HTMLKit
 ---
 
@@ -325,7 +325,36 @@ const { base, routes, pages, redirects } = await readManifest('dist');
 These fields are stable. A release may add fields at version `1`, so ignore fields you don't use.
 `version` changes only when a field is removed, renamed, or changes meaning, and `readManifest`
 refuses a version it doesn't know. File names inside `_htmlkit/` change from build to build; read
-them from the manifest.
+them from the manifest. The manifest lists prerendered pages; pages that
+[render on each request](/htmlkit/loaders#rendering-on-each-request) have no file to list.
+`_htmlkit/server/` holds the [request server](/htmlkit/deployment#the-node-server).
+
+## Command line
+
+```text
+htmlkit <command> [root] [options]
+```
+
+| Command | Does |
+| --- | --- |
+| `htmlkit dev` | Serves the application with live reload, rendering every page, endpoint, and middleware on request. |
+| `htmlkit build` | Prerenders pages and writes them, the browser bundles, and the request server to `dist/`. |
+| `htmlkit preview` | Serves `dist/` as a static host does: files only. |
+| `htmlkit start` | Serves the build on Node, without Vite: prerendered pages and assets from files, plus server-rendered pages, endpoints, and middleware ([deployment](/htmlkit/deployment#the-node-server)). |
+
+| Option | Commands | Does |
+| --- | --- | --- |
+| `[root]` | all | The project folder; the current folder unless given. |
+| `--base /docs/` | `dev`, `build` | Serves the site under a path. `preview` and `start` take it from the build. |
+| `--origin https://example.com` | `dev`, `build` | The origin of prerendered pages' `url`. |
+| `--out-dir dist` | `build`, `preview`, `start` | The build output. |
+| `--port 3000` | `dev`, `preview`, `start` | The port; `start` also reads `PORT`. |
+| `--host 127.0.0.1` | `dev`, `preview`, `start` | The host; `start` also reads `HOST`. |
+| `--render-workers 4` | all | How many workers render pages: the number of available CPUs, up to 8, unless given. |
+| `-h`, `--help` | | Lists the commands and options. |
+
+Flags override the same settings in `htmlkit.config.ts`. `start` runs the build alone and doesn't read
+the config file.
 
 ## Using HTMLKit from code
 
@@ -355,5 +384,10 @@ await buildApplication({ ...config, root, plugins: [...config.plugins ?? [], doc
 ```
 
 `app.fetch(request)` takes a standard `Request` and returns a `Response`, on Node, Deno 2.8+, and
-Bun. Pass it directly, as in `Deno.serve(app.fetch)`. Its pages don't include browser scripts; the
-development server adds those. Loaders still run as they do for a static build.
+Bun. Pass it directly, as in `Deno.serve(app.fetch)`. It answers as the development server does:
+middleware, endpoints, and pages, with prerendered pages' loaders run as a build runs them. Its pages
+don't include browser scripts; the development server adds those. `app.endpoints` lists the
+`app/api` endpoints and `app.middleware` names the middleware file.
+
+`startApplication({ outDir, port, host })` is `htmlkit start`. Import it from
+`@nextwebwg/htmlkit/server`, which never loads Vite; see [deployment](/htmlkit/deployment#from-code).

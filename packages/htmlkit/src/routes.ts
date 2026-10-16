@@ -5,7 +5,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HtmlKitError, pluginLayouts, within, type PluginOptions } from "./config.js";
 import { applicationResource, pageDefinition } from "./resource.js";
-import type { ApplicationOptions, ApplicationRoute, HtmlKitPlugin, RouteGroup, RouteInput, RouteLayer } from "./types.js";
+import type { ApplicationOptions, ApplicationRoute, EndpointRoute, HtmlKitPlugin, RouteGroup, RouteInput, RouteLayer } from "./types.js";
 
 /** The name of a [name], [...name] catch-all, or [[...name]] optional catch-all segment. */
 export function parameter(segment: string): string | undefined {
@@ -289,8 +289,10 @@ export async function discover(root: string, options: DiscoveryOptions) {
     // A static <title> labels the page's folder in navigation trees when hk:label doesn't.
     const title = /^<title>([^<{]*)<\/title>$/m.exec(metadata.head.replaceAll("><", ">\n<"))?.[1]?.trim()
       .replace(/&(lt|gt|quot|#39|amp);/g, (_, name: string) => ({ lt: "<", gt: ">", quot: '"', "#39": "'", amp: "&" })[name]!);
+    // The not-found page is prerendered as 404.html, and the error page renders as a build would; neither takes hk:render.
+    if ((isNotFound || isError) && metadata.render !== undefined) throw new HtmlKitError(`The ${isNotFound ? "not-found" : "error"} page takes no hk:render.`, route.component);
     const discoveredRoute = { ...route, layouts, pageName, ...(order === undefined ? {} : { order }), ...(metadata.label === undefined ? {} : { label: metadata.label }),
-      ...(title ? { title } : {}), ...(metadata.hidden ? { hidden: true } : {}) };
+      ...(title ? { title } : {}), ...(metadata.hidden ? { hidden: true } : {}), ...(metadata.render === "server" ? { render: "server" as const } : {}) };
     if (isNotFound) notFound = discoveredRoute;
     else if (isError) error = discoveredRoute;
     else discovered.push(discoveredRoute);
@@ -306,7 +308,44 @@ export async function discover(root: string, options: DiscoveryOptions) {
   }
   return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), ...(error === undefined ? {} : { error }), sources, files, watched };
 }
-export function matchRoute(routes: readonly ApplicationRoute[], pathname: string, base: string) {
+/**
+ * The request-time files: each app/api/**\/*.server.ts endpoint, which answers its folder path without
+ * a trailing slash (index.server.ts answers the folder's own), and app/middleware.server.ts.
+ */
+export async function discoverServerFiles(root: string): Promise<{ readonly endpoints: readonly EndpointRoute[]; readonly middleware?: string }> {
+  const endpoints: EndpointRoute[] = [];
+  const patterns = new Map<string, string>();
+  const visit = async (directory: string, segments: readonly string[]): Promise<void> => {
+    let files;
+    try { files = await readdir(directory, { withFileTypes: true }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (file.name.startsWith(".") || file.name.startsWith("_")) continue;
+      const path = join(directory, file.name);
+      const stem = file.isDirectory() ? file.name : /^(.+)\.server\.(?:ts|js)$/.exec(file.name)?.[1];
+      if (stem === undefined || !file.isDirectory() && !file.isFile()) continue;
+      // Endpoint URLs are not pages, so a segment may name a file, as feed.xml does.
+      if (stem !== "index" && parameter(stem) === undefined && !/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(stem)) {
+        throw new HtmlKitError("Endpoint files and folders must be URL segments or [named] parameters.", path);
+      }
+      if (file.isDirectory()) { await visit(path, [...segments, stem]); continue; }
+      const parts = stem === "index" ? segments : [...segments, stem];
+      if (parts.slice(0, -1).some(segment => breadth(segment) > 1)) throw new HtmlKitError("A [...catch-all] parameter must be the last route segment.", path);
+      const params = parts.flatMap(segment => parameter(segment) ?? []);
+      if (new Set(params).size !== params.length) throw new HtmlKitError("Route parameter names must be unique.", path);
+      const normalized = parts.map(segment => ["", "[]", "[...]", "[[...]]"][breadth(segment)] || segment.toLowerCase()).join("/");
+      if (patterns.has(normalized)) throw new HtmlKitError(`Endpoint conflict: ${patterns.get(normalized)} and ${path}.`, path);
+      patterns.set(normalized, path);
+      endpoints.push({ pattern: `/${parts.join("/")}`, segments: parts, params, file: path });
+    }
+  };
+  await visit(resolve(root, "app/api"), ["api"]);
+  const middleware = ["ts", "js"].map(extension => resolve(root, `app/middleware.server.${extension}`)).filter(file => { try { return statSync(file).isFile(); } catch { return false; } });
+  if (middleware.length > 1) throw new HtmlKitError("Choose one app/middleware.server.ts or .js.", resolve(root, "app"));
+  return { endpoints, ...(middleware[0] === undefined ? {} : { middleware: middleware[0] }) };
+}
+
+export function matchRoute<Route extends Pick<ApplicationRoute, "pattern" | "segments">>(routes: readonly Route[], pathname: string, base: string) {
   if (!pathname.startsWith(base)) return undefined;
   let segments: string[];
   try { segments = pathname.slice(base.length).replace(/\/$/, "").split("/").filter(Boolean).map(decodeURIComponent); }

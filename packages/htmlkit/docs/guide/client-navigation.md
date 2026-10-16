@@ -1,6 +1,6 @@
 ---
 title: Moving between pages
-order: 4
+order: 5
 blurb: client navigation · prefetch · opt-outs
 eyebrow: HTMLKit
 ---
@@ -84,7 +84,10 @@ Or for one link, or every link inside an element:
 | `visible` | The page's code and data | The page's code and data |
 | `none` | Nothing | Nothing |
 
-`visible` suits small sites. Prefetching never runs a page's code; it only downloads it.
+`visible` suits small sites. Prefetching never runs a page's code in the browser; it only downloads
+it. For a page that [renders on each request](/htmlkit/loaders#rendering-on-each-request), loading its
+data runs its loaders on the server, with the link's query and the reader's cookies, as loading the
+page does. Give links to such pages `data-hk-prefetch="none"` when their loaders are costly.
 
 ## Animating the change
 

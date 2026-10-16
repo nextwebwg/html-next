@@ -1,6 +1,6 @@
-import { createServer as createHTTPServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { createServer, isRunnableDevEnvironment, normalizePath } from "vite";
 
@@ -10,27 +10,12 @@ import { browserPlugin, browserSources, stylesheetSources } from "./browser.js";
 import { configure, globalStylesheets, HtmlKitError, rootAlias, runHook, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
+import { listen, mime, nodeRequest, outputPath, sendResponse } from "./server.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
-
-const mime: Readonly<Record<string, string>> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
-  ".webp": "image/webp", ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8" };
-
-async function listen(server: Server, options: ServerOptions, base: string): Promise<ApplicationServer> {
-  const host = options.host ?? "127.0.0.1";
-  await new Promise<void>((done, reject) => { server.once("error", reject); server.listen(options.port ?? 3000, host, done); });
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new HtmlKitError("Server did not obtain a TCP port.");
-  return { url: `http://${host.includes(":") ? `[${host}]` : host}:${address.port}${base}`,
-    close: () => new Promise<void>((done, reject) => { server.close(error => error ? reject(error) : done()); server.closeIdleConnections(); }) };
-}
 
 function requestPath(request: IncomingMessage): string {
   const original = "originalUrl" in request && typeof request.originalUrl === "string" ? request.originalUrl : request.url;
   return new URL(original ?? "/", "http://localhost").pathname;
-}
-function redirect(response: ServerResponse, pathname: string): void {
-  response.writeHead(308, { location: pathname + "/" }); response.end();
 }
 function methodAllowed(request: IncomingMessage, response: ServerResponse): boolean {
   if (request.method === "GET" || request.method === "HEAD") return true;
@@ -46,37 +31,19 @@ export async function previewApplication(input: ServerOptions = {}): Promise<App
   const server = createHTTPServer((request, response) => { void (async () => {
     if (!methodAllowed(request, response)) return;
     const pathname = requestPath(request);
-    if (pathname === base.slice(0, -1) && base !== "/") { redirect(response, pathname); return; }
-    let file: string | undefined;
-    if (pathname.startsWith(base)) {
-      let decoded: string;
-      try { decoded = decodeURIComponent(pathname.slice(base.length)); } catch { response.writeHead(400); response.end(); return; }
-      const candidate = resolve(output, decoded || ".");
-      if (!within(output, candidate)) { response.writeHead(404); response.end(); return; }
-      try {
-        const canonical = await realpath(candidate);
-        if (within(output, canonical)) {
-          const info = await stat(canonical);
-          if (info.isDirectory()) {
-            if (!pathname.endsWith("/")) { redirect(response, pathname); return; }
-            file = join(canonical, "index.html");
-          } else file = canonical;
-        }
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    }
-    let body: Buffer;
+    const found = await outputPath(output, base, pathname);
+    if (found === "slash") { response.writeHead(308, { location: pathname + "/" }); response.end(); return; }
+    if (found === "invalid") { response.writeHead(400); response.end(); return; }
+    // The request server's code is never a file to serve.
+    let file = found === undefined || within(join(output, "_htmlkit/server"), found.file) ? undefined : found.file;
     let status = 200;
-    if (file !== undefined) {
-      try { file = await realpath(file); if (!within(output, file)) file = undefined; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; file = undefined; }
-    }
     if (file === undefined) {
       status = 404;
       file = await realpath(join(output, "404.html"));
       if (!within(output, file)) throw new HtmlKitError("Missing-page output escapes the deployment directory.");
     }
-    body = await readFile(file);
-    response.writeHead(status, { "content-type": mime[extname(file ?? "404.html")] ?? "application/octet-stream", "content-length": body.length });
+    const body = await readFile(file);
+    response.writeHead(status, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
     response.end(request.method === "HEAD" ? undefined : body);
   })().catch(error => { response.writeHead(500, { "content-type": "text/plain" }); response.end(String(error)); }); });
   return listen(server, options, base);
@@ -135,20 +102,21 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
       if (dirty) { application = await createApplication(options, vite, assets); vite.watcher.add([...application.watchFiles]); dirty = false; sources.clear(); }
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
-      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
-      if (!methodAllowed(request, response)) return;
+      // Other files, such as public/ and the application's modules, are Vite's to serve.
+      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined &&
+        matchRoute(application.endpoints, pathname, config.base) === undefined) { next(); return; }
       if (file !== undefined) {
+        if (!methodAllowed(request, response)) return;
         const body = await readFile(file);
         response.writeHead(200, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
         response.end(request.method === "HEAD" ? undefined : body);
         return;
       }
-      // The page itself comes from the runtime-neutral handler; this adapts Node's request and response.
-      const page = await application.fetch(new Request(new URL(pathname, "http://localhost"), { method: request.method! }));
-      response.writeHead(page.status, Object.fromEntries(page.headers));
-      response.end(page.body === null ? undefined : Buffer.from(await page.arrayBuffer()));
+      // Middleware, endpoints, and pages come from the runtime-neutral handler; this adapts Node's request and response.
+      await sendResponse(await application.fetch(nodeRequest(request, response)), response);
     })().catch(error => {
       vite.ssrFixStacktrace(error instanceof Error ? error : new Error(String(error)));
+      if (response.headersSent) { response.end(); return; }
       response.writeHead(500, { "content-type": "text/html; charset=utf-8" });
       response.end(documentHTML(`<main><h1>Application error</h1><pre>${escapeHTML(String(error))}</pre></main>`, { title: "Application error" }));
     });

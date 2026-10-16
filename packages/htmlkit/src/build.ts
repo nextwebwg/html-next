@@ -1,15 +1,16 @@
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile, copyFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Manifest, ManifestChunk } from "vite";
 
-import { createApplication, headScripts, notFoundPage } from "./application.js";
+import { createApplicationInternals, headScripts, notFoundPage, type RouteGraph } from "./application.js";
 import { browserSources, stylesheetSources } from "./browser.js";
-import { bundleBrowser } from "./bundle.js";
+import { bundleBrowser, bundleServer } from "./bundle.js";
 import { configure, globalStylesheets, HtmlKitError, runHook, withPlugins, within } from "./config.js";
-import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage } from "./document.js";
+import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type PageAssets } from "./document.js";
 import { checkLinks } from "./links.js";
 import { matchRoute, redirectTable } from "./routes.js";
-import type { ApplicationOptions, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
+import type { ServerData, ServerPage } from "./server.js";
+import type { ApplicationOptions, ApplicationRoute, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -47,6 +48,53 @@ export async function readManifest(outDir: string): Promise<BuildManifest> {
   return { ...manifest, redirects: manifest.redirects ?? [] };
 }
 
+/**
+ * Write _htmlkit/server: entry.js, whose default export answers requests, and the loaders, endpoints,
+ * and middleware it imports. Prerendered pages need none of their code there; their files serve them.
+ */
+async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, internals, serverGraphs }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+  readonly stage: string; readonly redirects: readonly ManifestRedirect[]; readonly scripts: readonly string[];
+  readonly internals: Awaited<ReturnType<typeof createApplicationInternals>>;
+  readonly serverGraphs: readonly { readonly route: ApplicationRoute; readonly graph: RouteGraph; readonly assets: PageAssets }[] }): Promise<void> {
+  const { application } = internals;
+  const inputs: Record<string, string> = {};
+  const ids = new Map<string, string>();
+  const module = (file: string, kind: string) => {
+    let id = ids.get(file);
+    if (id === undefined) { id = kind === "middleware" ? kind : `${kind}-${ids.size}`; ids.set(file, id); inputs[id] = file; }
+    return id;
+  };
+  // Diagnostics name source files relative to the root, which the server need not have.
+  const source = (file: string) => relative(root, file).replaceAll("\\", "/");
+  const path = ({ component: _component, server: _server, layouts: _layouts, ...route }: ApplicationRoute) => route;
+  const pages: Record<string, ServerPage> = {};
+  let error: ServerData["error"];
+  for (const { route, graph, assets } of serverGraphs) {
+    const layers = [...route.layouts, route];
+    const page: ServerPage = { definitions: graph.definitions, assets, layers: graph.layers.map((layer, i) => {
+      const loader = layers[i]!.server;
+      if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
+      return { definition: layer.definition, metadata: { head: layer.metadata.head, propDeclarations: layer.metadata.propDeclarations },
+        ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
+    }) };
+    if (route === application.error) error = { ...page, route: path(route) };
+    else pages[application.routes.indexOf(route)] = page;
+  }
+  const catalog = await internals.catalog();
+  const data: ServerData = { version: 1, base, canonicalOrigin, redirects, scripts, pages, ...(error === undefined ? {} : { error }),
+    routes: application.routes.map(path),
+    catalog: [...catalog].map(([path, route]) => [path, application.routes.indexOf(route)] as const),
+    endpoints: application.endpoints.map(endpoint => ({ ...endpoint, file: source(endpoint.file), module: module(endpoint.file, "api") })),
+    ...(application.middleware === undefined ? {} : { middleware: module(application.middleware, "middleware") }) };
+  const directory = join(stage, "_htmlkit/server");
+  if (ids.size > 0) await bundleServer({ root, outDir: directory, inputs });
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "entry.js"), "// The build's request server: `htmlkit start` serves it, and its default export's fetch answers requests on any runtime.\n" +
+    'import { serverApplication } from "@nextwebwg/htmlkit/server";\n' +
+    `export default await serverApplication(import.meta.url, JSON.parse(${JSON.stringify(JSON.stringify(data))}), {\n` +
+    Object.keys(inputs).map(id => `  ${JSON.stringify(id)}: () => import(${JSON.stringify(`./${id}.js`)}),\n`).join("") + "});\n");
+}
+
 export async function buildApplication(input: ApplicationOptions = {}): Promise<BuildResult> {
   const options = await withPlugins(input);
   const config = configure(options);
@@ -62,7 +110,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
   await mkdir(dirname(config.outDir), { recursive: true });
   // Before any page is read, so generated pages, data, and assets are part of the build.
   await runHook(options, "buildStart", { command: "build", root: config.root, base: config.base });
-  const application = await createApplication(options);
+  const internals = await createApplicationInternals(options);
+  const { application } = internals;
   // Sibling staging keeps rename on the same volume. No failed render or bundle replaces dist.
   let stage: string;
   try { stage = await mkdtemp(join(dirname(config.outDir), ".htmlkit-build-")); }
@@ -70,7 +119,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
   const backup = stage + "-previous";
   try {
     const entries = await application.entries();
-    if (entries.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
+    const serverRoutes = application.routes.filter(route => route.render === "server");
+    if (entries.length === 0 && serverRoutes.length === 0 && application.endpoints.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
     await copyPublic(resolve(config.root, "public"), stage);
     if (await exists(join(stage, "_htmlkit"))) throw new HtmlKitError("Public asset collision: _htmlkit is reserved for generated assets.");
     if (options.robots !== undefined && options.robots !== false && await exists(join(stage, "robots.txt"))) {
@@ -85,11 +135,26 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const page = await application.render(pathname);
       // A loader's redirect() makes the page a redirect page.
       if (page.location !== undefined) { redirects.push({ from: page.pathname, to: page.location, status: page.status as RedirectStatus }); continue; }
-      if (page.status === 404) notFoundIndex = pages.length;
+      if (page.status === 404) {
+        // A page whose loader calls notFound() is left out; a host answers its URL with 404.html.
+        if (pathname !== config.base + "404/") continue;
+        notFoundIndex = pages.length;
+      }
       pages.push(page);
       for (const [id, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch,
         manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length - 1}`, globalStylesheets(options, config.root))) sources.set(id, source);
       for (const [id, css] of stylesheetSources(page.components)) sources.set(id, css);
+    }
+    // A server-rendered route's browser bundle follows the pages', one per route rather than per URL.
+    const serverGraphs = [];
+    // When anything renders on request, app/error.html answers its failures, so the server renders it too.
+    const renders = serverRoutes.length > 0 || application.endpoints.length > 0 || application.middleware !== undefined;
+    for (const route of renders && application.error !== undefined ? [...serverRoutes, application.error] : serverRoutes) {
+      const graph = await internals.graph(route);
+      for (const [id, source] of browserSources(graph.components, { base: config.base, prefetch: config.prefetch,
+        manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length + serverGraphs.length}`, globalStylesheets(options, config.root))) sources.set(id, source);
+      for (const [id, css] of stylesheetSources(graph.components)) sources.set(id, css);
+      serverGraphs.push({ route, graph });
     }
     const browserInputs = await bundleBrowser({ root: config.root, base: config.base, outDir: stage, sources });
     for (const [path, file] of application.files) {
@@ -100,17 +165,10 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     }
     const manifest = JSON.parse(await readFile(join(stage, "_htmlkit/vite-manifest.json"), "utf8")) as Manifest;
     const bundles = new Map(Object.values(manifest).filter(chunk => chunk.isEntry).map(chunk => [chunk.name, chunk]));
-    const delivery = [];
-    // sitemap.xml lists each page at its own URL: no alias, redirect, not-found page, or page marked noindex.
-    const indexed: string[] = [];
-    let notFoundHTML = notFoundPage(await headScripts(options, config.root)).html;
-    for (let i = 0; i < pages.length; i++) {
-      const page = pages[i]!;
-      const path = join(stage, decodeURIComponent(page.pathname.slice(config.base.length)), "index.html");
-      if (i !== notFoundIndex && await exists(path)) throw new HtmlKitError(`Public asset collision with route ${page.pathname}.`, path);
+    // A bundle's stylesheets and module, and the shared chunks it imports.
+    const bundled = (i: number, name: string) => {
       const entry = bundles.get(`page-${i}`);
-      if (entry === undefined) throw new HtmlKitError(`Missing browser bundle for ${page.pathname}.`);
-      const route = i === notFoundIndex ? application.notFound! : matchRoute(application.routes, page.pathname, config.base)!.route;
+      if (entry === undefined) throw new HtmlKitError(`Missing browser bundle for ${name}.`);
       // Vite's manifest includes CSS from the entry and its shared static imports.
       const styles = new Set<string>();
       const seen = new Set<ManifestChunk>();
@@ -122,8 +180,20 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       };
       collect(entry);
       // Shared chunks, which links on screen may prefetch; the entry holds the page's own content.
-      const chunks = [...seen].filter(chunk => chunk !== entry).map(chunk => config.base + chunk.file);
-      const assets = { styles: [...styles], modules: [config.base + entry.file] };
+      return { entry, chunks: [...seen].filter(chunk => chunk !== entry).map(chunk => config.base + chunk.file),
+        assets: { styles: [...styles], modules: [config.base + entry.file] } };
+    };
+    const delivery = [];
+    // sitemap.xml lists each page at its own URL: no alias, redirect, not-found page, or page marked noindex.
+    const indexed: string[] = [];
+    const scripts = await headScripts(options, config.root);
+    let notFoundHTML = notFoundPage(scripts).html;
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i]!;
+      const path = join(stage, decodeURIComponent(page.pathname.slice(config.base.length)), "index.html");
+      if (i !== notFoundIndex && await exists(path)) throw new HtmlKitError(`Public asset collision with route ${page.pathname}.`, path);
+      const route = i === notFoundIndex ? application.notFound! : matchRoute(application.routes, page.pathname, config.base)!.route;
+      const { entry, chunks, assets } = bundled(i, page.pathname);
       // Served at any missing path, so it has no route, manifest entry, or payload; its asset URLs are absolute.
       if (i === notFoundIndex) { notFoundHTML = documentHTML(page.body, page.head, assets); continue; }
       delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
@@ -158,6 +228,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
       await writeFile(join(stage, "robots.txt"), rules + sitemap);
     }
+    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, internals, serverGraphs: serverGraphs.map(({ route, graph }, i) =>
+      ({ route, graph, assets: bundled(pages.length + i, route.pattern).assets })) });
     const routes = delivery.map(page => page.pathname);
     const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };
     await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify(published, null, 2) + "\n");
@@ -175,7 +247,9 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
         }
       } });
     // After buildEnd, so the files plugins add are link targets too.
-    await checkLinks(stage, config.origin, config.base, [...routes, ...redirects.map(redirect => redirect.from), config.base + "404.html"], options.linkCheck);
+    // Server-rendered pages and endpoints answer their paths on request, so links to them are whole.
+    await checkLinks(stage, config.origin, config.base, [...routes, ...redirects.map(redirect => redirect.from), config.base + "404.html"], options.linkCheck,
+      pathname => matchRoute(serverRoutes, pathname, config.base) !== undefined || matchRoute(application.endpoints, pathname, config.base) !== undefined);
     const previous = await exists(config.outDir);
     if (previous) await rename(config.outDir, backup);
     try { await rename(stage, config.outDir); }

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { availableParallelism } from "node:os";
 import { describe, it } from "vitest";
 
 import { parseComponent } from "../src/source-parser.js";
-import { renderComponents } from "../src/server.js";
+import { closeRenderWorkers, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
 
 const counter = parseComponent(`<template component="x-server-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
@@ -72,13 +73,38 @@ describe("Node component rendering", () => {
     assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, "document"), before);
   });
 
-  it("renders independent requests concurrently with their own initial state", async () => {
-    const outputs = await Promise.all([3, 8].map((count) => renderComponents('<x-server-counter id="counter"></x-server-counter>', {
-      definitions: [counter],
-      state: { "#counter": { count } },
-    })));
-    assert.match(outputs[0]!.html, /<span>3<\/span>/);
-    assert.match(outputs[1]!.html, /<span>8<\/span>/);
+  // Conflicting requests: one tag, two definitions, each with its own state and URL.
+  const conflicting = (count: number) => renderComponents('<x-server-counter id="counter" label="Visits"></x-server-counter>', {
+    definitions: [count % 2 === 0 ? counter : { ...counter, css: ":host { display: inline; }",
+      template: { ...counter.template, attributes: [{ kind: "literal", name: "title", value: "odd" }] } } as typeof counter],
+    state: { "#counter": { count } },
+    url: `https://example.test/${count}/`,
+  });
+  const isolated = (output: RenderedComponents, count: number) => {
+    assert.match(output.html, new RegExp(`<span>${count}</span>`));
+    assert.equal(output.html.includes('title="odd"'), count % 2 === 1);
+    assert.equal(output.css.includes("inline"), count % 2 === 1);
+  };
+
+  for (const workers of [1, 3]) {
+    it(`renders independent requests with their own definitions and state, concurrently and in sequence, on ${workers} render worker${workers === 1 ? "" : "s"}`, async () => {
+      setRenderWorkers(workers);
+      try {
+        // A shared registry would refuse the second definition of <x-server-counter> (HR001), and
+        // shared instances would carry one request's count into another's.
+        const counts = [3, 8, 5, 2, 7, 4];
+        (await Promise.all(counts.map(conflicting))).forEach((output, i) => isolated(output, counts[i]!));
+        for (const count of counts) isolated(await conflicting(count), count);
+      } finally { setRenderWorkers(Math.min(availableParallelism(), 8)); }
+    });
+  }
+
+  it("rejects the render of a worker that ends, and renders the next one on a new worker", async () => {
+    const lost = conflicting(3);
+    await new Promise((resolve) => setImmediate(resolve));
+    await closeRenderWorkers();
+    await assert.rejects(lost, /exited without a result/);
+    isolated(await conflicting(4), 4);
   });
 
   it("renders the browser's declarative baseline before declared reads connect", async () => {
