@@ -24,7 +24,7 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
-import { ask, hostListener, type RequestChecks, type RequestOptions } from "./requests.js";
+import { ask, hostListener, responderCheck, type RequestChecks, type RequestOptions } from "./requests.js";
 import { headInstance, instanceScripts, type DeclaredScript, type HeadEntry, type ScriptStatus } from "./head.js";
 import { DataResource, type DataState } from "./data.js";
 import { propAttribute } from "./names.js";
@@ -46,7 +46,7 @@ export {
   checkUnknown,
 } from "./type-checks.js";
 export { boundFailures } from "./value-constraints.js";
-export { RequestEvent, respond } from "./requests.js";
+export { RequestEvent } from "./requests.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
 export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
@@ -1102,16 +1102,27 @@ type HostOn = (type: string, callback: (event: Event) => void | (() => void)) =>
 
 /**
  * The host a module that declares requests gives its controller, in place of the one the runtime
- * built: the same capabilities with `host.request`, the live request steps at the compiled root, and
- * an `on` whose `responder` listener hears only the relay to that root. Other modules bundle none of it.
+ * built: the same capabilities with `host.request` and `host.hasResponder`, the live request steps at
+ * the compiled root, and an `on` whose `responder` listener hears only the relay to that root. Other
+ * modules bundle none of it.
  */
-export function requestHost<Host extends { readonly on: HostOn }>(host: Host, instance: GeneratedInstance & { H?: unknown }): Host & {
+export function requestHost<Host extends { readonly root: Element; readonly on: HostOn; signal<T>(value: T): { get(): T; set(value: T): void } }>(
+  host: Host, instance: GeneratedInstance & { H?: unknown },
+): Host & {
   readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown>;
+  readonly hasResponder: (name: string) => boolean;
 } {
   const { on } = host;
-  return instance.H = Object.freeze(Object.defineProperties({}, {
+  // The names its controller's host.on listens for, whose known responders on its own root are not its own answer.
+  const own: string[] = [];
+  const asking = Object.defineProperties({}, {
     ...Object.getOwnPropertyDescriptors(host),
-    on: { value: ((type, callback) => on(type, hostListener(type, callback) as typeof callback)) satisfies HostOn, enumerable: true },
+    on: { value: ((type, callback) => {
+      // Counted before the listener records itself, so its notice already discounts it.
+      own.push(type);
+      const stop = on(type, hostListener(type, callback) as typeof callback);
+      return () => { stop(); own.splice(own.indexOf(type), 1); };
+    }) satisfies HostOn, enumerable: true },
     request: { value: (name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> => {
       let owner = instance.a;
       if (owner === undefined) {
@@ -1122,7 +1133,9 @@ export function requestHost<Host extends { readonly on: HostOn }>(host: Host, in
         : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
       return ask(instance.e, connection, name, detail, options, instance.S.q?.[name], (message) => warnOnce(instance.S, message, message));
     }, enumerable: true },
-  })) as Host & { readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown> };
+  }) as Host & { readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown>; hasResponder: (name: string) => boolean };
+  asking.hasResponder = responderCheck(asking, Object.keys(instance.S.q ?? {}), own);
+  return instance.H = Object.freeze(asking);
 }
 
 /** The host of a component that declares named scripts: `host.scripts`, which `manageHead` built. */
@@ -1842,9 +1855,19 @@ export function attachGeneratedController(
         const listener = (event: Event): void => { callback(event); };
         const target: Element = host.root;
         target.addEventListener(type, listener);
+        // A known responder, as src/requests.ts `knownResponder` records one, for `hasResponder`.
+        const page = documentState(target.ownerDocument);
+        const names = (page.k ??= new WeakMap()).get(target) ?? page.k.set(target, []).get(target)!;
+        const changed = (): void => page.w?.forEach((heard) => heard(type));
+        names.push(type);
+        changed();
         // A responder registered after a request went unanswered tells the asker to ask again, once a page asks.
-        documentState(target.ownerDocument).relay?.(target, type);
-        return () => target.removeEventListener(type, listener);
+        page.relay?.(target, type);
+        return () => {
+          target.removeEventListener(type, listener);
+          names.splice(names.indexOf(type), 1);
+          changed();
+        };
       });
       return () => { stopped = true; stop(); };
     },

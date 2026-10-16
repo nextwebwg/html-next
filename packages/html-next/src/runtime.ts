@@ -64,7 +64,7 @@ import {
   typeCheck,
   type TypeNode,
 } from "./type-system.js";
-import { ask, hostListener, relayResponders, type RequestChecks, type RequestOptions } from "./requests.js";
+import { ask, hostListener, knownResponder, relayResponders, responderCheck, type RequestChecks, type RequestOptions } from "./requests.js";
 import { declareScript, flushHead, joinHead, scheduleHead, writeServerHead, type DeclaredScript, type HeadEntry, type ScriptHandle, type ScriptStatus } from "./head.js";
 import type {
   AttributeBinding,
@@ -89,7 +89,7 @@ import { manageDerivedValidity, setElementValidity, validityState, type Generali
 
 /** Requests: what a component asks its consumer (src/requests.ts). Loaders hold a root until its controller runs. */
 export {
-  holdController, RequestEvent, respond,
+  holdController, RequestEvent,
   type RequestEventInit, type RequestOptions, type Responder, type ResponderInit,
 } from "./requests.js";
 
@@ -3874,6 +3874,11 @@ export interface ComponentHost {
    * on the host of a component that declares at least one `<request>`.
    */
   request?(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown>;
+  /**
+   * Whether a known responder answers a declared request, as a reactive read. Present on the host of
+   * a component that declares at least one `<request>`.
+   */
+  hasResponder?(name: string): boolean;
 }
 
 /** A named declared script, as a controller reads it (javascript#host-scripts). */
@@ -4060,6 +4065,8 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       load: () => handle.load(),
     });
   }
+  // How many known responders this controller's host.on keeps on its own root, by name.
+  const own: string[] = [];
   const host: ComponentHost = {
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
@@ -4074,9 +4081,10 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
         const root = host.root;
         const listener = hostListener(type, callback);
         root.addEventListener(type, listener);
+        const forget = knownResponder(root, type, own);
         // A responder registered after a request went unanswered tells the asker to ask again.
         relayResponders(root, type);
-        return () => root.removeEventListener(type, listener);
+        return () => { root.removeEventListener(type, listener); forget(); };
       });
       return () => { stopped = true; stop(); };
     },
@@ -4113,6 +4121,8 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       },
     }),
   };
+  const requests = instance.definition.contract.requests;
+  if (requests !== undefined) host.hasResponder = responderCheck(host, Object.keys(requests), own);
   instance.host = Object.freeze(host);
   return instance.host;
 }
