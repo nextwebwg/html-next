@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.55
+
+### Added
+
+- A declared script whose `src` is relative to its definition, such as `./vendor/sdk.js`, loads from the same file in a build as in the live runtime. The Vite plugin imports it as an asset, so a compiled component loads it from its served URL in development and its emitted URL in a build, and `generateComponent` takes `scriptURL` for the module specifier a bundler resolves. The converter resolves it at build time against the definition's `publicRootURL` URL, which such a script requires, as a component-relative `<data src>` does.
+- A test holds head declarations through compiled hydration of `renderComponents` output in Chromium, Firefox and WebKit: marked elements adopted as the same nodes without duplicates, an eager script inserted once from its preload, `on:load` once, a deeper component taking the title and giving it back, a bound JSON-LD value replacing its block, a client navigation as one reconciliation, and the authored title restored as the same node. The converted frameworks' server rendering and hydration test checks the same after hydration.
+
 ## 1.0.0-alpha.54
 
 ### Added

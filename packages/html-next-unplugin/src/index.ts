@@ -352,6 +352,8 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         // Each component the template invokes, by the module exporting its factory.
         invocations: new Map([...invocations.edges.get(node.id) ?? []].map(([tag, url]) =>
           [tag, { module: componentId(url), definition: graph.nodes.get(url)!.definition }])),
+        // A declared script beside its definition is a Vite asset: its served URL in development, its emitted one in a build.
+        scriptURL: (src) => `${fileURLToPath(new URL(src, node.url))}?url`,
       }));
       const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
       if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);

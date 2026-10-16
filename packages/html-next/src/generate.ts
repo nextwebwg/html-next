@@ -62,6 +62,12 @@ export interface GenerationOptions {
    */
   readonly hydrate?: boolean;
   /**
+   * A bundler's module specifier for a declared script whose `src` is relative to the definition,
+   * whose default export is the script's emitted or served URL, such as Vite's `?url` import.
+   * Without one, a relative `src` resolves against the generated module's URL at runtime.
+   */
+  readonly scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined;
+  /**
    * The linked graph's definitions, by tag. Their slots and props type converted Vue invocations as
    * the converter's do; `invocations`' definitions when omitted.
    */
@@ -79,7 +85,7 @@ export function generateComponent(
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true);
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL);
   const graph = options?.definitions
     ?? new Map([...options?.invocations ?? []].map(([tag, invoked]) => [tag, invoked.definition] as const));
   const vue = convertedToVue(definition, {

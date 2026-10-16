@@ -143,38 +143,42 @@ ${detach.replace("const detach", "const detach: any").replace("const removed = n
  */
 type Framework = Exclude<Target, "vanilla">;
 const ssrSources = {
-  vue: (artifact: (tag: string) => string, ssr: boolean) => `import { createSSRApp, h } from "vue";
-import DocsLayout from "./${artifact("docs-layout").replace(/\.vue$/, ssr ? ".ssr" : ".vue")}";
-import PageA from "./${artifact("page-a").replace(/\.vue$/, ssr ? ".ssr" : ".vue")}";
-import SavedCards from "./${artifact("saved-cards").replace(/\.vue$/, ssr ? ".ssr" : ".vue")}";
-const app = createSSRApp({ render: () => [h(DocsLayout as any, null, { default: () => h(PageA as any) }), h(SavedCards as any, { id: "a" })] });
+  vue: (artifact: (tag: string) => string, ssr: boolean) => `import { createSSRApp, h, nextTick, reactive } from "vue";
+${["docs-layout", "page-a", "page-b", "x-note", "x-product", "saved-cards"].map((tag) => `import ${pascal(tag)} from "./${artifact(tag).replace(/\.vue$/, ssr ? ".ssr" : ".vue")}";`).join("\n")}
+const s = reactive({ page: "a", note: false, schema: { name: "Install" } as unknown, shown: true });
+const app = createSSRApp({ render: () => s.shown ? [h(DocsLayout as any, null, { default: () => s.page === "a" ? h(PageA as any, null, { default: () => s.note ? h(XNote as any) : null }) : h(PageB as any) }),
+  h(XProduct as any, { schema: s.schema }), h(SavedCards as any, { id: "a" })] : null });
 ${ssr ? `import { renderToString } from "@vue/server-renderer";
 import { createHeadCollector, writeCollectedHead, HEAD_CONTEXT } from "./vue/head";
 export async function render() { const collector = createHeadCollector(); const html = await renderToString(app, { [HEAD_CONTEXT]: collector }); return { html, write: (document: Document) => writeCollectedHead(document, collector) }; }`
   : `app.mount("#mount");
-(globalThis as any).ssr = { unmount: () => app.unmount() };`}
+const set = (next: Partial<typeof s>) => { Object.assign(s, next); return nextTick(); };
+(globalThis as any).ssr = { set, unmount: () => set({ shown: false }) };`}
 `,
   react: (artifact: (tag: string) => string, ssr: boolean) => `import React from "react";
-import DocsLayout from "./${artifact("docs-layout")}";
-import PageA from "./${artifact("page-a")}";
-import SavedCards from "./${artifact("saved-cards")}";
-const App = () => <><DocsLayout><PageA /></DocsLayout><SavedCards id="a" /></>;
+${["docs-layout", "page-a", "page-b", "x-note", "x-product", "saved-cards"].map((tag) => `import ${pascal(tag)} from "./${artifact(tag)}";`).join("\n")}
+let s = { page: "a", note: false, schema: { name: "Install" } as unknown, shown: true };
+const App = (props: typeof s) => props.shown ? <><DocsLayout>{props.page === "a" ? <PageA>{props.note ? <XNote /> : null}</PageA> : <PageB />}</DocsLayout>
+  <XProduct schema={props.schema} /><SavedCards id="a" /></> : null;
 ${ssr ? `import { renderToString } from "react-dom/server";
 import { collectHead, createHeadCollector, writeCollectedHead } from "./react/head";
-export async function render() { const collector = createHeadCollector(); const html = collectHead(collector, () => renderToString(<App />)); return { html, write: (document: Document) => writeCollectedHead(document, collector) }; }`
+export async function render() { const collector = createHeadCollector(); const html = collectHead(collector, () => renderToString(<App {...s} />)); return { html, write: (document: Document) => writeCollectedHead(document, collector) }; }`
   : `import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-const root = hydrateRoot(document.querySelector("#mount")!, <App />);
-(globalThis as any).ssr = { unmount: () => flushSync(() => root.unmount()) };`}
+const root = hydrateRoot(document.querySelector("#mount")!, <App {...s} />);
+const set = (next: Partial<typeof s>) => { s = { ...s, ...next }; flushSync(() => root.render(<App {...s} />)); };
+(globalThis as any).ssr = { set, unmount: () => set({ shown: false }) };`}
 `,
   svelte: (_artifact: (tag: string) => string, ssr: boolean) => ssr ? `import { render as renderSvelte } from "svelte/server";
 import App from "./Ssr.svelte";
 import { createHeadCollector, writeCollectedHead, HEAD_CONTEXT } from "./svelte/head.svelte";
 export async function render() { const collector = createHeadCollector(); const html = renderSvelte(App, { context: new Map([[HEAD_CONTEXT, collector]]) }).body; return { html, write: (document: Document) => writeCollectedHead(document, collector) }; }
-` : `import { hydrate, unmount, flushSync } from "svelte";
+` : `import { hydrate, flushSync } from "svelte";
 import App from "./Ssr.svelte";
-const app = hydrate(App, { target: document.querySelector("#mount")! });
-(globalThis as any).ssr = { unmount: () => { unmount(app); flushSync(); } };
+import { ssrState } from "./ssr-state.svelte.js";
+hydrate(App, { target: document.querySelector("#mount")! });
+const set = (next: Partial<typeof ssrState>) => { Object.assign(ssrState, next); flushSync(); };
+(globalThis as any).ssr = { set, unmount: () => set({ shown: false }) };
 `,
 } as const satisfies Record<Framework, (artifact: (tag: string) => string, ssr: boolean) => string>;
 
@@ -252,7 +256,10 @@ describe.skipIf(!enabled)("head declarations in compiled output and converted fr
         }
       }
       if (target === "svelte") {
-        await writeFile(join(out, "Ssr.svelte"), `<script>import DocsLayout from "./${artifact("docs-layout")}"; import PageA from "./${artifact("page-a")}"; import SavedCards from "./${artifact("saved-cards")}";</script><DocsLayout><PageA /></DocsLayout><SavedCards id="a" />`);
+        await writeFile(join(out, "ssr-state.svelte.ts"), 'export const ssrState = $state({ page: "a", note: false, schema: { name: "Install" } as unknown, shown: true });\n');
+        await writeFile(join(out, "Ssr.svelte"), `<script>${["docs-layout", "page-a", "page-b", "x-note", "x-product", "saved-cards"].map((tag) => `import ${pascal(tag)} from "./${artifact(tag)}";`).join(" ")}
+import { ssrState as s } from "./ssr-state.svelte.js";</script>
+{#if s.shown}<DocsLayout>{#if s.page === "a"}<PageA>{#if s.note}<XNote />{/if}</PageA>{:else}<PageB />{/if}</DocsLayout><XProduct schema={s.schema} /><SavedCards id="a" />{/if}`);
       }
       const extension = target === "react" ? "tsx" : "ts";
       await writeFile(join(out, `ssr-server.${extension}`), ssrSources[target](artifact, true));
@@ -306,7 +313,8 @@ describe.skipIf(!enabled)("head declarations in compiled output and converted fr
         // The server wrote the reconciled head, the authored title in its set-aside template, and a preload, never a script.
         assert.match(html, /<title data-component-head="">Install · Docs<\/title><template data-component-head="set-aside"><title>Acme<\/title><\/template>/);
         assert.match(html, /<link rel="preload" as="script" href="https:\/\/js\.example\/sdk\.js" crossorigin="anonymous" data-component-head="">/);
-        assert.doesNotMatch(html, /<script/);
+        // JSON-LD blocks only: never an executing script.
+        assert.doesNotMatch(html.replaceAll(/<script type="application\/ld\+json"[^>]*>[^<]*<\/script>/g, ""), /<script/);
         const browser = await browserType.launch({ headless: true });
         const errors: string[] = [];
         try {
@@ -329,6 +337,7 @@ describe.skipIf(!enabled)("head declarations in compiled output and converted fr
             const kept = globalThis as unknown as Record<string, unknown>;
             kept.serverTitle = document.querySelector("title");
             kept.serverDescription = document.querySelector('meta[name="description"]');
+            kept.serverJson = document.querySelectorAll('script[type="application/ld+json"]')[1];
             kept.authoredTitle = document.querySelector<HTMLTemplateElement>("template[data-component-head]")?.content.firstElementChild;
           });
           await page.addScriptTag({ path: bundle });
@@ -349,6 +358,29 @@ describe.skipIf(!enabled)("head declarations in compiled output and converted fr
             await new Promise((done) => setTimeout(done, 20));
           });
           assert.deepEqual(await read(), { sameTitle: true, sameDescription: true, title: "Install · Docs", templates: 0, preloads: 1, scripts: 1, runs: 1, loads: "2" });
+          // After hydration: a deeper component takes the title and gives it back, a bound JSON-LD value
+          // changes the block, and a page change is one reconciliation.
+          const after = await page.evaluate(async () => {
+            const { set } = (globalThis as unknown as { ssr: { set(next: object): Promise<void> | void } }).ssr;
+            const settle = () => new Promise((done) => setTimeout(done, 20));
+            const adoptedJson = (globalThis as unknown as Record<string, unknown>).serverJson === document.querySelectorAll('script[type="application/ld+json"]')[1];
+            await set({ note: true }); await settle();
+            const deeper = document.title;
+            await set({ note: false }); await settle();
+            const back = document.title;
+            await set({ schema: { name: "Upgrade" } }); await settle();
+            const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'), (block) => block.textContent);
+            const seen: string[] = [];
+            const removed: Node[] = [];
+            const preconnect = document.querySelector('link[href="https://search.acme.example"]');
+            const observer = new MutationObserver((records) => { seen.push(document.title); for (const record of records) removed.push(...record.removedNodes); });
+            observer.observe(document.head, { subtree: true, childList: true, characterData: true, attributes: true });
+            await set({ page: "b" }); await settle();
+            observer.disconnect();
+            return { adoptedJson, deeper, back, blocks, seen: [...new Set(seen)], kept: preconnect === document.querySelector('link[href="https://search.acme.example"]') && !removed.includes(preconnect!) };
+          });
+          assert.deepEqual(after, { adoptedJson: true, deeper: "Note", back: "Install · Docs", blocks: ['{"@type": "Organization", "name": "{Acme}"}', '{"name":"Upgrade"}'],
+            seen: ["Configure · Docs"], kept: true });
           // With no component setting a title, the authored node returns: the same object.
           const restored = await page.evaluate(async () => {
             (globalThis as unknown as { ssr: { unmount(): void } }).ssr.unmount();

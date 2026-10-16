@@ -28,6 +28,7 @@ export function generateVanilla(
   transitions = false,
   /** The factory also adopts a server-rendered root. */
   hydrate = false,
+  scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -74,5 +75,5 @@ export function generateVanilla(
       ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
       : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
   });
-  return { module: emitBlocks(blockPlan(definition, invocations, transitions), definition, version, rootLines, invocations, noContextReaders, hydrate), declaration };
+  return { module: emitBlocks(blockPlan(definition, invocations, transitions), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL), declaration };
 }
