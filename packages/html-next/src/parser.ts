@@ -924,7 +924,7 @@ function readDeclarations(
       if (eventNames.has(name)) {
         reject(element, "HC020", `Event and request \`${name}\` share a name; a component either announces it or asks it.`);
       } else if (warnInvalidDeclaration === undefined && Object.hasOwn(contract.props, requestPropName(name))) {
-        // A framework component accepts the request's answer as this prop, so the two cannot share it.
+        // A framework component takes the function that answers the request under this prop name.
         locatedFail(element)("HC011", `Request \`${name}\` and prop \`${requestPropName(name)}\` collide as a framework prop.`, source);
       }
     } catch (error) {

@@ -65,11 +65,6 @@ import {
   type TypeNode,
 } from "./type-system.js";
 import { ask, hostListener, relayResponders, type RequestChecks, type RequestOptions } from "./requests.js";
-
-export {
-  holdController, RequestEvent, respond,
-  type RequestEventInit, type RequestOptions, type Responder, type ResponderInit,
-} from "./requests.js";
 import type {
   AttributeBinding,
   ComponentDefinition,
@@ -90,6 +85,12 @@ import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
 import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
+
+/** Requests: what a component asks its consumer (src/requests.ts). Loaders hold a root until its controller runs. */
+export {
+  holdController, RequestEvent, respond,
+  type RequestEventInit, type RequestOptions, type Responder, type ResponderInit,
+} from "./requests.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
