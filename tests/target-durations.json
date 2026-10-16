@@ -33,6 +33,7 @@
   "packages/html-next-converter/tests/react-slot-parity.test.ts": 7,
   "packages/html-next-converter/tests/react-type-parity.test.ts": 3,
   "packages/html-next-converter/tests/request-parity.test.ts": 20,
+  "packages/html-next-converter/tests/head-parity.test.ts": 40,
   "packages/html-next-converter/tests/svelte-basic-parity.test.ts": 23,
   "packages/html-next-converter/tests/svelte-component-binding-parity.test.ts": 213,
   "packages/html-next-converter/tests/svelte-component-decoration-parity.test.ts": 28,

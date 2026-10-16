@@ -36,6 +36,11 @@ export interface NodeLoaderOptions {
   readonly resolveStylesheet?: (specifier: string, parentURL: string) => Promise<string | undefined>;
   readonly stylesheetAssetURL?: (url: string) => string;
   readonly inspectModule?: (url: string) => Promise<InspectedModule>;
+  /**
+   * Whether a definition's URL is the build's own source. An installed package's file is not, even
+   * as an entry: its definitions are imported components, as one reached by a bare specifier is.
+   */
+  readonly isApplicationURL?: (url: string) => boolean;
 }
 
 export interface NodeComponentGraph extends ComponentGraph {
@@ -154,6 +159,7 @@ export async function loadNodeComponents(
     fetchComponent: readComponent,
     prepareStyles: styles.prepare,
     ...(options.collectDiagnostics === undefined ? {} : { collectDiagnostics: options.collectDiagnostics }),
+    ...(options.isApplicationURL === undefined ? {} : { isApplicationURL: options.isApplicationURL }),
   });
 
   const moduleInputs = new Set<string>();

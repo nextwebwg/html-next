@@ -535,6 +535,8 @@ export interface ComponentHostOptions {
   readonly data?: Readonly<Record<string, Readable<unknown>>>
   /** Values inherited through declared context, which a controller reads. */
   readonly context?: Readonly<Record<string, Readable<unknown>>>
+  /** Each named declared script, which a controller reads as `host.scripts`. */
+  readonly scripts?: Readonly<Record<string, unknown>>
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean
   /** Asks one of the component's declared requests. */
   request?(
@@ -700,6 +702,7 @@ export function useComponentHost(
       ),
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
     }, options.controllerSource?.definition ?? '<component>'),
+    scripts: options.scripts ?? Object.freeze({}),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
       const entry: Subscription = {
         type,

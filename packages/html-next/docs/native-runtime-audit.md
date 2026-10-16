@@ -94,7 +94,11 @@ meta lists with their sub-properties, and setting aside and restoring the docume
 as the same nodes. `src/head.ts` fills it with one manager per document on the document record that
 every HTML Next bundle shares. It walks `document.head`'s children once per reconciliation and
 changes only elements whose target changed. Depth counts the component roots around an instance's
-root (`data-component`, converted Vue's `data-hn`, and the roots of head contributors).
+root (`data-component`, converted Vue's `data-hn`, and the roots of head contributors). Compiled
+output imports it through `generated-runtime`, and converted Vue, React and Svelte components carry
+its source in their `head` helper, so every implementation on a page joins the same manager. A
+framework's server rendering has no document tree: its helper records each component's depth among
+head-declaring components through the framework's context, and render order stands for tree order.
 
 A declared script is an ordinary `<script>` inserted through the DOM: the browser fetches and runs
 it, applies CSP, Subresource Integrity, CORS and mixed-content blocking, evaluates a module URL once,

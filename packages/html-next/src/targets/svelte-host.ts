@@ -33,6 +33,8 @@ export interface ComponentHostOptions {
   request?(root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: unknown): Promise<unknown>;
   /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
   readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
+  /** Each named declared script, which a controller reads as \`host.scripts\`. */
+  readonly scripts?: Readonly<Record<string, unknown>>;
 }
 
 interface ControllerHost {
@@ -40,6 +42,7 @@ interface ControllerHost {
   readonly element: Element;
   readonly state: Record<string, unknown>;
   readonly data: Readonly<Record<string, unknown>>;
+  readonly scripts: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {
     readonly value: unknown;
     readonly inputValue: unknown;
@@ -116,6 +119,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     get root() { return (root ?? lastRoot)!; },
     get element() { return host.root; },
     ...controllerNamespaces(options, options.definition),
+    scripts: options.scripts ?? Object.freeze({}),
     props: Object.freeze(propHandles),
     refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
       get: (_target, name) => {

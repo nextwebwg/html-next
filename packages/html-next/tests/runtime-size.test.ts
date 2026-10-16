@@ -72,6 +72,10 @@ describe("runtime size measurement", () => {
       "data",
       "controller",
       "request",
+      "headNone",
+      "headStatic",
+      "headJson",
+      "headScript",
       "controllerKeyed",
     ]);
     const keyed = native.capabilityFixtures.controllerKeyed as { forbiddenModules: string[]; targetMet: boolean };

@@ -9,7 +9,8 @@ import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
-import { rejectHeadDeclarations, targetComponent } from "./backend.js";
+import { targetComponent } from "./backend.js";
+import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
@@ -48,6 +49,7 @@ export interface SvelteConversionOptions {
   readonly renderSpecifier?: string;
   /** The request steps, which a component that declares requests imports. */
   readonly requestsSpecifier?: string;
+  readonly headSpecifier?: string;
   readonly controllerSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
@@ -55,7 +57,7 @@ export interface SvelteConversionOptions {
 export interface SvelteConversionOutput {
   readonly component: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render" | "requests")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render" | "requests" | "head")[];
 }
 
 /** A value Svelte reads as written in a quoted attribute: no entity, brace, quote or edge space. */
@@ -1059,7 +1061,6 @@ interface RootScope extends Scope {
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, version: string, options: SvelteConversionOptions = {}): SvelteConversionOutput {
-  rejectHeadDeclarations(definition, "Svelte");
   definition = condenseWhitespace(definition);
   const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);
@@ -1113,6 +1114,20 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
     ] }, nullable: false });
   }
+  // A named declared script's status is the component's own state, read as a <data> read's is.
+  const scriptNames = new Map<string, string>();
+  for (const script of definition.scripts ?? []) {
+    if (script.name === undefined) continue;
+    const name = freshIdentifier(`htmlNextScript${scriptNames.size}`);
+    scriptNames.set(script.name, name);
+    code.set(script.name, name);
+    types.set(script.name, { type: { kind: "object", open: false, fields: [
+      { name: "pending", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "error", type: { kind: "terminal", name: "unknown" }, optional: false },
+    ] }, nullable: false });
+  }
+  const headed = declaresHead(definition);
   const computedNames = new Map<ReactiveDeclaration, string>();
   for (const declaration of [...states, ...computed]) {
     const name = declarationName(declaration.name);
@@ -1321,7 +1336,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     }).join(", ");
     return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ root: () => rootElement ?? null, source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: [${parameters}] });`;
   });
-  const script = [
+  let script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     `import type { HTMLAttributes${nativeAttributes === "HTMLAttributes" ? "" : ` as ${nativeAttributes}`} } from "svelte/elements";`,
     ...svelteImport([...(nestedDepthLimit !== undefined || contexts.length > 0 || context.imports.size > 0) ? ["getContext"] : [],
@@ -1336,6 +1351,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `import type { ${REQUEST_TYPES.join(", ")} } from ${quote(options.requestsSpecifier ?? "./requests")};`,
     ]),
     ...(definition.lifecycle === undefined ? [] : [`import { useLifecycle } from ${quote(options.connectionSpecifier ?? "./connection.svelte")};`]),
+    ...(!headed ? [] : ["/* html-next head imports */"]),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, prepareHydrationControls, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
@@ -1519,6 +1535,15 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       "  return Array.isArray(recorded) ? recorded[0] : recorded;",
       "}",
     ]),
+    ...(!headed ? [] : [
+      ...[...scriptNames.values()].map((name) => `let ${name} = $state<ScriptStatus>({ pending: false, ok: false, error: null });`),
+      ...(definition.head === undefined ? [] : ["const htmlNextHeadKept: unknown[] = [];", `useHead(() => rootElement ?? null, () => ${headEntriesSource(definition, (expression) =>
+        conformingRead(expression, scope, context, lowering.value(expression.ast, scope)).source, "htmlNextHeadKept")});`]),
+      ...(definition.scripts === undefined ? [] : [`const htmlNextHeadScripts = useScripts(() => rootElement ?? null, ${headScriptsSource(definition, (name, event) => {
+        const handler = handlers.findIndex((candidate) => candidate.name === name);
+        return `${handlerNames.get(name)!}(${handlerSources[handler]!.includes("(event: Event)") ? event : ""})`;
+      }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptNames.get(name)!} = ${value}` }))});`]),
+    ]),
     ...(usesController ? [
       ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, Parameters<typeof acceptsControllerWrite>[1]> = ${JSON.stringify(controllerStateTypes)};`] : []),
       `useComponentHost(() => import(${quote(definition.controller!)}), {`,
@@ -1533,6 +1558,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { if (!Object.is(${code.get(state.name)}, value)) ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
       `  computed: { ${[...computed, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
       `  data: { ${data.map((value) => `${objectKey(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
+      ...(scriptNames.size === 0 ? [] : ["  scripts: htmlNextHeadScripts,"]),
       ...(usesControllerTypeChecks ? [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, ${controllerTypesName}[name], keys),`] : []),
       `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
@@ -1551,6 +1577,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       return `() => ${handlerNames.get(handlers[handler]!.name)!}(${handlerSources[handler]!.includes("(event: Event)") ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
+  const headSpecifier = quote(options.headSpecifier ?? "./head.svelte");
+  if (headed) script = script.replace("/* html-next head imports */", [
+    `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\b`).test(script)).join(", ")} } from ${headSpecifier};`,
+    `import type { ${["DeclaredScript", "HeadEntry", "HeadScript", "ScriptStatus"].filter((name) => new RegExp(`\\b${name}\\b`).test(script)).join(", ")} } from ${headSpecifier};`,
+  ].join("\n"));
   const open = script.slice(0, script.indexOf("\n"));
   let body = script.slice(open.length + 1, script.lastIndexOf("\n</script>"));
   let template = markup;
@@ -1577,9 +1608,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       ...(context.usesStyleDecorations ? ["style" as const] : []),
       ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
       ...(usesController ? ["host" as const] : []),
-      ...(usesController || definition.lifecycle !== undefined || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
+      ...(usesController || definition.lifecycle !== undefined || headed || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
       ...(computed.length > 0 || usesController ? ["reactivity" as const] : []),
       ...(rendered.length > 0 ? ["render" as const] : []),
       ...(requestProps.length > 0 ? ["requests" as const] : []),
+      ...(headed ? ["head" as const] : []),
     ] };
 }

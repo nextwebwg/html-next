@@ -3,7 +3,7 @@ import { dirname, posix, relative, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
-import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, requestsHelperArtifact, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
+import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, importsVueHead, headHelperArtifact, requestsHelperArtifact, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { parseComponentResource } from "./source-graph.js";
@@ -229,6 +229,11 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const requests = requestsHelperArtifact("vue");
     if (files.has(requests.path)) throw new Error(`Package artifact collision at ${requests.path}.`);
     files.set(requests.path, requests.content);
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueHead(content))) {
+    const head = headHelperArtifact("vue");
+    if (files.has(head.path)) throw new Error(`Package artifact collision at ${head.path}.`);
+    files.set(head.path, head.content);
   }
   const publicNames = new Set<string>();
   for (const definition of definitions) {

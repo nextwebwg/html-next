@@ -25,6 +25,7 @@ import {
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 import { ask, hostListener, type RequestChecks, type RequestOptions } from "./requests.js";
+import { headInstance, instanceScripts, type DeclaredScript, type HeadEntry, type ScriptStatus } from "./head.js";
 import { DataResource, type DataState } from "./data.js";
 import { propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
@@ -401,6 +402,77 @@ export function dataHandles(spec: GeneratedStateSpec, values: readonly unknown[]
     deleteProperty: (_target, key) => (deny(key), true),
     defineProperty: (_target, key) => (deny(key), false),
     has: (_target, key) => typeof key === "string" && Object.hasOwn(reads, key),
+  });
+}
+
+/** A compiled declared script: the script, its status root (-1 for none), its name, and its handlers. */
+export type GeneratedScript = readonly [declaration: DeclaredScript, root: number, name: string | undefined, run: (loaded: boolean, event: Event) => void];
+
+/**
+ * A compiled component's head declarations (src/head.ts), as live's instance gives them: `compute`
+ * evaluates them, read again after each render, and they join the document head while the root is
+ * connected. Returns what each render calls.
+ */
+export function manageHead(instance: GeneratedInstance, compute: () => readonly (HeadEntry | undefined)[]): () => void {
+  const head = headInstance(() => instance.e);
+  instance.o.push({
+    pause: () => head.disconnect(),
+    resume: () => { head.update(compute()); head.connect(); },
+    stop: () => head.disconnect(),
+  });
+  return () => head.update(compute());
+}
+
+/**
+ * A compiled component's declared scripts: a named script's status is its root, which renders as a
+ * `<data>` read's does, and `host.scripts` shows it with `ready` and `load()`, tracked by name.
+ */
+export function manageScripts(instance: GeneratedInstance, scripts: readonly GeneratedScript[]): void {
+  const values = instance.v!;
+  const tracked: Record<string, number> = {};
+  const declared = instanceScripts(() => instance.e, scripts.map(([declaration, root, name, run]) => {
+    if (name !== undefined) tracked[name] = root;
+    return [declaration, name, run, (status: ScriptStatus) => {
+      if (root < 0 || name === undefined) return;
+      const previous = values[root];
+      instance.w(root, status);
+      notifyPropertySet(tracked, name, previous, status, undefined);
+    }];
+  }));
+  const handles = Object.create(null) as Record<string, object>;
+  for (const name of Object.keys(tracked)) {
+    const status = (): ScriptStatus => { trackProperty(tracked, name); return values[tracked[name]!] as ScriptStatus; };
+    handles[name] = Object.freeze({
+      get pending() { return status().pending; },
+      get ok() { return status().ok; },
+      get error() { return status().error; },
+      get ready() { return declared.scripts[name]!.ready; },
+      load: () => declared.scripts[name]!.load(),
+    });
+  }
+  (instance as GeneratedInstance & { SC?: object }).SC = Object.freeze(handles);
+  instance.o.push({ pause: () => declared.disconnect(), resume: () => declared.connect(), stop: () => declared.disconnect() });
+}
+
+/** A head binding's converted result, or the one it last accepted when this result is invalid. */
+export function headValue(kept: unknown[], slot: number, value: unknown, convert: (value: Value) => string | null): string | null {
+  if (value !== NONCONFORMING) kept[slot] = convert(value as Value);
+  return (kept[slot] ?? null) as string | null;
+}
+
+/** A head element's attributes: an omitted value leaves its attribute out, and so does an executable URL. */
+export function headAttributes(attributes: readonly (readonly [string, string | null])[]): [string, string][] {
+  return attributes.flatMap(([name, value]): [string, string][] =>
+    value === null || ((name === "href" || name === "src") && hasExecutableUrl(value)) ? [] : [[name, value]]);
+}
+
+/** A bound JSON-LD block's text: the value as JSON with `<` escaped, or null to leave the block out. */
+export function headJson(spec: GeneratedStateSpec, kept: unknown[], slot: number, value: unknown, source: string): string | null {
+  return headValue(kept, slot, value, (result) => {
+    if (result === null || result === ABSENT) return null;
+    if (typeof result === "object") return JSON.stringify(result).replaceAll("<", "\\u003c");
+    warnOnce(spec, `head:json:${source}`, `JSON-LD \`${source}\` must be an object or a list.`);
+    return kept[slot] as string | null ?? null;
   });
 }
 
@@ -1051,6 +1123,14 @@ export function requestHost<Host extends { readonly on: HostOn }>(host: Host, in
       return ask(instance.e, connection, name, detail, options, instance.S.q?.[name], (message) => warnOnce(instance.S, message, message));
     }, enumerable: true },
   })) as Host & { readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown> };
+}
+
+/** The host of a component that declares named scripts: `host.scripts`, which `manageHead` built. */
+export function scriptHost<Host extends object>(host: Host, instance: GeneratedInstance & { H?: unknown; SC?: object }): Host & { readonly scripts: object } {
+  return instance.H = Object.freeze(Object.defineProperties({}, {
+    ...Object.getOwnPropertyDescriptors(host),
+    scripts: { value: instance.SC, enumerable: true },
+  })) as Host & { readonly scripts: object };
 }
 
 /** A plain object or a null-prototype one, as a declared object or record value must be. */
