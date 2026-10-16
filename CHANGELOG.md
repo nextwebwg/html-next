@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- A symbolic link in an HTMLKit page folder that would be a page, such as `docs/page.md` linking to `../other/page.md`, or a page folder, is an error that names it, as a symbolic link in `public/` is. Links whose names start with `_` or `.`, and links to files that aren't pages, stay as they are. To serve pages kept elsewhere, add their folder to the `pages` option.
 - The HTMLKit documentation proof links the guide's index page at `/guide/` and gives a heading with a trailing `{#name}` that id, as the guide's site does.
 - An `hk:alias` of a dynamic page marks its page's own URL, with the alias's parameters, current in navigation.
 

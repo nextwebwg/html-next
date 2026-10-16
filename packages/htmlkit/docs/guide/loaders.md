@@ -124,7 +124,7 @@ only the HTML Next code its components use. After that, links to other pages ren
 - A component's controller can be TypeScript: write `controller="./counter.js"` next to
   `counter.ts`, and HTMLKit compiles it. Run `tsc` separately to check types.
 - Component styles become regular stylesheets that load before the page is shown.
-- Files in `public/` are copied unchanged. `_htmlkit/` and `404.html` are reserved names, and so is
+- Files in `public/` are copied unchanged, and a symbolic link there is an error. `_htmlkit/` and `404.html` are reserved names, and so is
   `robots.txt` when the [`robots` option](/htmlkit/configuration#search-engines) is set.
 - `document` fires `hk:ready` once the page's components have taken over its HTML.
 - After any change in development, open pages reload.

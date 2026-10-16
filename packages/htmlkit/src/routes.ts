@@ -95,6 +95,14 @@ export async function discover(root: string, options: DiscoveryOptions) {
   const visit = async (directory: string, prefix: string, segments: string[], order: (string | null)[],
     directoryLayout: string | false | RouteLayer | undefined, outer: readonly RouteLayer[], groups: readonly RouteGroup[]): Promise<void> => {
     const files = await readdir(directory, { withFileTypes: true });
+    // As in public/, a page or page folder is a regular file or folder, so the URL tree is the file tree.
+    for (const file of files) {
+      if (!file.isSymbolicLink() || file.name.startsWith("_") || file.name.startsWith(".")) continue;
+      const path = join(directory, file.name);
+      if (pageExtension(file.name) !== undefined || await stat(path).then(info => info.isDirectory(), () => false)) {
+        throw new HtmlKitError("Pages and page folders must not be symbolic links; add the target's folder to the pages option.", path);
+      }
+    }
     const names = new Set(files.filter(file => file.isFile()).map(file => file.name));
     const prefixDepth = prefix.split("/").filter(Boolean).length;
     const layer = (name: string, stem: string): RouteLayer => {

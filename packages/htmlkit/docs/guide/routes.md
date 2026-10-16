@@ -25,6 +25,9 @@ A few rules cover the rest:
 - URLs end with a slash. The development server, `preview`, and `application.fetch` redirect
   `/about` to `/about/`. A static host decides for itself, so check its trailing-slash setting.
 - Files and folders starting with `_` or `.` are not pages, so keep helpers there or in `app/components`.
+- Pages and page folders are regular files and folders, as `public/` files are: a symbolic link to
+  one is an error that names it. To serve pages kept elsewhere, add their folder to the
+  [`pages` option](/htmlkit/configuration#page-folders).
 - A number and a dot at the start of a name, as in `01.guide/`, orders [navigation](/htmlkit/navigation)
   and never appears in the URL.
 
