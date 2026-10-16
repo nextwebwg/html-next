@@ -19,7 +19,7 @@ export function childPath(path: string, key: string | number): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }
 
-function plainObject(value: unknown): value is Record<string, unknown> {
+export function plainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value) as unknown;
   return prototype === Object.prototype || prototype === null;

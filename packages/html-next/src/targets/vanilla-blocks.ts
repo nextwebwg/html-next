@@ -379,6 +379,64 @@ export function checkSource(type: TypeInput): string {
   }
 }
 
+/** Whether `valueCheck` writes a type's check itself; a separated list or a selected type takes `checkSource`'s. */
+const specialized = (node: TypeNode): boolean => {
+  switch (node.kind) {
+    case "terminal": case "keyword": return true;
+    case "union": return node.members.every(specialized);
+    case "constrained": return specialized(node.base);
+    case "list": return specialized(node.item);
+    case "record": return specialized(node.value);
+    case "object": return node.fields.every((field) => specialized(field.type));
+    default: return false;
+  }
+};
+
+/**
+ * JavaScript deciding what `parseTypedValue(value, type, "$", "value").ok` decides, written out for
+ * one declared type: a JavaScript value, never HTML text, so it needs no literal parser.
+ */
+function valueCheck(node: TypeNode, value: string, depth: number): string {
+  const item = `v${depth + 1}`;
+  switch (node.kind) {
+    case "terminal": {
+      const plain: Readonly<Record<string, string>> = {
+        string: `typeof ${value} == "string"`, boolean: `typeof ${value} == "boolean"`, number: `Number.isFinite(${value})`,
+        integer: `Number.isInteger(${value})`, null: `${value} === null`, absent: `${value} === void 0`, unknown: "true",
+        function: `typeof ${value} == "function"`, event: `isNativeEvent(${value})`,
+      };
+      const format = FORMAT_CHECKS[node.name];
+      return plain[node.name] ?? (format === undefined ? `${checkSource(node)}(${value}, "$", "value").ok`
+        : `(typeof ${value} == "string" && ${format}(${value}))`);
+    }
+    case "keyword": return `${value} === ${JSON.stringify(node.value)}`;
+    case "union": return `(${node.members.map((member) => valueCheck(member, value, depth)).join(" || ")})`;
+    case "constrained": {
+      const { kind: _kind, base, values, ...bounds } = node;
+      return `(${[valueCheck(base, value, depth), ...values === undefined ? [] : [`${JSON.stringify(values)}.includes(${value})`],
+        ...Object.keys(bounds).length === 0 ? [] : [`!boundFailures(${value}, ${JSON.stringify(base.kind === "terminal" ? base.name : "")}, ${JSON.stringify(bounds)}).length`]].join(" && ")})`;
+    }
+    case "list": return `(Array.isArray(${value}) && ${value}.every((${item}) => ${valueCheck(node.item, item, depth + 1)}))`;
+    case "record": return `(plainObject(${value}) && Object.values(${value}).every((${item}) => ${valueCheck(node.value, item, depth + 1)}))`;
+    case "object": {
+      // A declared field is present when `in` finds it, as `checkObject` reads it.
+      const fields = node.fields.map((field) => {
+        const name = JSON.stringify(field.name);
+        const check = valueCheck(field.type, `${value}[${name}]`, depth);
+        return field.optional ? `(!(${name} in ${value}) || ${check})` : `${name} in ${value} && ${check}`;
+      });
+      const closed = node.open ? [] : [`Object.keys(${value}).every((${item}) => ${JSON.stringify(node.fields.map((field) => field.name))}.includes(${item}))`];
+      return `(${[`plainObject(${value})`, ...fields, ...closed].join(" && ")})`;
+    }
+    default: return unreachable("a specialized check for this type");
+  }
+}
+
+/** A request detail's or answer's check as source: specialized to its type, or the full check where `valueCheck` defers. */
+export function valueCheckSource(type: TypeNode): string {
+  return specialized(type) ? `(v0) => ${valueCheck(type, "v0", 0)}` : `detailCheck(${checkSource(type)})`;
+}
+
 /** A prop type's compiled checks (`PropChecks`) as source. */
 function propChecks(type: TypeInput): string {
   const node = normalizeType(type);
@@ -2270,7 +2328,9 @@ export function emitBlocks(
     index < 29 ? `c |= ${rootBit(index)};` : `c |= ${OVERFLOW}; d.set(${index}, 1);`} } }`);
   const update = plan.reads.length === 0 && aliased.length === 0 ? render
     : `((c, d) => { ${aliased.join(" ")}${plan.reads.length === 0 ? "" : " DU(c, d);"} ${render}(c, d); })`;
-  const instance = hydrate || provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  // A component that declares requests gives its controller a host with `host.request`, which reads the instance.
+  const asks = definition.controller !== undefined && Object.keys(contract.requests ?? {}).length > 0;
+  const instance = asks || hydrate || provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
     transitionMask !== 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
@@ -2308,7 +2368,7 @@ export function emitBlocks(
       "  };",
     ],
     // A context provider tells its readers after each render.
-    `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : "C"}${
+    `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : asks ? "(host) => C(host, I)" : "C"}${
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...transitionMask === 0 ? [] : [`  holdTransitions(I, ${transitionMask});`],
     ...plan.roots.flatMap((item, index) => item.context === undefined ? []
@@ -2447,11 +2507,16 @@ export function emitBlocks(
     const type = declarationTypeNode(declaration.type, declaration.shape);
     return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${checkSource(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
   });
+  // Declared requests: `host.request` checks the detail and answer as live does; only a controller
+  // asks, and only these modules bundle the request steps.
+  const requests = definition.controller === undefined ? [] : Object.entries(contract.requests ?? {}).map(([name, request]) =>
+    `${JSON.stringify(name)}: [${valueCheckSource(request.type)}, ${valueCheckSource(request.returns)}]`);
   const shown = plan.roots.slice(0, plan.shown);
   // The transitions extension's rules, registered once per document when the module loads.
   const registration = plan.transitions === undefined || plan.transitions === "" ? "" : `transitionStyles(${JSON.stringify(plan.transitions)});`;
   const stateSpec = `const S = { n: ${JSON.stringify(shown.map((item) => item.name))}, t: [${shown.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
     plan.states === plan.shown ? "" : `, k: ${plan.states}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
+    requests.length === 0 ? "" : `, q: { ${requests.join(", ")} }`}${
     blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""}${plan.states === plan.shown ? "" : ", r: readonlyView"} };`;
   // What the shared prop boundary reads (`CompiledProp`): each prop's rule as data and its type as compiled checks.
   const propsSpec = propNames.length === 0 ? undefined : `const D = { g: ${JSON.stringify(contract.tag)}, props: { ${Object.entries(contract.props).map(([name, prop]) => {
@@ -2465,7 +2530,7 @@ export function emitBlocks(
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
-    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState",
+    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "plainObject", "eventPasses", "listen", "refTargets", "rootValue", "setState",
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
@@ -2479,6 +2544,8 @@ export function emitBlocks(
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
+  // The controller of a component that declares requests receives `requestHost`'s host.
+  if (requests.length > 0) helpers.push("requestHost");
   // Decimal operations are `binaryValue`'s last argument; their names are also common authored names.
   helpers.push(...Object.values(DECIMAL).filter((name) => `${source}\n${stateSpec}`.includes(`, ${name})`)));
   // A root without children, and an arm without them, build no prototype.
@@ -2513,7 +2580,9 @@ export function emitBlocks(
     })))};`]),
     ...(propsSpec === undefined ? [] : [propsSpec]),
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
-    ...(definition.controller === undefined ? [] : ["const C = (host) => controller.default(host);"]),
+    // A component that declares requests gives its controller the host with `host.request`.
+    ...(definition.controller === undefined ? [] : [requests.length === 0 ? "const C = (host) => controller.default(host);"
+      : "const C = (host, I) => controller.default(requestHost(host, I));"]),
     "",
     source,
     "",

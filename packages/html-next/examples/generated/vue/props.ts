@@ -503,3 +503,7 @@ export function acceptsControllerWrite(value: unknown, type: TypeNode | undefine
     : type.kind === "list" ? (/^\d+$/.test(key) ? type.item : undefined) : type.kind === "record" ? type.value : undefined;
   return acceptsControllerWrite(value, child, keys.slice(1));
 }
+/** Declared event details use the same nested type and constraint check as typed values. */
+export function acceptsDeclaredEvent(value: unknown, type: Parameters<typeof parse>[1]): boolean {
+  return parse(value, type, "$").ok;
+}

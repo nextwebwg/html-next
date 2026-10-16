@@ -61,8 +61,10 @@ import {
   declarationTypeNode,
   formatType,
   parseTypedValue,
+  typeCheck,
   type TypeNode,
 } from "./type-system.js";
+import { ask, hostListener, relayResponders, type RequestChecks, type RequestOptions } from "./requests.js";
 import type {
   AttributeBinding,
   ComponentDefinition,
@@ -83,6 +85,12 @@ import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
 import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
+
+/** Requests: what a component asks its consumer (src/requests.ts). Loaders hold a root until its controller runs. */
+export {
+  holdController, RequestEvent, respond,
+  type RequestEventInit, type RequestOptions, type Responder, type ResponderInit,
+} from "./requests.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
@@ -145,6 +153,8 @@ interface RuntimeInstance {
   readonly refs: Record<string, Element | Element[]>;
   readonly effects: ReactiveOwner[];
   connected: boolean;
+  /** Aborts when this connection ends; made when a request first asks for it. */
+  connection?: AbortController;
   host?: ComponentHost;
   /** Props the author supplied. Only these are reflected; defaults never are. */
   readonly explicit: Set<string>;
@@ -1130,6 +1140,23 @@ function runHandler(
       else (target as HTMLInputElement | undefined)?.reportValidity?.();
     }
   }
+}
+
+const definitionRequestChecks = new WeakMap<ComponentDefinition, Map<string, RequestChecks>>();
+
+/** A declared request's detail and answer checks; the request steps accept a `null` answer before checking. */
+function requestChecks(definition: ComponentDefinition, name: string): RequestChecks | undefined {
+  const request = definition.contract.requests?.[name];
+  if (request === undefined) return undefined;
+  let checks = definitionRequestChecks.get(definition);
+  if (checks === undefined) definitionRequestChecks.set(definition, checks = new Map());
+  let found = checks.get(name);
+  if (found === undefined) {
+    const detail = typeCheck(request.type);
+    const answer = typeCheck(request.returns);
+    checks.set(name, found = [(value) => detail(value, "$", "value").ok, (value) => answer(value, "$", "value").ok]);
+  }
+  return found;
 }
 
 function eventDeclaration(definition: ComponentDefinition, name: string): EventDeclaration | undefined {
@@ -3719,6 +3746,11 @@ export interface ComponentHost {
    */
   effect(run: () => void | (() => void)): () => void;
   dispatch(event: string, detail?: unknown): boolean;
+  /**
+   * Ask the consumer a declared request. Resolves to its answer, or null when none answered. Present
+   * on the host of a component that declares at least one `<request>`.
+   */
+  request?(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown>;
 }
 
 export interface ComponentProp {
@@ -3757,6 +3789,8 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
 function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   if (!instance.connected) return;
   instance.connected = false;
+  instance.connection?.abort();
+  delete instance.connection;
   for (const effect of instance.effects) effect.pause();
   for (const effect of instance.owned.effects) effect.pause();
   for (const delegate of instance.delegates) disconnectRuntimeInstance(delegate);
@@ -3895,8 +3929,10 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
         if (type === "connect") return untracked(() => callback(new Event(type)));
         if (type === "disconnect") return () => { if (!stopped) untracked(() => callback(new Event(type))); };
         const root = host.root;
-        const listener = (event: Event): void => { callback(event); };
+        const listener = hostListener(type, callback);
         root.addEventListener(type, listener);
+        // A responder registered after a request went unanswered tells the asker to ask again.
+        relayResponders(root, type);
         return () => root.removeEventListener(type, listener);
       });
       return () => { stopped = true; stop(); };
@@ -3924,6 +3960,15 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     dispatch(event, detail) {
       return dispatchComponentEvent(instance.element!, event, detail, eventDeclaration(instance.definition, event));
     },
+    // A component that declares at least one request also has `host.request`.
+    ...(instance.definition.contract.requests === undefined ? {} : {
+      request(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> {
+        const connection = instance.connected ? (instance.connection ??= new AbortController()).signal
+          : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
+        return ask(host.root, connection, name, detail, options, requestChecks(instance.definition, name),
+          (message) => warnAuthored(instance.definition, message, message));
+      },
+    }),
   };
   instance.host = Object.freeze(host);
   return instance.host;

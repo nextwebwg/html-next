@@ -161,4 +161,14 @@ authored state assignments retain the prior value and warn; native control edits
 ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host(:state(state))`.
 The [public proposal](https://nextwebwg.org/declarative-components/javascript/) defines these contracts.
 
+A component that declares a `<request>` accepts a function prop for it, named in camelCase
+(`mention-query` is `mentionQuery`), and its event form (Vue's `@mention-query`, React's
+`onMentionQuery`, Svelte's `onmention-query`). The host adds one listener per request on the root
+before the controller runs and reads the prop when a request arrives; a prop or listener set later
+relays to the requests that went unanswered, as a late `host.on` does. The generated types give
+each prop the request's detail and answer types, and a request whose camelCase name equals a
+prop's fails conversion (`HC011`). Such a component imports `requests.ts`, the request steps, which
+every converted host shares with the live runtime and compiled output through the document. See
+[requests](https://nextwebwg.org/declarative-components/javascript#framework-requests).
+
 Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).

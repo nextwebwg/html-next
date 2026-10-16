@@ -1,6 +1,7 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
+import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
 
 const SOURCE = `import React from "react";
 
@@ -37,6 +38,7 @@ function cycleError(): Error {
 
 ${NATIVE_CONNECTION_SOURCE}
 ${CONTROLLER_STATE_SOURCE}
+${REQUEST_HOST_SOURCE}
 export interface StateAccess {
   readonly get: () => unknown;
   readonly set: (value: unknown) => void;
@@ -59,6 +61,10 @@ export interface ComponentHostOptions {
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
   /** The paths, from a state root, that handler and bound-control writes changed since the last call. */
   readonly written?: () => readonly (readonly unknown[])[];
+  /** Asks one of the component's declared requests. */
+  request?(root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
+  readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
 }
 
 interface ControllerHost {
@@ -77,6 +83,7 @@ interface ControllerHost {
   computed<T>(compute: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
+  request?(name: string, detail?: unknown, options?: unknown): Promise<unknown>;
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
 }
 
@@ -110,6 +117,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     readonly synchronize: () => void;
     readonly disconnect: () => void;
     readonly checkValues: () => void;
+    readonly relayLateResponders: () => void;
   } | null>(null);
 
   if (runtime.current === null) {
@@ -137,8 +145,12 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         if (entry.type === "connect" || entry.type === "disconnect") continue;
         if (attach) element.addEventListener(entry.type, entry.listener);
         else element.removeEventListener(entry.type, entry.listener);
+        // A responder registered after a request went unanswered tells the asker to ask again.
+        if (attach) relayResponders(element, entry.type);
       }
     };
+    const requests = requestConnection();
+    let releaseController: (() => void) | undefined;
     const dependencies = new Map<string, Dependency>();
     const readComputed = new Set<string>();
     const previousValues = new Map<string, unknown>();
@@ -319,16 +331,24 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         return stop;
       },
       dispatch: (name, detail) => latest.current.dispatch(host.root, name, detail),
+      // A component that declares requests also has host.request.
+      ...(options.request === undefined ? {} : {
+        request: (name: string, detail?: unknown, requestOptions?: unknown) =>
+          latest.current.request!(host.root, requests.signal(connected), name, detail, requestOptions),
+      }),
       on(type, callback) {
         const entry: { type: string; callback: typeof callback; listener: EventListener; disposer?: () => void } = {
-          type, callback, listener: (event) => { callback(event); },
+          type, callback, listener: options.request === undefined ? (event) => { callback(event); } : hostListener(type, callback),
         };
         listeners.add(entry);
         if (connected) {
           if (type === "connect") {
             const disposer = callback(new Event("connect"));
             if (typeof disposer === "function") entry.disposer = disposer;
-          } else if (type !== "disconnect") host.root.addEventListener(type, entry.listener);
+          } else if (type !== "disconnect") {
+            host.root.addEventListener(type, entry.listener);
+            relayResponders(host.root, type);
+          }
         }
         return () => {
           if (!listeners.delete(entry)) return;
@@ -345,10 +365,24 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       if (error instanceof Error && "diagnostic" in error) throw error;
       throw moduleDiagnostic("HJ001", latest.current, error);
     });
+    // Each request's responder listens on the root from its first connection, before the controller runs.
+    const responderNames = Object.keys(options.responders ?? {});
+    for (const name of responderNames) host.on(name, (event) => latest.current.responders?.[name]?.()?.(event));
+    const responding = new Map(responderNames.map((name) => [name, options.responders![name]!() !== undefined]));
+    // A function prop or event form set later relays for its request, as a late host.on does.
+    const relayLateResponders = (): void => {
+      for (const name of responderNames) {
+        const set = latest.current.responders?.[name]?.() !== undefined;
+        if (set && !responding.get(name) && connected && root !== null) relayResponders(root, name);
+        responding.set(name, set);
+      }
+    };
     const disconnect = (): void => {
       if (!connected) return;
       connected = false;
       generation += 1;
+      requests.end();
+      releaseController?.();
       lifecycle("disconnect");
       if (root !== null) attachListeners(root, false);
       for (const entry of listeners) { entry.disposer?.(); entry.disposer = undefined; }
@@ -378,15 +412,19 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         lifecycle("connect");
         return;
       }
+      // Requests from inside this root wait until the controller has run, or failed to load.
+      const release = releaseController = holdController(next);
       void load().then(async (module) => {
         if (!connected || current !== generation || initialized) return;
         initialized = true;
-        const result = await module.default(host);
+        let invoked: ReturnType<ControllerModule["default"]>;
+        try { invoked = module.default(host); } finally { release(); }
+        const result = await invoked;
         if (typeof result === "function") {
           if (!connected || current !== generation) result();
           else cleanup = result;
         }
-      }).catch(report);
+      }).catch(report).finally(release);
     };
     const checkValues = (): void => {
       const current = latest.current;
@@ -412,10 +450,10 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       for (const name of replaced) if (!writes.some((path) => path[0] === name)) changedPath([name]);
       checkComputed();
     };
-    runtime.current = { host, synchronize, disconnect, checkValues };
+    runtime.current = { host, synchronize, disconnect, checkValues, relayLateResponders };
   }
 
-  React.useLayoutEffect(() => { runtime.current!.checkValues(); runtime.current!.synchronize(); });
+  React.useLayoutEffect(() => { runtime.current!.checkValues(); runtime.current!.synchronize(); runtime.current!.relayLateResponders(); });
   React.useLayoutEffect(() => {
     const root = latest.current.root.current;
     if (root === null) return;

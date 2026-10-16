@@ -1079,3 +1079,59 @@ describe("browser-parsed components", () => {
     assert.deepEqual(warnings, ["count.html: HT022: `count` is a keyword, not a reference; did you mean `$count`? (in `count`)"]);
   });
 });
+
+describe("requests", () => {
+  const editor = (defs: string, root = "<div></div>"): string =>
+    `<template component="ui-editor" status="early" summary="Asks its consumer." controller="./editor.js"><defs>${defs}</defs>${root}</template>`;
+
+  it("declares a request's detail and answer in attribute and expanded forms", () => {
+    const { contract } = parseComponent(editor(`
+      <request name="mention-query" type="object({ query: string })" returns="list(object({ id: string, label: string }))">People matching the text after @.</request>
+      <request name="image-upload" type="object">
+        <prop name="file" type="unknown" required>The File the author dropped or pasted.</prop>
+        <returns type="object"><prop name="src" type="string" required></prop><prop name="width" type="integer"></prop></returns>
+      </request>
+      <request name="extensions" returns="list(unknown)"></request>
+      <request name="pick" type="event"></request>`), "editor.html");
+    assert.deepEqual(Object.keys(contract.requests ?? {}), ["mention-query", "image-upload", "extensions", "pick"]);
+    const requests = contract.requests!;
+    assert.equal(formatType(requests["mention-query"]!.type), "object({ query: string })");
+    assert.equal(formatType(requests["mention-query"]!.returns), "list(object({ id: string, label: string }))");
+    assert.equal(requests["mention-query"]!.description, "People matching the text after @.");
+    assert.equal(formatType(requests["image-upload"]!.type), "object({ file: unknown })");
+    assert.equal(formatType(requests["image-upload"]!.returns), "object({ src: string, width?: integer })");
+    assert.equal(requests["image-upload"]!.description, undefined);
+    // Omitted, the detail is null and the answer unknown; `event` and `unknown` need no attribute form.
+    assert.equal(formatType(requests.extensions!.type), "null");
+    assert.equal(formatType(requests.pick!.returns), "unknown");
+    assert.equal(formatType(requests.pick!.type), "event");
+    // A request is not a prop, and a component without one has no requests.
+    assert.deepEqual(Object.keys(contract.props), []);
+    assert.equal(parseComponent(editor("")).contract.requests, undefined);
+  });
+
+  it("fails a build that names a request like an event, the responder host event, or a framework prop", () => {
+    expectDiagnostic("HC010", editor(`<request name="responder"></request>`));
+    expectDiagnostic("HC010", editor(`<event name="responder"></event>`));
+    expectDiagnostic("HC020", editor(`<event name="ask"></event><request name="ask"></request>`));
+    expectDiagnostic("HC020", editor(`<request name="ask"></request><event name="ask"></event>`));
+    expectDiagnostic("HC020", editor(`<request name="ask"></request><request name="ask"></request>`));
+    expectDiagnostic("HC010", editor(`<request name="mentionQuery"></request>`));
+    expectDiagnostic("HC011", editor(`<prop name="mentionQuery" type="string">Query.</prop><request name="mention-query"></request>`, `<div from:title="$mentionQuery"></div>`));
+    expectDiagnostic("HC013", editor(`<request name="ask" returns="string"><returns type="string"></returns></request>`));
+    expectDiagnostic("HC013", editor(`<request name="ask"><prop name="file" type="unknown">File.</prop></request>`));
+  });
+
+  it("warns and ignores those declarations in the live parser", () => {
+    const warnings: string[] = [];
+    const virtualConsole = new VirtualConsole();
+    virtualConsole.on("warn", (message: string) => warnings.push(message));
+    const { document } = new JSDOM(editor(`<request name="responder"></request><event name="ask"></event><request name="ask"></request>
+      <prop name="mentionQuery" type="string">Query.</prop><request name="mention-query"></request>`, `<div from:title="$mentionQuery"></div>`), { virtualConsole }).window;
+    const definition = parseBrowserComponent(document.querySelector("template")!, "editor.html");
+    // A framework function prop does not exist live, so only the build reports that collision.
+    assert.deepEqual(Object.keys(definition.contract.requests ?? {}), ["mention-query"]);
+    assert.ok(definition.declarations?.some((declaration) => declaration.kind === "event" && declaration.name === "ask"));
+    assert.deepEqual(warnings.map((warning) => warning.split(": ").slice(0, 2).join(": ")), ["editor.html: HC010", "editor.html: HC020"]);
+  });
+});

@@ -136,8 +136,13 @@ const computedGenerated = await generatedFixture("computed-counter", 7_550);
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
 // +5 B: a root renders, at its first connection, what changed after its construction while it waited
 // detached, such as a parent's bound list of objects; until then such a change never rendered.
-const dataGenerated = await generatedFixture("data-read", 7_630);
+// +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
+// does nothing until a component on the page asks.
+const dataGenerated = await generatedFixture("data-read", 7_642);
 const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000);
+// The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
+// responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
+const requestGenerated = await generatedFixture("controller-request", 8_180);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -148,7 +153,7 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000
 const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_250);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
-const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),
@@ -190,6 +195,7 @@ const nativeBuild = {
     keyed: keyedGenerated,
     data: dataGenerated,
     controller: controllerGenerated,
+    request: requestGenerated,
     controllerKeyed: controllerKeyedGenerated,
   },
 } as const;

@@ -9,6 +9,7 @@ import { formatVue } from "./vue-format.js";
 import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
+import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
 import { expressionHelpersSource } from "./vue-lowering.js";
 
 /** Where the shared module sits, relative to the package root, and how a component imports it. */
@@ -25,6 +26,7 @@ import { computed, createTextVNode, defineComponent, Fragment, getCurrentInstanc
 import type { PropType, VNode } from "vue";
 
 ${CONTROLLER_STATE_SOURCE}
+${REQUEST_HOST_SOURCE}
 ${DISPATCH_TARGETS_SOURCE}
 
 interface DataReadOptions {
@@ -197,6 +199,10 @@ export interface ComponentHostOptions {
   /** Values inherited through declared context, which a controller reads. */
   readonly context?: Readonly<Record<string, Readable<unknown>>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  /** Asks one of the component's declared requests. */
+  request?(root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: unknown): Promise<unknown>;
+  /** Each declared request's responder, from its function prop or event form, read when the request arrives. */
+  readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
 }
 
 /** Vue does not promise a \`v-for\` ref array in source order, and the host does. */
@@ -268,6 +274,8 @@ export function useComponentHost(
     else if (entry.type !== "disconnect") {
       entry.target = root.value ?? undefined;
       entry.target?.addEventListener(entry.type, entry.callback as EventListener);
+      // A responder registered after a request went unanswered tells the asker to ask again.
+      if (entry.target !== undefined) relayResponders(entry.target, entry.type);
     }
   };
   const deactivate = (entry: Subscription, disconnecting: boolean): void => {
@@ -302,7 +310,7 @@ export function useComponentHost(
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
     }, options.controllerSource?.definition ?? "<component>"),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
-      const entry: Subscription = { type, callback };
+      const entry: Subscription = { type, callback: type === "connect" || type === "disconnect" || options.request === undefined ? callback : hostListener(type, callback) };
       subscriptions.add(entry);
       if (connected.value) activate(entry);
       return () => { if (subscriptions.delete(entry)) deactivate(entry, false); };
@@ -355,7 +363,24 @@ export function useComponentHost(
       return dispose;
     },
     dispatch,
+    // A component that declares requests also has host.request.
+    ...(options.request === undefined ? {} : {
+      request: (name: string, detail?: unknown, requestOptions?: unknown): Promise<unknown> =>
+        options.request!(root.value as Element, requests.signal(connected.value), name, detail, requestOptions),
+    }),
   };
+  const requests = requestConnection();
+  // Each request's responder listens on the root from its first connection, before the controller runs.
+  const responders = Object.entries(options.responders ?? {});
+  for (const [name, read] of responders) host.on(name, (event) => read()?.(event));
+  // A function prop or event form set later relays for its request, as a late host.on does.
+  if (responders.length > 0) {
+    watch(() => responders.map(([, read]) => read() !== undefined), (now, before) => {
+      const element = root.value;
+      if (element === null || !connected.value) return;
+      now.forEach((set, index) => { if (set && !before[index]) relayResponders(element, responders[index]![0]); });
+    });
+  }
 
   let cleanup: void | (() => void);
   let started: Promise<ControllerModule> | undefined;
@@ -363,10 +388,13 @@ export function useComponentHost(
   let connection = 0;
   let initialized = false;
   let unmounted = false;
+  let releaseController: (() => void) | undefined;
   const disconnect = (): void => {
     if (!connected.value) return;
     connected.value = false;
     connection += 1;
+    requests.end();
+    releaseController?.();
     for (const pause of pauses.values()) pause();
     for (const entry of subscriptions) deactivate(entry, true);
     cleanup?.();
@@ -390,17 +418,21 @@ export function useComponentHost(
     for (const entry of subscriptions) activate(entry);
     if (initialized) return;
     const current = ++connection;
+    // Requests from inside this root wait until the controller has run, or failed to load.
+    const release = releaseController = holdController(root.value!);
     started = loadControllerModule().then(async (loaded) => {
       if (!connected.value || current !== connection || initialized) return loaded;
       initialized = true;
-      const result = await loaded.default(host as never);
+      let invoked: unknown;
+      try { invoked = loaded.default(host as never); } finally { release(); }
+      const result = await invoked;
       if (typeof result === "function") {
         if (!connected.value || current !== connection) result();
         else cleanup = result as () => void;
       }
       return loaded;
     });
-    void started.catch(report);
+    void started.catch(report).finally(release);
   };
   onMounted(() => {
     if (root.value === null) return;

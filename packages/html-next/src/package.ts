@@ -3,7 +3,7 @@ import { dirname, posix, relative, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
-import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
+import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, requestsHelperArtifact, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { parseComponentResource } from "./source-graph.js";
@@ -71,7 +71,7 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     `  ${JSON.stringify(tag)}: () => import(${JSON.stringify(`../${path}`)}), // controller ${index + 1}`
   );
   return [
-    'import { getComponentHost, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
+    'import { getComponentHost, holdController, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     "",
     `export const definitions = ${JSON.stringify(definitions)};`,
     "const controllerImports = {",
@@ -86,19 +86,21 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     "    onConnect(element, definition) {",
     "      const load = controllerImports[definition.contract.tag];",
     "      if (load == null) return;",
+    "      const host = getComponentHost(element);",
+    "      if (initialized.has(host)) return;",
     "      let disposed = false; let cleanup;",
     "      const module = load();",
+    "      // Requests from inside this root wait until the controller has run, or failed to load.",
+    "      const release = holdController(element);",
     "      module.then(value => {",
-    "        if (disposed) return;",
-    "        const host = getComponentHost(element);",
-    "        if (initialized.has(host)) return;",
+    "        if (disposed || initialized.has(host)) return;",
     "        initialized.add(host);",
-    "        return value.default(host);",
+    "        try { return value.default(host); } finally { release(); }",
     "      }).then(value => {",
     "        if (typeof value !== 'function') return;",
     "        if (disposed) value(); else cleanup = value;",
-    "      });",
-    "      const dispose = () => { disposed = true; cleanup?.(); active.delete(element); };",
+    "      }).finally(release);",
+    "      const dispose = () => { disposed = true; release(); cleanup?.(); active.delete(element); };",
     "      active.set(element, dispose);",
     "      return dispose;",
     "    },",
@@ -218,6 +220,11 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const props = vuePropsArtifact();
     if (files.has(props.path)) throw new Error(`Package artifact collision at ${props.path}.`);
     files.set(props.path, props.content);
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueRequests(content))) {
+    const requests = requestsHelperArtifact("vue");
+    if (files.has(requests.path)) throw new Error(`Package artifact collision at ${requests.path}.`);
+    files.set(requests.path, requests.content);
   }
   const publicNames = new Set<string>();
   for (const definition of definitions) {

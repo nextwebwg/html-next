@@ -2,7 +2,7 @@
 
 import { fail } from "./diagnostics.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
-import { lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
+import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent, isPlatformObject } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
@@ -24,6 +24,7 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
+import { ask, hostListener, type RequestChecks, type RequestOptions } from "./requests.js";
 import { DataResource, type DataState } from "./data.js";
 import { propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
@@ -44,6 +45,7 @@ export {
   checkUnknown,
 } from "./type-checks.js";
 export { boundFailures } from "./value-constraints.js";
+export { RequestEvent, respond } from "./requests.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
 export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
@@ -1015,7 +1017,44 @@ export interface GeneratedStateSpec {
   readonly z?: typeof iteratedRef;
   /** `readonlyView`, supplied by a module with computeds or contexts, which the host shows read-only. */
   readonly r?: typeof readonlyView;
+  /** Declared requests' detail and answer checks, which `host.request` applies as the live host does. */
+  readonly q?: Readonly<Record<string, RequestChecks>>;
 }
+
+/** What `host.request` uses to abort the current connection's requests: paused, it aborts them. */
+interface ConnectionOwner extends ReactiveOwner {
+  c?: AbortController | undefined;
+}
+
+type HostOn = (type: string, callback: (event: Event) => void | (() => void)) => () => void;
+
+/**
+ * The host a module that declares requests gives its controller, in place of the one the runtime
+ * built: the same capabilities with `host.request`, the live request steps at the compiled root, and
+ * an `on` whose `responder` listener hears only the relay to that root. Other modules bundle none of it.
+ */
+export function requestHost<Host extends { readonly on: HostOn }>(host: Host, instance: GeneratedInstance & { H?: unknown }): Host & {
+  readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown>;
+} {
+  const { on } = host;
+  return instance.H = Object.freeze(Object.defineProperties({}, {
+    ...Object.getOwnPropertyDescriptors(host),
+    on: { value: ((type, callback) => on(type, hostListener(type, callback) as typeof callback)) satisfies HostOn, enumerable: true },
+    request: { value: (name: string, detail?: unknown, options?: RequestOptions): Promise<unknown> => {
+      let owner = instance.a;
+      if (owner === undefined) {
+        const created: ConnectionOwner = { pause() { created.c?.abort(); created.c = undefined; }, resume() {}, stop() {} };
+        instance.o.push(owner = instance.a = created);
+      }
+      const connection = instance.c() ? (owner.c ??= new AbortController()).signal
+        : AbortSignal.abort(new DOMException("The component is not connected.", "AbortError"));
+      return ask(instance.e, connection, name, detail, options, instance.S.q?.[name], (message) => warnOnce(instance.S, message, message));
+    }, enumerable: true },
+  })) as Host & { readonly request: (name: string, detail?: unknown, options?: RequestOptions) => Promise<unknown> };
+}
+
+/** A plain object or a null-prototype one, as a declared object or record value must be. */
+export { plainObject } from "./type-checks.js";
 
 /** A ref the host reads: an iterated one is what the iteration still renders, in document order. */
 export function iteratedRef(recorded: Record<string, unknown>, key: string): unknown {
@@ -1066,6 +1105,8 @@ export interface GeneratedInstance {
   D?: GeneratedInstance[];
   /** How many of its owners were released since the list was last compacted. */
   x?: number;
+  /** The owner whose pause aborts this connection's requests, made by the first `host.request`. */
+  a?: ConnectionOwner;
   /** Its root values, as attaching set them. */
   readonly v?: unknown[];
   /** `host.data`, set before attaching by a component that declares reads (`dataHandles`). */
@@ -1721,6 +1762,8 @@ export function attachGeneratedController(
         const listener = (event: Event): void => { callback(event); };
         const target: Element = host.root;
         target.addEventListener(type, listener);
+        // A responder registered after a request went unanswered tells the asker to ask again, once a page asks.
+        documentState(target.ownerDocument).relay?.(target, type);
         return () => target.removeEventListener(type, listener);
       });
       return () => { stopped = true; stop(); };
@@ -1734,7 +1777,7 @@ export function attachGeneratedController(
       get: (_target, key) => typeof key === "string" ? [] : undefined,
       has: () => false,
     }),
-    signal: <T>(initialValue: T) => createSignal(initialValue),
+    signal: createSignal,
     computed<T>(compute: () => T) {
       const computed = createComputed(scheduler, compute);
       if (!connected) computed.pause();

@@ -1,0 +1,6 @@
+<template component="controller-request" controller="./controller.js" status="experimental" summary="Request bundle-size fixture.">
+  <defs>
+    <request name="mention-query" type="object({ query: string })" returns="list(object({ id: string, label: string }))">People matching the text after @.</request>
+  </defs>
+  <button type="button"><slot></slot></button>
+</template>

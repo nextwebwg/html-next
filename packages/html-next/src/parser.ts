@@ -12,7 +12,7 @@ import {
   validateLiteralAttributeName,
   validateMvpDomProperty,
 } from "./language.js";
-import { componentName } from "./names.js";
+import { componentName, requestPropName } from "./names.js";
 import { IDENTIFIER, isIdentifier } from "./identifiers.js";
 import { isIgnoredResourceMetadata } from "./resource-metadata.js";
 import type {
@@ -31,7 +31,7 @@ import type {
   TextNode,
 } from "./template.js";
 import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, TypeSyntaxError, type TypeNode } from "./type-system.js";
-import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
+import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue, RequestContract } from "./types.js";
 
 type DiagnosticFail = typeof fail;
 
@@ -820,6 +820,13 @@ function readHandlerStepsAtSource(
   return steps;
 }
 
+/** A request's detail or answer type, from its attribute or expanded form; `fallback` when neither is written. */
+function requestType(element: Element, attribute: string | undefined, expanded: boolean, fallback: TypeNode, source: string,
+  warnInvalidDeclaration: ComponentParserPlatform["warnInvalidDeclaration"]): TypeNode {
+  if (expanded) return normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration));
+  return attribute === undefined ? fallback : normalizeType(parseTypeAttribute(attribute));
+}
+
 function readDeclarations(
   group: Element | undefined,
   contract: ComponentContract,
@@ -827,7 +834,7 @@ function readDeclarations(
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
   onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
   warn?: ComponentParserPlatform["warn"],
-): { declarations: ComponentDeclaration[]; scope: ParseScope } {
+): { declarations: ComponentDeclaration[]; scope: ParseScope; requests?: Record<string, RequestContract> } {
   const declarations: ComponentDeclaration[] = [];
   const roots = new Set(Object.keys(contract.props));
   const writableRoots = new Set<string>();
@@ -845,6 +852,14 @@ function readDeclarations(
   const eventTypes = new Map<string, TypeNode>();
   const names = new Set<string>();
   const eventNames = new Set<string>();
+  const requestElements = new Map<string, Element>();
+  // A build tool fails an interface declaration the proposal forbids; the live parser warns and ignores it.
+  const ignored = new Set<Element>();
+  const reject = (element: Element, code: string, message: string): void => {
+    if (warnInvalidDeclaration === undefined) locatedFail(element)(code, message, source);
+    warn?.({ code, message, source, ...sourceLocation(element), severity: "warning" });
+    ignored.add(element);
+  };
   for (const node of sourceChildren(group)) {
     if (!isElement(node)) continue;
     const element = node;
@@ -852,12 +867,22 @@ function readDeclarations(
       const fail: DiagnosticFail = locatedFail(element);
       elements.push(element);
       const kind = sourceTag(element);
-      if (!/^(?:prop|type|state|computed|data|context|handler|event)$/.test(kind)) {
+      if (!/^(?:prop|type|state|computed|data|context|handler|event|request)$/.test(kind)) {
         fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
       }
       if (kind === "type") continue;
       const name = attr(element, "name") ?? "";
       if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
+      if ((kind === "event" || kind === "request") && name === "responder") {
+        reject(element, "HC010", `<${kind} name="responder"> takes the name of the host event that announces late responders.`);
+        continue;
+      }
+      if (kind === "request") {
+        if (!EVENT_PART_RE.test(name)) fail("HC010", `Request name \`${name}\` must be lowercase kebab case.`, source);
+        if (requestElements.has(name)) fail("HC020", `Request \`${name}\` is declared more than once.`, source);
+        requestElements.set(name, element);
+        continue;
+      }
       if (kind === "event") {
         if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
         eventNames.add(name);
@@ -894,16 +919,46 @@ function readDeclarations(
       invalid?.add(element);
     }
   }
+  for (const [name, element] of requestElements) {
+    try {
+      if (eventNames.has(name)) {
+        reject(element, "HC020", `Event and request \`${name}\` share a name; a component either announces it or asks it.`);
+      } else if (warnInvalidDeclaration === undefined && Object.hasOwn(contract.props, requestPropName(name))) {
+        // A framework component takes the function that answers the request under this prop name.
+        locatedFail(element)("HC011", `Request \`${name}\` and prop \`${requestPropName(name)}\` collide as a framework prop.`, source);
+      }
+    } catch (error) {
+      recoverSource(error, element, source, onDiagnostic);
+      invalid?.add(element);
+    }
+  }
 
   const declarationScope = { roots, writableRoots, handlers, report: onDiagnostic ?? warn };
+  const requests: Record<string, RequestContract> = {};
   for (const element of elements) {
-    if (invalid?.has(element)) continue;
+    if (invalid?.has(element) || ignored.has(element)) continue;
     const scope = { ...declarationScope, at: sourceLocation(element) };
     try {
       const fail: DiagnosticFail = locatedFail(element);
       const kind = sourceTag(element);
       if (kind === "prop" || kind === "type") continue;
       const name = attr(element, "name")!;
+
+      if (kind === "request") {
+        const returns = directElements(element, "returns");
+        const written = attr(element, "returns");
+        if (returns.length > 1 || (returns.length === 1 && written !== undefined)) {
+          fail("HC013", `Request \`${name}\` declares its answer's type once, by \`returns\` or one <returns>.`, source);
+        }
+        const description = textContent(element).trim();
+        requests[name] = {
+          type: requestType(element, attr(element, "type"), directElements(element, "prop").length > 0, NULL_TYPE, source, warnInvalidDeclaration),
+          returns: returns[0] === undefined ? requestType(element, written, false, UNKNOWN_TYPE, source, warnInvalidDeclaration)
+            : requestType(returns[0], undefined, true, UNKNOWN_TYPE, source, warnInvalidDeclaration),
+          ...(description === "" ? {} : { description }),
+        };
+        continue;
+      }
 
       if (kind === "context") {
         const from = attr(element, "from");
@@ -1055,8 +1110,11 @@ function readDeclarations(
       }
     }
   }
-  return { declarations, scope: declarationScope };
+  return { declarations, scope: declarationScope, ...(Object.keys(requests).length === 0 ? {} : { requests }) };
 }
+
+const NULL_TYPE: TypeNode = { kind: "terminal", name: "null" };
+const UNKNOWN_TYPE: TypeNode = { kind: "terminal", name: "unknown" };
 
 function parseAttributes(
   sourceAttributes: readonly SourceAttribute[],
@@ -1712,7 +1770,7 @@ function parseComponentNodesAtSource(
   const delegatedRoot = !platform.isNativeElement(rootName);
 
   const targets = collectTargets(root, source, platform);
-  const contract = readContract(
+  const propContract = readContract(
     wrapper,
     declarationGroup,
     rootName,
@@ -1724,7 +1782,9 @@ function parseComponentNodesAtSource(
     platform.onDiagnostic,
   );
 
-  const { declarations, scope: declarationScope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source, platform.warnInvalidDeclaration, platform.onDiagnostic, platform.warn);
+  const { declarations, scope: declarationScope, requests } = readDeclarations(legacyProps ? undefined : declarationGroup, propContract, source, platform.warnInvalidDeclaration, platform.onDiagnostic, platform.warn);
+  // The same object, so it keeps its diagnostic location; the definition freezes it below.
+  const contract: ComponentContract = requests === undefined ? propContract : Object.assign(propContract, { requests });
   let scope = declarationScope;
   if (legacyProps && platform.onDiagnostic !== undefined && declarationGroup !== undefined) {
     const roots = new Set(scope.roots);
