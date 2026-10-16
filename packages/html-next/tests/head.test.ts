@@ -214,6 +214,21 @@ describe("server output of head declarations", () => {
       '<link rel="modulepreload" href="https://maps.example/sdk.js" data-component-head="">');
     assert.doesNotMatch(rendered.html, /<script/);
   });
+
+  it("writes a same-origin script's preload as a path, and another origin's as its URL", async () => {
+    const { renderComponents } = await import("../src/server.js");
+    const page = parseComponent(`<template component="x-page"><defs>
+      <script src="/kit/widget.js?v=2"></script><script src="./local.js" type="module"></script>
+      <script src="https://js.example/sdk.js"></script><link rel="preconnect" href="/api/">
+    </defs><main>Page</main></template>`, "file:///app/x-page.html");
+    for (const url of [undefined, "http://localhost/docs/"]) {
+      const rendered = await renderComponents("<x-page></x-page>", { definitions: [page], ...(url === undefined ? {} : { url }) });
+      assert.equal(rendered.head, '<link rel="preconnect" href="/api/" data-component-head="">' +
+        '<link rel="preload" as="script" href="/kit/widget.js?v=2" data-component-head="">' +
+        `<link rel="modulepreload" href="${url === undefined ? "/local.js" : "/docs/local.js"}" data-component-head="">` +
+        '<link rel="preload" as="script" href="https://js.example/sdk.js" data-component-head="">');
+    }
+  });
 });
 
 // jsdom loads no scripts, so these tests fire the inserted element's load and error events themselves.

@@ -554,7 +554,9 @@ export function writeServerHead(document: Document, eager: readonly DeclaredScri
     const link = document.createElement("link");
     link.setAttribute("rel", rel);
     if (!module) link.setAttribute("as", "script");
-    link.setAttribute("href", url);
+    // A same-origin script's preload is a path, so it is the same URL wherever the page is served.
+    const target = new URL(url);
+    link.setAttribute("href", target.origin === new URL(document.baseURI).origin ? target.pathname + target.search + target.hash : url);
     for (const name of ["crossorigin", "integrity", "referrerpolicy", "fetchpriority"] as const) {
       const value = declaration[name];
       if (value !== undefined) link.setAttribute(name, value);
