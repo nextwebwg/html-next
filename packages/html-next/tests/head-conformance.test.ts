@@ -36,7 +36,7 @@ globalThis.alert = () => { globalThis.alerted = true; };
 globalThis.app = {
   mount() {
     mount().innerHTML = '<docs-layout><page-a></page-a></docs-layout><img-card></img-card><img-card></img-card>' +
-      '<x-product></x-product><vendor-widget></vendor-widget><cdn-badge></cdn-badge>';
+      '<x-product></x-product><x-product></x-product><vendor-widget></vendor-widget><cdn-badge></cdn-badge>';
   },
   section(text) { HtmlNextLive.updateComponentProps(root("page-a"), { section: text }); },
   note(shown) { if (shown) root("page-a").append(document.createElement("x-note")); else root("x-note").remove(); },
@@ -154,9 +154,13 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
         <handler name="loaded"><set name="loads" expr:value="$loads + 1"></set></handler>
         <title>Checkout · Acme</title><link rel="preconnect" href="https://js.example">
         <script name="sdk" src="https://js.example/sdk.js" crossorigin="anonymous" on:load="loaded"></script>
-      </defs><main from:data-loads="$loads"><p>Pay</p></main></template>`;
+      </defs><main from:data-loads="$loads"><p>Pay</p></main></template>
+      <template component="x-product"><defs>
+        <prop name="name" type="string" default="Anvil">The name.</prop>
+        <script type="application/ld+json" from:value="{ name: $name }"></script>
+      </defs><section></section></template>`;
       const files = { "checkout.html": checkout };
-      const rendered = await renderComponents('<page-checkout id="checkout"></page-checkout>', {
+      const rendered = await renderComponents('<page-checkout id="checkout"></page-checkout><x-product id="product"></x-product><x-product></x-product>', {
         definitions: parseComponentResource(checkout, "https://app.example/checkout.html").definitions,
         head: "<title>Acme</title>", url: "https://app.example/",
       });
@@ -186,9 +190,12 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
           const kept = globalThis as unknown as Record<string, unknown>;
           kept.serverTitle = document.querySelector("title");
           kept.authoredTitle = document.querySelector<HTMLTemplateElement>("template[data-component-head]")?.content.firstElementChild;
-          return { title: document.title, preloads: document.querySelectorAll('link[rel="preload"]').length, scripts: document.scripts.length };
+          kept.serverJson = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+          return { title: document.title, preloads: document.querySelectorAll('link[rel="preload"]').length,
+            scripts: document.querySelectorAll('script:not([type="application/ld+json"])').length, json: (kept.serverJson as Element[]).map((block) => block.textContent) };
         });
-        assert.deepEqual(before, { title: "Checkout · Acme", preloads: 1, scripts: 0 });
+        // Two instances with identical JSON-LD write two blocks.
+        assert.deepEqual(before, { title: "Checkout · Acme", preloads: 1, scripts: 0, json: ['{"name":"Anvil"}', '{"name":"Anvil"}'] });
         await page.addScriptTag({ path: bundle });
         await page.evaluate(() => (window as unknown as { HtmlNextLive: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLive.startBrowserComponents());
         await page.waitForFunction(() => document.getElementById("checkout")?.getAttribute("data-loads") === "1");
@@ -202,6 +209,16 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
             loads: document.getElementById("checkout")?.getAttribute("data-loads") ?? null };
         });
         assert.deepEqual(await read(), { sameTitle: true, title: "Checkout · Acme", templates: 0, preload: 1, scripts: 1, runs: 1, loads: "1" });
+        // Hydration adopts each instance's block; a value change updates that instance's block in place.
+        const json = await page.evaluate(async () => {
+          const server = (globalThis as unknown as { serverJson: Element[] }).serverJson;
+          const same = () => { const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]')); return blocks.length === server.length && blocks.every((block, index) => block === server[index]); };
+          const adopted = same();
+          (window as unknown as { HtmlNextLive: { updateComponentProps(root: Element, props: object): void } }).HtmlNextLive.updateComponentProps(document.getElementById("product")!, { name: "Hammer" });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return { adopted, same: same(), text: server.map((block) => block.textContent) };
+        });
+        assert.deepEqual(json, { adopted: true, same: true, text: ['{"name":"Hammer"}', '{"name":"Anvil"}'] });
         // A new connection runs on:load again without inserting or running the script again.
         await page.evaluate(async () => {
           const root = document.getElementById("checkout")!;

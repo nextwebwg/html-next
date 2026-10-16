@@ -151,13 +151,14 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 7_080
 // which ship with the class every request dispatches.
 const requestGenerated = await generatedFixture("controller-request", 8_780);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
-// declarations; a title and two metas (+2.0 KB: the head manager's keys, precedence, set-aside and
-// restore, and one reconciliation per update); bound JSON-LD (+0.15 KB, its serialization); a lazy
-// declared script (+2.0 KB: the script entries, status, `on:load` and lazy loading).
+// declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
+// restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
+// JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
+// `on:load` and lazy loading).
 const headNoneGenerated = await generatedFixture("head-none", 10_230);
-const headStaticGenerated = await generatedFixture("head-static", 12_230);
-const headJsonGenerated = await generatedFixture("head-json", 12_380);
-const headGenerated = await generatedFixture("head-script", 14_380);
+const headStaticGenerated = await generatedFixture("head-static", 12_355);
+const headJsonGenerated = await generatedFixture("head-json", 12_505);
+const headGenerated = await generatedFixture("head-script", 14_505);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

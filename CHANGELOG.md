@@ -21,6 +21,10 @@ To migrate a page or layout:
 5. A helper component that declared a title or description now sets it while it is on the page, as the deepest component; remove head content the page should own.
 6. A page compiler (`pages.compile`) writes the page's head content and `hk:` settings into the component's `<defs>`.
 
+### Changed
+
+- Each JSON-LD declaration of each connected instance is its own block in `document.head`, in the live runtime, compiled output and converted Vue, React and Svelte components. Two instances with identical JSON-LD write two blocks; a bound value change updates its block's text in place, as the same node in the same position; `null` removes the block, and a later value inserts it again. Server rendering writes the blocks in tree order of their instances, then declared order, and hydration adopts each as its instance's and declaration's own. Tests hold this live and compiled, and through server rendering and hydration, in Chromium, Firefox and WebKit. The head manager grows by 113 B gzip: `pnpm measure:runtime`'s `head-static` fixture is 12,327 B, and its ceilings for `head-static`, `head-json` and `head-script` are 12,355, 12,505 and 14,505 B.
+
 ### Fixed
 
 - Server rendering writes an eager declared script's preload `href` as a path, such as `/kit/widget.js`, when the script has the render URL's origin, and as its absolute URL only for another origin. A page rendered at one origin, such as HTMLKit's default `http://localhost`, and served from another preloads from the served origin, and the script entry the client inserts there owns that preload, under a `script-src 'self'` policy too. `renderComponents` and `writeCollectedHead` both write it. A test renders a compiled component at `http://localhost` and hydrates it at another origin under that policy, in Chromium, Firefox and WebKit.

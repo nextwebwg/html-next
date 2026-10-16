@@ -37,6 +37,10 @@ interface HeadManager {
   readonly roots: WeakSet<Element>;
   /** Preload links that declared scripts own; reconciliation never removes them. */
   readonly preloads: Set<string>;
+  /** Each connected instance's JSON-LD elements, by declaration: never shared, each its own element. */
+  owned: Map<Contributor, Element[]>;
+  /** Server output's JSON-LD blocks, in the order it wrote them, for the first reconciliation to adopt. */
+  adoptable: Element[];
   scheduled: boolean;
   connections: number;
 }
@@ -49,9 +53,9 @@ const documentRecord = (document: Document): DocumentRecord =>
 /**
  * The key of a head element or an entry, and the top-level competing key of its family. A shared
  * key has no family. Keys are prefixed by kind: `t` title, `c` canonical, `n` meta name, `p` meta
- * property, `l` other links, `j` JSON-LD.
+ * property, `l` other links. A JSON-LD block has no key: it belongs to one declaration of one instance.
  */
-function keyOf(document: Document, tag: string, read: (name: string) => string | null, text: () => string): readonly [string, string?] | undefined {
+function keyOf(document: Document, tag: string, read: (name: string) => string | null): readonly [string, string?] | undefined {
   if (tag === "title") return ["t", "t"];
   if (tag === "meta") {
     const name = read("name");
@@ -73,16 +77,16 @@ function keyOf(document: Document, tag: string, read: (name: string) => string |
     try { resolved = new URL(href, document.baseURI).href; } catch { /* kept as written */ }
     return [`l${rel} ${resolved}`];
   }
-  if (tag === "script" && read("type")?.trim().toLowerCase() === "application/ld+json") return [`j${text()}`];
   return undefined;
 }
 
+
 function elementKey(element: Element): readonly [string, string?] | undefined {
-  return keyOf(element.ownerDocument, element.localName, (name) => element.getAttribute(name), () => element.textContent ?? "");
+  return keyOf(element.ownerDocument, element.localName, (name) => element.getAttribute(name));
 }
 
-function entryKey(document: Document, [tag, attributes, text]: HeadEntry): readonly [string, string?] | undefined {
-  return keyOf(document, tag, (name) => attributes.find(([attribute]) => attribute === name)?.[1] ?? null, () => text ?? "");
+function entryKey(document: Document, [tag, attributes]: HeadEntry): readonly [string, string?] | undefined {
+  return keyOf(document, tag, (name) => attributes.find(([attribute]) => attribute === name)?.[1] ?? null);
 }
 
 function create(document: Document, [tag, attributes, text]: HeadEntry): Element {
@@ -106,7 +110,10 @@ function managerFor(document: Document): HeadManager {
   const record = documentRecord(document);
   if (record.head !== undefined) return record.head;
   const manager: HeadManager = { contributors: new Set(), setAside: new Map(), roots: new WeakSet(),
-    preloads: new Set(), scheduled: false, connections: 0 };
+    preloads: new Set(), owned: new Map(), scheduled: false, connections: 0,
+    // Server output wrote each JSON-LD declaration's block in tree order of its instances, then
+    // declared order; hydration reproduces that tree, so position identifies instance and declaration.
+    adoptable: Array.from(document.head?.querySelectorAll(`script[${HEAD_MARKER}][type="application/ld+json"]`) ?? []) };
   record.head = manager;
   // Server output carries the authored elements a family set aside, to restore as the same nodes.
   for (const template of Array.from(document.head?.querySelectorAll(`template[${HEAD_MARKER}="set-aside"]`) ?? [])) {
@@ -220,7 +227,28 @@ function reconcile(document: Document, manager: HeadManager): void {
     }
   }
 
-  // 6. New elements in tree order of their instances, then declared order.
+  // 6. JSON-LD: each declaration of each connected instance has its own element, which a value change
+  // updates in place and a null value removes. The first reconciliation adopts server output's blocks.
+  const owned = new Map<Contributor, Element[]>();
+  for (const [contributor, tree] of treeOrder) {
+    const before = manager.owned.get(contributor) ?? [];
+    const after: Element[] = [];
+    contributor.entries.forEach((entry, declared) => {
+      // Head entries' only scripts are JSON-LD blocks; declared scripts are entries of their own.
+      if (entry?.[0] !== "script") return;
+      let element = before[declared] ?? manager.adoptable.shift();
+      if (element === undefined) appended.push([tree, declared, element = create(document, entry)]);
+      else patch(element, entry);
+      after[declared] = element;
+      delete before[declared];
+    });
+    owned.set(contributor, after);
+  }
+  for (const element of [...Array.from(manager.owned.values()).flat(), ...manager.adoptable]) element.remove();
+  manager.owned = owned;
+  manager.adoptable = [];
+
+  // 7. New elements in tree order of their instances, then declared order.
   appended.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   for (const [, , element] of appended) head.append(element);
 }
