@@ -651,7 +651,7 @@ Some entries affect the whole page, its identity for search engines and sharing,
 
 A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its page-wide head entries are ignored with an `HL011` warning; its other head declarations apply.
 
-A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations run in the browser runtime and in server rendering; Vite and converter output report them with `HT030`.
+A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations behave the same in the browser runtime, Vite output, and converted Vue, React and Svelte components, which share one head manager on the page.
 
 ### Load a third-party script {#declared-scripts}
 
@@ -699,6 +699,49 @@ export default function controller(host) {
 - Under a nonce-based policy, the runtime puts the nonce of the `<link rel="component">` or inline `<template component>` that imported the definition on the scripts it inserts. Under `'strict-dynamic'` or an origin allowlist such as `script-src 'self' https://js.stripe.com`, nothing more is needed.
 
 Server rendering with `renderComponents(html, { definitions, head })` returns the page's `head` as well: the application's own head elements, the components' contributions reconciled into it, each replaced element in a `<template data-component-head="set-aside">`, and a `<link rel="preload" as="script">`, or `modulepreload`, for each eager script. It never writes an executing `<script>`. Hydration adopts those elements, restores the set-aside ones as the same nodes when no component sets them, and inserts each eager script once, served from its preload.
+
+Converted components render the head on the server through their framework. Each target's `head` helper collects the head declarations the render reached, and `writeCollectedHead` writes them into a document holding the application's own head, with the same set-aside templates and preload links:
+
+::: framework-vue
+
+```ts title="server.ts"
+import { renderToString } from "@vue/server-renderer";
+import { createHeadCollector, HEAD_CONTEXT, writeCollectedHead } from "./generated/vue/head";
+
+const collector = createHeadCollector();
+const body = await renderToString(app, { [HEAD_CONTEXT]: collector });
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
+::: framework-react
+
+```tsx title="server.tsx"
+import { renderToString } from "react-dom/server";
+import { collectHead, createHeadCollector, writeCollectedHead } from "./generated/react/head";
+
+const collector = createHeadCollector();
+const body = collectHead(collector, () => renderToString(<App />));
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
+::: framework-svelte
+
+```ts title="server.ts"
+import { render } from "svelte/server";
+import { createHeadCollector, HEAD_CONTEXT, writeCollectedHead } from "./generated/svelte/head.svelte";
+
+const collector = createHeadCollector();
+const { body } = render(App, { context: new Map([[HEAD_CONTEXT, collector]]) });
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
+Serialize `document.head` into the page. The client hydrates as usual and adopts the head the server wrote.
 
 ## When you need more
 

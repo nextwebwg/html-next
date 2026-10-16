@@ -171,4 +171,15 @@ prop's fails conversion (`HC011`). Such a component imports `requests.ts`, the r
 every converted host shares with the live runtime and compiled output through the document. See
 [requests](https://nextwebwg.org/declarative-components/javascript#framework-requests).
 
+A component with [head declarations](https://nextwebwg.org/declarative-components/components#head-declarations)
+imports its target's `head` helper (`vue/head.ts`, `react/head.ts` or `svelte/head.svelte.ts`):
+the head manager every HTML Next bundle on a page shares through the document, with the
+framework's adapter. Its title, metadata, links and JSON-LD join the document head while the
+component's root is connected, a declared script's status is the component's own state, and
+`on:load` and `on:error` call its handlers once per connection. For server rendering, the helper's
+`createHeadCollector()` gathers what a render reached (through Vue's render context, Svelte's
+`render` context, or React's `collectHead`), and `writeCollectedHead(document, collector)` writes it
+into the application's own head, which hydration adopts. A component installed from a package is
+an imported component, so its page-wide head entries are left out.
+
 Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).

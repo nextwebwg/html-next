@@ -128,7 +128,9 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 const staticGenerated = await generatedFixture("static-card", 7_000);
 // The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
-const reactiveGenerated = await generatedFixture("reactive-counter", 7_225);
+// +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
+// which the bundle does not include.
+const reactiveGenerated = await generatedFixture("reactive-counter", 7_230);
 const propGenerated = await generatedFixture("prop-button", 11_450);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 const computedGenerated = await generatedFixture("computed-counter", 7_550);
@@ -143,6 +145,9 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 const requestGenerated = await generatedFixture("controller-request", 8_180);
+// A page with a prop, a controller, a title, metadata, a preconnect and a lazy script: the prop boundary
+// (~4.4 KB, as prop-button) and the head manager with declared scripts (head.ts, ~3.7 KB gzip).
+const headGenerated = await generatedFixture("head-script", 15_200);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -154,7 +159,7 @@ const requestGenerated = await generatedFixture("controller-request", 8_180);
 const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_267);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
-const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated];
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),
@@ -197,6 +202,7 @@ const nativeBuild = {
     data: dataGenerated,
     controller: controllerGenerated,
     request: requestGenerated,
+    head: headGenerated,
     controllerKeyed: controllerKeyedGenerated,
   },
 } as const;

@@ -38,3 +38,14 @@ if (process.argv.includes("--check")) {
     throw new Error("Requests source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
   }
 } else await writeFile(requestsOutput, requestsContent);
+
+// Converted framework components that declare head content carry the head manager as their own helper.
+const head = await readFile(new URL("../src/head.ts", import.meta.url), "utf8");
+const headOutput = new URL("../src/generated/head-source.ts", import.meta.url);
+const headContent = "/** Generated from src/head.ts by scripts/generate-literal-source.ts. */\nexport const HEAD_SOURCE = "
+  + JSON.stringify(head) + ";\n";
+if (process.argv.includes("--check")) {
+  if (await readFile(headOutput, "utf8").catch(() => "") !== headContent) {
+    throw new Error("Head source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
+  }
+} else await writeFile(headOutput, headContent);

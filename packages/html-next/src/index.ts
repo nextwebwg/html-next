@@ -13,6 +13,8 @@ export {
   importsVueControl,
   importsVueProps,
   importsVueRequests,
+  importsVueHead,
+  headHelperArtifact,
   requestsHelperArtifact,
   vueHostArtifact,
   vueHtmlArtifact,

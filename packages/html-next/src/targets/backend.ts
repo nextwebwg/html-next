@@ -3,7 +3,6 @@ import type {
   EventDeclaration,
   SlotContract,
 } from "../template.js";
-import { fail } from "../diagnostics.js";
 import { requestPropName } from "../names.js";
 import type { PropContract, RequestContract } from "../types.js";
 import { declarationTypeNode, parseTypeExpression, typeScriptType } from "../type-system.js";
@@ -55,12 +54,6 @@ export function declarationTypeSource(source: string): string {
   } catch {
     return "unknown";
   }
-}
-
-/** Head declarations run in the live runtime; compiled and converted output reports them. */
-export function rejectHeadDeclarations(definition: ComponentDefinition, target: string): void {
-  if (definition.head === undefined && definition.scripts === undefined) return;
-  fail("HT030", `${target} output of <${definition.contract.tag}> does not compile head declarations; load it with the live runtime.`, definition.source.file);
 }
 
 /** Shared public-surface model consumed by every target emitter. */

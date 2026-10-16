@@ -19,6 +19,8 @@ interface Contributor {
   readonly entries: readonly (HeadEntry | undefined)[];
   /** When it connected: between instances at one depth, the later one wins. */
   readonly order: number;
+  /** Server rendering without a document tree gives the depth itself; its order is then tree order. */
+  readonly depth?: number;
 }
 
 interface HeadManager {
@@ -132,11 +134,11 @@ function reconcile(document: Document, manager: HeadManager): void {
   const head = document.head;
   if (head === null) return;
   const contributors = Array.from(manager.contributors, (contributor) => ({ contributor, root: contributor.root() }))
-    .filter((item): item is { contributor: Contributor; root: Element } => item.root !== undefined);
+    .filter((item) => item.root !== undefined || item.contributor.depth !== undefined);
   // Tree order of instances orders new elements; precedence picks each competing family's winner.
-  const treeOrder = new Map(contributors.toSorted((a, b) => a.root === b.root ? 0
-    : a.root.compareDocumentPosition(b.root) & 4 /* FOLLOWING */ ? -1 : 1).map((item, index) => [item.contributor, index]));
-  const depths = new Map(contributors.map((item) => [item.contributor, depthOf(item.root, manager)]));
+  const treeOrder = new Map(contributors.toSorted((a, b) => a.root === undefined || b.root === undefined ? a.contributor.order - b.contributor.order
+    : a.root === b.root ? 0 : a.root.compareDocumentPosition(b.root) & 4 /* FOLLOWING */ ? -1 : 1).map((item, index) => [item.contributor, index]));
+  const depths = new Map(contributors.map((item) => [item.contributor, item.contributor.depth ?? depthOf(item.root!, manager)]));
   const ranked = contributors.map((item) => item.contributor)
     .sort((a, b) => depths.get(b)! - depths.get(a)! || b.order - a.order);
 
@@ -559,4 +561,80 @@ export function writeServerHead(document: Document, eager: readonly DeclaredScri
     link.setAttribute(HEAD_MARKER, "");
     document.head.append(link);
   }
+}
+
+/**
+ * A framework's server rendering, which has no document tree: each head-declaring component adds its
+ * evaluated declarations and eager scripts, in render order, with its depth among them.
+ */
+export interface HeadCollector {
+  readonly contributions: [depth: number, entries: readonly (HeadEntry | undefined)[], eager: readonly DeclaredScript[]][];
+}
+
+export function createHeadCollector(): HeadCollector {
+  return { contributions: [] };
+}
+
+/**
+ * Writes what a framework's server rendering collected into `document`, which holds the application's
+ * own head: the same reconciliation, set-aside templates and preload links as `renderComponents`.
+ */
+export function writeCollectedHead(document: Document, collector: HeadCollector): void {
+  const manager = managerFor(document);
+  for (const [depth, entries] of collector.contributions) {
+    manager.contributors.add({ root: () => undefined, entries, order: ++manager.connections, depth });
+  }
+  manager.scheduled = true;
+  writeServerHead(document, collector.contributions.flatMap(([, , eager]) => eager));
+}
+
+/** A declared script as a compiled or converted component passes it: the script, its name, and its handlers. */
+export type InstanceScript = readonly [declaration: DeclaredScript, name: string | undefined,
+  run: (loaded: boolean, event: Event) => void, changed: (status: ScriptStatus) => void];
+
+/** One compiled or converted component instance's head declarations and declared scripts. */
+export interface HeadInstance {
+  /** The instance connected to a document. */
+  connect(): void;
+  disconnect(): void;
+  /** The declarations' evaluated elements, in declared order; the head reconciles when they change. */
+  update(entries: readonly (HeadEntry | undefined)[]): void;
+  /** Named scripts, for `host.scripts`. */
+  readonly scripts: Readonly<Record<string, ScriptHandle>>;
+}
+
+export function headInstance(root: () => Element | undefined, scripts: readonly InstanceScript[] = []): HeadInstance {
+  const entries: (HeadEntry | undefined)[] = [];
+  let text = "[]";
+  let leave: (() => void) | undefined;
+  let handles: ScriptHandle[] | undefined;
+  const named: Record<string, ScriptHandle> = {};
+  const document = (): Document => root()?.ownerDocument ?? globalThis.document;
+  // Handles bind to the document's scripts on first use, which is the first connection or `host.scripts`.
+  const handlesFor = (): ScriptHandle[] => handles ??= scripts.map(([declaration, name, run, changed]) => {
+    const handle: ScriptHandle = declareScript(document(), declaration, root, run, () => changed(handle.status()));
+    if (name !== undefined) named[name] = handle;
+    return handle;
+  });
+  const scriptHandles = new Proxy(named, { get: (target, key) => (handlesFor(), Reflect.get(target, key)), has: (target, key) => (handlesFor(), Reflect.has(target, key)) });
+  return {
+    connect() {
+      if (leave !== undefined) return;
+      leave = joinHead(document(), root, entries);
+      for (const handle of handlesFor()) handle.connect();
+    },
+    disconnect() {
+      leave?.();
+      leave = undefined;
+      for (const handle of handles ?? []) handle.disconnect();
+    },
+    update(next) {
+      const nextText = JSON.stringify(next);
+      if (nextText === text) return;
+      text = nextText;
+      entries.splice(0, entries.length, ...next);
+      if (leave !== undefined) scheduleHead(document());
+    },
+    scripts: scriptHandles,
+  };
 }

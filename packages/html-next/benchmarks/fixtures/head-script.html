@@ -1,0 +1,10 @@
+<template component="head-script" controller="./controller.js" status="experimental" summary="Head declaration bundle-size fixture.">
+  <defs>
+    <prop name="label" type="string" default="Checkout">The page's name.</prop>
+    <title>{$label} · Acme</title>
+    <meta name="description" from:content="$label">
+    <link rel="preconnect" href="https://js.stripe.com">
+    <script name="stripe" src="https://js.stripe.com/v3/" loading="lazy"></script>
+  </defs>
+  <form from:aria-busy="$stripe.pending"><slot></slot></form>
+</template>

@@ -3,7 +3,7 @@ import { rootArms } from "../template.js";
 import type { PropContract } from "../types.js";
 import { getDomInterface } from "../platform.js";
 import { dependentPropTypeSource, selectorGenerics } from "./shared.js";
-import { rejectHeadDeclarations, targetComponent } from "./backend.js";
+import { targetComponent } from "./backend.js";
 import { blockPlan, emitBlocks } from "./vanilla-blocks.js";
 import type { Invoked } from "../generate.js";
 
@@ -30,7 +30,6 @@ export function generateVanilla(
   hydrate = false,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
-  rejectHeadDeclarations(definition, "Vanilla");
   const target = targetComponent(definition);
   const props = target.props.map(({ name, contract }) => [name, contract] as const);
   const generics = selectorGenerics(contract.props);

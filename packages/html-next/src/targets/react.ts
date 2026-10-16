@@ -12,7 +12,8 @@ import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js"
 import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { rejectHeadDeclarations, targetComponent } from "./backend.js";
+import { targetComponent } from "./backend.js";
+import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
@@ -100,6 +101,7 @@ export interface ReactConversionOptions {
   readonly renderSpecifier?: string;
   /** The request steps, which a component that declares requests imports. */
   readonly requestsSpecifier?: string;
+  readonly headSpecifier?: string;
   readonly guardNestedDepth?: boolean;
   readonly controllerSpecifier?: string;
 }
@@ -107,7 +109,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests")[];
+  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
 }
 
 interface RootAttributes {
@@ -811,11 +813,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
 
 /** React component source and its feature-specific companion artifacts. */
 export function generateReactOutput(definition: ComponentDefinition, version: string, options: ReactConversionOptions = {}): ReactConversionOutput {
-  rejectHeadDeclarations(definition, "React");
   definition = condenseWhitespace(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
-  const usesHost = usesController || definition.lifecycle !== undefined;
+  const headed = declaresHead(definition);
+  // The head helper connects through the host's lifecycle.
+  const usesHost = usesController || definition.lifecycle !== undefined || headed;
   /** Handlers whose steps read `$event`, filled as their functions are written below. */
   const handlerTakesEvent = new Set<HandlerDeclaration>();
   const declarations = definition.declarations ?? [];
@@ -843,6 +846,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     const name = declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name;
     return [name, allocate(identifierFor(name), declaration.kind === "state" ? "State" : declaration.kind === "computed" ? "Computed" : declaration.kind === "data" ? "Data" : "Context")] as const;
   }));
+  // A named declared script's status is the component's own state, read as a <data> read's is.
+  const scriptNames = new Map((definition.scripts ?? []).flatMap((script) => script.name === undefined ? []
+    : [[script.name, allocate(identifierFor(script.name), "Script")] as const]));
+  const scriptSetters = new Map([...scriptNames].map(([name, variable]) => [name, allocate(`set${pascal(variable)}`)] as const));
   const stateSetters = new Map(states.map((state) => [state.name, allocate(`set${pascal(valueNames.get(state.name)!)}`)] as const));
   const stateGetters = new Map(states.map((state) => [state.name, allocate(`get${pascal(valueNames.get(state.name)!)}`)] as const));
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
@@ -896,6 +903,14 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       { name: "value", type: { kind: "union", members: [payload, { kind: "terminal", name: "null" }] }, optional: false },
       { name: "error", type: UNKNOWN.type, optional: false },
       { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
+    ] }, nullable: false });
+  }
+  for (const [name, variable] of scriptNames) {
+    code.set(name, variable);
+    types.set(name, { type: { kind: "object", open: false, fields: [
+      { name: "pending", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "error", type: UNKNOWN.type, optional: false },
     ] }, nullable: false });
   }
   for (const context of contexts) {
@@ -972,7 +987,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const contextMarkup = states.reduceRight((content, state) =>
     `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
-  const body = [
+  const HEAD_IMPORTS = "/* html-next head imports */";
+  const written = [
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
     'import React from "react";',
     'import type { ReactNode } from "react";',
@@ -988,7 +1004,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ].join(", ")} } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(data.length === 0 ? [] : [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data")};`]),
     ...(usesHtml ? [`import { SanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`] : []),
-    ...(usesHost ? [`import { ${[...usesController ? ["useComponentHost"] : [], ...definition.lifecycle === undefined ? [] : ["useLifecycle"]].join(", ")} } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
+    ...(usesController || definition.lifecycle !== undefined ? [`import { ${[...usesController ? ["useComponentHost"] : [], ...definition.lifecycle === undefined ? [] : ["useLifecycle"]].join(", ")} } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
+    ...(!headed ? [] : [HEAD_IMPORTS]),
     ...(usesContext ? [`import { componentContext } from ${quote(options.contextSpecifier ?? "./context")};`] : []),
     ...(target.requests.length === 0 ? [] : [
       ...(usesController ? [
@@ -1323,6 +1340,18 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }
       return `  const ${controllerComputedNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>((): ${type} => (${expression}) as any, false);`;
     }) : []),
+    ...(!headed ? [] : [
+      ...[...scriptNames].map(([name, variable]) => `  const [${variable}, ${scriptSetters.get(name)!}] = React.useState<ScriptStatus>({ pending: false, ok: false, error: null });`),
+      "  const headKept = React.useRef<unknown[]>([]).current;",
+      `  const [headScripts, headDepth] = useHead(rootRef, ${headEntriesSource(definition, (expression) => {
+        const guard = declaredReferenceGuard(expression, scope, definition, undefined, lowering);
+        const value = lowering.value(expression.ast, scope);
+        return guard === undefined ? value : `((${guard}) ? ${value} : Symbol.for("html-next.invalid-result"))`;
+      })}, ${headScriptsSource(definition, (name, event) => {
+        const handler = handlers.find((candidate) => candidate.name === name)!;
+        return `${handlerNames.get(name)!}(${handlerTakesEvent.has(handler) ? event : ""})`;
+      }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptSetters.get(name)!}(${value})` }))});`,
+    ]),
     ...(usesController ? [
       `  useComponentHost(() => import(${quote(definition.controller!)}), {`,
       `    root: rootRef, definition: ${quote(definition.source.file)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
@@ -1339,6 +1368,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => ${valueNames.get(value.as ?? value.name)!}`),
       ].join(", ")} },`,
       `    data: { ${data.map((value) => `${propKey(value.name)}: () => ${valueNames.get(value.name)!}`).join(", ")} },`,
+      ...(scriptNames.size === 0 ? [] : ["    scripts: headScripts,"]),
       ...(checksControllerWrites ? [`    acceptsState: (name, keys, value) => acceptsControllerWrite(value, controllerStateTypes[name as keyof typeof controllerStateTypes], keys),`] : []),
       `    refs: ${usesRefs ? "refElements.current" : "new Map<string, ReadonlySet<Element>>()"},`,
       ...(target.requests.length === 0 ? [] : [
@@ -1354,7 +1384,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       // A handler that reads $event gets a connection event, as a controller's host.on callback does.
       return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
-    `  return (${componentMarkup});`,
+    // Server rendering reads how many head-declaring components enclose each one from this context.
+    `  return (${headed ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",
     ...(usesScopedAttachments ? [
       "",
@@ -1399,6 +1430,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     "",
   ].join("\n");
+  // The head helper's exports this component names.
+  const headSpecifier = quote(options.headSpecifier ?? "./head");
+  const body = !headed ? written : written.replace(HEAD_IMPORTS, [
+    `import { ${["HeadDepth", "headAttribute", "headAttributes", "headJson", "headText", "useHead"].filter((name) => new RegExp(`\\b${name}\\b`).test(written)).join(", ")} } from ${headSpecifier};`,
+    `import type { ${["DeclaredScript", "HeadEntry", "HeadScript", "ScriptStatus"].filter((name) => new RegExp(`\\b${name}\\b`).test(written)).join(", ")} } from ${headSpecifier};`,
+  ].join("\n"));
   // The shared module's helpers this component calls: the expression helpers its lowering used,
   // and the rendering components and functions its markup and handlers name.
   const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
@@ -1418,6 +1455,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(nestedDepthLimit === undefined ? [] : ["depth" as const]),
       ...(rendered.length === 0 ? [] : ["render" as const]),
       ...(target.requests.length === 0 ? [] : ["requests" as const]),
+      ...(headed ? ["head" as const] : []),
     ],
   };
 }
