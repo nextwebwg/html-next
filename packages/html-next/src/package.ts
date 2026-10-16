@@ -178,13 +178,17 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
           moduleDependencies,
         );
       }
-      const generated = config.sourceOnly ? [] : generateComponent(generatedDefinition(definition, controller));
-      for (const artifact of generated) {
-        if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
-        files.set(artifact.path, artifact.content);
-      }
     }
     files.set(source, { copy: sourcePath });
+  }
+  // Every definition is read first, so each component's invocations are typed by the contracts it invokes.
+  const byTag = new Map(definitions.map((definition) => [definition.contract.tag, definition] as const));
+  for (const definition of config.sourceOnly ? [] : definitions) {
+    const controller = controllers.get(definition.contract.tag);
+    for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag })) {
+      if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
+      files.set(artifact.path, artifact.content);
+    }
   }
 
   for (const edge of config.passThrough ?? []) {

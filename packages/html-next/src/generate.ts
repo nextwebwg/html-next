@@ -60,6 +60,11 @@ export interface GenerationOptions {
    * DOM in place (see `docs/compiled-direct-path.md`, Hydration).
    */
   readonly hydrate?: boolean;
+  /**
+   * The linked graph's definitions, by tag. Their slots and props type converted Vue invocations as
+   * the converter's do; `invocations`' definitions when omitted.
+   */
+  readonly definitions?: ReadonlyMap<string, ComponentDefinition>;
 }
 
 /** A component another's template invokes: the module exporting its factory, and its definition. */
@@ -74,7 +79,12 @@ export function generateComponent(
 ): readonly GeneratedArtifact[] {
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
     options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true);
-  const vue = convertedToVue(definition);
+  const graph = options?.definitions
+    ?? new Map([...options?.invocations ?? []].map(([tag, invoked]) => [tag, invoked.definition] as const));
+  const vue = convertedToVue(definition, {
+    slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
+    propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
+  });
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
   const styles = (definition.stylesheets?.length ?? 0) > 0
@@ -212,9 +222,9 @@ export type { ComponentDefinition } from "./template.js";
  * The Vue conversion, or nothing when the definition uses a construct Vue conversion does not map
  * yet. HTML Next's own outputs do not depend on it; `generateVueComponent` reports the reason.
  */
-function convertedToVue(definition: ComponentDefinition): string | undefined {
+function convertedToVue(definition: ComponentDefinition, options: VueConversionOptions): string | undefined {
   try {
-    return generateVue(inlineStylesheetSources(definition), GENERATOR_VERSION);
+    return generateVue(inlineStylesheetSources(definition), GENERATOR_VERSION, options);
   } catch (error) {
     if (error instanceof HtmlDiagnosticError && /^HT03\d$/.test(error.diagnostic.code)) return undefined;
     throw error;
