@@ -193,3 +193,140 @@ describe("head declarations in the live runtime", () => {
     assert.deepEqual(head(), ['<link rel="prefetch" href="/2" *>', '<link rel="prefetch" href="/1a" *>', '<link rel="prefetch" href="/1b" *>']);
   });
 });
+
+describe("server output of head declarations", () => {
+  it("writes the reconciled head, set-aside elements in a template, and a preload for each eager script only", async () => {
+    const { renderComponents } = await import("../src/server.js");
+    const checkout = parseComponent(`<template component="page-checkout"><defs>
+      <title>Checkout · Acme</title><link rel="preconnect" href="https://js.stripe.com">
+      <script name="stripe" src="https://js.stripe.com/v3/" crossorigin="anonymous" integrity="sha384-abc"></script>
+      <script src="https://maps.example/sdk.js" type="module"></script>
+      <script name="later" src="https://lazy.example/a.js" loading="lazy"></script>
+      <script name="manual" src="https://manual.example/a.js" loading="manual"></script>
+      <script src="https://authored.example/a.js"></script>
+    </defs><main>Pay</main></template>`, "https://acme.example/checkout.html");
+    const rendered = await renderComponents("<page-checkout></page-checkout><page-checkout></page-checkout>", { definitions: [checkout],
+      head: '<meta charset="utf-8"><title>Acme</title><script src="https://authored.example/a.js"></script>', url: "https://acme.example/checkout/" });
+    assert.equal(rendered.head, '<meta charset="utf-8">' +
+      '<title data-component-head="">Checkout · Acme</title><template data-component-head="set-aside"><title>Acme</title></template>' +
+      '<script src="https://authored.example/a.js"></script><link rel="preconnect" href="https://js.stripe.com" data-component-head="">' +
+      '<link rel="preload" as="script" href="https://js.stripe.com/v3/" crossorigin="anonymous" integrity="sha384-abc" data-component-head="">' +
+      '<link rel="modulepreload" href="https://maps.example/sdk.js" data-component-head="">');
+    assert.doesNotMatch(rendered.html, /<script/);
+  });
+});
+
+// jsdom loads no scripts, so these tests fire the inserted element's load and error events themselves.
+const payments = (tag: string, attributes = "") => `<template component="${tag}"><defs>
+  <state name="loads" type="number" value="0"></state><state name="errors" type="number" value="0"></state>
+  <handler name="loaded"><set name="loads" expr:value="$loads + 1"></set></handler>
+  <handler name="failed"><set name="errors" expr:value="$errors + 1"></set></handler>
+  <script name="stripe" src="https://js.stripe.com/v3/" ${attributes} on:load="loaded" on:error="failed"></script>
+</defs><form from:data-pending="$stripe.pending" from:data-ok="$stripe.ok" from:data-loads="$loads" from:data-errors="$errors"></form></template>`;
+
+describe("declared scripts in the live runtime", () => {
+  it("inserts one ordinary script per URL, runs each connection's on:load once it loads, and never removes it", async () => {
+    const { document, main, settle, runtime } = await page("", [payments("saved-cards", 'integrity="sha384-abc" crossorigin referrerpolicy="no-referrer" fetchpriority="high"'),
+      payments("checkout-form", 'integrity="sha384-abc" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy"')]);
+    main.innerHTML = "<saved-cards></saved-cards><checkout-form></checkout-form>";
+    await settle();
+    const scripts = document.querySelectorAll("script");
+    assert.equal(scripts.length, 1);
+    assert.equal(scripts[0]!.outerHTML, '<script src="https://js.stripe.com/v3/" integrity="sha384-abc" crossorigin="" referrerpolicy="no-referrer" fetchpriority="high" data-component-head=""></script>');
+    const [cards, form] = Array.from(main.children);
+    assert.deepEqual([cards!.getAttribute("data-pending"), form!.getAttribute("data-pending")], ["", ""]);
+    const host = runtime.getComponentHost(form!)!;
+    let ready = false;
+    void host.scripts.stripe!.ready.then(() => { ready = true; });
+    scripts[0]!.dispatchEvent(new Event("load"));
+    await settle();
+    assert.equal(ready, true);
+    assert.deepEqual([cards!.getAttribute("data-loads"), form!.getAttribute("data-loads"), form!.getAttribute("data-ok"), form!.hasAttribute("data-pending")], ["1", "1", "", false]);
+    // A new connection runs its handler again, straight away; the script is neither inserted nor run again.
+    form!.remove();
+    await settle();
+    main.append(form!);
+    await settle();
+    assert.equal(form!.getAttribute("data-loads"), "2");
+    main.replaceChildren();
+    await settle();
+    assert.equal(document.querySelectorAll("script").length, 1);
+    assert.equal(host.scripts.stripe!.ok, true);
+  });
+
+  it("gives a connection that ends before the script settles no handler, and the next one its own", async () => {
+    const { document, main, settle } = await page("", [payments("checkout-form")]);
+    main.innerHTML = "<checkout-form></checkout-form>";
+    await settle();
+    const form = main.firstElementChild!;
+    form.remove();
+    await settle();
+    document.querySelector("script")!.dispatchEvent(new Event("error"));
+    await settle();
+    assert.equal(form.getAttribute("data-errors"), "0", "nothing runs while disconnected");
+    main.append(form);
+    await settle();
+    assert.equal(form.getAttribute("data-errors"), "1");
+    assert.equal(form.getAttribute("data-loads"), "0");
+  });
+
+  it("inserts a manual script only when its controller calls load()", async () => {
+    const { document, main, settle, runtime } = await page("", [payments("map-view", 'loading="manual"')]);
+    main.innerHTML = "<map-view></map-view>";
+    await settle();
+    assert.equal(document.querySelectorAll("script").length, 0);
+    const scripts = runtime.getComponentHost(main.firstElementChild!)!.scripts;
+    assert.deepEqual([scripts.stripe!.pending, scripts.stripe!.ok, scripts.stripe!.error], [false, false, null]);
+    const ready = scripts.stripe!.load();
+    assert.equal(scripts.stripe!.load(), ready);
+    await settle();
+    assert.equal(document.querySelectorAll("script").length, 1);
+    assert.equal(scripts.stripe!.pending, true);
+  });
+
+  it("fails a declaration that disagrees on integrity, crossorigin or referrerpolicy, for that instance only", async () => {
+    const { document, main, settle, runtime } = await page("", [payments("saved-cards", 'integrity="sha384-abc"'), payments("checkout-form", 'integrity="sha384-other"')]);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    main.innerHTML = "<saved-cards></saved-cards><checkout-form></checkout-form>";
+    await settle();
+    const [cards, form] = Array.from(main.children);
+    const scripts = runtime.getComponentHost(form!)!.scripts;
+    assert.ok(scripts.stripe!.error instanceof TypeError);
+    await assert.rejects(scripts.stripe!.ready, TypeError);
+    assert.equal(form!.getAttribute("data-errors"), "1");
+    assert.match(String(errors.mock.calls[0]?.[0]), /HR011: Script `https:\/\/js\.stripe\.com\/v3\/` is declared with different/);
+    document.querySelector("script")!.dispatchEvent(new Event("load"));
+    await settle();
+    assert.deepEqual([cards!.getAttribute("data-loads"), form!.getAttribute("data-loads")], ["1", "0"]);
+  });
+
+  it("puts the nonce of the import that reached a definition on the scripts it inserts", async () => {
+    const definition = parseComponent(payments("checkout-form"), "https://acme.example/checkout.html");
+    const { document, main, settle, runtime } = await page("", []);
+    runtime.setDefinitionNonce(definition, "r4nd0m");
+    runtime.registerComponentDefinitions([definition], document);
+    main.innerHTML = "<checkout-form></checkout-form>";
+    await settle();
+    assert.equal((document.querySelector("script") as HTMLScriptElement).nonce, "r4nd0m");
+  });
+
+  it("shares an authored script with the same URL instead of inserting another", async () => {
+    const { document, main, settle } = await page('<script src="https://js.stripe.com/v3/"></script>', [payments("checkout-form")]);
+    main.innerHTML = "<checkout-form></checkout-form>";
+    await settle();
+    assert.equal(document.querySelectorAll("script").length, 1);
+    // A parser-inserted classic script without async or defer has run.
+    assert.equal(main.firstElementChild!.getAttribute("data-loads"), "1");
+  });
+
+  it("resolves a bare script name through the document's import map, and reports one it does not map", async () => {
+    const maps = `<template component="map-view"><defs><script name="sdk" src="@acme/maps/v2.js"></script><script name="missing" src="@acme/other.js"></script></defs><div></div></template>`;
+    const { document, main, settle, runtime } = await page('<script type="importmap">{"imports": {"@acme/maps/": "/vendor/maps/"}}</script>', [maps]);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    main.innerHTML = "<map-view></map-view>";
+    await settle();
+    assert.deepEqual(Array.from(document.querySelectorAll("script[src]"), (script) => (script as HTMLScriptElement).src), ["https://acme.example/vendor/maps/v2.js"]);
+    assert.ok(runtime.getComponentHost(main.firstElementChild!)!.scripts.missing!.error instanceof TypeError);
+    assert.match(String(errors.mock.calls[0]?.[0]), /HR012/);
+  });
+});

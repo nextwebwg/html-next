@@ -10,6 +10,7 @@ import { listedSourceRoot, matchesSourceList } from "./source-list.js";
 import {
   getComponentHost,
   installComponentGraph,
+  setDefinitionNonce,
   installInlineDefinitionParser,
   registerComponentDefinitions,
   lowerDocument,
@@ -109,6 +110,27 @@ export function documentComponentRoots(root: Document = document): readonly stri
   ).filter((href) => href.trim() !== ""));
 }
 
+/**
+ * The nonce rule: each definition takes the nonce of the `<link rel="component">` that imported it,
+ * directly or through other definitions, for the scripts it declares.
+ */
+function applyNonces(root: Document, graph: ComponentGraph, resolver: ResourceResolver): void {
+  for (const link of Array.from(root.querySelectorAll<HTMLLinkElement>(componentLinkSelector))) {
+    if (link.nonce === "") continue;
+    let url: string;
+    try { url = resolver.resolveRoot(link.getAttribute("href")!).url; } catch { continue; }
+    const queue = [...graph.nodes.values()].filter((node) => node.url === url).map((node) => node.id);
+    const seen = new Set<string>();
+    for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
+      const node = graph.nodes.get(id);
+      if (node === undefined || seen.has(id)) continue;
+      seen.add(id);
+      setDefinitionNonce(node.definition, link.nonce);
+      queue.push(...node.dependencies);
+    }
+  }
+}
+
 export interface StartedBrowserComponents {
   readonly graph: ComponentGraph;
   readonly registry: ComponentRegistry;
@@ -149,7 +171,9 @@ export async function startBrowserComponents(
     const preparation = (async () => {
       const definition = parseBrowserComponent(carrier, root.baseURI);
       const resource = resolver.resolveRoot(root.baseURI);
-      prepared.set(carrier, await styles.prepare(definition, resource));
+      const ready = await styles.prepare(definition, resource);
+      setDefinitionNonce(ready, (carrier as HTMLElement).nonce ?? "");
+      prepared.set(carrier, ready);
     })();
     pending.set(carrier, preparation);
     return preparation;
@@ -157,6 +181,7 @@ export async function startBrowserComponents(
   const requested = new Set(documentComponentRoots(root));
   const loaded = await loadWithStylesheets([...requested], { ...options, document: root }, styles);
   for (const carrier of root.querySelectorAll("template[component]")) await prepareInline(carrier);
+  applyNonces(root, loaded.graph, resolver);
   installComponentGraph(loaded.graph, root);
   const report = options.onError ?? ((error: unknown) => console.error(error));
   let stopped = false;
@@ -175,6 +200,7 @@ export async function startBrowserComponents(
         ));
         const added = { ...graph, nodes };
         loaded.registry.addGraph(added, (node) => loadController(node, options.importer));
+        applyNonces(root, added, resolver);
         installComponentGraph(added, root);
       })
       .catch(report);

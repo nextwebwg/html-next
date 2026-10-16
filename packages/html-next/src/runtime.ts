@@ -65,7 +65,7 @@ import {
   type TypeNode,
 } from "./type-system.js";
 import { ask, hostListener, relayResponders, type RequestChecks, type RequestOptions } from "./requests.js";
-import { flushHead, joinHead, scheduleHead, type HeadEntry } from "./head.js";
+import { declareScript, flushHead, joinHead, scheduleHead, writeServerHead, type DeclaredScript, type HeadEntry, type ScriptHandle, type ScriptStatus } from "./head.js";
 import type {
   AttributeBinding,
   ComponentDefinition,
@@ -182,6 +182,10 @@ interface RuntimeInstance {
   /** What the current rendering of the root owns. */
   owned: RenderOwned;
   validityCleanup?: () => void;
+  /** Its head declarations' owners, which server rendering runs once without connecting the instance. */
+  head?: readonly ReactiveOwner[];
+  /** Its declared scripts, by name for `host.scripts`, and the eager ones server output preloads. */
+  scripts?: { readonly named: ReadonlyMap<string, ScriptHandle>; readonly eager: readonly DeclaredScript[] };
 }
 
 interface DocumentRegistry {
@@ -597,6 +601,9 @@ function componentScope(
       declaration.kind === "state" || declaration.kind === "computed" ||
       declaration.kind === "data"
     ) scope.set(declaration.name, null);
+  }
+  for (const script of definition.scripts ?? []) {
+    if (script.name !== undefined) scope.set(script.name, { pending: false, ok: false, error: null });
   }
   for (const declaration of declarations) {
     if (declaration.kind === "data") {
@@ -2836,7 +2843,11 @@ function prepareRuntimeInvocation(
       return () => run(lifecycle.disconnect, "disconnect");
     }, 2, false));
   }
-  if (definition.head !== undefined) instanceEffects.push(...headOwners(invocation.ownerDocument, instance, scope, definition));
+  if (definition.head !== undefined) {
+    instance.head = headOwners(invocation.ownerDocument, instance, scope, definition);
+    instanceEffects.push(...instance.head);
+  }
+  if (definition.scripts !== undefined) instanceEffects.push(...scriptOwners(invocation.ownerDocument, instance, renderScope, context));
   const renderRootNode: ElementNode = rootWith === undefined
     ? rootNode
     : (({ flow: _flow, ...body }) => body)(rootNode);
@@ -2918,6 +2929,66 @@ function headOwners(document: Document, instance: RuntimeInstance, scope: Reacti
       scheduleHead(document);
     }, 2, false));
   }
+  return owners;
+}
+
+/**
+ * Server output's head (components#head-ssr, H1–H3): the rendered instances' head declarations
+ * reconciled into `root.head` once, as if connected, then each set-aside family in its template and a
+ * preload link for each eager script. Nothing else connects.
+ */
+export function renderServerHead(root: Document): void {
+  const eager: DeclaredScript[] = [];
+  const visit = (instance: RuntimeInstance): void => {
+    for (const owner of instance.head ?? []) owner.resume();
+    eager.push(...instance.scripts?.eager ?? []);
+    for (const delegate of instance.delegates) visit(delegate);
+  };
+  for (const element of Array.from(root.querySelectorAll("[data-component]"))) {
+    const instance = runtimeInstance(element);
+    if (instance !== undefined) visit(instance);
+  }
+  writeServerHead(root, eager);
+}
+
+/** The nonce on the application element that imported each definition, for the scripts it declares. */
+const definitionNonces = new WeakMap<ComponentDefinition, string>();
+
+/**
+ * Records the nonce of the application's `<link rel="component">` or inline `<template component>`
+ * that imported a definition: the scripts it declares carry it (components#declared-scripts-csp).
+ */
+export function setDefinitionNonce(definition: ComponentDefinition, nonce: string): void {
+  if (nonce !== "") definitionNonces.set(definition, nonce);
+}
+
+/**
+ * A component's declared scripts (src/head.ts): one handle per declaration, connected with the
+ * instance. A named script's status is its scope value, so `$stripe.pending` and `host.scripts`
+ * follow it, and its `on:load` or `on:error` handler runs once per connection after it settles.
+ */
+function scriptOwners(document: Document, instance: RuntimeInstance, scope: ReactiveScope, context: RuntimeRenderContext): ReactiveOwner[] {
+  const definition = instance.definition;
+  const named = new Map<string, ScriptHandle>();
+  const eager: DeclaredScript[] = [];
+  const owners: ReactiveOwner[] = [];
+  const nonce = definitionNonces.get(definition);
+  for (const script of definition.scripts!) {
+    const declared: DeclaredScript = { ...script, base: definition.source.file, source: definition.source.file, ...(nonce === undefined ? {} : { nonce }) };
+    if (script.loading === "eager") eager.push(declared);
+    const handle: ScriptHandle = declareScript(document, declared, () => untracked(() => instance.rootElement.get()) ?? instance.element, (loaded, event) => {
+      const name = loaded ? script.load : script.error;
+      const handler = (definition.declarations ?? []).find((candidate): candidate is HandlerDeclaration =>
+        candidate.kind === "handler" && candidate.name === name);
+      if (handler !== undefined) untracked(() => runHandler(handler, instance.element!, scope, context, event));
+    }, () => { if (script.name !== undefined) instance.scope.set(script.name, handle.status() as unknown as Value); });
+    if (script.name !== undefined) named.set(script.name, handle);
+    owners.push(createEffect(instance.scope.scheduler, () => {
+      untracked(() => handle.connect());
+      return () => handle.disconnect();
+    }, 2, false));
+  }
+  instance.scripts = { named, eager };
   return owners;
 }
 
@@ -3764,6 +3835,8 @@ export interface ComponentHost {
   readonly state: Record<string, unknown>;
   /** Declared resource handles; response and status fields are readonly. */
   readonly data: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** One entry per named declared script; status reads participate in effects. */
+  readonly scripts: Readonly<Record<string, ScriptResource>>;
   /** Subscribe to a connection lifecycle or DOM event, with lifecycle-owned cleanup. */
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
   /** Per-prop handles for accepted values, latest input, and validity. */
@@ -3801,6 +3874,14 @@ export interface ComponentHost {
    * on the host of a component that declares at least one `<request>`.
    */
   request?(name: string, detail?: unknown, options?: RequestOptions): Promise<unknown>;
+}
+
+/** A named declared script, as a controller reads it (javascript#host-scripts). */
+export interface ScriptResource extends ScriptStatus {
+  /** Resolves when the script loads and rejects with its error; settles once, with the script. */
+  readonly ready: Promise<void>;
+  /** Inserts the script element if it is not inserted yet. Returns `ready`. */
+  load(): Promise<void>;
 }
 
 export interface ComponentProp {
@@ -3968,11 +4049,23 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     },
     has: (_target, key) => typeof key === "string" && instance.refs[key] !== undefined,
   }) as Readonly<Record<string, Element | readonly Element[]>>;
+  const scripts = Object.create(null) as Record<string, ScriptResource>;
+  for (const [name, handle] of instance.scripts?.named ?? []) {
+    const status = (): ScriptStatus => instance.scope.get(name) as unknown as ScriptStatus;
+    scripts[name] = Object.freeze({
+      get pending() { return status().pending; },
+      get ok() { return status().ok; },
+      get error() { return status().error; },
+      get ready() { return handle.ready; },
+      load: () => handle.load(),
+    });
+  }
   const host: ComponentHost = {
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
     state,
     data,
+    scripts: Object.freeze(scripts),
     on(type, callback) {
       let stopped = false;
       const stop = host.effect(() => {

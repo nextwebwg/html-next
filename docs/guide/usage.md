@@ -651,7 +651,54 @@ The canonical, `alternate`, `icon` and `manifest` links and the `robots`, `refer
 
 A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its document-authority entries are ignored with an `HL011` warning; its other head declarations apply.
 
-A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations run in the browser runtime; Vite and converter output report them with `HT030`.
+A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. Head declarations run in the browser runtime and in server rendering; Vite and converter output report them with `HT030`.
+
+### Load a third-party script {#declared-scripts}
+
+A component that needs a third-party SDK declares its script in `<defs>`. The runtime inserts an ordinary `<script>` into `document.head`, once per URL and type, and never removes it, so the browser fetches and runs it once under the page's Content Security Policy, however many components declare it. The [declared scripts section of the proposal](https://nextwebwg.org/declarative-components/components#declared-scripts) defines the behavior.
+
+```html title="src/checkout-form.html"
+<template component="checkout-form" controller="./checkout-form.js">
+  <defs>
+    <prop name="pk" type="string" required>The Stripe publishable key.</prop>
+    <event name="paymentready"></event>
+    <handler name="announceReady"><dispatch event="paymentready"></dispatch></handler>
+
+    <link rel="preconnect" href="https://js.stripe.com">
+    <script name="stripe" src="https://js.stripe.com/v3/" loading="lazy" on:load="announceReady"></script>
+  </defs>
+
+  <form>
+    <div $ref="card"></div>
+    <p $if="$stripe.error" role="alert">Payments are unavailable right now.</p>
+    <p $if="$stripe.pending">Loading the secure payment form…</p>
+    <button>Pay</button>
+  </form>
+</template>
+```
+
+```js title="src/checkout-form.js"
+export default function controller(host) {
+  let card;
+  host.on("connect", () => {
+    host.scripts.stripe.ready.then(() => {
+      if (!host.root.isConnected) return;
+      card = Stripe(host.props.pk.value).elements().create("card");
+      card.mount(host.refs.card);
+    }, () => {});
+  });
+  host.on("disconnect", () => { card?.destroy(); card = undefined; });
+}
+```
+
+- `loading="eager"`, the default, inserts the script when an instance connects; `lazy` when its root comes within 1,250 pixels of the viewport; `manual` when the controller calls `host.scripts.name.load()`.
+- `$stripe.pending`, `.ok` and `.error` read the script's status, and `host.scripts.stripe` adds `ready`, a promise that settles once with the script, and `load()`.
+- `on:load` and `on:error` run a handler once for each connection, as soon as the script settles: when it fires `load` or `error`, or straight away when it already has. A connection that ends first gets neither, and a reconnected form announces again.
+- `type="module"`, `integrity`, `crossorigin`, `referrerpolicy` and `fetchpriority` are copied onto the inserted element. Declarations of one script that disagree on `integrity`, `crossorigin` or `referrerpolicy` fail with `HR011` for the later one. A bare `src`, such as `@acme/maps/v2.js`, resolves through the page's import map (`HR012` when it maps nothing).
+- A `<script>` the page already has with the same URL is used instead of inserting another.
+- Under a nonce-based policy, the runtime puts the nonce of the `<link rel="component">` or inline `<template component>` that imported the definition on the scripts it inserts. Under `'strict-dynamic'` or an origin allowlist such as `script-src 'self' https://js.stripe.com`, nothing more is needed.
+
+Server rendering with `renderComponents(html, { definitions, head })` returns the page's `head` as well: the application's own head elements, the components' contributions reconciled into it, each replaced element in a `<template data-component-head="set-aside">`, and a `<link rel="preload" as="script">`, or `modulepreload`, for each eager script. It never writes an executing `<script>`. Hydration adopts those elements, restores the set-aside ones as the same nodes when no component sets them, and inserts each eager script once, served from its preload.
 
 ## When you need more
 

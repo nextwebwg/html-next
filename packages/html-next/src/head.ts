@@ -23,6 +23,12 @@ interface Contributor {
 
 interface HeadManager {
   readonly contributors: Set<Contributor>;
+  /** Declared scripts by key: resolved URL and classic or module. */
+  readonly scripts: Map<string, ScriptEntry>;
+  /** The document's import map, read once, for bare script names. */
+  imports?: Readonly<Record<string, string>>;
+  lazy?: IntersectionObserver;
+  readonly near: WeakMap<Element, Set<Binding>>;
   /** Each competing family's authored elements, set aside while a contribution replaces them. */
   readonly setAside: Map<string, Element[]>;
   /** Contributors' roots, so a root without a component marker still counts toward depth. */
@@ -97,7 +103,8 @@ function patch(element: Element, [, attributes, text]: HeadEntry): void {
 function managerFor(document: Document): HeadManager {
   const record = documentRecord(document);
   if (record.head !== undefined) return record.head;
-  const manager: HeadManager = { contributors: new Set(), setAside: new Map(), roots: new WeakSet(), preloads: new Set(), scheduled: false, connections: 0 };
+  const manager: HeadManager = { contributors: new Set(), scripts: new Map(), near: new WeakMap(), setAside: new Map(), roots: new WeakSet(),
+    preloads: new Set(), scheduled: false, connections: 0 };
   record.head = manager;
   // Server output carries the authored elements a family set aside, to restore as the same nodes.
   for (const template of Array.from(document.head?.querySelectorAll(`template[${HEAD_MARKER}="set-aside"]`) ?? [])) {
@@ -244,4 +251,312 @@ export function joinHead(document: Document, root: () => Element | undefined, en
   return () => {
     if (manager.contributors.delete(contributor)) scheduleHead(document);
   };
+}
+
+/** A declared `<script src>` as an implementation passes it (components#declared-scripts). */
+export interface DeclaredScript {
+  /** As written: URL-like, resolved against `base`, or bare, resolved through the document's import map. */
+  readonly src: string;
+  /** The definition's URL. */
+  readonly base: string;
+  readonly type?: "module" | undefined;
+  readonly loading: "eager" | "lazy" | "manual";
+  readonly integrity?: string | undefined;
+  readonly crossorigin?: string | undefined;
+  readonly referrerpolicy?: string | undefined;
+  readonly fetchpriority?: string | undefined;
+  /** The application's nonce on the import that reached the definition. */
+  readonly nonce?: string | undefined;
+  /** Where diagnostics point. */
+  readonly source: string;
+}
+
+/** A declared script's status, as `$name` and `host.scripts.name` read it. */
+export interface ScriptStatus {
+  readonly pending: boolean;
+  readonly ok: boolean;
+  readonly error: Event | TypeError | null;
+}
+
+/** One instance's declaration of a script. */
+export interface ScriptHandle {
+  /** The instance connected: binds it to the script, which an eager declaration calls for. */
+  connect(): void;
+  disconnect(): void;
+  /** Inserts the script's element if it is not inserted yet; returns `ready`. */
+  load(): Promise<void>;
+  /** Resolves when the script loads and rejects with its `error` event; settles once. */
+  readonly ready: Promise<void>;
+  status(): ScriptStatus;
+}
+
+/** One script per resolved URL and type, for the document's lifetime. */
+interface ScriptEntry {
+  readonly url: string;
+  readonly module: boolean;
+  element?: HTMLScriptElement;
+  /** The fetch-changing attributes of its first declaration, or of the authored element it uses. */
+  readonly fetch: string;
+  status: ScriptStatus;
+  loaded: boolean;
+  event?: Event;
+  readonly ready: Promise<void>;
+  readonly settle: (loaded: boolean, event: Event) => void;
+  readonly bindings: Set<Binding>;
+}
+
+interface Binding {
+  readonly call: () => void;
+  readonly queue: () => void;
+  readonly changed: () => void;
+  connected: boolean;
+  ran: boolean;
+}
+
+const BEFORE: ScriptStatus = Object.freeze({ pending: false, ok: false, error: null });
+const URL_LIKE = /^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/;
+/** How near the viewport a lazy script's root comes before it loads, as Chromium fetches an `<img loading="lazy">`. */
+const LAZY_MARGIN = "1250px";
+
+/** A script's URL: URL-like against the definition, bare through the document's import map. */
+function resolveScript(document: Document, manager: HeadManager, src: string, base: string): string {
+  if (URL_LIKE.test(src)) return new URL(src, /^https?:/.test(base) ? base : document.baseURI).href;
+  if (manager.imports === undefined) {
+    const imports: Record<string, string> = {};
+    for (const script of Array.from(document.querySelectorAll('script[type="importmap"]'))) {
+      try {
+        for (const [key, target] of Object.entries((JSON.parse(script.textContent ?? "{}") as { imports?: Record<string, string> }).imports ?? {})) {
+          imports[key] ??= new URL(target, document.baseURI).href;
+        }
+      } catch { /* the browser reports an invalid import map */ }
+    }
+    manager.imports = imports;
+  }
+  const exact = manager.imports[src];
+  if (exact !== undefined) return exact;
+  const prefix = Object.keys(manager.imports).filter((key) => key.endsWith("/") && src.startsWith(key)).sort((a, b) => b.length - a.length)[0];
+  if (prefix === undefined) throw new TypeError(`Declared script \`${src}\` is not mapped by the document's import map.`);
+  return new URL(src.slice(prefix.length), manager.imports[prefix]).href;
+}
+
+/** The attributes that change a script's fetch: declarations of one script must agree on them. */
+function fetchOf(integrity: string | null | undefined, crossorigin: string | null | undefined, referrerpolicy: string | null | undefined): string {
+  const cors = crossorigin == null ? "" : crossorigin.toLowerCase() === "use-credentials" ? "use-credentials" : "anonymous";
+  return JSON.stringify([integrity ?? "", cors, referrerpolicy?.toLowerCase() ?? ""]);
+}
+
+const isModule = (script: HTMLScriptElement): boolean => script.type.trim().toLowerCase() === "module";
+
+/** S2: the document's entry for a script, using an authored `<script>` for it when there is one. */
+function entryFor(document: Document, manager: HeadManager, url: string, module: boolean, fetch: string): ScriptEntry {
+  const key = `${module ? "module" : "classic"} ${url}`;
+  const known = manager.scripts.get(key);
+  if (known !== undefined) return known;
+  const authored = Array.from(document.scripts).find((script) => !script.hasAttribute(HEAD_MARKER) && script.hasAttribute("src") &&
+    script.src === url && isModule(script) === module);
+  let resolve!: () => void;
+  let reject!: (reason: unknown) => void;
+  const ready = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+  // A failure reaches whoever waits on `ready`; nobody waiting is not an unhandled rejection.
+  ready.catch(() => {});
+  const entry: ScriptEntry = {
+    url, module, ready, bindings: new Set(), status: BEFORE, loaded: false,
+    fetch: authored === undefined ? fetch
+      : fetchOf(authored.getAttribute("integrity"), authored.getAttribute("crossorigin"), authored.getAttribute("referrerpolicy")),
+    // S6 and S7: settle once, `ready` first, then each connected instance's handler (S8).
+    settle(loaded, event) {
+      if (entry.status.ok || entry.status.error !== null) return;
+      entry.loaded = loaded;
+      entry.event = event;
+      entry.status = Object.freeze(loaded ? { pending: false, ok: true, error: null } : { pending: false, ok: false, error: event });
+      if (loaded) resolve();
+      else reject(event);
+      for (const binding of entry.bindings) {
+        binding.changed();
+        if (binding.connected && !binding.ran) binding.queue();
+      }
+    },
+  };
+  manager.scripts.set(key, entry);
+  // A preload link server output wrote for the script belongs to it.
+  manager.preloads.add(url);
+  if (authored !== undefined) {
+    entry.element = authored;
+    entry.status = Object.freeze({ pending: true, ok: false, error: null });
+    // A parser-inserted classic script without async or defer has run, and so has any script once the document loaded.
+    if ((!module && !authored.async && !authored.defer) || document.readyState === "complete") entry.settle(true, new Event("load"));
+    else {
+      authored.addEventListener("load", (event) => entry.settle(true, event), { once: true });
+      authored.addEventListener("error", (event) => entry.settle(false, event), { once: true });
+    }
+  }
+  return entry;
+}
+
+/** S4: one new `<script>` element in the document, for the declaration that calls for it first. */
+function insertScript(document: Document, entry: ScriptEntry, declaration: DeclaredScript): void {
+  if (entry.element !== undefined) return;
+  const script = document.createElement("script");
+  script.src = entry.url;
+  if (entry.module) script.type = "module";
+  for (const name of ["integrity", "crossorigin", "referrerpolicy", "fetchpriority"] as const) {
+    const value = declaration[name];
+    if (value !== undefined) script.setAttribute(name, value);
+  }
+  if (declaration.nonce !== undefined) script.nonce = declaration.nonce;
+  script.setAttribute(HEAD_MARKER, "");
+  script.addEventListener("load", (event) => entry.settle(true, event), { once: true });
+  script.addEventListener("error", (event) => entry.settle(false, event), { once: true });
+  entry.element = script;
+  entry.status = Object.freeze({ pending: true, ok: false, error: null });
+  for (const binding of entry.bindings) binding.changed();
+  document.head.append(script);
+}
+
+/** Calls for a lazy script when its root first comes near the viewport. */
+function whenNear(document: Document, manager: HeadManager, root: Element, binding: Binding): () => void {
+  const Observer = document.defaultView?.IntersectionObserver;
+  if (Observer === undefined) {
+    binding.call();
+    return () => {};
+  }
+  manager.lazy ??= new Observer((records) => {
+    for (const record of records) {
+      if (!record.isIntersecting) continue;
+      const waiting = manager.near.get(record.target);
+      manager.near.delete(record.target);
+      manager.lazy!.unobserve(record.target);
+      for (const near of waiting ?? []) near.call();
+    }
+  }, { rootMargin: LAZY_MARGIN });
+  let waiting = manager.near.get(root);
+  if (waiting === undefined) {
+    manager.near.set(root, waiting = new Set());
+    manager.lazy.observe(root);
+  }
+  waiting.add(binding);
+  return () => {
+    if (!waiting.delete(binding) || waiting.size > 0) return;
+    manager.near.delete(root);
+    manager.lazy?.unobserve(root);
+  };
+}
+
+/**
+ * One instance's declared script (S1–S8). `run` runs its `on:load` or `on:error` handler, once per
+ * connection, after the script settles; `changed` reports a status change.
+ */
+export function declareScript(document: Document, declaration: DeclaredScript, root: () => Element | undefined,
+  run: (loaded: boolean, event: Event) => void, changed: () => void): ScriptHandle {
+  const manager = managerFor(document);
+  let entry: ScriptEntry | undefined;
+  let failure: { readonly error: TypeError; readonly ready: Promise<void>; readonly event: Event } | undefined;
+  let connection = 0;
+  let unobserve: (() => void) | undefined;
+  const fail = (code: string, error: TypeError): void => {
+    const ready = Promise.reject(error);
+    ready.catch(() => {});
+    const ErrorEvent = document.defaultView?.ErrorEvent;
+    failure = { error, ready, event: ErrorEvent === undefined ? new Event("error") : new ErrorEvent("error", { error, message: error.message }) };
+    console.error(`${declaration.source}: ${code}: ${error.message}`);
+  };
+  // S1 and S3: bind to the document's entry; a declaration that disagrees on the fetch fails for this instance.
+  const bind = (): void => {
+    if (entry !== undefined || failure !== undefined) return;
+    let url: string;
+    try { url = resolveScript(document, manager, declaration.src, declaration.base); }
+    catch (error) { fail("HR012", error as TypeError); return; }
+    const fetch = fetchOf(declaration.integrity, declaration.crossorigin, declaration.referrerpolicy);
+    const bound = entryFor(document, manager, url, declaration.type === "module", fetch);
+    if (bound.fetch !== fetch) {
+      fail("HR011", new TypeError(`Script \`${url}\` is declared with different integrity, crossorigin or referrerpolicy attributes.`));
+      return;
+    }
+    entry = bound;
+    bound.bindings.add(binding);
+  };
+  const binding: Binding = {
+    connected: false,
+    ran: false,
+    changed,
+    call() {
+      bind();
+      if (entry !== undefined) insertScript(document, entry, declaration);
+    },
+    // S8: one handler for this connection, unless it ends first.
+    queue() {
+      const current = connection;
+      queueMicrotask(() => {
+        if (!binding.connected || connection !== current || binding.ran) return;
+        binding.ran = true;
+        if (failure !== undefined) run(false, failure.event);
+        else run(entry!.loaded, entry!.event!);
+      });
+    },
+  };
+  return {
+    connect() {
+      if (binding.connected) return;
+      bind();
+      // Another declaration may have inserted or settled the script already.
+      changed();
+      binding.connected = true;
+      binding.ran = false;
+      connection += 1;
+      if (failure !== undefined || entry!.status.ok || entry!.status.error !== null) binding.queue();
+      if (failure !== undefined || entry!.element !== undefined) return;
+      const element = root();
+      if (declaration.loading === "eager") binding.call();
+      else if (declaration.loading === "lazy" && element !== undefined) unobserve = whenNear(document, manager, element, binding);
+    },
+    disconnect() {
+      binding.connected = false;
+      unobserve?.();
+      unobserve = undefined;
+    },
+    load() {
+      binding.call();
+      return failure?.ready ?? entry!.ready;
+    },
+    get ready() {
+      bind();
+      return failure?.ready ?? entry!.ready;
+    },
+    status: () => failure === undefined ? entry?.status ?? BEFORE : Object.freeze({ pending: false, ok: false, error: failure.error }),
+  };
+}
+
+/**
+ * Server output (H2 and H3): each family's set-aside elements in a `<template data-component-head="set-aside">`
+ * after its last marked element, and a preload link for each eager script no authored script satisfies.
+ */
+export function writeServerHead(document: Document, eager: readonly DeclaredScript[]): void {
+  const manager = managerFor(document);
+  flushHead(document);
+  for (const [family, elements] of manager.setAside) {
+    const marked = Array.from(document.head.children).filter((element) => element.hasAttribute(HEAD_MARKER) && elementKey(element)?.[1] === family);
+    const template = document.createElement("template");
+    template.setAttribute(HEAD_MARKER, "set-aside");
+    template.content.append(...elements);
+    (marked.at(-1) ?? document.head.lastChild)?.after(template);
+  }
+  manager.setAside.clear();
+  for (const declaration of eager) {
+    let url: string;
+    try { url = resolveScript(document, manager, declaration.src, declaration.base); } catch { continue; }
+    const module = declaration.type === "module";
+    const rel = module ? "modulepreload" : "preload";
+    if (Array.from(document.scripts).some((script) => script.hasAttribute("src") && script.src === url && isModule(script) === module) ||
+      Array.from(document.head.querySelectorAll(`link[${HEAD_MARKER}]`)).some((link) => (link as HTMLLinkElement).rel === rel && (link as HTMLLinkElement).href === url)) continue;
+    const link = document.createElement("link");
+    link.setAttribute("rel", rel);
+    if (!module) link.setAttribute("as", "script");
+    link.setAttribute("href", url);
+    for (const name of ["crossorigin", "integrity", "referrerpolicy", "fetchpriority"] as const) {
+      const value = declaration[name];
+      if (value !== undefined) link.setAttribute(name, value);
+    }
+    link.setAttribute(HEAD_MARKER, "");
+    document.head.append(link);
+  }
 }
