@@ -62,7 +62,7 @@ describe("application platform", () => {
       for (const value of ['hreflang="en"', 'hreflang="fr"', "a.png", "b.png"]) expect(head).toContain(value);
       // An eager declared script is preloaded, never run, by server rendering; a lazy one waits for the browser.
       expect(head).toContain('<link rel="preload" as="script" href="https://js.pay.example/v3/" data-component-head="">');
-      expect(head).not.toMatch(/<script src|maps\.example/);
+      expect(head.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")).not.toMatch(/<script src|maps\.example/);
       expect(head).toContain('<script type="application/ld+json" data-component-head="">{"@type":"WebPage"}</script>');
       // HTMLKit reads its hk: settings and leaves them out of the head.
       expect(head).not.toMatch(/hk:|from:|\{\$/);
@@ -75,7 +75,7 @@ describe("application platform", () => {
     const application = await createApplication({ root });
     try {
       const { html } = await application.render("/");
-      expect(html).toContain('<head><meta charset="utf-8"><script>document.documentElement.dataset.prepaint = String(document.body === null);</script><meta name="viewport"');
+      expect(html).toMatch(/<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="[^"]*"><script>document\.documentElement\.dataset\.prepaint = String\(document\.body === null\);<\/script><meta name="viewport"/);
       // The not-found page gets it too, rendered and built, so a saved theme never flashes there.
       expect((await application.render("/missing/")).html).toContain(prepaint);
     } finally { await application.close(); }

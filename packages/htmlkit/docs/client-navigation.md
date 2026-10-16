@@ -90,6 +90,9 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    are left alone. New stylesheets load before the swap; component styles are scoped, so only the
    next page's global rules apply early.
 5. **Route announcement** and **back and forward positions** in WebKit, above.
+6. **Content Security Policy.** A policy belongs to its document, so client navigation keeps the
+   current one, and HTMLKit gives every page of the site the same policy. The render document has no
+   `<base>`, which `base-uri 'none'` forbids: the next page's module URLs resolve against its URL.
 
 ## Chosen approach: payloads, with the HTML as the fallback
 

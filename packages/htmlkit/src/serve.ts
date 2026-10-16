@@ -8,6 +8,7 @@ import { createApplication } from "./application.js";
 import { readManifest } from "./build.js";
 import { browserPlugin, browserSources, stylesheetSources } from "./browser.js";
 import { configure, globalStylesheets, HtmlKitError, rootAlias, runHook, withPlugins, within } from "./config.js";
+import { developmentPolicyOptions } from "./csp.js";
 import { authoredHead, documentHTML, escapeHTML, type PageAssets } from "./document.js";
 import { matchRoute } from "./routes.js";
 import { listen, mime, nodeRequest, outputPath, sendResponse } from "./server.js";
@@ -49,9 +50,30 @@ export async function previewApplication(input: ServerOptions = {}): Promise<App
   return listen(server, options, base);
 }
 
+/**
+ * The development pages' Content Security Policy reporter, which runs before the page's own module: it
+ * reports each violation in the console and, through Vite's HMR channel, in the terminal, with the
+ * csp option line that would allow it.
+ */
+const policyReporter = `addEventListener("securitypolicyviolation", event => {
+  const policy = event.originalPolicy.split(";").map(directive => directive.trim().split(/\\s+/)[0]);
+  const directive = [event.effectiveDirective, event.effectiveDirective.replace(/-(?:elem|attr)$/, ""), "default-src"].find(name => policy.includes(name)) ?? event.effectiveDirective;
+  const blocked = event.blockedURI;
+  const url = URL.parse(blocked);
+  const source = blocked === "inline" ? "'unsafe-inline'" : blocked === "eval" ? "'unsafe-eval'" : blocked === "wasm-eval" ? "'wasm-unsafe-eval'"
+    : url === null ? blocked : url.origin === "null" ? url.protocol : url.origin;
+  const report = { page: location.pathname, blocked, directive, line: "csp: { " + JSON.stringify(directive) + ": [" + JSON.stringify(source) + "] }",
+    blocks: event.disposition === "enforce" };
+  console.warn("HTMLKit: " + report.page + (report.blocks ? " blocked " : " would block ") + blocked + " under " + directive + ". To allow it, add to htmlkit.config.ts: " + report.line);
+  import.meta.hot?.send("htmlkit:csp", report);
+});
+`;
+
 export async function devApplication(input: ServerOptions = {}): Promise<ApplicationServer> {
   const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
+  // ponytail: any ws: socket rather than Vite's own, whose port is chosen when it listens.
+  const csp = developmentPolicyOptions(config.csp, "ws:");
   // Once, before Vite watches, so generated files don't trigger a reload; edits don't rerun it.
   await runHook(options, "buildStart", { command: "dev", root: config.root, base: config.base });
   const sources = new Map<string, string>();
@@ -77,10 +99,18 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
     // Vite's HTML transformer applies its base to root-relative assets a second time.
     // This document is already composed for its deployment URL; only modules use Vite.
     // Page-wide stylesheets first, so component styles follow them in the cascade.
-    return { styles: [...css.map(normalizePath), ...styles.keys()].map(id => config.base + "@fs/" + id), modules: [config.base + "@vite/client", config.base + "@id/" + id] };
+    return { styles: [...css.map(normalizePath), ...styles.keys()].map(id => config.base + "@fs/" + id),
+      modules: [config.base + "@vite/client", ...csp === false ? [] : [config.base + "@id/" + reporter], config.base + "@id/" + id] };
   };
+  const reporter = "virtual:htmlkit/csp-report";
+  if (csp !== false) {
+    sources.set(reporter, policyReporter);
+    vite.ws.on("htmlkit:csp", (report: { page: string; blocked: string; directive: string; line: string; blocks: boolean }) => {
+      console.warn(`HTMLKit: ${report.page} ${report.blocks ? "blocked" : "would block"} ${report.blocked} under ${report.directive}. To allow it, add to htmlkit.config.ts: ${report.line}`);
+    });
+  }
   let application: Application;
-  try { application = await createApplication(options, vite, assets); }
+  try { application = await createApplication(options, vite, assets, csp); }
   catch (error) { await vite.close(); throw error; }
   // What page plugins read, wherever it lives, joins the watched root.
   vite.watcher.add([...application.watchFiles]);
@@ -99,7 +129,11 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
     const payload = pathname.startsWith(config.base + "_htmlkit/pages/");
     void (async () => {
-      if (dirty) { application = await createApplication(options, vite, assets); vite.watcher.add([...application.watchFiles]); dirty = false; sources.clear(); }
+      if (dirty) {
+        application = await createApplication(options, vite, assets, csp); vite.watcher.add([...application.watchFiles]); dirty = false;
+        sources.clear();
+        if (csp !== false) sources.set(reporter, policyReporter);
+      }
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
       // Other files, such as public/ and the application's modules, are Vite's to serve.

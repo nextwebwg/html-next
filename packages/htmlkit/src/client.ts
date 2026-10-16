@@ -86,7 +86,7 @@ interface Rendered { readonly next: Document; readonly layers: readonly Element[
  * component's factory, each page nested in its layout's `page` slot, with each loader's state. Every
  * layer renders, kept layouts included, so a kept layout gets its new props from its rendering.
  */
-async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Rendered> {
+async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
   if (payload.version !== 1 || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
   const next = document.implementation.createHTMLDocument("");
   const append = (parent: Element, tag: string, attributes: Readonly<Record<string, string>>) => {
@@ -94,7 +94,6 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
     for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
     return element;
   };
-  append(next.head, "base", { href: url.href });
   if (payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
@@ -233,7 +232,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     // module's identity everywhere: Vite's development server adds ?import to a path, a second URL.
     await Promise.all(data.modules.map(src => import(/* @vite-ignore */ new URL(src, location.href).href)));
     signal.throwIfAborted();
-    return render(runtime, data, url);
+    return render(runtime, data);
   };
 
   const visit = async (url: URL, event: NavigateEvent): Promise<void> => {
@@ -262,7 +261,8 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       const loading = sheets.map(sheet => new Promise(done => { sheet.addEventListener("load", done); sheet.addEventListener("error", done); }));
       document.head.append(...sheets);
       // The next page's components register before its DOM arrives; a conflicting one falls back below.
-      const modules = [...next.head.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')].map(script => import(/* @vite-ignore */ script.src));
+      // Resolved against the page's URL: the next document has no <base>, which base-uri 'none' forbids.
+      const modules = [...next.head.querySelectorAll('script[type="module"][src]')].map(script => import(/* @vite-ignore */ new URL(script.getAttribute("src")!, url).href));
       await Promise.all([...loading, ...modules]);
       const commit = () => {
         signal.throwIfAborted();
