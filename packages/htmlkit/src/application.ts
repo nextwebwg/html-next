@@ -88,7 +88,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
   const options = await withPlugins(input);
   const config = configure(options);
   const redirects = redirectTable(config.base, options.redirects);
-  const { routes, notFound: notFoundRoute, sources, files, folderLabels, watched } = await discover(config.root, { ...options, base: config.base });
+  const { routes, notFound: notFoundRoute, sources, files, watched } = await discover(config.root, { ...options, base: config.base });
   // A dynamic page's entries are checked the same way when they are listed.
   const shadowed = routes.find(route => route.params.length === 0 && redirects.has(config.base + route.pattern.slice(1)));
   if (shadowed !== undefined) throw new HtmlKitError(`The redirects option also redirects ${shadowed.pattern}, which is this page's URL.`, shadowed.component);
@@ -160,13 +160,9 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     ...(route.groups === undefined ? {} : { group: route.groups.at(-1)!.label }) });
   // A page's place in the file tree: each URL segment, with its (group) folders where they sit.
   // depth is the URL segments above the element: a segment's index, or a group's depth.
-  // A segment's label is a plugin's folder() label for the folder it names; a catch-all's segments name none.
   const treePath = (href: string, route: ApplicationRoute) => {
-    const path: { name: string; rank: string | null; depth: number; group?: true; label?: string }[] = href.slice(config.base.length).split("/").filter(Boolean)
-      .map((name, i) => {
-        const label = i < route.segments.length && breadth(route.segments[i]) < 2 ? folderLabels.get(route.segments.slice(0, i + 1).join("/")) : undefined;
-        return { name, rank: route.order?.[i] ?? null, depth: i, ...(label === undefined ? {} : { label }) };
-      });
+    const path: { name: string; rank: string | null; depth: number; group?: true }[] = href.slice(config.base.length).split("/").filter(Boolean)
+      .map((name, i) => ({ name, rank: route.order?.[i] ?? null, depth: i }));
     // Deepest first, so each insertion index is still a count of URL segments.
     for (const group of (route.groups ?? []).toReversed()) path.splice(group.depth, 0, { name: group.label, rank: group.order, depth: group.depth, group: true });
     return path;
@@ -219,7 +215,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     const items = await navigation(query);
     const paths = await concreteRoutes();
     const fromDepth = checkedFrom(query.from).split("/").filter(Boolean).length;
-    type Draft = { label: string; folder?: string; order: string | null; children: Draft[]; item?: NavigationItem; route?: ApplicationRoute };
+    type Draft = { label: string; order: string | null; children: Draft[]; item?: NavigationItem; route?: ApplicationRoute };
     const top: Draft[] = [];
     const nodes = new Map<string, Draft>();
     for (const item of items) {
@@ -232,8 +228,7 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
         key += `${element.group ? "(" : "/"}${element.name}\0`;
         node = nodes.get(key);
         if (node === undefined) {
-          node = { label: element.label ?? (element.group ? element.name : decodeURIComponent(element.name)), order: element.rank, children: [],
-            ...(element.label === undefined ? {} : { folder: element.label }) };
+          node = { label: element.group ? element.name : decodeURIComponent(element.name), order: element.rank, children: [] };
           nodes.set(key, node);
           siblings.push(node);
         }
@@ -246,8 +241,8 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     const finish = (draft: Draft, depth: number): NavigationNode => {
       const children = draft.children.map(child => finish(child, depth + 1));
       const { item, route } = draft;
-      // A folder's index page labels the folder by its hk:label; then a plugin's folder() label does, then the page's <title>.
-      const label = item === undefined ? draft.label : children.length > 0 && route!.label === undefined ? draft.folder ?? route!.title ?? draft.label : item.label;
+      // A folder's index page labels the folder, by hk:label, then its <title>.
+      const label = item === undefined ? draft.label : children.length > 0 && route!.label === undefined ? route!.title ?? draft.label : item.label;
       const current = item?.current ?? "false";
       return Object.freeze({ label, ...(item === undefined ? {} : { href: item.href, pageName: item.pageName }), current,
         open: current === "page" || children.some(child => child.open), depth, order: draft.order, children: Object.freeze(children) });

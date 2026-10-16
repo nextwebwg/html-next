@@ -116,6 +116,8 @@ it("recompiles a plugin page in development when a file it watches changes, outs
     page.watch(banner);
     return (await compile(source, page)).replace("Install body", await readFile(banner, "utf8"));
   } } };
+  const application = await createApplication({ root, plugins: [watching] });
+  try { expect(application.watchFiles).toEqual(new Set([resolve(banner)])); } finally { await application.close(); }
   const server = await devApplication({ root, port: 0, plugins: [watching] });
   try {
     expect(await (await fetch(server.url + "v/one/install/")).text()).toContain("First banner");

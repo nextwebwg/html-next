@@ -13,6 +13,10 @@
 - A definition that names an `<event>` or a `<request>` `responder`, the host event for late responders, or declares an event and a request with the same name, fails a build (`HC010`, `HC020`); the live parser warns and ignores the declaration. A request whose camelCase name equals a declared prop's fails a build (`HC011`), because a framework component takes the request's function prop under that name.
 - Only a compiled or converted component that declares a request bundles the request steps. A compiled one checks each request's detail and answer with code written for their declared types, which accepts exactly what the live runtime accepts: one request adds 1.2 KB gzip to a compiled controller component. Another compiled host carries only `host.on`'s relay of a late responder, a call that does nothing until a component on the page asks (6 to 18 B gzip). The live browser bundle grows by 1.9 KB gzip.
 
+### Removed
+
+- The HTMLKit `folder(dir, { watch })` plugin hook is removed, with its `FolderMetadata` and `FolderContext` types. A folder takes its label and order from its index page's `hk:label` and `hk:order`, and a route group takes its label from its parentheses and its order from its number-and-dot prefix. `page.watch(file)` and `Application.watchFiles` remain for page compilers.
+
 ## 1.0.0-alpha.52
 
 ### Added

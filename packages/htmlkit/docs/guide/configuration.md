@@ -118,7 +118,7 @@ name the `.note` file. While compiling, a plugin can call:
 - `page.asset(file)` to serve a file the page references, such as an image, and get its URL;
 - `page.watch(file)` for a file the page's output depends on, such as a metadata file beside it.
 
-`htmlkit dev` watches the project root, and also each file a plugin passes to `watch`, inside the
+`htmlkit dev` watches the project root, and also each file a plugin passes to `page.watch`, inside the
 root or outside it. When one changes, it recompiles the pages and reloads open pages:
 
 ```ts
@@ -167,35 +167,6 @@ A layout's loader receives `propNames`, the props its component declares, which 
 return. A plugin that has more data than a site's layout declares returns
 `Object.fromEntries(Object.entries(data).filter(([name]) => propNames.includes(name)))` and passes
 the rest on as `data`.
-
-### Folder labels and order
-
-`folder(dir, { watch })` labels and orders a folder in navigation, such as from a metadata file
-inside it. HTMLKit calls it for each folder and [group](/htmlkit/routes#route-groups) folder in a
-page directory, with the folder's absolute path. It returns `{ label, order }` with the fields it
-knows, or `undefined` to leave the folder as it is:
-
-```ts
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
-const categories: HtmlKitPlugin = {
-  name: 'categories',
-  async folder(dir, { watch }) {
-    const file = join(dir, '_category.json');   // { "label": "Forms", "order": 2 }
-    watch(file);
-    try { return JSON.parse(await readFile(file, 'utf8')); } catch { return undefined; }
-  },
-};
-```
-
-| Field | Effect |
-| --- | --- |
-| `label` | The folder's label in `navigationTree()`, in place of its name, or of a group's parentheses and its pages' `group`. A folder's index page labels it by its own `hk:label` first; the plugin's label comes before the page's `<title>`. |
-| `order` | A whole number that orders the folder, with all its pages, among its neighbours, in place of its number-and-dot prefix. `navigation()`, `navigationTree()`, and `pager()` all follow it. `hk:order` on the folder's index page comes first. |
-
-For each field, the earliest plugin that returns one wins. `watch(file)` is `page.watch`'s
-counterpart, so editing the metadata file updates `htmlkit dev`.
 
 ### Build hooks
 
