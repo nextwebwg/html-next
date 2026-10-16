@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
-import { createServer, normalizePath } from "vite";
+import { isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { ApplicationOptions, HtmlKitPlugin, RouteLayer } from "./types.js";
 
 /**
@@ -11,6 +10,8 @@ export async function loadConfig(root = process.cwd()): Promise<ApplicationOptio
   const files = ["ts", "js"].map(ext => resolve(root, `htmlkit.config.${ext}`)).filter(existsSync);
   if (files.length > 1) throw new HtmlKitError("Choose one htmlkit.config.ts or .js.", resolve(root));
   if (files[0] === undefined) return {};
+  // Loaded here, so the request server, which shares this module, runs without Vite.
+  const { createServer } = await import("vite");
   const loader = await createServer({ root: resolve(root), configFile: false, appType: "custom", logLevel: "silent",
     server: { middlewareMode: true, watch: null, hmr: false }, optimizeDeps: { noDiscovery: true, include: [] } });
   let configured: unknown;
@@ -91,7 +92,8 @@ export async function runHook<Hook extends "buildStart" | "buildEnd">(options: A
 
 /** Vite's side of the import map's @/ entry, for loaders, controllers, and stylesheets. */
 export function rootAlias(root: string) {
-  return [{ find: /^@\//, replacement: normalizePath(root) + "/" }];
+  // Vite's normalizePath.
+  return [{ find: /^@\//, replacement: posix.normalize(root.replaceAll("\\", "/")) + "/" }];
 }
 
 /** The application's global stylesheets as absolute paths. */

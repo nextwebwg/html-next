@@ -27,9 +27,12 @@ function read(html: string): Document {
 /**
  * Fail when a link in a built document points under base at a page or file the output lacks, or at a
  * #fragment that names no element in its page. It reads the output, as a static host serves it.
- * documents are the deployment pathnames of the HTML the build rendered.
+ * documents are the deployment pathnames of the HTML the build rendered, and served names the paths a
+ * server answers on request, such as server-rendered pages and endpoints, which have no file.
  */
-export async function checkLinks(outDir: string, origin: string, base: string, documents: readonly string[], mode: "error" | "warn" = "error"): Promise<void> {  const parsed = new Map<string, Promise<Document>>();
+export async function checkLinks(outDir: string, origin: string, base: string, documents: readonly string[], mode: "error" | "warn" = "error",
+  served: (pathname: string) => boolean = () => false): Promise<void> {
+  const parsed = new Map<string, Promise<Document>>();
   const documentAt = (file: string) => parsed.get(file) ?? parsed.set(file, readFile(file, "utf8").then(read)).get(file)!;
   // The file a pathname serves: itself, or its folder's index.html, as a static host serves it.
   const fileAt = async (pathname: string): Promise<string | undefined> => {
@@ -47,7 +50,7 @@ export async function checkLinks(outDir: string, origin: string, base: string, d
   for (const source of documents) {
     for (const href of (await documentAt((await fileAt(source))!)).links) {
       const url = URL.parse(href, origin + source);
-      if (url === null || url.origin !== origin || !url.pathname.startsWith(base)) continue;
+      if (url === null || url.origin !== origin || !url.pathname.startsWith(base) || served(url.pathname)) continue;
       const target = await fileAt(url.pathname);
       if (target === undefined) { broken.push(`${source} links to ${href}, which is no page or file in the build.`); continue; }
       const fragment = url.hash.slice(1);

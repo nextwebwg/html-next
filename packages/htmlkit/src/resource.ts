@@ -8,6 +8,8 @@ interface ComponentMetadata {
   /** hk:order, the page's place among its neighbours, as a number-and-dot prefix gives it. */
   readonly order?: string;
   readonly hidden?: boolean;
+  /** hk:render: "server" renders the page on each request; "prerender", the default, at build time. */
+  readonly render?: "prerender" | "server";
   /** Extra route patterns for a page, relative to its page directory's prefix. */
   readonly aliases: readonly string[];
   readonly head: string;
@@ -42,7 +44,7 @@ export function applicationResource(source: string, file: string) {
     const tag = node.attrs.find(attribute => attribute.name === "component")?.value;
     if (node.tagName !== "template" || tag === undefined) continue;
     const children = (node as DefaultTreeAdapterMap["template"]).content.childNodes;
-    const configuration: { layout?: string; label?: string; order?: string; hidden?: boolean } = {};
+    const configuration: { layout?: string; label?: string; order?: string; hidden?: boolean; render?: "prerender" | "server" } = {};
     const aliases: string[] = [];
     const head: string[] = [];
     for (const child of children) {
@@ -53,12 +55,15 @@ export function applicationResource(source: string, file: string) {
         const content = child.attrs.find(attribute => attribute.name === "content")?.value;
         if (!content) throw new HtmlKitError(`Declare ${name} with nonempty content.`, file);
         if (name === "hk:alias") { aliases.push(content); continue; }
-        const key = ({ "hk:layout": "layout", "hk:label": "label", "hk:order": "order", "hk:navigation": "hidden" } as const)[name];
-        if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:order, hk:navigation, or hk:alias; hk:page belongs outside the carrier (${name}).`, file);
+        const key = ({ "hk:layout": "layout", "hk:label": "label", "hk:order": "order", "hk:navigation": "hidden", "hk:render": "render" } as const)[name];
+        if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:order, hk:navigation, hk:render, or hk:alias; hk:page belongs outside the carrier (${name}).`, file);
         if (configuration[key] !== undefined) throw new HtmlKitError(`Declare ${name} once per component.`, file);
         if (key === "hidden" && content !== "hidden") throw new HtmlKitError('hk:navigation accepts only content="hidden".', file);
         if (key === "order" && !/^\d+$/.test(content)) throw new HtmlKitError("hk:order needs a whole number, such as content=\"3\".", file);
-        if (key === "hidden") configuration.hidden = true; else configuration[key] = content;
+        if (key === "render" && content !== "prerender" && content !== "server") throw new HtmlKitError('hk:render accepts content="prerender" or content="server".', file);
+        if (key === "hidden") configuration.hidden = true;
+        else if (key === "render") configuration.render = content as "prerender" | "server";
+        else configuration[key] = content;
       } else head.push(serializeOuter(child));
     }
     const defs = children.find(child => "tagName" in child && child.tagName === "defs");

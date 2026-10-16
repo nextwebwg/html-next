@@ -128,8 +128,8 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
 }
 
 function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: ClientOptions): void {
-  /** The pathname whose layers the document shows. A navigation's URL commits before its layers arrive. */
-  let rendered = location.pathname;
+  /** The path and query whose layers the document shows. A navigation's URL commits before its layers arrive. */
+  let rendered = location.pathname + location.search;
   /** Head metadata from server documents. Elements that scripts add are never removed. */
   let owned: Element[] = [...document.head.querySelectorAll("meta, link")];
   const announcer = document.createElement("div");
@@ -145,7 +145,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
    */
   const local = (url: URL, source: Element | null) => url.origin === location.origin && url.pathname.startsWith(base) &&
     url.pathname.endsWith("/") && !source?.closest("[data-hk-reload]") && !source?.hasAttribute("download");
-  const payloadURL = (url: URL) => `${base}_htmlkit/pages/${url.pathname.slice(base.length)}payload.json`;
+  const payloadURL = (url: URL) => `${base}_htmlkit/pages/${url.pathname.slice(base.length)}payload.json${url.search}`;
 
   // Prefetching never runs anything: payloads are data, and modules and stylesheets are only hinted.
   const hinted = new Set<string>();
@@ -162,17 +162,17 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   /** The page an HTML link would visit in place, if any. An unparsable href is not a page. */
   const target = (anchor: Element) => {
     const url = anchor instanceof HTMLAnchorElement ? URL.parse(anchor.href) : null;
-    return url !== null && local(url, anchor) && ["", "_self"].includes((anchor as HTMLAnchorElement).target) && url.pathname !== rendered ? url : undefined;
+    return url !== null && local(url, anchor) && ["", "_self"].includes((anchor as HTMLAnchorElement).target) && url.pathname + url.search !== rendered ? url : undefined;
   };
   const prefetchPage = (url: URL) => {
-    const cached = prefetched.get(url.pathname);
+    const cached = prefetched.get(url.pathname + url.search);
     if (cached !== undefined && fresh(cached.time)) return;
     const payload = payloadOf(url);
-    prefetched.set(url.pathname, { time: performance.now(), payload });
+    prefetched.set(url.pathname + url.search, { time: performance.now(), payload });
     payload.then(({ modules, styles }) => {
       for (const src of modules) hint("modulepreload", src);
       for (const href of styles) hint("prefetch", href);
-    }).catch(() => { prefetched.delete(url.pathname); });
+    }).catch(() => { prefetched.delete(url.pathname + url.search); });
   };
   // Links on screen prefetch only the shared chunks their page needs: a page's own module holds its
   // content, so a long menu would otherwise download every page.
@@ -225,8 +225,8 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     return { next, layers, adopt: true };
   };
   const payload = async (url: URL, signal: AbortSignal) => {
-    const cached = prefetched.get(url.pathname);
-    prefetched.delete(url.pathname);
+    const cached = prefetched.get(url.pathname + url.search);
+    prefetched.delete(url.pathname + url.search);
     const data = await (cached !== undefined && fresh(cached.time) ? cached.payload : payloadOf(url, signal));
     // The page's module registers its definitions before anything renders. An absolute URL is the
     // module's identity everywhere: Vite's development server adds ?import to a path, a second URL.
@@ -282,7 +282,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         runtime.replaceProjectedNode(layer(document, index)!, layers[index]!);
         // Server markup from the fallback is adopted in place, as the first page was.
         if (hydrate) adopt(layers[index]!);
-        rendered = url.pathname;
+        rendered = url.pathname + url.search;
         announcer.textContent = document.title;
         watch();
       };
@@ -309,7 +309,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     // Reloads, downloads, form posts, fragment and history.pushState changes, and other documents
     // stay native. Modified clicks and link targets open other browsing contexts without this event.
     if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null || event.formData !== null ||
-      !local(url, event.sourceElement) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname === rendered)) return;
+      !local(url, event.sourceElement) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname + url.search === rendered)) return;
     // After the swap, a new entry scrolls to its fragment or the top, back and forward return to
     // where the entry was left, and focus resets as after a document load.
     event.intercept({ scroll: "manual", handler: () => visit(url, event) });

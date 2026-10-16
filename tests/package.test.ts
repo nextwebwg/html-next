@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -310,7 +310,7 @@ describe("workspace package contracts", () => {
     expect([...versions], "All published packages must share one version.").toHaveLength(1);
   });
 
-  it.skipIf(!includesPackage("htmlkit"))("builds a static application through the installed HTMLKit CLI", () => {
+  it.skipIf(!includesPackage("htmlkit"))("builds an application and serves it through the installed HTMLKit CLI", async () => {
     const consumer = join(workspace, "htmlkit-consumer");
     mkdirSync(join(consumer, "app/pages"), { recursive: true });
     mkdirSync(join(consumer, "app/layouts"), { recursive: true });
@@ -335,7 +335,28 @@ describe("workspace package contracts", () => {
     expect(JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).dependencies[componentsPackage]).not.toContain("workspace:");
     expect(readFileSync(join(installed, "LICENSE"), "utf8")).toBe(repositoryLicense);
     const entry = join(consumer, "platform-types.ts");
-    writeFileSync(entry, 'import { defineConfig, type Application, type LoadContext, type LoaderResult, type RouteInput } from "@nextwebwg/htmlkit"; export const config = defineConfig({ routes: [] satisfies RouteInput[] }); export type PublicTypes = [Application, LoadContext, LoaderResult];');
+    writeFileSync(entry, 'import { defineConfig, type Application, type EndpointHandler, type LoadContext, type LoaderResult, type Middleware, type RouteInput } from "@nextwebwg/htmlkit"; import type { ServerApplication } from "@nextwebwg/htmlkit/server"; export const config = defineConfig({ routes: [] satisfies RouteInput[] }); export type PublicTypes = [Application, LoadContext, LoaderResult, EndpointHandler, Middleware, ServerApplication];');
     execFileSync("corepack", ["pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", entry], { cwd: root, shell: useCommandShell });
-  }, 120_000);
+
+    // The built server runs on Node from the installed packages; a resolve hook fails if anything loads Vite.
+    writeFileSync(join(consumer, "app/pages/account.html"), '<template component="packed-account"><meta name="hk:render" content="server"><defs><prop name="user" type="string" required>User</prop></defs><p>Hello {$user}</p></template>');
+    writeFileSync(join(consumer, "app/pages/account.server.ts"), 'export const load = ({ cookies }) => ({ props: { user: cookies.get("user") ?? "guest" } });');
+    mkdirSync(join(consumer, "app/api"));
+    writeFileSync(join(consumer, "app/api/time.server.ts"), 'export const GET = () => Response.json({ ok: true });');
+    writeFileSync(join(consumer, "no-vite.mjs"), 'import { registerHooks } from "node:module"; registerHooks({ resolve(specifier, context, next) { if (/^vite(?:\\/|$)/.test(specifier)) throw new Error(`start loaded ${specifier}`); return next(specifier, context); } });');
+    expect(runBin(consumer, "htmlkit", ["build"])).toContain("Generated 1 pages");
+    const start = spawn(process.execPath, ["--import", "./no-vite.mjs", join(installed, "dist/cli.js"), "start", "--port", "0"], { cwd: consumer });
+    try {
+      const url = await new Promise<string>((done, reject) => {
+        let output = "";
+        start.stdout.on("data", (chunk: Buffer) => { output += chunk; const match = /HTMLKit start: (\S+)/.exec(output); if (match) done(match[1]!); });
+        start.stderr.on("data", (chunk: Buffer) => { output += chunk; });
+        start.once("exit", code => reject(new Error(`htmlkit start exited (${code}): ${output}`)));
+      });
+      expect(url).toMatch(/\/packed\/$/);
+      expect(await (await fetch(`${url}account/`, { headers: { cookie: "user=ada" } })).text()).toContain("Hello ada");
+      expect(await (await fetch(`${url}api/time`)).json()).toEqual({ ok: true });
+      expect(await (await fetch(url)).text()).toContain("Installed platform");
+    } finally { start.kill(); }
+  }, 180_000);
 });

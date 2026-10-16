@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildApplication, devApplication, previewApplication, type ApplicationServer } from "../src/index.js";
+import { buildApplication, devApplication, previewApplication, startApplication, type ApplicationServer } from "../src/index.js";
 import { write } from "./fixture.js";
 
 const navigationItems = "list(object({ href: string, label: string, current: string, depth: number, pageName: string }))";
@@ -429,6 +429,51 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
         await settled(page, "Home");
         expect(await page.evaluate(() => [document.getElementById("hk-layer-1")!.dataset.component, document.getElementById("hk-layer-2")])).toEqual(["home-page", null]);
         expect(await tree()).toEqual([false, "docs", "Home"]);
+        expect([await marked(page), errors]).toEqual([true, []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+  }
+});
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation to server-rendered pages", () => {
+  let root: string;
+  let server: ApplicationServer;
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "htmlkit-server-navigation-"));
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "app/layouts/default.html", `<template component="list-shell"><div class="shell"><a id="home" href="/">Home</a> <a id="two" href="/list/?page=2">Two</a>
+      <a id="three" href="/list/?page=3">Three</a><slot name="page"></slot></div></template>`);
+    await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><h1>Home</h1></template>');
+    await write(root, "app/pages/list.html", `<template component="list-page"><meta name="hk:render" content="server"><title>{$title}</title><defs>
+      <prop name="title" type="string" required>Title</prop><prop name="reader" type="string" required>Reader</prop></defs><article><h1>{$title}</h1><p class="reader">{$reader}</p></article></template>`);
+    await write(root, "app/pages/list.server.ts", 'export const load = ({ url, cookies }) => ({ props: { title: "Page " + (url.searchParams.get("page") ?? "1"), reader: cookies.get("reader") ?? "nobody" } });');
+    const { outDir } = await buildApplication({ root });
+    server = await startApplication({ outDir, port: 0 });
+  }, 120_000);
+  afterAll(async () => {
+    await server?.close();
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  for (const [name, type] of engines) {
+    it(`${name} renders a server page in place with the link's query and the reader's cookies`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const context = await browser.newContext();
+        await context.addCookies([{ name: "reader", value: "ada", url: server.url }]);
+        const { page, errors, requests } = await open(context);
+        await page.goto(server.url);
+        await page.waitForFunction(() => document.querySelector('[data-component="home-page"]') !== null && document.readyState === "complete");
+        await mark(page);
+        await page.locator("#two").click();
+        await settled(page, "Page 2");
+        // A change of query alone is a change of page, and Back returns to the previous one.
+        await page.locator("#three").click();
+        await settled(page, "Page 3");
+        await page.goBack();
+        await settled(page, "Page 2");
+        expect([await page.locator("h1").textContent(), await page.locator(".reader").textContent()]).toEqual(["Page 2", "ada"]);
+        expect(requests.some(request => request.path === "/_htmlkit/pages/list/payload.json")).toBe(true);
         expect([await marked(page), errors]).toEqual([true, []]);
       } finally { await browser.close(); }
     }, 60_000);

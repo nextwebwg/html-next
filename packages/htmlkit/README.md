@@ -1,9 +1,10 @@
 # HTMLKit
 
 HTMLKit (`@nextwebwg/htmlkit`) builds applications with HTML Next components. It provides routes,
-layouts, server loaders, browser delivery, and development tools. The first production adapter
-generates static pages; [the server-rendering design](./docs/server-rendering.md) preserves a path
-to request-time rendering.
+layouts, server loaders, endpoints, middleware, browser delivery, and development tools. A build
+prerenders pages for any static host and writes a request server for pages that render on each
+request, which `htmlkit start` runs on Node and Deno and Bun run through its `fetch`.
+[The server-rendering design](./docs/server-rendering.md) records how requests are answered.
 
 Use Node `>=22.22.2 <23 || >=24.15 <25`. Install `@nextwebwg/htmlkit` and add its commands to your
 `package.json` scripts:
@@ -13,15 +14,17 @@ Use Node `>=22.22.2 <23 || >=24.15 <25`. Install `@nextwebwg/htmlkit` and add it
   "scripts": {
     "dev": "htmlkit dev",
     "build": "htmlkit build",
-    "preview": "htmlkit preview"
+    "preview": "htmlkit preview",
+    "start": "htmlkit start"
   }
 }
 ```
 
-Then run `pnpm dev`, `pnpm build`, or `pnpm preview` (`npm run dev` and the others work too).
+Then run `pnpm dev`, `pnpm build`, `pnpm preview`, or `pnpm start` (`npm run dev` and the others work too).
 
 **Guide:** [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/) covers pages and routing,
-loading data, navigation, moving between pages, and configuration. Its source is
+loading data, endpoints and middleware, navigation, moving between pages, deployment, and
+configuration. Its source is
 [`docs/guide`](./docs/guide/) in this package.
 [The client-navigation design](./docs/client-navigation.md) records how pages swap in place.
 

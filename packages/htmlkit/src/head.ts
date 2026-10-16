@@ -1,9 +1,7 @@
 import { parseComponent, type ComponentDefinition } from "@nextwebwg/html-next";
-import { renderComponents } from "@nextwebwg/html-next/server";
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
 import { HtmlKitError } from "./config.js";
 import { defaultHeadElements } from "./document.js";
-import type { applicationResource } from "./resource.js";
 import type { HeadElement, LoaderResult, RenderedHead } from "./types.js";
 
 function identity(element: HeadElement): string | undefined {
@@ -21,29 +19,38 @@ function identity(element: HeadElement): string | undefined {
   return undefined;
 }
 
-export async function renderHead(resource: ReturnType<typeof applicationResource>, definition: ComponentDefinition,
-  result: LoaderResult, previous: RenderedHead, url: string,
-  invoke: (definition: ComponentDefinition) => string): Promise<RenderedHead> {
+/** A page or layout component's head elements and prop declarations, from its resource's metadata. */
+export interface HeadSource { readonly head: string; readonly propDeclarations: string }
+
+/**
+ * A page or layout's head bindings as a component of its own, named tag, which renders in the same
+ * HTML Next render as the page with the layer's props. No state, data reads, controllers, or browser
+ * subscriptions enter this head scope. Component bodies exclude head elements, so inert spans carry
+ * the same attribute and text bindings through the renderer, and mergeHead turns them into native
+ * metadata. Undefined when the component has no head elements.
+ */
+export function headCarrier(metadata: HeadSource, definition: ComponentDefinition, tag: string): ComponentDefinition | undefined {
+  if (metadata.head === "") return undefined;
+  const fragment = parseFragment(metadata.head);
+  for (const node of fragment.childNodes) {
+    if (!("tagName" in node)) continue;
+    node.attrs.push({ name: "data-hk-head", value: node.tagName });
+    node.tagName = "span";
+    node.nodeName = "span";
+  }
+  return parseComponent(`<template component="${tag}"><defs>${metadata.propDeclarations}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
+}
+
+/**
+ * The head after a layer: its rendered carrier's metadata merged onto the previous layers' by identity,
+ * then its loader's head fields.
+ */
+export function mergeHead(root: DefaultTreeAdapterMap["element"] | undefined, definition: ComponentDefinition,
+  result: LoaderResult, previous: RenderedHead): RenderedHead {
   let title = previous.title;
   let description = previous.description;
   const elements = [...(previous.elements ?? defaultHeadElements)];
-  const metadata = resource.components.get(definition.contract.tag)!;
-  if (metadata.head !== "") {
-    // Reuse the ordinary parser, declared prop contracts, serializer and DOM renderer.
-    // No state, data reads, controllers, or browser subscriptions enter this head scope.
-    // Component bodies exclude head elements. Inert spans carry the same attribute/text
-    // bindings through the renderer, then become native metadata after evaluation.
-    const fragment = parseFragment(metadata.head);
-    for (const node of fragment.childNodes) {
-      if (!("tagName" in node)) continue;
-      node.attrs.push({ name: "data-hk-head", value: node.tagName });
-      node.tagName = "span";
-      node.nodeName = "span";
-    }
-    const headDefinition = parseComponent(`<template component="hk-head"><defs>${metadata.propDeclarations}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
-    const rendered = await renderComponents(invoke(headDefinition), { definitions: [headDefinition], url });
-    const root = parseFragment(rendered.html).childNodes.find(node => "tagName" in node);
-    if (root === undefined || !("childNodes" in root)) throw new HtmlKitError("Head rendering produced no root.", definition.source.file);
+  if (root !== undefined) {
     const text = (node: DefaultTreeAdapterMap["node"]): string => "value" in node ? node.value : "childNodes" in node ? node.childNodes.map(text).join("") : "";
     const current: HeadElement[] = [];
     for (const node of root.childNodes) {

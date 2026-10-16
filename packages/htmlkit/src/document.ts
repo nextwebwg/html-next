@@ -58,7 +58,7 @@ function exact(value: unknown, seen: Set<object>): boolean {
  * definitions are in its module. Undefined when JSON cannot carry the state exactly; such a page
  * navigates by its HTML instead.
  */
-export function pagePayload(page: RenderedPage, assets: PageAssets) {
+export function pagePayload(page: Pick<RenderedPage, "status" | "head" | "layers">, assets: PageAssets) {
   if (page.status !== 200 || !page.layers.every(layer => layer.state === undefined || exact(layer.state, new Set()))) return undefined;
   const { lang = "en", title = "HTMLKit", description, elements = defaultHeadElements } = page.head;
   return { version: 1, head: { lang, title, ...(description === undefined ? {} : { description }), elements },

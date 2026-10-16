@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
     "./components/*": "./components/*"
   },
   "files": [
@@ -27,7 +31,8 @@
     "prepack": "pnpm build",
     "build:docs-proof": "tsx examples/docs/build.ts",
     "measure:delivery": "tsx scripts/measure-delivery.ts",
-    "measure:navigation": "tsx scripts/measure-navigation.ts"
+    "measure:navigation": "tsx scripts/measure-navigation.ts",
+    "measure:server": "tsx scripts/measure-server.ts"
   },
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",

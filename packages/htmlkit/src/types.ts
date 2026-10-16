@@ -177,7 +177,9 @@ export interface LoaderResult {
 }
 
 export interface LoadContext {
-  readonly phase: "prerender";
+  /** "request" for a page with hk:render="server", which renders on each request; "prerender" at build time. */
+  readonly phase: "prerender" | "request";
+  /** The page URL: the request's, query included, or for prerendering, the page path under the configured origin. */
   readonly url: URL;
   readonly base: string;
   /** Each [name] parameter's segment, and each [...name] or [[...name]] parameter's list of segments. */
@@ -200,8 +202,18 @@ export interface LoadContext {
    * given: requests answer with it, and static builds write a redirect page.
    */
   readonly redirect: (location: string, status?: RedirectStatus) => never;
-  /** Unavailable during static generation; accessing it throws a diagnostic. */
+  /** Stop loading and answer with the not-found page and status 404. A build leaves the page out. */
+  readonly notFound: () => never;
+  /** The request being answered. Prerendering has none, and reading it throws a diagnostic. */
   readonly request: Request;
+  /** The request's cookies by name, from its Cookie header. Prerendering has none, and reading it throws. */
+  readonly cookies: ReadonlyMap<string, string>;
+  /**
+   * The response's status, 200 unless set, and headers, which every loader of the page shares, such as
+   * response.headers.append("set-cookie", "theme=dark; Path=/"). Redirects and notFound() carry the
+   * headers too. Prerendering has no response, and reading it throws.
+   */
+  readonly response: { status: number; readonly headers: Headers };
 }
 
 export interface ServerModule {
@@ -209,6 +221,37 @@ export interface ServerModule {
   readonly entries?: () => readonly Readonly<Record<string, RouteParam>>[] | Promise<readonly Readonly<Record<string, RouteParam>>[]>;
 }
 export type RouteParam = string | readonly string[];
+
+/** An endpoint method: a standard Request in, a standard Response out. */
+export type EndpointHandler = (request: Request, context: EndpointContext) => Response | Promise<Response>;
+export interface EndpointContext {
+  /** Each [name] parameter's segment, and each [...name] or [[...name]] parameter's list of segments. */
+  readonly params: Readonly<Record<string, RouteParam>>;
+}
+/** An app/api file's exports. HEAD answers with GET's headers and no body unless the file exports HEAD. */
+export interface EndpointModule {
+  readonly GET?: EndpointHandler;
+  readonly HEAD?: EndpointHandler;
+  readonly POST?: EndpointHandler;
+  readonly PUT?: EndpointHandler;
+  readonly PATCH?: EndpointHandler;
+  readonly DELETE?: EndpointHandler;
+}
+/** An app/api/**\/*.server.ts file and the path it answers, such as /api/todos/[id]. */
+export interface EndpointRoute {
+  readonly pattern: string;
+  readonly segments: readonly string[];
+  readonly params: readonly string[];
+  readonly file: string;
+}
+/**
+ * app/middleware.server.ts's default export. It runs before every page, page payload, and endpoint,
+ * and answers with a Response: its own, such as a redirect, or next()'s, whose headers it may change.
+ * next(url) answers as the application would answer that path, a rewrite, and next(request) answers
+ * that request instead, such as one with an added header for loaders to read. For a page's payload,
+ * the request is the page's own URL.
+ */
+export type Middleware = (request: Request, next: (rewrite?: string | URL | Request) => Promise<Response>) => Response | Promise<Response>;
 
 /** server is a loader module path, or for a plugin's layout, the loader module itself. */
 export interface RouteLayer { readonly component: string; readonly server?: string | ServerModule; }
@@ -235,6 +278,8 @@ export interface ApplicationRoute extends RouteLayer {
   readonly order?: readonly (string | null)[];
   /** The (group) folders the page is in, outermost first. */
   readonly groups?: readonly RouteGroup[];
+  /** From the page's hk:render metadata: "server" renders it on each request instead of at build time. */
+  readonly render?: "server";
 }
 /** A (group) folder: it orders and labels its pages and adds no URL segment. */
 export interface RouteGroup {
@@ -289,7 +334,8 @@ export interface BrowserDefinition {
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
-  readonly status: 200 | 404 | 500 | RedirectStatus;
+  /** 200, 404 for the not-found page, 500 for the error page, or a redirect's status. */
+  readonly status: number;
   readonly pathname: string;
   /** A redirect's Location; html is then its redirect page. */
   readonly location?: string;
@@ -321,6 +367,10 @@ export interface Application {
   readonly files: ReadonlyMap<string, string>;
   /** The absolute paths page plugins passed to page.watch(), which the development server watches. */
   readonly watchFiles: ReadonlySet<string>;
+  /** The app/api endpoints, in file order. */
+  readonly endpoints: readonly EndpointRoute[];
+  /** The absolute path of app/middleware.server.ts, when there is one. */
+  readonly middleware?: string;
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */
   entries(): Promise<readonly string[]>;
   navigation(options?: NavigationQuery): Promise<readonly NavigationItem[]>;
@@ -328,13 +378,31 @@ export interface Application {
   /** Render a fresh declarative baseline without executing browser controllers. */
   render(pathname: string, signal?: AbortSignal): Promise<RenderedPage>;
   /**
-   * Serve pages for a native Request, on any runtime with fetch types: GET and HEAD under base, redirects, 308 to
-   * a route's trailing-slash URL, 404, 405, and 500 with app/error.html when a page fails. Documents include browser modules only when the
-   * serving adapter supplies them, as the development server does.
+   * Answer a native Request, on any runtime with fetch types: middleware, then endpoints, then pages (GET
+   * and HEAD) under base, with redirects, 308 to a page's trailing-slash URL, 404, 405, and 500 with
+   * app/error.html when a page, endpoint, or middleware fails. Documents include browser modules only
+   * when the serving adapter supplies them, as the development server does.
    */
   fetch(request: Request): Promise<Response>;
   close(): Promise<void>;
 }
+/**
+ * A build's request server, the default export of _htmlkit/server/entry.js in the output. Its fetch
+ * answers as Application.fetch does, serving prerendered pages and assets from the output's files.
+ */
+export interface ServerApplication {
+  readonly base: string;
+  /** Not a method of `this`, so a runtime can be handed it, as in Deno.serve(application.fetch). */
+  readonly fetch: (request: Request) => Promise<Response>;
+}
 export interface BuildResult { readonly outDir: string; readonly routes: readonly string[]; readonly browserInputs: readonly string[]; }
 export interface ServerOptions extends ApplicationOptions { readonly host?: string; readonly port?: number; }
+export interface StartOptions {
+  /** The build output, dist unless given. */
+  readonly outDir?: string;
+  readonly host?: string;
+  readonly port?: number;
+  /** How many HTML Next render workers render pages: the number of available CPUs, up to 8, unless given. */
+  readonly renderWorkers?: number;
+}
 export interface ApplicationServer { readonly url: string; close(): Promise<void>; }
