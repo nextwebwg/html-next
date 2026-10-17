@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { generateHostTypes } from "./generate.js";
 import type { ComponentGraph } from "./graph.js";
+import type { ComponentDefinition } from "./template.js";
 
 /**
  * Writes `<tag>.host.d.ts` beside the definition of each application component that declares a
@@ -11,13 +12,22 @@ import type { ComponentGraph } from "./graph.js";
  * alone, and so is a file of that name HTML Next did not generate. Returns the declarations' paths.
  */
 export async function writeHostDeclarations(graph: ComponentGraph): Promise<readonly string[]> {
-  const definitions = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition] as const));
+  return writeHostFiles([...graph.nodes.values()].flatMap((node) =>
+    node.controller === undefined || node.imported === true ? [] : [{ url: node.url, definition: node.definition }]),
+  new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition] as const)));
+}
+
+/** Writes the host declaration of each component with a controller, from its definition's file URL. */
+export async function writeHostFiles(
+  components: readonly { readonly url: string; readonly definition: ComponentDefinition }[],
+  definitions: ReadonlyMap<string, ComponentDefinition>,
+): Promise<readonly string[]> {
   const paths: string[] = [];
-  for (const node of graph.nodes.values()) {
-    if (node.controller === undefined || node.imported === true || !node.url.startsWith("file:")) continue;
-    const path = fileURLToPath(new URL(`${node.definition.contract.tag}.host.d.ts`, node.url));
+  for (const { url, definition } of components) {
+    if (definition.controller === undefined || !url.startsWith("file:")) continue;
+    const path = fileURLToPath(new URL(`${definition.contract.tag}.host.d.ts`, url));
     if (path.split(sep).includes("node_modules")) continue;
-    const content = generateHostTypes(node.definition, definitions);
+    const content = generateHostTypes(definition, definitions);
     const previous = await readFile(path, "utf8").catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;

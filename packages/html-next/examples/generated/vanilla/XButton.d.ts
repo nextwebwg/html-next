@@ -3,7 +3,11 @@ export interface XButtonEventMap {
 }
 export interface XButtonElement extends HTMLButtonElement {
   addEventListener<K extends keyof XButtonEventMap>(type: K, listener: (this: XButtonElement, event: XButtonEventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;
+  addEventListener<K extends keyof HTMLElementEventMap>(type: K, listener: (this: XButtonElement, event: HTMLElementEventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
   removeEventListener<K extends keyof XButtonEventMap>(type: K, listener: (this: XButtonElement, event: XButtonEventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;
+  removeEventListener<K extends keyof HTMLElementEventMap>(type: K, listener: (this: XButtonElement, event: HTMLElementEventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
 }
 export interface XButtonProps {
   size?: "sm" | "md" | "lg" | null;

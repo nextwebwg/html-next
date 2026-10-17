@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-alpha.58
+
+### Added
+
+- `assembleComponentPackage` takes `hostTypes: true` and writes each controller's typed host, `<tag>.host.d.ts`, beside the component source that declares it, as the build and convert paths do, so a package typechecks its controllers in its own build. A test assembles a package with and without it.
+
+### Fixed
+
+- A generated Vanilla element type, `XElement`, types its declared events in addition to its root element's own: `addEventListener` and `removeEventListener` take each declared event with its detail, then each event of the root's DOM event map (`HTMLElementEventMap`, or the media, video, body or frameset map for those roots), then any type with an `EventListenerOrEventListenerObject`. The element is assignable to `Node`, `HTMLElement` and its root's DOM type, and `createUiSeparator().addEventListener("click", …)` types `event` as a `MouseEvent`. Tests compile assignment to `Node`, `HTMLElement` and the root type, a native `click` listener, a declared event with a native event's name, and a declared event's detail.
+
 ## 1.0.0-alpha.57
 
 ### Added

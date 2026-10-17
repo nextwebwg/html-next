@@ -15,6 +15,8 @@ export interface ComponentPackageConfig {
   readonly outDirectory: string;
   /** Publish HTML definitions and controllers for consumer-side framework conversion. */
   readonly sourceOnly?: boolean;
+  /** Also write `<tag>.host.d.ts` beside each component source that declares a controller. */
+  readonly hostTypes?: boolean;
   readonly components: readonly PackageComponentInput[];
   readonly passThrough?: readonly PackagePassThrough[];
   readonly exports?: Readonly<Record<string, unknown>>;

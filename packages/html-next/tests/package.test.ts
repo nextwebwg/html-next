@@ -59,6 +59,21 @@ describe("component package assembler", () => {
     assert.match(await readFile(join(outDirectory, "html-next/index.js"), "utf8"), /export \{ UiButton \} from "\.\.\/components\/library\.html"/);
   });
 
+  it("writes each controller's typed host beside its source when asked", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-package-hosts-"));
+    temporary.push(root);
+    await writeFile(join(root, "library.html"), '<template component="ui-picker" controller="./picker.js"><defs><event name="pick" type="string"></event></defs><div></div></template>' +
+      '<template component="ui-badge"><span></span></template>');
+    await writeFile(join(root, "picker.js"), "export default function controller() {}\n");
+    const assemble = (hostTypes: boolean) => assembleComponentPackage({ name: "@example/library", version: "1.0.0",
+      outDirectory: join(root, hostTypes ? "hosts" : "plain"), components: [{ source: join(root, "library.html") }], hostTypes });
+    await assemble(false);
+    await assert.rejects(readFile(join(root, "ui-picker.host.d.ts"), "utf8"));
+    await assemble(true);
+    assert.match(await readFile(join(root, "ui-picker.host.d.ts"), "utf8"), /export interface HostEvents \{\n {2}pick: string;\n\}/);
+    await assert.rejects(readFile(join(root, "ui-badge.host.d.ts"), "utf8"));
+  });
+
   it("can publish only HTML sources and a named source entry", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-source-package-"));
     temporary.push(root);

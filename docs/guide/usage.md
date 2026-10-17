@@ -338,7 +338,7 @@ If a component needs declarations before its first import, add `entries: ["src/c
 
 ### Type a controller {#typed-host}
 
-Each component that declares a controller gets a typed host: `<tag>.host.d.ts`, beside its definition. It exports `Host`, the host the controller receives, and `Controller`, the type of the controller module's default export. The Vite plugin writes it when a build or dev server starts, `html-next-sync` writes it for a typecheck that runs first, and `html-next build` and `html-next-convert` write it too. Each run rewrites it from the definition, so you can list `*.host.d.ts` in `.gitignore`. A file of that name that HTML Next didn't write stays as it is, and the run stops with an error naming it.
+Each component that declares a controller gets a typed host: `<tag>.host.d.ts`, beside its definition. It exports `Host`, the host the controller receives, and `Controller`, the type of the controller module's default export. The Vite plugin writes it when a build or dev server starts, `html-next-sync` writes it for a typecheck that runs first, and `html-next build` and `html-next-convert` write it too, as does `assembleComponentPackage` with `hostTypes: true`. Each run rewrites it from the definition, so you can list `*.host.d.ts` in `.gitignore`. A file of that name that HTML Next didn't write stays as it is, and the run stops with an error naming it.
 
 The host types what `<defs>` declares:
 
