@@ -21,6 +21,7 @@
 - Converted Svelte components compile when named slot content is conditional or repeated: a projected element spreads its `slot` attribute, which Svelte rejects as written inside `{#if}` and `{#each}`. A named slot of only `$if` elements shows its fallback while none renders.
 - A converted React slot that mixes elements and repeated content renders without React's missing-key warning.
 - A test renders a link form that passes its search result row a prefix icon, leading, label, title, conditional meta, repeated, replaced trailing and scoped action content, with default content, in the live runtime, compiled output, Vue, React and Svelte, in Chromium, Firefox and WebKit, and converter tests check the Vue output of `convertComponents` and of `generateComponent` with the graph's definitions.
+- A controller's connection cleanup in a converted Vue component reads `host.root` and `host.element` as the root that disconnected, as the live runtime, compiled output, React and Svelte do. When the component's own render failed, for example in its slot content, Vue had already cleared the root ref, so both read `null` and cleanup that removed listeners from the root threw. React's host has `host.element`, as its typed host declares. A test removes a component with a controller in the live runtime, compiled output, Vue, React and Svelte, and fails a Vue component's slot render, and checks what its cleanup reads.
 
 ## 1.0.0-alpha.57
 

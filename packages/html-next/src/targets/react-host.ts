@@ -72,6 +72,7 @@ export interface ComponentHostOptions {
 
 interface ControllerHost {
   readonly root: Element;
+  readonly element: Element;
   readonly state: Record<string, unknown>;
   readonly data: Readonly<Record<string, unknown>>;
   readonly scripts: Readonly<Record<string, unknown>>;
@@ -243,6 +244,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         track(dependency("root"));
         return (latest.current.root.current ?? root ?? lastRoot)!;
       },
+      get element() { return host.root; },
       state: namespaces.state,
       data: namespaces.data,
       scripts: options.scripts ?? Object.freeze({}),
