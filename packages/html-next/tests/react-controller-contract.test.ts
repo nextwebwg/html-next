@@ -263,7 +263,6 @@ describe("React controller contract", () => {
         await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: "wrong" })); });
         assert.equal(button.querySelector("output")!.textContent, "11");
         await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: "still wrong" })); });
-        await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: null })); });
         assert.equal(button.querySelector("output")!.textContent, "11");
         assert.equal(warning.mock.calls.length, 1);
         assert.match(String(warning.mock.calls[0]![0]), /HR007.*count/);

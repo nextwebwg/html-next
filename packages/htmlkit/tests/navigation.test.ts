@@ -123,8 +123,8 @@ it("nests navigation by folder and group, labels folders from their index pages,
   await write(root, "app/pages/01.guide/deep/more.html", '<template component="page-more"><h1>more</h1></template>');
   await write(root, "app/layouts/default.html", `<template component="tree-shell"><defs>
     <prop name="tree" type="list(object({ label: string, current: string, depth: number, ... }))" required>Tree</prop>
-    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string, ... })" nullable>Previous</prop>
-    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string, ... })" nullable>Next</prop></defs>
+    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string, ... })">Previous</prop>
+    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string, ... })">Next</prop></defs>
     <main><hk-nav from:items="$tree"></hk-nav><slot name="page"></slot><hk-pager from:previous="$previous" from:next="$next"></hk-pager></main></template>`);
   await write(root, "app/layouts/default.server.ts", 'export const load = async ({ navigationTree, pager }) => ({ props: { tree: await navigationTree(), ...await pager() } });');
   const application = await createApplication({ root });
@@ -190,8 +190,8 @@ it("renders built-in breadcrumbs and previous/next links from navigation order",
   const item = "object({ href: string, label: string, current: string, depth: number, pageName: string })";
   await write(root, "app/layouts/default.html", `<template component="trail-shell"><defs>
     <prop name="crumbs" type="list(${item})" required>Trail</prop>
-    <prop name="previous" type="${item}" nullable>Previous page</prop>
-    <prop name="next" type="${item}" nullable>Next page</prop></defs>
+    <prop name="previous" type="${item}">Previous page</prop>
+    <prop name="next" type="${item}">Next page</prop></defs>
     <main><hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs><slot name="page"></slot><hk-pager from:previous="$previous" from:next="$next"></hk-pager></main></template>`);
   await write(root, "app/layouts/default.server.ts", 'export const load = async ({ breadcrumbs, pager }) => ({ props: { crumbs: await breadcrumbs(), ...await pager() } });');
   await write(root, "app/pages/blog/[slug].html", '<template component="page-post"><p>Post</p></template>');

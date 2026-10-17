@@ -892,12 +892,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
   const propType = (prop: (typeof target.props)[number]): string =>
     parameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, parameters);
+  // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
+  const suppliedProp = (name: string): string => "default" in contract.props[name]!
+    ? `(props[${quote(name)}] ?? ${JSON.stringify(contract.props[name]!.default)})` : `props[${quote(name)}]`;
   const selectedNode = (prop: (typeof target.props)[number]): string =>
     prop.contract.select === undefined
       ? JSON.stringify(normalizeType(prop.contract.type))
       : `selectedPropNode(${contract.props[prop.contract.select.from] === undefined
         ? `${stateNames.get(states.find((state) => state.name === prop.contract.select!.from)!)}.value`
-        : `checkedProp<unknown>(props[${quote(prop.contract.select.from)}], ${JSON.stringify(normalizeType(contract.props[prop.contract.select.from]!.type))}, ${contract.props[prop.contract.select.from]!.required}, ${quote(prop.contract.select.from)}, acceptedProps)`}, ${JSON.stringify(prop.contract.select.options)})`;
+        : `checkedProp<unknown>(${suppliedProp(prop.contract.select.from)}, ${JSON.stringify(normalizeType(contract.props[prop.contract.select.from]!.type))}, ${contract.props[prop.contract.select.from]!.required}, ${quote(prop.contract.select.from)}, acceptedProps)`}, ${JSON.stringify(prop.contract.select.options)})`;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const hasStateSelected = target.props.some((prop) => prop.contract.select !== undefined &&
@@ -1096,7 +1099,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
-    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps)`;
+    const checked = `checkedProp<${type}>(${suppliedProp(prop.name)}, ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps)`;
     const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
     return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
       : `  ${propKey(prop.name)}: ${value},`;

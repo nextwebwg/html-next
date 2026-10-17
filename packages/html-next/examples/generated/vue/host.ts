@@ -169,7 +169,7 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
         [],
         unwrap(value),
         typeof name !== 'string' || !Object.hasOwn(options.state, name),
-        () => options.state[String(name)]!.set(unwrap(value)),
+        () => options.state[String(name)]!.set(unwrap(value) ?? null),
       ),
     deleteProperty: (_target, name) => {
       warn(String(name), true)
@@ -1236,7 +1236,7 @@ export function warnUnless(accepted: boolean, location: string, message: string)
 
 /**
  * A handler's checked write to a ref or through a setter. An invalid result, such as a number that
- * is not finite, writes nothing. A value neither absent nor of the destination's type warns once for
+ * is not finite, writes nothing. A value neither null, absent nor of the destination's type warns once for
  * its authored write (the state `path` in `file`'s `handler`), as the live runtime does, and
  * leaves the destination as it was.
  */
@@ -1252,14 +1252,14 @@ export function write(
     value === Symbol.for('html-next.invalid-result')
     || (typeof value === 'number' && !Number.isFinite(value))
   ) return
-  if (check !== undefined && value !== undefined && !check(value)) {
+  if (check !== undefined && value != null && !check(value)) {
     warnUnless(
       false,
       `${file}#${handler}:${path}`,
       `${file}: HR007: State \`${path}\` does not satisfy its declared type.`,
     )
-  } else if (typeof to === 'function') to(value)
-  else to.value = value
+  } else if (typeof to === 'function') to(value ?? null)
+  else to.value = value ?? null
 }
 
 export const isString = (value: unknown): value is string => typeof value === 'string'

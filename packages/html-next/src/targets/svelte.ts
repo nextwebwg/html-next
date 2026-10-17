@@ -1238,7 +1238,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const inputSource = (name: string): string => {
     const prop = definition.contract.props[name]!;
     const input = selectedInputs.has(name) ? `${inputNames.get(name)}.value` : inputNames.get(name)!;
-    return "default" in prop ? `(${input} === undefined ? ${literalValueSource(prop.default)} : ${input})` : input;
+    // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
+    return "default" in prop ? `(${input} ?? ${literalValueSource(prop.default)})` : input;
   };
   const selectorSource = (name: string): string | undefined => {
     const selector = definition.contract.props[name];

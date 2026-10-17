@@ -50,7 +50,7 @@ const component = (defs: string, body: string, controller = true): string =>
 const benchmarkShape = component(`
   <state name="ready" type="boolean" value="false"></state>
   <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-  <state name="selected" type="number" nullable></state>`, `
+  <state name="selected" type="number"></state>`, `
   <div id="main"><div class="container" $if="$ready"><table><tbody>
     <tr $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:danger="$row.id = $selected">
       <td $value="$row.id"></td><td><a data-action="select" $value="$row.label"></a></td>
@@ -170,7 +170,8 @@ describe("compact declared types (matrix)", () => {
   };
   const atDestination = (value: unknown, type: TypeNode | undefined): boolean => {
     if (type === undefined) return true;
-    if (value === null) return parseTypedValue(value, type, "$", "value").ok;
+    // Null, or undefined, means not present: never a wrong-typed write.
+    if (value == null) return true;
     return atReference(value, normalizeType(type));
   };
   const number: TypeNode = { kind: "terminal", name: "number" };
@@ -203,7 +204,7 @@ describe("compact declared types (matrix)", () => {
     });
   }
 
-  it("checks formats, keywords, functions, events and constrained nullable types as the type system does", async () => {
+  it("checks formats, keywords, functions, events and constrained types as the type system does", async () => {
     const helpers = await import("../src/generated-runtime.js");
     const materialize = (node: TypeNode): CompactType =>
       // oxlint-disable-next-line typescript/no-implied-eval
@@ -371,7 +372,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>`, `
+      <state name="selected" type="number"></state>`, `
       <section><p>rows</p><ul $if="$ready">
         <li $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:on="$row.id = $selected"
           class:off="$selected != $row.id"><b $value="$row.label"></b></li>
@@ -410,8 +411,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
-      <state name="other" type="number" nullable></state>`, `
+      <state name="selected" type="number"></state>
+      <state name="other" type="number"></state>`, `
       <section><p>rows</p><div $if="$ready">
         <ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"
           class:on="$row.id = $selected" class:other="$row.id = $other"><b $value="$row.label"></b></li></ul>
@@ -456,7 +457,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string, tags: list(string), user: object({ name: string }) }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="user" type="object({ name: string, age: number })" value="{ name: 'Ada', age: 36 }"></state>`, `
       <section from:data-next="$selected + 1" from:title="concat($user.name, '/', $user.age)">
         <p $value="default($selected, 'none')"></p>
@@ -480,7 +481,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(number)" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="level" type="number" value="0"></state>
       <state name="count" type="integer" value="7"></state>
       <state name="width" type="length" value="1.1px"></state>
@@ -505,7 +506,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="title" type="string" value="Rows"></state>
       <state name="link" type="string" value="https://a.example/"></state>`, `
       <section style:--count="$rows.length" from:data-n="$rows.length">
@@ -589,7 +590,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="title" type="string" value="Rows"></state>
       <state name="limit" type="number" value="3"></state>
       <state name="prefix" type="string" value="k"></state>
@@ -754,7 +755,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string, done: boolean }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="name" type="string" value="Ada"></state>
       <state name="age" type="number" value="36"></state>
       <state name="agree" type="boolean" value="true"></state>
@@ -1210,10 +1211,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="site" type="url" value="https://a.example/"></state>
       <state name="tint" type="color" value="red"></state>
-      <state name="when" type="date" nullable></state>
+      <state name="when" type="date"></state>
       <state name="tone" type="keyword" values="solid, outline" value="solid"></state>
       <state name="links" type="list(url)" value="[]"></state>`, `
       <section><p>{$site} {$tint} {$when} {$tone}</p><a from:href="$site">x</a><b $value="$links[0]"></b><i $value="$links.length"></i></section>`);
@@ -1229,7 +1230,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <computed name="first" from="$rows[0]"></computed>
       <computed name="labels" from="[default($first.label, 'none')]"></computed>`, `
       <section><p>{default($first.label, 'none')}</p><b $value="$labels[0]"></b><i $value="$rows.length"></i></section>`);
@@ -1249,7 +1250,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>${many}`, `
+      <state name="selected" type="number"></state>${many}`, `
       <section><p>{$s0} {$s30} {$s33}</p><input .value="$s31"><b $if="$s32 > 40">big</b><i class:hot="$s33 > 40"></i></section>`);
     const note = (host: any, label: string): void => {
       (globalThis as any).directExtendLog.events.push(`${label} ${host.root.querySelector("input").value}`);
@@ -1266,7 +1267,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="tone" type="string" value=""></state>`, `
       <section><p>{$tone}</p></section><style>:host(:state(ready)) { color: red; } :host(:state(tone=loud)) { color: blue; }
       :host(:state(selected)) { outline: 1px solid; }</style>`);
@@ -1730,7 +1731,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const rows = `
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>`;
+      <state name="selected" type="number"></state>`;
     const steps: Step[] = [
       (host) => { host.state.rows = [1, 2, 3, 4].map((id) => ({ id, label: `r${id}` })); },
       (host) => { const list = host.state.rows; const first = list[0]; list[0] = list[3]; list[3] = first; },
@@ -1930,7 +1931,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const rows = `
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-      <state name="selected" type="number" nullable></state>`;
+      <state name="selected" type="number"></state>`;
     const steps: Step[] = [
       (host) => { host.state.rows = [{ id: 1, label: "a" }, { id: 2, label: "b" }]; },
       (host) => { host.state.rows[0].label = "z"; host.state.selected = 2; },
@@ -1977,7 +1978,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("keeps whitespace-only text between elements and rows inside pre", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
-      <state name="selected" type="number" nullable></state>
+      <state name="selected" type="number"></state>
       <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>`, `
       <section><p>code</p><pre><code><span class="line">a</span>
 <span class="line">b</span>

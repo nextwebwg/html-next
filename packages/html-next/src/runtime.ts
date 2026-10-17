@@ -3978,8 +3978,8 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
 
 /**
  * Applies props to one named instance, which a shared root makes explicit: the prop channel of
- * `componentRegistry.update` and framework attachments. Each defined value becomes explicit (and is
- * reflected as `data-<tag>-prop-<name>`), and `undefined` returns the prop to its implicit default.
+ * `componentRegistry.update` and framework attachments. Each value becomes explicit (and is
+ * reflected as `data-<tag>-prop-<name>`), and `null` or `undefined` returns the prop to its implicit default.
  */
 function applyComponentProps(
   instance: RuntimeInstance,
@@ -4016,7 +4016,7 @@ function applyComponentProps(
     const prop = contract.props[name];
     if (prop === undefined) continue;
     // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
-    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input !== undefined };
+    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input != null };
     const previous = untracked(() => instance.propInputs[name]!.get());
     if (previous.source !== record.source || previous.present !== record.present || !Object.is(previous.value, record.value)) {
       instance.propInputs[name]!.set(record);
@@ -4027,7 +4027,7 @@ function applyComponentProps(
     // but only the binding may write that output (and an invalid input cannot trigger it).
     const bound = instance.rootNode.attributes.some((binding) =>
       binding.kind === "attribute" && binding.name === attributeName);
-    // Null has no attribute form, but remains the effective in-memory prop value.
+    // Null, like undefined, means not present: the prop returns to its default.
     if (input === undefined || input === null) {
       instance.explicit.delete(name);
       // An attribute the template binds is its own output (it shows the default); leave it be.
@@ -4216,7 +4216,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       return value === ABSENT ? undefined : wrap(value, key, !writable.has(key));
     },
     set: (_target, key, value) => write(String(key), value, typeof key !== "string" || !writable.has(key),
-      () => instance.scope.set(key as string, value as Value)),
+      () => instance.scope.set(key as string, (value ?? null) as Value)),
     deleteProperty: (_target, key) => write(String(key), undefined, true, () => {}),
     defineProperty: (_target, key) => { write(String(key), undefined, true, () => {}); return false; },
     has: (_target, key) => typeof key === "string" && stateNames.has(key),

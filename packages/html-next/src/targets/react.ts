@@ -896,7 +896,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     code.set(state.name, valueNames.get(state.name)!);
     types.set(state.name, { ...declared, nullable: declared.nullable || state.expression === undefined });
     stateTypes.set(state.name, state.expression === undefined && declaredType !== undefined
-      ? `${typeScript(present(declaredType))} | undefined`
+      ? `${typeScript(present(declaredType))} | null`
       : typeScript(types.get(state.name)!));
   }
   const stateType = (state: ReactiveDeclaration): string => stateTypes.get(state.name)!;
@@ -1079,7 +1079,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  const checkedProps = {",
       ...target.props.map((prop) => {
         const value = `props[${quote(prop.name)}]`;
-        const supplied = "default" in prop.contract ? `${value} === undefined ? ${JSON.stringify(prop.contract.default)} : ${value}` : value;
+        // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
+        const supplied = "default" in prop.contract ? `${value} ?? ${JSON.stringify(prop.contract.default)}` : value;
         return `    ${propKey(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${supplied}, ${selectedType(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false)${"default" in prop.contract ? "!" : ""},`;
       }),
       "  };",
@@ -1087,17 +1088,19 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(stateWritesName === "" ? [] : [`  const ${stateWritesName} = React.useRef<unknown[][]>([]);`]),
     // Handlers read a state's latest write through its getter; rendering reads the value React has.
     ...states.map((state) => {
-      const initial = state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope);
+      // A state without value reads null until written, as in every target (types#null-and-missing-values).
+      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope);
       return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
     }),
     ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
     ...stateSelectedProps.map((prop) => {
       const select = prop.contract.select!;
-      return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(props[${quote(prop.name)}], selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
+      const supplied = `props[${quote(prop.name)}]${"default" in prop.contract ? ` ?? ${JSON.stringify(prop.contract.default)}` : ""}`;
+      return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(${supplied}, selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
     }),
     ...(target.props.length === 0 ? [] : [
       "  const propInputValues = { ...checkedProps,",
-      ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] === undefined ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
+      ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] == null ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
       "  };",
       "  const reflectedAttrs = {",
       ...target.props.map((prop) => {

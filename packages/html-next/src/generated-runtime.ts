@@ -709,7 +709,8 @@ export function acceptProps(
   }
   for (const name of names) {
     const prop = props[name]!;
-    v[at(name)] = accepted[name] !== undefined ? accepted[name] : prop.default === undefined ? null : prop.default;
+    // A null input means not present, so the prop takes its default (`invocationValue`).
+    v[at(name)] = accepted[name] != null ? accepted[name] : prop.default === undefined ? null : prop.default;
   }
   const inputs: Record<string, PropInput> = Object.create(null);
   for (const name of names) inputs[name] = incoming[name] ?? { value: null, source: "value", present: false };
@@ -830,8 +831,8 @@ export function manageProps(instance: GeneratedInstance): void {
       for (const [name, value] of Object.entries(input)) {
         const prop = props[name];
         if (prop === undefined || (prop.select !== undefined) !== pass) continue;
-        // A framework's undefined returns the prop to its default (`assignedPropValue`).
-        const accepted = value !== undefined ? taken(selected(prop, next), value, "value") : prop.default === undefined ? null : prop.default;
+        // A framework's null or undefined returns the prop to its default (`assignedPropValue`).
+        const accepted = value != null ? taken(selected(prop, next), value, "value") : prop.default === undefined ? null : prop.default;
         if (accepted !== undefined) next[name] = accepted;
       }
     }
@@ -840,8 +841,8 @@ export function manageProps(instance: GeneratedInstance): void {
       if (prop === undefined) continue;
       // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
       const previous = inputs[name];
-      if (previous?.source !== "value" || previous.present !== (value !== undefined) || !Object.is(previous.value, value === undefined ? null : value)) {
-        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+      if (previous?.source !== "value" || previous.present !== (value != null) || !Object.is(previous.value, value === undefined ? null : value)) {
+        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value != null };
         notifyPropertySet(inputs, name, previous, inputs[name], undefined);
       }
       // A bound data-* attribute is template output; only its binding writes it.
@@ -1058,16 +1059,10 @@ export function clearRegion(start: Comment, end: Comment): void {
 /**
  * A declared type in generated form: 0 none, "?" unknown, "s" string, "b" boolean, "n" number,
  * "i" integer, "z" null, "a" absent, ["l", item], ["r", value], ["o", [field, type, ...], open?],
- * ["u", ...members], ["k", keyword], ["p", check, acceptsNull] for any other kind (a format, a
- * function, an event, trusted content), and ["c", base, acceptsNull] for a constrained type whose
- * base accepts null: a reference checks only the base, a null write the whole type.
+ * ["u", ...members], ["k", keyword], and ["p", check] for any other kind (a format, a function,
+ * an event, trusted content). A constrained type is its base's: writes check the immediate type.
  */
 export type CompactType = 0 | "?" | "s" | "b" | "n" | "i" | "z" | "a" | readonly unknown[];
-
-const acceptsNull = (type: CompactType): boolean =>
-  type === "?" || type === "z" || typeof type === "object" && (
-    type[0] === "u" ? type.some((member, index) => index > 0 && acceptsNull(member as CompactType))
-      : (type[0] === "p" || type[0] === "c") && type[2] === true);
 
 /** A string format's check over any value. */
 export const formatOf = (format: (value: string) => boolean) => (value: unknown): boolean => typeof value === "string" && format(value);
@@ -1092,7 +1087,6 @@ const conformsAtReference = (value: unknown, type: CompactType): boolean => {
     case "u": return (type as readonly unknown[]).some((member, index) => index > 0 && conformsAtReference(value, member as CompactType));
     case "k": return value === (type as readonly unknown[])[1];
     case "p": return ((type as readonly unknown[])[1] as (value: unknown) => boolean)(value);
-    case "c": return conformsAtReference(value, (type as readonly unknown[])[1] as CompactType);
   }
   return false;
 };
@@ -1106,7 +1100,8 @@ export const referenceConforms = (value: unknown, type: CompactType): boolean =>
 
 /** @internal The destination check (`conformsAtDestination`) on a compact type. */
 export const conforms = (value: unknown, type: CompactType): boolean =>
-  type === 0 || (value === null ? acceptsNull(type) : conformsAtReference(value, type));
+  // Null means not present: it is never a wrong-typed write (types#null-and-missing-values).
+  type === 0 || value == null || conformsAtReference(value, type);
 
 /** @internal The declared type one step into `type` (`typeAtKey`); 0 when nothing describes it. */
 export function compactTypeAt(type: CompactType, key: PropertyKey): CompactType {
@@ -1869,7 +1864,8 @@ export function attachGeneratedController(
       }
       const length = Array.isArray(target) ? target.length : undefined;
       const previous: unknown = Reflect.get(target, key);
-      const next = raw(value);
+      // Undefined means not present, as null does.
+      const next = raw(value) ?? null;
       Reflect.set(target, key, next);
       if (!Object.is(previous, next) || length !== undefined && length !== (target as unknown[]).length) written(this);
       notifyPropertySet(target, key, previous, next, length);

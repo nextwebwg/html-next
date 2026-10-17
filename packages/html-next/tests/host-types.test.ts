@@ -17,6 +17,7 @@ const checkout = `<link rel="component" href="./line-item.html">
     <prop name="limit" type="number">The most lines.</prop>
     <state name="lines" type="list(object({ sku: string, qty: integer }))" value="[]"></state>
     <state name="note" type="string" value=""></state>
+    <state name="level" type="integer"></state>
     <computed name="count" type="integer" from="$lines.length"></computed>
     <context name="theme" from="app-shell" as="theme"></context>
     <data name="rates" src="/api/rates" type="object({ usd: number })"></data>
@@ -57,6 +58,10 @@ export default function controller(host: Host) {
   const limit: number | null = host.props.limit.value;
   host.state.lines.push({ sku: "A1", qty: 2 });
   host.state.note = "Added";
+  // Writing null or undefined is never wrong-typed; a state without value reads null until written.
+  host.state.note = null;
+  host.state.level = undefined;
+  const level: number | null = host.state.level;
   const count: number = host.state.count;
   const theme: "light" | "dark" = host.state.theme;
   const usd: number | undefined = host.data.rates.value?.usd;
@@ -81,7 +86,7 @@ export default function controller(host: Host) {
   const doubled = host.computed(() => count * 2);
   const local = host.signal(0);
   local.update((value) => value + doubled.get());
-  host.effect(() => { void [theme, usd, pending, rows, item, footer, answer, ping, answered]; });
+  host.effect(() => { void [level, theme, usd, pending, rows, item, footer, answer, ping, answered]; });
 }
 `;
 

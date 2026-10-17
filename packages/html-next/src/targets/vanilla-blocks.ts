@@ -298,9 +298,6 @@ const FORMAT_CHECKS: Readonly<Record<string, string>> = {
   duration: "durationFormat",
 };
 
-/** Whether `parseTypedValue` accepts null for the type, decided once at build time. */
-const nullAccepted = (node: TypeNode): boolean => parseTypedValue(null, node, "$", "value").ok;
-
 /** The compact form of a declared type; kinds without a structure of their own check through a predicate. */
 export function compactType(node: TypeNode): CompactType {
   switch (node.kind) {
@@ -315,7 +312,7 @@ export function compactType(node: TypeNode): CompactType {
         : node.name === "function" ? { js: "isFunctionValue" }
         : node.name === "event" ? { js: "isNativeEvent" }
         : { js: `detailCheck(${checkSource(node)})` };
-      return ["p", check, nullAccepted(node)];
+      return ["p", check];
     }
     case "keyword": return ["k", node.value];
     case "list": {
@@ -338,21 +335,13 @@ export function compactType(node: TypeNode): CompactType {
       }
       return ["u", ...members];
     }
-    case "constrained": {
-      // A reference checks only the base; a null write checks the constraints too, so a base
-      // that accepts null carries whether the whole type does.
-      const base = compactType(node.base);
-      return acceptsNullCompact(base) ? ["c", base, nullAccepted(node)] : base;
-    }
+    // A write's immediate check is its base type's; null is never wrong-typed.
+    case "constrained": return compactType(node.base);
     default:
       // A selected type depends on another declaration; a separated list checks its items.
-      return ["p", { js: `detailCheck(${checkSource(node)})` } satisfies CompactCheck, nullAccepted(node)];
+      return ["p", { js: `detailCheck(${checkSource(node)})` } satisfies CompactCheck];
   }
 }
-
-const acceptsNullCompact = (type: CompactType): boolean =>
-  type === "?" || type === "z" || typeof type === "object" && (type[0] === "u" ? type.some((member, index) => index > 0 && acceptsNullCompact(member as CompactType))
-    : (type[0] === "p" || type[0] === "c") && type[2] === true);
 
 /** JavaScript for a compact type: JSON, with each predicate's check written as code. */
 export function compactSource(type: unknown): string {
