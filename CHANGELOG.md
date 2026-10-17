@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.57
+
+### Fixed
+
+- Live hydration adopts the server's nodes in a fragment `<template>`: the body of a `<template $if>` or `<template $with>`, a `<template $when>` or `<template $else>` arm of a `$match`, and a plain `<template>`, at any depth and in any parent, such as `<p>`, `<span>`, `<a>`, `<button>` and `<label>`. It built new elements in their place, so a reference taken before hydration was disconnected. A row of a `<template $each>` adopts its nodes the same way. Compiled hydration already adopted them. Tests hold node identity through server rendering and hydration, live and compiled, in Chromium, Firefox and WebKit.
+
 ## 1.0.0-alpha.56
 
 ### Added
