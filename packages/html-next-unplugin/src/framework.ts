@@ -127,20 +127,21 @@ class FrameworkCompiler {
     }
   }
 
-  async resource(source: string, packageRoot: string, cache: string): Promise<string> {
+  /** `hostTypes` writes the typed controller hosts of an application's own components. */
+  async resource(source: string, packageRoot: string, cache: string, hostTypes = false): Promise<string> {
     const key = `${cache}:${source}`;
     const known = this.conversions.get(key);
     if (known !== undefined) return known;
-    const conversion = this.convertResource(source, packageRoot, cache);
+    const conversion = this.convertResource(source, packageRoot, cache, hostTypes);
     this.conversions.set(key, conversion);
     return conversion;
   }
-  private async convertResource(source: string, packageRoot: string, cache: string): Promise<string> {
+  private async convertResource(source: string, packageRoot: string, cache: string, hostTypes: boolean): Promise<string> {
     await this.linkDependencies(cache, packageRoot);
     const output = resolve(cache, "resources", identity(source));
     await rm(output, { recursive: true, force: true });
     const manifest = await convertComponents({ target: this.options.target, mode: "library", root: packageRoot,
-      entries: [source], outDirectory: output,
+      entries: [source], outDirectory: output, hostTypes,
       ...(this.options.publicRootURL === undefined ? {} : { publicRootURL: this.options.publicRootURL }) });
     for (const path of manifest.sourceFiles) this.sources.add(resolve(packageRoot, path));
     return resolve(output, manifest.output.entry);
@@ -358,7 +359,7 @@ class FrameworkCompiler {
 
   private async convertLocalResource(source: string): Promise<string> {
     const cache = resolve(this.root, "node_modules", ".html-next", this.options.target, identity(source));
-    const entry = await this.resource(source, this.root, cache);
+    const entry = await this.resource(source, this.root, cache, true);
     const declaration = await this.declarations(entry, cache);
     const sidecar = source.replace(/\.html$/, ".d.html.ts");
     await writeGenerated(sidecar, `${header}export * from ${JSON.stringify(importPath(sidecar, declaration).replace(/\.d\.ts$/, ""))};\n`);

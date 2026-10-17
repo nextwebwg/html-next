@@ -172,6 +172,17 @@ describe("framework converter", () => {
       '<main id="case" class="outer" data-component="x-app"><article aria-label="Hello" class="card ready" style="border-radius:2px;color:red" data-x-card-prop-label="Hello" data-x-card-state="label label=Hello" data-component="x-card"></article></main>');
   });
 
+  it("writes each controller's typed host beside its definition when asked, as the CLI does", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-convert-host-"));
+    temporary.push(root);
+    await writeFile(join(root, "card.html"), '<template component="x-card" controller="./card.js"><defs><request name="pick" type="string" returns="integer"></request></defs><article></article></template>');
+    await writeFile(join(root, "card.js"), "export default function controller() {}\n");
+    await convertComponents({ mode: "library", target: "react", root, outDirectory: join(root, "plain"), entries: ["card.html"] });
+    await assert.rejects(access(join(root, "x-card.host.d.ts")));
+    await convertComponents({ mode: "library", target: "react", root, outDirectory: join(root, "out"), entries: ["card.html"], hostTypes: true });
+    assert.match(await readFile(join(root, "x-card.host.d.ts"), "utf8"), /pick: \{ detail: string; answer: number \}/);
+  });
+
   it("does not infer React helpers from authored text", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-text-"));
     temporary.push(root);

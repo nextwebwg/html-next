@@ -12,6 +12,8 @@ import {
   HtmlDiagnosticAggregateError,
   recoverDiagnostic,
   loadNodeComponents,
+  writeHostDeclarations,
+  type ComponentGraph,
   type HtmlDiagnostic,
   type DiagnosticLocation,
   type ComponentDefinition,
@@ -104,6 +106,7 @@ interface CompiledGraph {
   readonly support: string;
   readonly sourceFiles: readonly string[];
   readonly manifest: HtmlNextBuildManifest;
+  readonly graph: ComponentGraph;
 }
 
 export function componentModule(tag: string): string {
@@ -432,6 +435,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   const sortedCapabilities = Object.freeze([...allCapabilities].sort());
 
   return Object.freeze({
+    graph,
     entry,
     packages,
     components,
@@ -515,18 +519,23 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
   return {
     name: "html-next",
     enforce: "pre",
-    vite: { configResolved(config) {
-      root = options.root ?? config.root;
-      const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
-      resolveStylesheet = async (specifier, parentURL) => {
-        const resolved = await cssResolver(specifier, fileURLToPath(parentURL));
-        return resolved === undefined ? undefined
-          : pathToFileURL(resolved.replace(/[?#].*$/, "")).href + (/[?#].*$/.exec(resolved)?.[0] ?? "");
-      };
-    } },
+    vite: {
+      /** `html-next-sync` writes the typed controller hosts before a standalone typecheck. */
+      api: { async sync(): Promise<void> { await writeHostDeclarations((await graph()).graph); } },
+      configResolved(config) {
+        root = options.root ?? config.root;
+        const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
+        resolveStylesheet = async (specifier, parentURL) => {
+          const resolved = await cssResolver(specifier, fileURLToPath(parentURL));
+          return resolved === undefined ? undefined
+            : pathToFileURL(resolved.replace(/[?#].*$/, "")).href + (/[?#].*$/.exec(resolved)?.[0] ?? "");
+        };
+      },
+    },
     async buildStart() {
       compiled = compileGraph({ ...options, root }, false, resolveStylesheet);
       const current = await compiled;
+      await writeHostDeclarations(current.graph);
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },
     async resolveId(id, importer) {

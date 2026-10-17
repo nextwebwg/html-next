@@ -262,6 +262,8 @@ When working from this repository, substitute
 `inspect` reports component, controller, and transitive module edges. `build`
 follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
 which is a build inventory—not a second component contract.
+`build` also writes `<tag>.host.d.ts` beside each definition that declares a controller: the
+typed host that controller receives.
 
 Generated targets preserve the definition's native root; they do not add a component
 wrapper. The checked-in [button output](./packages/html-next/examples/generated)

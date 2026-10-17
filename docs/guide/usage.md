@@ -276,17 +276,15 @@ The result uses Svelte and native DOM roots. Generated components import the hel
 
 ::: framework-html-next
 
-Run `html-next-check` to check components without building. It reports invalid declarations, constraints, and component links with their file and line. Pass the same entries as your Vite configuration:
+Run `html-next-check` to check components without building. It reports invalid declarations, constraints, and component links with their file and line. Pass the same entries as your Vite configuration, then write the [typed controller hosts](#typed-host) and check controllers and other application code with your project's usual tools:
 
 ```json title="package.json"
 {
   "scripts": {
-    "check": "html-next-check src/app.html"
+    "typecheck": "html-next-check src/app.html && html-next-sync && tsc --noEmit"
   }
 }
 ```
-
-Check controllers and other application code with your project's usual tools, such as `tsc --noEmit`.
 
 :::
 
@@ -337,6 +335,64 @@ Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter 
 If a component needs declarations before its first import, add `entries: ["src/counter.html"]` to `htmlNext({ target: "svelte" })`.
 
 :::
+
+### Type a controller {#typed-host}
+
+Each component that declares a controller gets a typed host: `<tag>.host.d.ts`, beside its definition. It exports `Host`, the host the controller receives, and `Controller`, the type of the controller module's default export. The Vite plugin writes it when a build or dev server starts, `html-next-sync` writes it for a typecheck that runs first, and `html-next build` and `html-next-convert` write it too. Each run rewrites it from the definition, so you can list `*.host.d.ts` in `.gitignore`. A file of that name that HTML Next didn't write stays as it is, and the run stops with an error naming it.
+
+The host types what `<defs>` declares:
+
+- `props`: each prop's accepted value type, with its input and validity.
+- `state`: writable state, readonly computed values, and context values, typed from their provider.
+- `data`: each resource's `.value`, from its `type`, with `.pending`, `.ok` and `.error`.
+- `refs`: the element type of each referenced element, and a list for a ref inside `$each`. A ref inside `$if` may be `undefined`.
+- `slots` and `scripts`: the declared names, with each script's `ready`, `load()` and status.
+- `request(name, detail, options)` and `hasResponder(name)`: the declared request names, each detail and answer type, from `type` and `returns`.
+- `dispatch(name, detail)`: the declared event names and detail types.
+- `on(type, callback)`: the component's own events and requests, those of the components its template uses, `connect` and `disconnect`, and DOM events.
+
+```html title="src/checkout-form.html"
+<template component="checkout-form" controller="./checkout-form.ts">
+  <defs>
+    <prop name="pk" type="string" required>The Stripe publishable key.</prop>
+    <state name="status" type="keyword" values="idle, paying, paid" value="idle"></state>
+    <event name="paid" type="object({ id: string })"></event>
+    <request name="card-token" type="object({ amount: number })" returns="string"></request>
+    <script name="stripe" src="https://js.stripe.com/v3/" loading="manual"></script>
+  </defs>
+  <form>
+    <div $ref="card"></div>
+    <button>Pay</button>
+  </form>
+</template>
+```
+
+```ts title="src/checkout-form.ts"
+import type { Host } from "./checkout-form.host.js";
+
+export default function controller(host: Host) {
+  host.on("submit", async (event) => {
+    event.preventDefault();
+    host.state.status = "paying";
+    await host.scripts.stripe.load();
+    const token = await host.request("card-token", { amount: 1200 });
+    if (token === null) { host.state.status = "idle"; return; }
+    host.state.status = "paid";
+    host.dispatch("paid", { id: token });
+  });
+}
+```
+
+A misspelled name, a wrong detail, or a name `<defs>` doesn't declare is a type error, such as `host.state.stauts` (`Property 'stauts' does not exist … Did you mean 'status'?`) or `host.request("card-token", { amount: "12" })` (`Type 'string' is not assignable to type 'number'`).
+
+A JavaScript controller takes the same types through JSDoc, checked when `checkJs` is on:
+
+```js title="src/checkout-form.js"
+/** @type {import("./checkout-form.host.js").Controller} */
+export default function controller(host) {
+  host.refs.card.dataset.key = host.props.pk.value;
+}
+```
 
 ## Use a library {#use-a-library}
 
