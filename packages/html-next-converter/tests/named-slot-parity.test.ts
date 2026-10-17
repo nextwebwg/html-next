@@ -32,7 +32,6 @@ const emptyStyles = { name: "empty-styles", setup(pluginBuild: { onResolve: (opt
 } };
 
 const slots = Object.keys(namedSlotText.initial);
-const frameworks = new Set(["vue", "react", "svelte"]);
 
 async function slotText(page: Page, meta: string): Promise<Record<string, string>> {
   try {
@@ -124,12 +123,11 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             await page.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents());
           }
           assert.deepEqual(await slotText(page, namedSlotText.initial.meta), namedSlotText.initial);
-          // ponytail: the live and compiled runtimes put conditional and repeated content that appears
-          // after the first render in the default slot; check them once that is fixed.
-          if (frameworks.has(target)) {
-            await page.locator(".toggle").click();
-            assert.deepEqual(await slotText(page, namedSlotText.toggled.meta), namedSlotText.toggled);
-          }
+          // Content that appears later goes to its slot, and the fallback comes back when it goes.
+          await page.locator(".toggle").click();
+          assert.deepEqual(await slotText(page, namedSlotText.toggled.meta), namedSlotText.toggled);
+          await page.locator(".toggle").click();
+          assert.deepEqual(await slotText(page, namedSlotText.closed.meta), namedSlotText.closed);
           assert.deepEqual(errors, []);
         } finally {
           await browser.close();

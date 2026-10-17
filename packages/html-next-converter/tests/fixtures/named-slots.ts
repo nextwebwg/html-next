@@ -35,8 +35,9 @@ export const linkFormSource = `<link rel="component" href="./row.html">
     <p>Body text</p>
   </ui-search-result-row></form></template>`;
 
-/** Each slot's text in the row, before and after `toggle`. */
+/** Each slot's text in the row, before `toggle`, after it, and after it again. */
 export const namedSlotText = {
   initial: { prefix: ">", leading: "Link#docs", label: "https://example.org", title: "Example", meta: "No meta", body: "Body text", trailing: "!", action: "https://example.org" },
   toggled: { prefix: ">", leading: "Link#docs#guide", label: "https://example.org", title: "Example", meta: "Opened", body: "Body text", trailing: "!", action: "https://example.org" },
+  closed: { prefix: ">", leading: "Link#docs#guide", label: "https://example.org", title: "Example", meta: "No meta", body: "Body text", trailing: "!", action: "https://example.org" },
 } as const;
