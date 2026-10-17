@@ -45,7 +45,7 @@ const parent = `<link rel="component" href="./item.html">
   :host:has(x-graph-item:state(pressed)) > output { color: rgb(150 20 20); }</style>
 </template>`;
 
-type Snapshot = { readonly behavior: { readonly tag: string; readonly text: string; readonly rootHits: string; readonly savedHits: string; readonly rightHits: string; readonly documentClicks: number; readonly documentSaved: number; readonly color: string; readonly background: string; readonly projectedColor: string }; readonly pixels: Buffer };
+type Snapshot = { readonly behavior: { readonly tag: string; readonly text: string; readonly rootHits: string; readonly savedHits: string; readonly rightHits: string; readonly documentClicks: number; readonly documentSaved: number; readonly color: string; readonly background: string; readonly projectedColor: string; readonly listBorder: string; readonly outputColor: string }; readonly pixels: Buffer };
 
 async function snapshot(page: Page, expected: string): Promise<Snapshot> {
   await page.waitForFunction((value) => document.querySelector("#case li")?.textContent?.replace(/\s/g, "") === value, expected);
