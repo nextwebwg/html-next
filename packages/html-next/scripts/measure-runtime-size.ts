@@ -149,7 +149,9 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 7_080
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 8_780);
+// +1 B: no added code (identical bytes); esbuild's minified names permute when component-styles.ts
+// gains the HY007 helpers this bundle shakes out, and gzip reads the new order one byte longer.
+const requestGenerated = await generatedFixture("controller-request", 8_781);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
