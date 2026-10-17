@@ -713,12 +713,15 @@ export function useComponentHost(
       validate: validity,
     })
   }
+  // Vue clears a template ref when it removes the element, as when a failed render replaces the
+  // root, so cleanup that runs after that still reads the root that disconnected.
+  let lastRoot: Element | null = null
   const host = {
     get element(): Element {
-      return root.value as Element
+      return (root.value ?? lastRoot) as Element
     },
     get root(): Element {
-      return root.value as Element
+      return (root.value ?? lastRoot) as Element
     },
     ...controllerNamespaces({
       state: Object.fromEntries(
@@ -875,6 +878,7 @@ export function useComponentHost(
   }
   const synchronize = (): void => {
     if (unmounted) return
+    lastRoot = root.value ?? lastRoot
     if (root.value?.isConnected !== true) {
       disconnect()
       return
