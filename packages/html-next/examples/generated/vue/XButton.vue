@@ -59,7 +59,7 @@ const reflectedProp = useReflectedProp()
 
 checkHydratedRoot('button', 'x-button')
 
-/** The values the styles' :host() prop and state rules test. */
+/** The values the styles' :host() and :state() rules test. */
 const hostState = computed(() =>
   [
     checkedProps.value.size && 'size',
