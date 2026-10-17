@@ -56,6 +56,7 @@ config.test!.include = [
   "packages/html-next-converter/tests/request-parity.test.ts",
   "packages/html-next-converter/tests/head-parity.test.ts",
   "packages/html-next-converter/tests/named-slot-parity.test.ts",
+  "packages/html-next-converter/tests/slotted-style-parity.test.ts",
   "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts",
   "packages/html-next-converter/tests/slot-props-parity.test.ts",
   "packages/html-next-converter/tests/library-distribution.test.ts",

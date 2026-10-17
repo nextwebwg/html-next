@@ -1,7 +1,7 @@
 /** Svelte 5 output from the shared, checked component definition. */
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
-import { compileComponentStylesForSvelte, componentStateNames } from "../component-styles-build.js";
+import { compileComponentStylesForSvelte, componentStateNames, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName, propAttribute } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
@@ -922,6 +922,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
   if (root) {
+    // Every converted root bounds the styles of the components around it, as Vue's does: a slot's
+    // `:slotted()` rules stop at a projected component, its root included. A delegated root's is its child's.
+    if (!component) attributes.push(`${VUE_ROOT_ATTRIBUTE}=""`);
     attributes.push("{...rootAttrs()}");
     if (component) attributes.push(`{...{ ${quote(ROOT_OWNER_PROP)}: true }}`);
     attributes.push(rootScope!.preservesRootFocus

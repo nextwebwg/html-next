@@ -173,7 +173,8 @@ export function renderScopedSlot<T extends Record<string, unknown>>(slot: ReactN
 
 /** Projected elements carry \`data-slotted\`, which the component's \`:slotted()\` rules select. */
 export function markProjected(value: ReactNode): ReactNode {
-  if (Array.isArray(value)) return value.map(markProjected);
+  // Several projected children keep their places as a fragment's arguments; returned as an array they would be a list needing keys.
+  if (Array.isArray(value)) return React.createElement(React.Fragment, null, ...value.map(markProjected));
   if (!React.isValidElement(value)) return value;
   if (value.type === React.Fragment) {
     // A fragment's children keep their places as arguments; one array argument would be a list needing keys.

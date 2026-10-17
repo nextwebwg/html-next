@@ -154,7 +154,7 @@ The Svelte adapter generates this component when your app builds. [Set up Svelte
 	}
 </script>
 
-<div {...rootAttrs()}
+<div data-hn="" {...rootAttrs()}
 	><button type="button" onclick={increment}>Count: {count}</button>
 	<button type="button" onclick={reset}>Reset</button
 ></div>
