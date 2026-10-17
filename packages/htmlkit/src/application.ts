@@ -12,8 +12,8 @@ import { sitePolicy } from "./csp.js";
 import { authoredHead, documentHTML, redirectPage, type PageAssets } from "./document.js";
 import { breadth, discover, discoverServerFiles, matchRoute, parameter, redirectTable, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition, withoutSettings } from "./resource.js";
-import { createNavigation, failurePage, pageResponse, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
-import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
+import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
+import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
 
 // Built-in components need no link: a resource that uses one gets it added after its content, so
@@ -99,6 +99,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const paths = new Map<string, ApplicationRoute>();
     for (const route of routes) {
       const loaded = await module(route);
+      if (loaded.actions !== undefined && route.render !== "server") throw prerenderedActions(route.pattern, origin(route));
       // A server-rendered dynamic page renders whatever its URL names, so it needs no entries().
       if (route.params.length > 0 && typeof loaded.entries !== "function") {
         if (route.render !== "server") unenumerated.push(route);
@@ -218,13 +219,14 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   // A matched route; without one, the not-found page, or for a failure the error page, through its layouts.
   // request makes it a request-time render.
   const renderPage = async (matched: { route: ApplicationRoute; params: Readonly<Record<string, RouteParam>> } | undefined, url: URL,
-    request: Request | undefined, signal: AbortSignal, failure?: Failure): Promise<Page> => {
+    request: Request | undefined, signal: AbortSignal, failure?: Failure, action?: PageAction): Promise<Page> => {
     const fallback = failure === undefined ? notFoundRoute : errorRoute;
     if (matched === undefined && fallback === undefined) return failure === undefined ? builtinNotFound(url.pathname) : builtinFailure(url.pathname);
     const { route, params } = matched ?? { route: fallback!, params: {} };
     const { layers, definitions, components } = await graph(route);
     const rendered = await renderRoute({ base: config.base, canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, layers,
-      definitions, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }) });
+      definitions, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
+      ...(action === undefined ? {} : { action }) });
     if (rendered.kind === "redirect") return redirected(url.pathname, rendered.location, rendered.status, rendered.headers);
     if (rendered.kind === "notFound") {
       // The not-found and error pages' own notFound() falls back to the built-in page.
@@ -262,7 +264,16 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       const url = new URL(request.url);
       // A prerendered page renders as the build renders it: at its canonical URL, without the request.
       const server = route.render === "server";
-      const page = await renderPage({ route, params }, server ? url : new URL(url.pathname, config.origin), server ? request : undefined, request.signal);
+      let action: PageAction | undefined;
+      if (request.method === "POST") {
+        const loaded = await module(route);
+        // As the build does, so development names the page too.
+        if (loaded.actions !== undefined && !server) throw prerenderedActions(route.pattern, origin(route));
+        const found = pageAction(loaded, url);
+        if (found instanceof Response) return found;
+        action = found;
+      }
+      const page = await renderPage({ route, params }, server ? url : new URL(url.pathname, config.origin), server ? request : undefined, request.signal, undefined, action);
       return pageResponse(page, request, payload, assets?.(page));
     },
     async notFound(request, payload) {

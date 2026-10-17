@@ -14,10 +14,16 @@ or `server`. This is a tooling implementation design, not a component-language s
 - `renderRoute` runs a route's loaders, outermost first, serializes their props into standard
   component invocations, merges head metadata, and renders through HTML Next's `renderComponents`.
   Without a request it builds the prerender context, whose `request`, `cookies`, and `response`
-  throw a diagnostic; with one it builds the request context.
+  throw a diagnostic; with one it builds the request context. For a POST it first runs the page's
+  action with the page layer's context: nothing returned redirects 303 to the page's URL without
+  the `?/name` key, and an object becomes page props over the page loader's.
+- `pageAction` finds the action a POST names, `?/name` or `default`, or answers 405 for a page
+  without `actions` and 404 for an unknown name. Each application calls it before rendering.
 - `respond` answers a `Request`: a page payload URL becomes its page's URL, middleware runs, then
-  the redirects table, endpoints (paths without a trailing slash), and pages (GET and HEAD, 308 to
-  the trailing slash).
+  the redirects table, endpoints (paths without a trailing slash), and pages (GET, HEAD, and POST,
+  308 to the trailing slash). A POST from another site gets 403 first: `Sec-Fetch-Site` must be
+  `same-origin` or `none`, or without it, `Origin`'s host must be the request's, as Go's
+  `CrossOriginProtection` decides. A request with neither header is no browser's form.
 - `createNavigation` answers `navigation()`, `navigationTree()`, `breadcrumbs()`, and `pager()` from
   routes and the concrete page URLs.
 
@@ -28,7 +34,7 @@ Request
   -> payload URL to page URL -> middleware(request, next)
   -> redirects -> endpoint (exported method, or 405 with Allow)
   -> page match -> prerendered: application.render / the build's file
-                -> server: renderRoute with the request
+                -> server: renderRoute with the request (POST: same-origin check, action, then loaders)
   -> Response (status, headers, Set-Cookie, body)
 ```
 

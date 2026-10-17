@@ -94,7 +94,7 @@ const head = (page: Page) => page.evaluate(() => ({ titles: document.querySelect
   widgets: document.querySelectorAll('script[src$="/kit/widget.js"]').length, runs: (window as unknown as { widgetRuns?: number }).widgetRuns ?? 0 }));
 const marked = (page: Page) => page.evaluate(() => (window as unknown as { marker?: boolean }).marker === true);
 const mark = (page: Page) => page.evaluate(() => { (window as unknown as { marker: boolean }).marker = true; });
-const payloadPath = (path: string) => `/kit/_htmlkit/pages/${path}payload.json`;
+const payloadPath = (path: string, base = "/kit/") => `${base}_htmlkit/pages/${path}payload.json`;
 /** A page's own module, as its payload names it. */
 async function moduleOf(url: string, path: string): Promise<string> {
   const payload = await (await fetch(new URL(payloadPath(path), url))).json() as { modules: string[] };
@@ -510,6 +510,109 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation to
         expect([await page.locator("h1").textContent(), await page.locator(".reader").textContent()]).toEqual(["Page 2", "ada"]);
         expect(requests.some(request => request.path === "/_htmlkit/pages/list/payload.json")).toBe(true);
         expect([await marked(page), errors]).toEqual([true, []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+  }
+});
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("form actions", () => {
+  let root: string;
+  let server: ApplicationServer;
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "htmlkit-form-actions-"));
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "app/layouts/default.html", `<template component="form-shell"><div class="shell"><a id="slow" href="/slow/">Slow</a> <a id="todos" href="/todos/">Todos</a>
+      <slot name="page"></slot></div><style>:host { display: block; }</style></template>`);
+    await write(root, "app/pages/index.html", '<template component="home-page"><defs><title>Home</title></defs><h1>Home</h1></template>');
+    await write(root, "app/pages/slow.html", '<template component="slow-page"><defs><meta name="hk:render" content="server"><title>Slow</title></defs><h1>Slow</h1></template>');
+    await write(root, "app/pages/slow.server.ts", "export const load = async () => { await new Promise(done => setTimeout(done, 400)); return {}; };");
+    // The first invalid field takes autofocus, which a page load and a submission in place both focus.
+    await write(root, "app/pages/todos.html", `<template component="todos-page"><defs>
+      <prop name="todos" type="list(string)" required>Todos</prop>
+      <prop name="errors" type="object({ title?: string })" default="{}">Field errors</prop><prop name="values" type="object({ title?: string })" default="{}">Submitted values</prop>
+      <meta name="hk:render" content="server"><title>Todos</title></defs><section>
+      <form method="post" action="?/create"><label>Title <input name="title" from:value="$values.title" from:autofocus="$errors.title"
+        from:aria-invalid="$errors.title ? 'true' : 'false'"></label>
+        <p class="error" $if="$errors.title">{$errors.title}</p><button>Add</button></form>
+      <ul><li $each="todo of $todos">{$todo}</li></ul></section></template>`);
+    await write(root, "app/pages/todos.server.ts", `const todos = [];
+      export const load = () => ({ props: { todos } });
+      export const actions = {
+        async create({ request, response }) {
+          const title = String((await request.formData()).get("title") ?? "").trim();
+          if (title.length < 3) { response.status = 422; return { errors: { title: "Use at least 3 characters." }, values: { title } }; }
+          await new Promise(done => setTimeout(done, 300));
+          todos.push(title);
+        },
+      };`);
+    const { outDir } = await buildApplication({ root });
+    server = await startApplication({ outDir, port: 0 });
+  }, 120_000);
+  afterAll(async () => {
+    await server?.close();
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  for (const [name, type] of engines) {
+    it(`${name} submits a form in place, with pending attributes and focus on the invalid field`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const { page, errors, count } = await open(await browser.newContext());
+        await page.goto(server.url + "todos/");
+        await page.waitForFunction(() => document.querySelector('[data-component="todos-page"]') !== null && document.readyState === "complete");
+        await mark(page);
+        // Every change to the pending attributes, in order.
+        await page.evaluate(() => {
+          const log: string[] = (window as unknown as { log: string[] }).log = [];
+          new MutationObserver(records => { for (const { target, attributeName } of records) {
+            log.push(`${(target as Element).localName} ${attributeName} ${(target as Element).hasAttribute(attributeName!) ? "on" : "off"}`);
+          } }).observe(document.documentElement, { subtree: true, attributeFilter: ["data-hk-navigating", "data-hk-submitting", "aria-busy"] });
+        });
+        const log = () => page.evaluate(() => (window as unknown as { log: string[] }).log.splice(0));
+        const title = page.getByRole("textbox", { name: "Title" });
+        await title.fill("ab");
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.locator(".error").waitFor();
+        await settled(page, "Todos");
+        // A validation error renders in place at the action's URL, as a document POST would, with the field focused.
+        expect([new URL(page.url()).search, await title.inputValue(), await title.getAttribute("aria-invalid"), await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name)])
+          .toEqual(["?/create", "ab", "true", "title"]);
+        expect(await log()).toEqual(["html data-hk-navigating on", "form data-hk-submitting on", "form aria-busy on", "html data-hk-navigating off"]);
+        // Success redirects to the page, which replaces the submission's entry; the form is busy meanwhile.
+        const entries = await page.evaluate(() => navigation.entries().length);
+        await title.fill(`${name} task`);
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.waitForFunction(() => document.querySelector("form")?.getAttribute("aria-busy") === "true");
+        await page.getByText(`${name} task`).waitFor();
+        await settled(page, "Todos");
+        expect([new URL(page.url()).search, await page.locator(".error").count(), await page.evaluate(() => navigation.entries().length)]).toEqual(["", 0, entries + 1]);
+        // The redirect's navigation continues the submission's pending state, which ends once.
+        expect((await log()).filter(entry => entry.startsWith("html"))).toEqual(["html data-hk-navigating on", "html data-hk-navigating on", "html data-hk-navigating off"]);
+        // Link navigation is pending too, until the next page renders.
+        await page.locator("#slow").click();
+        await page.waitForFunction(() => document.documentElement.hasAttribute("data-hk-navigating"));
+        await settled(page, "Slow");
+        expect(await page.evaluate(() => document.documentElement.hasAttribute("data-hk-navigating"))).toBe(false);
+        // Both submissions were fetches from this document, which never reloaded, under the site's policy; the
+        // redirect's page rendered from the submission's response, the third fetch, with no payload request.
+        expect([count("/todos/", "document"), count("/todos/", "fetch"), count(payloadPath("todos/", "/")), await marked(page), errors]).toEqual([1, 3, 0, true, []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+
+    it(`${name} submits the same form as a document without JavaScript`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const page = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+        await page.goto(server.url + "todos/");
+        await page.getByRole("textbox", { name: "Title" }).fill("x");
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.waitForURL(url => url.search === "?/create");
+        expect([await page.locator(".error").textContent(), await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name)])
+          .toEqual(["Use at least 3 characters.", "title"]);
+        await page.getByRole("textbox", { name: "Title" }).fill(`${name} plain`);
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.waitForURL(server.url + "todos/");
+        await page.getByText(`${name} plain`).waitFor();
       } finally { await browser.close(); }
     }, 60_000);
   }

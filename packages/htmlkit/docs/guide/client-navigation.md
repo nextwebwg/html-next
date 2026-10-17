@@ -1,6 +1,6 @@
 ---
 title: Moving between pages
-order: 5
+order: 6
 blurb: client navigation · prefetch · opt-outs
 eyebrow: HTMLKit
 ---
@@ -43,8 +43,10 @@ These links load normally, as they would without HTMLKit:
 | A file rather than a page | `<a href="/report.pdf">` |
 | A download, or a new tab or window | `download`, `target="_blank"`, or Ctrl, ⌘, Shift, or middle click |
 | A `#fragment` on the same page | `<a href="#install">` |
-| A form that posts | `<form method="post">` |
 | Marked with `data-hk-reload` | `<a href="/print/" data-hk-reload>` |
+
+Forms submit in place as well: a `GET` form loads its page with the form's query, and a
+[form that posts](/htmlkit/forms#submitting-in-place) runs its page's action.
 
 Put `data-hk-reload` on a link, or on an element around several links, to load those pages in full:
 
@@ -103,6 +105,25 @@ too:
 
 The default is a cross-fade. Style `::view-transition-old(root)` and `::view-transition-new(root)`
 to change it. Firefox loads pages without the animation.
+
+## Showing that a page is loading
+
+While a page loads in place, `<html>` has `data-hk-navigating`. While a
+[form submits in place](/htmlkit/forms#submitting-in-place), the form also has
+`data-hk-submitting` and `aria-busy="true"`. Both go when the next page has rendered, or when the
+navigation fails or another replaces it. Show a pending indicator with CSS:
+
+```css
+.progress { opacity: 0; }
+/* Shown after 150 ms, so a quick navigation shows nothing. */
+:root[data-hk-navigating] .progress { opacity: 1; transition: opacity 200ms 150ms; }
+form[data-hk-submitting] button { cursor: progress; opacity: 0.6; }
+```
+
+`aria-busy` tells screen readers the form is changing, and they hear the next page's title once it
+renders, so an indicator needs no announcement of its own. Scripts read the browser's own state:
+`navigation.transition` is set while a navigation is under way, and `navigatesuccess` and
+`navigateerror` fire when it ends.
 
 ## Running code after a navigation
 

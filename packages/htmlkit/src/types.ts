@@ -251,9 +251,21 @@ export interface LoadContext {
 
 export interface ServerModule {
   readonly load?: (context: LoadContext) => LoaderResult | Promise<LoaderResult>;
+  /**
+   * A server-rendered page's form actions by name. A `<form method="post">` runs `default`, and one whose
+   * `action` or a button's `formaction` is `?/name` runs `name`. Layouts' loader files have none.
+   */
+  readonly actions?: Readonly<Record<string, PageAction>>;
   readonly entries?: () => readonly Readonly<Record<string, RouteParam>>[] | Promise<readonly Readonly<Record<string, RouteParam>>[]>;
 }
 export type RouteParam = string | readonly string[];
+/**
+ * A form action. It runs before every loader, with the page loader's context and the POST request, and
+ * returns nothing to redirect to the page with 303 (POST/redirect/GET), or the page's props, over its
+ * loader's, to render the page with them, such as `{ errors, values }`. `response.status` sets the
+ * render's status, such as 422; `redirect()` and `notFound()` work as in a loader.
+ */
+export type PageAction = (context: LoadContext) => void | Readonly<Record<string, unknown>> | Promise<void | Readonly<Record<string, unknown>>>;
 
 /** An endpoint method: a standard Request in, a standard Response out. */
 export type EndpointHandler = (request: Request, context: EndpointContext) => Response | Promise<Response>;

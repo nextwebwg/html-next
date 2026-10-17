@@ -1,6 +1,6 @@
 ---
 title: Navigation
-order: 4
+order: 5
 blurb: hk-nav · page order · labels
 eyebrow: HTMLKit
 ---
