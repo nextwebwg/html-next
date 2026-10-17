@@ -16,6 +16,7 @@ import {
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
 import { createStylesheetLoader } from "./stylesheet-resources.js";
 import { parseStylesheetForBuild } from "./stylesheet-resources-build.js";
+import { nestedRootStyleWarnings } from "./component-styles-build.js";
 
 export interface InspectedModule {
   readonly url: string;
@@ -158,6 +159,7 @@ export async function loadNodeComponents(
     resolver,
     fetchComponent: readComponent,
     prepareStyles: styles.prepare,
+    inspectDefinitions: nestedRootStyleWarnings,
     ...(options.collectDiagnostics === undefined ? {} : { collectDiagnostics: options.collectDiagnostics }),
     ...(options.isApplicationURL === undefined ? {} : { isApplicationURL: options.isApplicationURL }),
   });

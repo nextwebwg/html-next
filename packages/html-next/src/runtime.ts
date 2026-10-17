@@ -493,6 +493,7 @@ function installComponentStyles(
   writeTestedStates(style, compiled);
   document.head.append(style);
   recordTestedStates(document, compiled.testedStates);
+  for (const warning of compiled.warnings ?? []) console.warn(`${warning.source ?? definition.source.file}: ${warning.code}: ${warning.message}`);
   return style;
 }
 

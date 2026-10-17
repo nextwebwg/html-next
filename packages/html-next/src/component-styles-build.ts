@@ -9,6 +9,7 @@ import postcss, { type AtRule, type ChildNode, type Container, type Rule } from 
 import {
   adopterGraph,
   assembleComponentStyles,
+  authoredSelector,
   assertResolvedStylesheet,
   componentStyleNameResolver,
   guardComponentPseudoElements,
@@ -17,7 +18,10 @@ import {
   type CompiledComponentStyles,
   type ComponentPseudoClass,
   type ComponentStyleGraph,
+  complexSelectors,
   foreignStateResolver,
+  nestedRootDiagnostic,
+  nestedRootSubject,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
   styleRuleKind,
@@ -25,6 +29,7 @@ import {
   testedStatesField,
 } from "./component-styles.js";
 import { getDomInterface } from "./platform.js";
+import type { HtmlDiagnostic } from "./diagnostics.js";
 import type { ComponentDefinition, TemplateNode } from "./template.js";
 import { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 
@@ -64,6 +69,34 @@ export function compileSharedComponentStylesForBuild(css: string, adopters: read
   graph?: ComponentStyleGraph): CompiledComponentStyles {
   if (adopters.length === 0) return { css: "", stateNames: [] };
   return compileStyles(css, adopters[0]!, source, adopters, includeBoundaryReset, graph);
+}
+
+/**
+ * HY007 warnings for a graph: each rule whose subject is a component's root, which the styles that
+ * select it never match. Rules whose selectors hold `&` are relative to a parent and are skipped.
+ */
+export function nestedRootStyleWarnings(definitions: readonly ComponentDefinition[]): HtmlDiagnostic[] {
+  const tags = new Set(definitions.map((definition) => definition.contract.tag));
+  const warnings: HtmlDiagnostic[] = [];
+  for (const definition of definitions) {
+    const sheets = [{ css: definition.css, source: definition.source.file },
+      ...(definition.stylesheets ?? []).map((sheet) => ({ css: sheet.css, source: sheet.url }))];
+    for (const { css, source } of sheets) {
+      if (css.trim() === "") continue;
+      let root: postcss.Root;
+      // Malformed styles report their own errors when they compile.
+      try { root = postcss.parse(renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css))); } catch { continue; }
+      root.walkRules((rule) => {
+        const parent = rule.parent;
+        if ((parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) || rule.selector.includes("&")) return;
+        for (const complex of complexSelectors(rule.selector)) {
+          const tag = nestedRootSubject(complex, tags);
+          if (tag !== undefined) warnings.push(nestedRootDiagnostic(definition.contract.tag, authoredSelector(complex), tag, source));
+        }
+      });
+    }
+  }
+  return warnings;
 }
 
 /** The component graph of a closed set of definitions, by tag. */

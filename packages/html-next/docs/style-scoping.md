@@ -35,6 +35,10 @@ A style block compiles to two scopes:
   one. Each component resolves against the component graph: the definitions registered with the
   live runtime and those installed with them, or the linked graph a build converts. A state no
   component declares, or a tag outside the graph, is HY001; without a graph, HY006.
+- A rule whose subject is a nested component's root (a component tag in the subject compound,
+  including inside `:slotted()`) matches nothing, since that root belongs to its own component's
+  styles. The graph's style check reports it as an HY007 warning, and the live runtime logs it once
+  when it compiles the styles. Rules holding `&` are skipped.
 - Every compilation reports `testedStates`, the names it tests on each component. A component's
   root writes its own `:host()` names and every name the graph's styles test on it. In the live
   runtime, a stylesheet registered later that tests a component's state makes its existing roots

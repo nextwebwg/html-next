@@ -1851,6 +1851,27 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} warns once about a rule whose subject is a nested component's root`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(`<template component="x-warn-item" status="early" summary="Item."><li></li></template>` +
+          `<template component="x-warn-list" status="early" summary="List."><ul><x-warn-item></x-warn-item></ul>` +
+          `<style>x-warn-item { color: red; } ul > x-warn-item + li, :slotted(x-warn-item) { color: blue; } li { color: green; }</style></template>` +
+          `<x-warn-list></x-warn-list><x-warn-list></x-warn-list>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => window.HtmlRuntime.lowerDocument());
+        const styleWarnings = warnings.filter((warning) => warning.includes("HY007"));
+        assert.equal(styleWarnings.length, 2);
+        assert.match(styleWarnings[0]!, /`x-warn-item` selects <x-warn-item>'s root, which <x-warn-list>'s styles never match/);
+        assert.match(styleWarnings[1]!, /`:slotted\(x-warn-item\)`/);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} hydrates server-rendered roots that another component's :state() tests`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
