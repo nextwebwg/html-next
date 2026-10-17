@@ -316,7 +316,9 @@ update(callout, { tone: "warning" });
 
 `create` returns the instance's native root; inserting it connects the instance. The live runtime
 registers every definition it reads, and a compiled Vanilla module defines its component when it is
-evaluated. Every bundle on the page shares one registry for each document.
+evaluated. Every bundle on the page shares one registry for each document. The
+[componentRegistry support note](./packages/html-next/docs/component-registry.md) says which registry
+behaviors the live runtime, compiled Vanilla output and the Vue, React and Svelte targets support.
 
 ## Types and validation
 
