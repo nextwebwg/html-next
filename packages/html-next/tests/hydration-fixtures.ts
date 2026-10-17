@@ -60,7 +60,7 @@ export const definitions = [
   `<template component="ssr-table"><table><tbody><tr><td>Cell <slot></slot> end</td></tr></tbody></table></template>`,
   `<template component="ssr-classed"><defs><state name="count" type="number" value="0"></state></defs>
     <section class="card own" style="color: red" title="own"><output $value="$count"></output></section></template>`,
-  `<template component="ssr-scoped"><defs>
+  `<template component="ssr-scoped"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
     </defs><section><button type="button" on:click="change">Change</button><ul>

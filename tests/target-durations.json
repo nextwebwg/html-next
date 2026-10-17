@@ -89,5 +89,6 @@
   "packages/html-next/tests/targets.test.ts": 5,
   "packages/html-next/tests/vue-parity.test.ts": 158,
   "packages/html-next-converter/tests/named-slot-parity.test.ts": 15,
-  "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts": 4
+  "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts": 4,
+  "packages/html-next-converter/tests/slot-props-parity.test.ts": 15
 }

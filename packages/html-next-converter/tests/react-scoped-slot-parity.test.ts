@@ -15,7 +15,7 @@ import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const rows = `<template component="x-rows" status="early" summary="Rows."><defs>
+const rows = `<template component="x-rows" status="early" summary="Rows."><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
   <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
 </defs><div><button type="button" class="add" on:click="add">Add</button>

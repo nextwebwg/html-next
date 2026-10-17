@@ -602,7 +602,7 @@ const regressions: readonly ConverterCase[] = [
   },
   {
     name: "scoped slot snippets keep child row names and parent expressions separate",
-    dependencies: { "rows.html": `<template component="x-rows" status="early" summary="Rows."><defs>
+    dependencies: { "rows.html": `<template component="x-rows" status="early" summary="Rows."><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
       <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state>
       <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
       </defs><div><button class="add" on:click="add">Add</button><ul>
@@ -624,7 +624,7 @@ const regressions: readonly ConverterCase[] = [
 
   {
     name: "scoped slot snippets retain each invalid prop independently per row",
-    dependencies: { "measures.html": `<template component="x-measures" status="early" summary="Measured rows."><defs>
+    dependencies: { "measures.html": `<template component="x-measures" status="early" summary="Measured rows."><defs><slot name="measure"><prop name="item" type="length" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
       <state name="rows" type="list(object({ id: string, width: length }))" value="[{ id: 'a', width: '8px' }, { id: 'b', width: '4px' }]"></state>
       <handler name="invalidate"><set name="rows.0.width" value="1rem"></set></handler>
       <handler name="restore"><set name="rows.0.width" value="2px"></set><set name="rows.1.width" value="6px"></set></handler>

@@ -21,7 +21,7 @@ const panelBody = `<button type="button" class="expand" on:click="expand">Expand
   <main><slot><p>Empty</p></slot></main>
   <ul><li $each="row of $rows" $key="$row"><slot name="row" from:label="$row"><span class="missing">Missing</span></slot></li></ul>
   <div class="extra" $if="$open"><slot name="extra"><em>Extra fallback</em></slot></div>`;
-const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs>
+const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs><slot name="row"><prop name="label" type="string" required>The row's label.</prop></slot>
   <state name="branch" type="keyword" value="section"></state>
   <state type="list(string)" name="rows" value="['A']"></state>
   <state type="boolean" name="open" value="false"></state>

@@ -35,8 +35,9 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, TypeSyntaxError, type TypeNode } from "./type-system.js";
-import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue, RequestContract } from "./types.js";
+import { formatType, isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, TypeSyntaxError, type TypeNode } from "./type-system.js";
+import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropType, PropValue, RequestContract, SlotDeclaration } from "./types.js";
+import { invocationValue } from "./prop-values.js";
 
 type DiagnosticFail = typeof fail;
 
@@ -509,6 +510,7 @@ function readProps(
   requireBinding = true,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
   onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
+  textForm = true,
 ): Record<string, PropContract> {
   const elements = group === undefined ? [] : directElements(group, "prop");
   const namedTypes = new Map<string, Element>();
@@ -626,7 +628,7 @@ function readProps(
       if (description === "") {
         fail("HC003", `\`props.${name}.description\` must be a non-empty string.`, source);
       }
-      if (!isAttributeType(type)) {
+      if (textForm && !isAttributeType(type)) {
         fail(
           "HC017",
           `Prop \`${name}\` cannot be written as an HTML attribute; function, unknown, and trusted content types have no text form.`,
@@ -719,7 +721,46 @@ function readContractAtSource(
     ...(summary === undefined ? {} : { summary }),
     nativeElement,
     props: readProps(group, targets, source, requireBinding, warnInvalidDeclaration, onDiagnostic),
+    ...slotDeclarations(readSlotDeclarations(group, source, warnInvalidDeclaration, onDiagnostic)),
   };
+}
+
+const slotDeclarations = (slots: Record<string, SlotDeclaration>): { slots?: Record<string, SlotDeclaration> } =>
+  Object.keys(slots).length === 0 ? {} : { slots };
+
+/**
+ * The `<slot>` declarations in `<defs>`, by slot name (`""` for the default slot): the props a slot's
+ * outlets give its consumer's template, declared with the component `<prop>` vocabulary. A slot that
+ * gives no props is not declared.
+ */
+function readSlotDeclarations(
+  group: Element | undefined,
+  source: string,
+  warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
+  onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
+): Record<string, SlotDeclaration> {
+  const slots = Object.create(null) as Record<string, SlotDeclaration>;
+  for (const element of group === undefined ? [] : directElements(group, "slot")) {
+    const fail: DiagnosticFail = locatedFail(element);
+    const authored = attr(element, "name");
+    const name = authored ?? "";
+    if (authored !== undefined && !isIdentifier(authored)) fail("HC013", slotNameMessage(authored), source);
+    if (Object.hasOwn(slots, name)) fail("HC020", `${authored === undefined ? "The default slot" : `Slot \`${name}\``} is declared more than once.`, source);
+    for (const attribute of sourceAttributes(element)) {
+      if (attribute.name !== "name") fail("HC013", `A <slot> declaration takes only \`name\`; \`${attribute.name}\` is not one of its attributes.`, source);
+    }
+    for (const child of significant(sourceChildren(element))) {
+      if (!isElement(child) || sourceTag(child) !== "prop") fail("HC013", "A <slot> declaration in <defs> holds only <prop> elements.", source);
+    }
+    // A slot prop is written as an attribute only when an outlet gives it statically, so any type is declarable.
+    const props = readProps(element, {}, source, false, warnInvalidDeclaration, onDiagnostic, false);
+    if (Object.keys(props).length === 0) fail("HC013", "A <slot> declaration declares at least one <prop>; a slot that gives no props is not declared.", source);
+    for (const [prop, contract] of Object.entries(props)) {
+      if (contract.select !== undefined) fail("HC013", `Slot prop \`${prop}\` cannot select its type with <type from>.`, source);
+    }
+    slots[name] = { props };
+  }
+  return slots;
 }
 
 function compileDeclarationExpression(value: string, source: string, path = false) {
@@ -900,10 +941,11 @@ function readDeclarations(
       const fail: DiagnosticFail = locatedFail(element);
       elements.push(element);
       const kind = sourceTag(element);
-      if (!/^(?:prop|type|state|computed|data|context|handler|event|request)$/.test(kind) && !HEAD_ELEMENT_RE.test(kind)) {
+      if (!/^(?:prop|type|state|computed|data|context|handler|event|request|slot)$/.test(kind) && !HEAD_ELEMENT_RE.test(kind)) {
         fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
       }
-      if (kind === "type") continue;
+      // A slot declaration's props are its outlets' (readSlotDeclarations), not the component's scope.
+      if (kind === "type" || kind === "slot") continue;
       if (HEAD_ELEMENT_RE.test(kind)) {
         // A named declared script shares the flat namespace: `$stripe` reads its status.
         const scriptName = kind === "script" ? attr(element, "name") : undefined;
@@ -989,7 +1031,7 @@ function readDeclarations(
     try {
       const fail: DiagnosticFail = locatedFail(element);
       const kind = sourceTag(element);
-      if (kind === "prop" || kind === "type") continue;
+      if (kind === "prop" || kind === "type" || kind === "slot") continue;
       if (HEAD_ELEMENT_RE.test(kind)) {
         withDiagnosticLocation(sourceLocation(element), () =>
           readHeadDeclaration(element, scope, source, head, scripts, headKeys, warn));
@@ -1682,7 +1724,8 @@ function parseElementAtSource(
         fail("HT008", "A slot's name is written as `name`, never computed with `from:name`; for content that varies by item, use one named scoped slot that passes the item as a prop, such as `<slot name=\"option\" from:item=\"$row\">`.", source);
       }
       const flowValues: Record<string, string> = {};
-      const rawProps: Array<{ name: string; expression: string }> = [];
+      const rawProps: Array<{ name: string; expression: string; type?: PropType }> = [];
+      const staticProps: Array<{ name: string; value: string }> = [];
       for (const attribute of sourceAttributes(child)) {
         if (FLOW_NAME_RE.test(attribute.name)) {
           flowValues[attribute.name] = attribute.value;
@@ -1693,9 +1736,13 @@ function parseElementAtSource(
           }
           rawProps.push({ name: prop, expression: attribute.value });
         } else if (attribute.name !== "name") {
-          fail("HT008", "A slot has an unsupported attribute.", source);
+          if (!isIdentifier(attribute.name)) {
+            fail("HT008", `Slot prop \`${attribute.name}\` is not an expression-scope name.`, source);
+          }
+          staticProps.push({ name: attribute.name, value: attribute.value });
         }
       }
+      rawProps.push(...slotOutletProps(name, contract.slots?.[name ?? ""], rawProps, staticProps, source));
       const parsedFlow = extractFlow(flowValues, childScope, source);
       if (parsedFlow !== undefined && parsedFlow.kind !== "each") {
         fail("HT008", "A slot only supports `$each` structural flow.", source);
@@ -1706,6 +1753,7 @@ function parseElementAtSource(
         ...prop,
         expressionPlan: compileScopedExpression(prop.expression, slotScope, source),
       }));
+      const declared = contract.slots?.[name ?? ""]?.props;
       if (name === undefined) {
         slotState.defaults += 1;
         if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
@@ -1722,11 +1770,12 @@ function parseElementAtSource(
         if (typeof fallbackNode === "string") fallback.push(...parseText(fallbackNode, slotScope, source));
         else fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
       }
-      const slotContract: { name?: string; required: boolean; props?: readonly string[] } = {
+      const slotContract: { name?: string; required: boolean; props?: readonly string[]; declared?: Readonly<Record<string, PropContract>> } = {
         required: fallback.length === 0,
       };
       if (name !== undefined) slotContract.name = name;
       if (props.length > 0) slotContract.props = props.map((prop) => prop.name);
+      if (declared !== undefined && props.length > 0) slotContract.declared = declared;
       // Root arms repeat their slots; the contract lists each once, required if any arm requires it.
       const existing = slotState.contracts.findIndex((contract) => contract.name === name);
       if (existing === -1) slotState.contracts.push(slotContract);
@@ -1856,6 +1905,76 @@ function parseElementAtSource(
   if (ref !== undefined) parsed.ref = ref;
   if (transition !== undefined) parsed.transition = transition;
   return parsed;
+}
+
+/**
+ * An outlet's props checked against its slot's declaration: each given prop is declared, once, and
+ * every required one is given. Static props are converted by their declared types, as an
+ * invocation's attributes are, and declared defaults fill the props the outlet leaves out; both
+ * become literal expressions. Bound props keep their expressions and take the declared type their
+ * values must conform to. Returns the static and default props; the bound ones are typed in place.
+ */
+function slotOutletProps(name: string | undefined, declaration: SlotDeclaration | undefined,
+  bound: Array<{ name: string; expression: string; type?: PropType }>, statics: readonly { name: string; value: string }[], source: string,
+): { name: string; expression: string }[] {
+  const slot = name === undefined ? "the default slot" : `slot \`${name}\``;
+  const outlet = name === undefined ? "<slot>" : `<slot name="${name}">`;
+  const given = [...bound.map((prop) => prop.name), ...statics.map((prop) => prop.name)];
+  if (given.length === 0 && declaration === undefined) return [];
+  const suggest = (props: readonly string[]): string =>
+    `<slot${name === undefined ? "" : ` name="${name}"`}>${props.map((prop) => `<prop name="${prop}" type="…">…</prop>`).join("")}</slot>`;
+  if (declaration === undefined) {
+    fail("HT008", `${outlet} gives props to ${slot}, which declares none; declare them in <defs>: ${suggest(given)}.`, source);
+  }
+  // Attribute names reach the parser lowercased, as an invocation's do; each matches its declared spelling.
+  const declaredName = (prop: string): string | undefined => Object.keys(declaration.props).find((candidate) => candidate.toLowerCase() === prop.toLowerCase());
+  const resolve = (prop: string): string => {
+    const declared = declaredName(prop);
+    if (declared === undefined) fail("HT008", `${outlet} gives prop \`${prop}\`, which ${slot} does not declare; add ${suggest([prop])} to <defs>.`, source);
+    return declared;
+  };
+  const seen = new Set<string>();
+  const once = (prop: string): void => {
+    if (seen.has(prop)) fail("HT008", `${outlet} gives prop \`${prop}\` more than once; give it as a static attribute or with \`from:${prop}\`, not both.`, source);
+    seen.add(prop);
+  };
+  for (const prop of bound) {
+    prop.name = resolve(prop.name);
+    once(prop.name);
+    // An `unknown` prop accepts any value, so only another type is checked.
+    const type = declaration.props[prop.name]!.type;
+    const node = normalizeType(type);
+    if (node.kind !== "terminal" || node.name !== "unknown") prop.type = type;
+  }
+  const literal: { name: string; expression: string }[] = [];
+  for (const { name: given, value } of statics) {
+    const prop = resolve(given);
+    once(prop);
+    const contract = declaration.props[prop]!;
+    const parsed = invocationValue(contract, value, "html", true);
+    if (parsed === undefined || !matchesPropBounds(parsed, contract.type, contract) || !matchesPropValues(parsed, contract.values)) {
+      fail("HT008", `${outlet} gives prop \`${prop}\` the value \`${value}\`, which does not satisfy its declared type \`${formatType(contract.type)}\`.`, source);
+    }
+    literal.push({ name: prop, expression: valueExpression(parsed, prop, source) });
+  }
+  for (const [prop, contract] of Object.entries(declaration.props)) {
+    if (seen.has(prop)) continue;
+    if (contract.required) fail("HT008", `${outlet} must give prop \`${prop}\`, which ${slot} declares as required.`, source);
+    if (contract.default !== undefined) literal.push({ name: prop, expression: valueExpression(contract.default, prop, source) });
+  }
+  return literal;
+}
+
+/** A converted prop value as an expression that reads it: a literal, or a list or object of them. */
+function valueExpression(value: PropValue, prop: string, source: string): string {
+  if (value === null || typeof value === "boolean") return String(value);
+  if (typeof value === "string") return `'${value.replace(/[\\']/g, (character) => `\\${character}`)}'`;
+  if (typeof value === "number" && Number.isFinite(value) && !/e/i.test(String(value))) return String(value);
+  if (Array.isArray(value)) return `[${value.map((item) => valueExpression(item, prop, source)).join(", ")}]`;
+  if (typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return `{ ${Object.entries(value).map(([key, item]) => `'${key.replace(/[\\']/g, (character) => `\\${character}`)}': ${valueExpression(item as PropValue, prop, source)}`).join(", ")} }`;
+  }
+  fail("HT008", `Slot prop \`${prop}\` has a value that cannot be written in an expression.`, source);
 }
 
 /** A slot name is a literal identifier, spelled as an expression name: no `-`, no `$`, never an expression. */

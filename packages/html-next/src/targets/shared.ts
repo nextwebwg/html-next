@@ -95,6 +95,17 @@ export function propTypeSource(prop: PropContract): string {
   return prop.required || includesNull(prop.type) ? source : `${source} | null`;
 }
 
+/**
+ * The props a declared slot gives its consumer's template, as a TypeScript object type: a required
+ * prop, or one with a default, is always present; any other may be absent.
+ */
+export function slotPropsType(declared: Readonly<Record<string, PropContract>>): string {
+  return `{ ${Object.entries(declared).map(([name, prop]) => {
+    const type = prop.values === undefined ? typeSource(prop.type) : prop.values.map((value) => JSON.stringify(value)).join(" | ");
+    return `readonly ${propKey(name)}${prop.required || prop.default !== undefined ? "" : "?"}: ${type};`;
+  }).join(" ")} }`;
+}
+
 /** One generic parameter per selecting prop keeps generated call-site types correlated. */
 export function selectorGenerics(props: Readonly<Record<string, PropContract>>): readonly {
   readonly from: string;

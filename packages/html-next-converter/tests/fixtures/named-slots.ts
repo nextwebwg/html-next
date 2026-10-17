@@ -4,7 +4,7 @@
  * several elements for one slot, a `<template slot>` beside elements for the same slot, which it
  * replaces, a scoped slot and default content.
  */
-export const rowSource = `<template component="ui-search-result-row" status="early" summary="A result row with named slots."><defs>
+export const rowSource = `<template component="ui-search-result-row" status="early" summary="A result row with named slots."><defs><slot name="action"><prop name="value" type="string" required>The value.</prop></slot>
   <prop name="value" type="string" default="">The row's value.</prop>
 </defs><div class="row"><span class="prefix"><slot name="prefix"></slot></span>
   <span class="leading"><slot name="leading"></slot></span>

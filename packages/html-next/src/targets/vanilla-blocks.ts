@@ -170,6 +170,8 @@ interface Region {
   /** A scoped slot's props: the values a consumer's template reads, by its names. */
   readonly props?: readonly Lowered[];
   readonly propNames?: readonly string[];
+  /** Each bound slot prop's declared type, which its value must fit to be given. */
+  readonly propTypes?: readonly (CompactType | undefined)[];
 }
 
 interface Block {
@@ -1269,11 +1271,16 @@ class Planner {
       // its content renders where that component's slot asks, reading the slot's props by name.
       const projecting = this.projecting;
       if (projecting === undefined || projecting.block !== block || path.length > 0) return [["template", ["slot", slot]]];
-      const props = [...new Set((projecting.definition.slots ?? [])
-        .filter((contract) => (contract.name ?? "") === slot).flatMap((contract) => contract.props ?? []))];
+      const contracts = (projecting.definition.slots ?? []).filter((contract) => (contract.name ?? "") === slot);
+      const props = [...new Set(contracts.flatMap((contract) => contract.props ?? []))];
       const inner: Scope = { ...scope, level: scope.level + 1 };
       const types: TypeScope = { get: () => undefined };
-      declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, undefined])));
+      // A declared slot prop has its declared type; the template reads it as its outlet gave it.
+      const declared = (name: string): TypeNode | undefined => {
+        const prop = contracts.find((contract) => contract.declared?.[name] !== undefined)?.declared?.[name];
+        return prop === undefined ? undefined : normalizeType(prop.type);
+      };
+      declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, declared(name)])));
       this.templateContent = true;
       const content = this.block({ kind: "element", name: "template", attributes: [], children: node.children }, false,
         { ...inner, types, aliases: [...inner.aliases, ...props.map((name) => ({ name, level: inner.level, kind: "item" as const, field: `s` }))] },
@@ -1306,7 +1313,8 @@ class Planner {
         false, { ...scope, level: scope.level + 1 }, false, svg, false);
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
       block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
-        ...props === undefined ? {} : { props, propNames: node.props!.map((prop) => prop.name) } });
+        ...props === undefined ? {} : { props, propNames: node.props!.map((prop) => prop.name),
+          propTypes: node.props!.map((prop) => prop.type === undefined ? undefined : compactType(normalizeType(prop.type))) } });
       return 4;
     }
     if (node.kind === "text") {
@@ -2004,11 +2012,16 @@ export function emitBlocks(
         // A scoped slot renders the consumer's template with its props, and patches that rendering
         // when a prop changes or nested data may have: a nonconforming prop keeps its last value.
         const rendering = `r.x${index}`;
+        // A bound value its declared type does not accept is not given, as live leaves it unset.
+        const accepted = (value: string, at: number): string => {
+          const type = region.propTypes?.[at];
+          return `${value} !== NONCONFORMING${type === undefined ? "" : ` && fits(${value}, ${compactSource(type)})`}`;
+        };
         lines.push(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
           // A prop that does not conform is not given, as live leaves it unset.
-          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = y; }`).join(" ")}`,
+          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (${accepted("y", at)}) s[${JSON.stringify(region.propNames![at])}] = y; }`).join(" ")}`,
           `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
           `    else if (at !== undefined) { ${body} = ${make}; ${place} }`,
@@ -2018,7 +2031,7 @@ export function emitBlocks(
           `      let w = c & ${NESTED};`,
           ...props.map((prop, at) => {
             const key = JSON.stringify(region.propNames![at]);
-            return `      { const y = ${convertible(prop)}; if (y !== NONCONFORMING && !(${key} in t && Object.is(t[${key}], y))) { t[${key}] = y; w = 1; } }`;
+            return `      { const y = ${convertible(prop)}; if (${accepted("y", at)} && !(${key} in t && Object.is(t[${key}], y))) { t[${key}] = y; w = 1; } }`;
           }),
           `      if (w) ${rendering}[0].p(${rendering}[1], ${NESTED}, d);`,
           "    }",
@@ -2593,7 +2606,7 @@ export function emitBlocks(
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "placeFallback", "recordInputs",
-    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged",
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "fits",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.

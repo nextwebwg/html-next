@@ -626,8 +626,8 @@ export function useReflectedProp() {
 /** A scoped slot's name, which the consumer must fill with a \`<template slot>\` rather than plain children. */
 export function useScopedSlotName() {
   const slots = useSlots();
-  return (value: unknown): string => {
-    const name = value == null ? "" : String(value);
+  // A slot's name is a literal, so the outlet keeps its literal type, as declared slots type it.
+  return <Name extends string>(name: Name): Name => {
     if (slots[name] === undefined && slots.default?.().some((node) => node.props?.slot === name)) {
       throw diagnostic("HR007", 'Scoped slot \`' + name + '\` requires a consumer <template slot="' + name + '">.');
     }

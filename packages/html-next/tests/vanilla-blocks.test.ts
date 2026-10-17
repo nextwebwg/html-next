@@ -1721,7 +1721,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("renders scoped and $each slots with a consumer's template like live", async () => {
     const list = `<template component="x-row-list" status="early" summary="Rows.">
-      <defs><prop name="items" type="list(object({ id: integer, name: string }))" default="[]">Items.</prop>
+      <defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot><slot name="title"><prop name="text" type="string" required>The text.</prop></slot><prop name="items" type="list(object({ id: integer, name: string }))" default="[]">Items.</prop>
         <state name="title" type="string" value="Rows"></state></defs>
       <section><h3><slot name="title" from:text="$title">{$title}</slot></h3>
         <ul><slot $each="item, i of $items" $key="$item.id" name="row" from:item="$item" from:index="$i"><li>{$item.name}</li></slot></ul></section></template>`;
@@ -1912,7 +1912,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("gives a scoped slot's props by name, and leaves other names to the consumer, like live", async () => {
     const alternate = `<template component="x-alternate" status="early" summary="Alternate.">
-      <defs><prop name="alternate" type="boolean" default="false">Alternate.</prop>
+      <defs><slot name="item"><prop name="first" type="string">The first.</prop><prop name="second" type="string">The second.</prop></slot><prop name="alternate" type="boolean" default="false">Alternate.</prop>
         <state name="first" type="string" value="First"></state><state name="second" type="string" value="Second"></state></defs>
       <template $match><section $when="$alternate"><slot name="item" from:first="$first"></slot></section>
         <article $else><slot name="item" from:second="$second"></slot></article></template></template>`;

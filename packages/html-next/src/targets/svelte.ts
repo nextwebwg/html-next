@@ -12,9 +12,9 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
-import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
+import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
+import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { formatSvelteScript } from "./vue-format.js";
@@ -393,8 +393,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const supplied = defaultSlot ? `slots?.[""]${scoped && hasChildren ? " ?? (children === undefined ? undefined : null)" : ""}` : `slots?.[${name}]`;
     const checked = scoped ? `checkedSlot(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
-      const source = lowering.value(prop.expressionPlan.ast, scope);
-      return `${objectKey(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
+      const value = lowering.value(prop.expressionPlan.ast, scope);
+      // A bound value its declared type does not accept keeps the last one it did, as live keeps it.
+      const source = prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope)) ? value
+        : `((value: unknown) => ${typeCheck(normalizeType(prop.type), "value")} ? value : Symbol.for('html-next.invalid-result'))(${value})`;
+      return `${objectKey(prop.name)}: ${source !== value || mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
     }).join(", ")} }` : "{}";
     const children = !scoped && defaultSlot && hasChildren ? "{:else if children}{@render children()}" : "";
     return `{#if true}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
@@ -540,7 +543,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const projectedScope: Scope = !scoped ? scope : {
         ...scope,
         code: new Map([...scope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
-        types: new Map<string, Static>([...scope.types, ...contract!.props!.map((prop) => [prop, { type: { kind: "terminal" as const, name: "unknown" }, nullable: true }] as const)]),
+        types: new Map<string, Static>([...scope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
       };
       const firstHtml = context.htmlSites;
       const firstRetention = context.retentions.size;
@@ -1192,7 +1195,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const eventCallbacks = target.events.flatMap((event) => [`on${event.name}`, `on${event.name}capture`]
     .filter((name) => definition.contract.props[name] === undefined)
     .map((name) => ({ name, type: `((event: CustomEvent<${event.detailType}>) => void) | null` })));
-  const slotType = (slot: SlotContract): string => `Snippet<[${(slot.props?.length ?? 0) === 0 ? "Record<string, any>" : `Readonly<{ ${slot.props!.map((name) => `${quote(name)}: any;`).join(" ")} }>`}]>`;
+  const slotType = (slot: SlotContract): string => `Snippet<[${(slot.props?.length ?? 0) === 0 ? "Record<string, any>"
+    : slot.declared !== undefined ? slotPropsType(slot.declared) : `Readonly<{ ${slot.props!.map((name) => `${quote(name)}: any;`).join(" ")} }>`}]>`;
   const slotsType = target.slots.length === 0 ? "Record<string, Snippet<[Record<string, any>]> | null>"
     : `Readonly<{ ${target.slots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`).join(" ")} }>`;
   // Each request is a function prop that answers it, and the event prop Svelte uses for declared events.

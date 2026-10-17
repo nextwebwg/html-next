@@ -2642,7 +2642,8 @@ function renderSlot(
     for (const prop of props) {
       ownEffect(context, scope, () => {
         const value = evalConforming(prop.expression, scope, context.definition);
-        if (value !== NONCONFORMING) projectedScope.set(prop.name, value);
+        // A bound value its declared type does not accept is not given, as a nonconforming one is not.
+        if (value !== NONCONFORMING && (prop.type === undefined || conformsAtDestination(value, prop.type))) projectedScope.set(prop.name, value);
       });
     }
     const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {

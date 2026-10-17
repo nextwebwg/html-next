@@ -12,7 +12,8 @@ import { isEnumeratedBoolean, wholeNumber, type ExpressionNode } from "../expres
 import { formattingType } from "../format.js";
 import { DECIMAL_SOURCE } from "../generated/decimal-source.js";
 import { formattingHelperSource } from "./format-source.js";
-import type { TypeNode } from "../type-system.js";
+import { formatType, normalizeType, type TypeNode } from "../type-system.js";
+import type { PropContract, PropType } from "../types.js";
 import { NUMERIC_ATTRIBUTES, quote } from "./shared.js";
 
 /** How each root name is read, and its static type, in one scope. */
@@ -29,6 +30,16 @@ export interface Static {
 }
 
 export const UNKNOWN: Static = { type: { kind: "terminal", name: "unknown" }, nullable: true, null: true };
+
+/** Whether a bound slot prop's value is already of its declared type, so it needs no check. */
+export function provenSlotProp(declared: PropType, value: Static): boolean {
+  return !value.nullable && formatType(value.type) === formatType(normalizeType(declared));
+}
+
+/** A slot prop as its consumer's template reads it: its declared type, absent when its outlet's value did not conform. */
+export function slotPropStatic(declared: PropContract | undefined): Static {
+  return declared === undefined ? UNKNOWN : { type: normalizeType(declared.type), nullable: true };
+}
 
 const terminal = (name: "string" | "number" | "boolean"): Static => ({ type: { kind: "terminal", name }, nullable: false });
 

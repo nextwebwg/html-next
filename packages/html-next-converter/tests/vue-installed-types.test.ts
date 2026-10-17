@@ -125,3 +125,32 @@ it("types an invocation's literal props in an assembled package's Vue output", a
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);
+
+it("types a declared slot's props for a consumer's slot template", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "html-next-vue-slot-props-"));
+  try {
+    await symlink(modules, join(directory, "node_modules"), "dir");
+    await writeFile(join(directory, "disclosure.html"), `<template component="x-disclosure" status="early" summary="Disclosure."><defs>
+      <prop name="items" type="list(string)" default="[]">Items.</prop>
+      <slot name="summary"><prop name="label" type="string" default="Details">Text.</prop><prop name="count" type="number" required>Count.</prop></slot>
+    </defs><div><slot name="summary" label="Open" from:count="$items.length">Details</slot></div></template>`);
+    await convertComponents({ target: "vue", mode: "application", root: directory, outDirectory: directory, entries: ["disclosure.html"] });
+    const disclosure = await readFile(join(directory, "vue", "XDisclosure.vue"), "utf8");
+    assert.match(disclosure, /defineSlots<\{ summary\?\(props: \{ readonly count: number; readonly label: string \}\): any \}>\(\)/);
+    await writeFile(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, skipLibCheck: true, module: "ESNext",
+      moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true, noEmit: true },
+      include: ["vue/**/*.vue", "vue/**/*.ts", "Consumer.vue"] }));
+    const check = () => run(process.execPath, [checker, "-p", join(directory, "tsconfig.json")], { cwd: directory });
+    const consumer = (body: string) => writeFile(join(directory, "Consumer.vue"),
+      `<script setup lang="ts">import XDisclosure from './vue/XDisclosure.vue';</script><template><XDisclosure><template #summary="{ label, count }">${body}</template></XDisclosure></template>`);
+    await consumer("{{ label.toUpperCase() }} {{ count.toFixed(0) }}");
+    try { await check(); } catch (error) { assert.fail((error as { stdout: string }).stdout); }
+    await consumer("{{ count.toUpperCase() }}");
+    await assert.rejects(check(), (error: unknown) => {
+      assert.match((error as { stdout: string }).stdout, /toUpperCase.*number|number.*toUpperCase/);
+      return true;
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);

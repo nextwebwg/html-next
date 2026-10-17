@@ -437,9 +437,46 @@ describe("parseComponent", () => {
     parseComponent(`<template component="x-plain" status="early" summary="Plain."><div><b slot="header-actions">A</b></div></template>`);
   });
 
+  it("declares a slot's props in <defs> and checks each outlet against them", () => {
+    const disclosure = (outlet: string, slot = `<slot name="summary"><prop name="label" type="string" default="Details">Text.</prop>` +
+      `<prop name="count" type="number" required>Count.</prop><prop name="tone" type="keyword" values="quiet, loud">Tone.</prop></slot>`): string =>
+      `<template component="x-disclosure" status="early" summary="D."><defs><prop name="items" type="list(string)" default="[]">Items.</prop>${slot}</defs>` +
+      `<button>${outlet}</button></template>`;
+    const message = (source: string): string => {
+      try { parseComponent(source, "component.html"); } catch (error) { if (error instanceof HtmlDiagnosticError) return `${error.diagnostic.code}: ${error.diagnostic.message}`; }
+      return "";
+    };
+    const definition = parseComponent(disclosure(`<slot name="summary" count="3" tone="loud"></slot>`));
+    // The normalized contract lists each declared slot's props, as it lists the component's.
+    assert.deepEqual(Object.keys(definition.contract.slots ?? {}), ["summary"]);
+    assert.deepEqual(definition.contract.slots?.summary?.props.count, { type: "number", required: true, target: { attribute: "count" }, description: "Count." });
+    // A static prop converts by its declared type; a default fills what the outlet leaves out.
+    const outlet = definition.template.children[0];
+    assert.ok(outlet?.kind === "slot");
+    assert.deepEqual(outlet.props?.map(({ name, expression }) => [name, expression]), [["count", "3"], ["tone", "'loud'"], ["label", "'Details'"]]);
+    // A bound prop keeps its expression and takes the type its value must conform to.
+    const bound = parseComponent(disclosure(`<slot name="summary" label="Open" from:count="$items.length"></slot>`));
+    const boundOutlet = bound.template.children[0];
+    assert.ok(boundOutlet?.kind === "slot");
+    assert.deepEqual(boundOutlet.props?.map(({ name, expression, type }) => [name, expression, type]), [["count", "$items.length", "number"], ["label", "'Open'", undefined]]);
+    // Each mistake names the outlet; an undeclared prop names the declaration to add.
+    assert.match(message(disclosure(`<slot name="summary" count="1" from:count="$items.length"></slot>`)), /HT008: .*gives prop `count` more than once/);
+    assert.match(message(disclosure(`<slot name="summary" count="1" size="2"></slot>`)), /HT008: .*`size`, which slot `summary` does not declare; add <slot name="summary"><prop name="size"/);
+    assert.match(message(disclosure(`<slot name="summary" label="x"></slot>`)), /HT008: .*must give prop `count`/);
+    assert.match(message(disclosure(`<slot name="summary" count="many"></slot>`)), /HT008: .*the value `many`, which does not satisfy its declared type `number`/);
+    assert.match(message(disclosure(`<slot name="summary" count="1" tone="soft"></slot>`)), /HT008: .*the value `soft`/);
+    assert.match(message(disclosure(`<slot name="other" from:item="$items"></slot>`)), /HT008: .*gives props to slot `other`, which declares none; declare them in <defs>: <slot name="other"><prop name="item"/);
+    // A slot without props is never declared; a declaration declares at least one prop, once.
+    assert.match(message(disclosure(`<slot name="summary"></slot>`, `<slot name="summary"></slot>`)), /HC013: .*at least one <prop>/);
+    assert.match(message(disclosure(`<slot name="summary" count="1"></slot>`, `<slot name="summary"><prop name="count" type="number">C.</prop></slot><slot name="summary"><prop name="count" type="number">C.</prop></slot>`)), /HC020: Slot `summary` is declared more than once/);
+    assert.match(message(disclosure(`<slot></slot>`, `<slot name="label-action"><prop name="a" type="string">A.</prop></slot>`)), /HC013: Slot name `label-action` is not an identifier/);
+    // A plain slot needs no declaration, and a declared slot's props may be any type, as only static ones are attributes.
+    parseComponent(disclosure(`<slot name="summary" from:count="$items.length"></slot>`, `<slot name="summary"><prop name="count" type="unknown" required>C.</prop></slot>`));
+  });
+
   it("parses repeated scoped slots and exposes their row bindings", () => {
     const definition = parseComponent(
-      `<template component="x-rows"><defs><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
+      `<template component="x-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
       `<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">` +
       `<li $value="$row.name"></li></slot></ul></template>`,
     );
@@ -451,18 +488,19 @@ describe("parseComponent", () => {
     assert.deepEqual(slot.props?.map((prop) => [prop.name, prop.expressionPlan.dependencies]), [
       ["item", ["row"]], ["index", ["loop.index"]],
     ]);
-    assert.deepEqual(definition.slots, [{ name: "row", required: false, props: ["item", "index"] }]);
+    assert.deepEqual(definition.slots?.map(({ declared: _declared, ...slot }) => slot), [{ name: "row", required: false, props: ["item", "index"] }]);
     assert.deepEqual(slot.fallback?.[0]?.kind === "element" && slot.fallback[0].attributes[0]?.kind === "directive"
       && slot.fallback[0].attributes[0].expressionPlan?.dependencies, ["row.name"]);
   });
 
   it("retains every scoped prop when root alternatives expose the same slot", () => {
-    const definition = parseComponent(`<template component="x-alternate-slots"><defs>` +
+    const definition = parseComponent(`<template component="x-alternate-slots"><defs><slot name="item"><prop name="first" type="string">The first.</prop><prop name="second" type="string">The second.</prop></slot>` +
       `<state name="first" value="First"></state><state name="second" value="Second"></state>` +
       `<state type="boolean" name="alternate" value="false"></state></defs>` +
       `<template $match><section $when="$alternate"><slot name="item" from:first="$first"></slot></section>` +
       `<article $else><slot name="item" from:second="$second"></slot></article></template></template>`);
-    assert.deepEqual(definition.slots, [{ name: "item", required: true, props: ["first", "second"] }]);
+    assert.deepEqual(definition.slots?.map(({ declared: _declared, ...slot }) => slot), [{ name: "item", required: true, props: ["first", "second"] }]);
+    assert.deepEqual(Object.keys(definition.contract.slots?.item?.props ?? {}), ["first", "second"]);
   });
 
   it("defers unknown names only inside a consumer's scoped-slot template", () => {

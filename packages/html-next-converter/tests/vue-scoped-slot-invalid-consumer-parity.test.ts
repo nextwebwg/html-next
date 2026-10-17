@@ -37,7 +37,7 @@ describe.skipIf(!enabled)("public Vue converter invalid scoped-slot consumer par
       const outDirectory = join(directory, mode);
       const manifest = await convertComponents({ mode, target: "vue", entries: ["components/consumer.html", "components/repeated-consumer.html"], root: directory, outDirectory });
       assert.deepEqual(manifest.components.map((component) => component.tag).sort(), [
-        "x-repeated-scoped-receiver", "x-invalid-repeated-scoped-consumer", "x-invalid-scoped-consumer", "x-scoped-receiver",
+        "x-invalid-repeated-scoped-consumer", "x-invalid-scoped-consumer", "x-repeated-scoped-receiver", "x-scoped-receiver",
       ]);
       for (const component of manifest.components) {
         const file = join(outDirectory, component.artifact);

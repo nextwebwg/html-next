@@ -1604,7 +1604,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        await page.setContent(`<template component="x-scoped-list"><defs>
+        await page.setContent(`<template component="x-scoped-list"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button type="button" on:click="add">Add</button><ul>
@@ -1632,7 +1632,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        await page.setContent(`<template component="x-scoped-hydrate"><defs>
+        await page.setContent(`<template component="x-scoped-hydrate"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           <handler name="rename"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
@@ -1682,7 +1682,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        await page.setContent(`<template component="x-scoped-rows"><defs>
+        await page.setContent(`<template component="x-scoped-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop></slot>
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
@@ -1710,7 +1710,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        await page.setContent(`<template component="x-hydrated-rows"><defs>
+        await page.setContent(`<template component="x-hydrated-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop></slot>
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="renameRow"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>

@@ -15,8 +15,8 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
-const staticSource = `<template component="x-static-scoped" status="early" summary="Static scoped slot."><div><slot name="row" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
-const repeatedSource = `<template component="x-repeated-scoped" status="early" summary="Repeated scoped slot."><defs><state name="names" type="list(string)" value="['Ada']"></state></defs><div><slot $each="name of $names" name="row" from:item="$name"><span>Fallback</span></slot></div></template>`;
+const staticSource = `<template component="x-static-scoped" status="early" summary="Static scoped slot."><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs><div><slot name="row" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
+const repeatedSource = `<template component="x-repeated-scoped" status="early" summary="Repeated scoped slot."><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot><state name="names" type="list(string)" value="['Ada']"></state></defs><div><slot $each="name of $names" name="row" from:item="$name"><span>Fallback</span></slot></div></template>`;
 
 describe.skipIf(!enabled)("public Vue converter scoped-slot fallback parity", () => {
   let directory = "";

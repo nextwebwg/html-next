@@ -6,7 +6,7 @@ import { parseDuration } from "../duration.js";
 import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
@@ -15,9 +15,9 @@ import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
+import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { category, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
+import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, typeCheck, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
@@ -468,8 +468,15 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
     if ((node.props?.length ?? 0) > 0) {
       state.usesScopedSlots = true;
-      const values = node.props!.map((prop) => `${quote(prop.name)}: ${lowering.value(prop.expressionPlan.ast, scope)}`).join(", ");
-      return `{renderScopedSlot(${supplied}, { ${values} }, ${name}, <>${fallback}</>)}`;
+      // A bound value its declared type does not accept is not given, as live leaves it unset.
+      const unchecked = (prop: NonNullable<SlotNode["props"]>[number]): boolean =>
+        prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
+      const values = node.props!.map((prop) => unchecked(prop) || prop.type === undefined
+        ? `${quote(prop.name)}: ${lowering.value(prop.expressionPlan.ast, scope)}`
+        : `...((value: unknown) => ${typeCheck(normalizeType(prop.type), "value")} ? { ${quote(prop.name)}: value } : {})(${lowering.value(prop.expressionPlan.ast, scope)})`).join(", ");
+      // Its declared type says what a consumer reads; a value that does not conform is left out, so the object is not that type.
+      const checked = node.props!.some((prop) => !unchecked(prop));
+      return `{renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)}`;
     }
     state.usesPlainSlots = true;
     return `{renderPlainSlot(${supplied}, <>${fallback}</>)}`;
@@ -751,7 +758,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const alias = `__slotProps${state.nextSlotAlias++}`;
         const projectedScope: RenderScope = {
           code: new Map([...scope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
-          types: new Map([...scope.types, ...contract!.props!.map((prop) => [prop, UNKNOWN] as const)]),
+          types: new Map([...scope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
           local: true,
         };
         if (carrier !== undefined) return `${quote(name)}: (${alias}: Record<string, any>) => <>${carrier.children.map((child) => renderNode(child, projectedScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
@@ -986,7 +993,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const namedSlots = (definition.slots ?? []).filter((slot) => slot.name !== undefined);
   const slotValueType = (slot: SlotContract): string => (slot.props?.length ?? 0) === 0
     ? "ReactNode"
-    : `(props: Readonly<{ ${slot.props!.map((prop) => `${propKey(prop)}: any;`).join(" ")} }>) => ReactNode`;
+    : `(props: ${slot.declared === undefined ? `Readonly<{ ${slot.props!.map((prop) => `${propKey(prop)}: any;`).join(" ")} }>` : slotPropsType(slot.declared)}) => ReactNode`;
   const slotsType = namedSlots.length === 0
     ? "Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>"
     : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")} }>`;

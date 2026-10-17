@@ -39,7 +39,7 @@ describe.skipIf(!enabled)("public React converter invalid scoped-slot consumer p
       const outDirectory = join(directory, mode);
       const manifest = await convertComponents({ mode, target: "react", entries: ["components/consumer.html", "components/repeated-consumer.html"], root: directory, outDirectory });
       assert.deepEqual(manifest.components.map((component) => component.tag).sort(), [
-        "x-repeated-scoped-receiver", "x-invalid-repeated-scoped-consumer", "x-invalid-scoped-consumer", "x-scoped-receiver",
+        "x-invalid-repeated-scoped-consumer", "x-invalid-scoped-consumer", "x-repeated-scoped-receiver", "x-scoped-receiver",
       ]);
       const entry = join(outDirectory, "entry.tsx");
       const client = join(outDirectory, "react.js");
