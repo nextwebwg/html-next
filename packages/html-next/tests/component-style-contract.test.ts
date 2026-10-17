@@ -24,7 +24,7 @@ it("scopes Svelte selectors by the hash Svelte gives the component's own markup"
   const own = ':where(*, :global([data-html-next-owner~="x-svelte-scope"]))';
   const layout = (css: string): string => css.replace(/\s*([{}])\s*/g, "$1").replace(/\s+/g, " ");
   assert.equal(layout(compiled.css), layout(`@keyframes -global-spin { to { opacity: 0; } }
-    @scope (.x-svelte-scope) to (.x-child) {
+    @scope (.x-svelte-scope) to ([data-hn]) {
       :global(:scope), :global(:scope[data-x-svelte-scope-state~="open"] span)${own} { color: red; }
       :global(.item *)${own}::before, :global(p)${own}:after { color: blue; }
       :global(:is(.projected) a):not(:scope, * *, [data-html-next-owner~="x-svelte-scope"])::marker { color: green; }
@@ -255,7 +255,7 @@ it("selects a component by tag with the live runtime's selectors in Vue and Svel
   // Without slots nothing is projected, so a subject needs no owner test.
   assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
     + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
-  assert.equal(svelte.replace(/\s+/g, " "), "@scope (.ui-x) to (.x-kid) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
+  assert.equal(svelte.replace(/\s+/g, " "), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
     + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
 });
 

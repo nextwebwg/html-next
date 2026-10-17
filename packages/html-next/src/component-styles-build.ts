@@ -282,7 +282,9 @@ export function compileComponentStylesForSvelte(
     }).join(", ");
   }, (root) => root.walkAtRules(/keyframes$/i, (rule) => {
     if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
-  }), () => descends, graph);
+  }),
+  // A nested or projected component's root bounds the scope, as `[data-hn]` does in Vue; with neither, nothing does.
+  () => descends && ((definition.slots?.length ?? 0) > 0 || componentTags(definition.template).size > 0) && `[${VUE_ROOT_ATTRIBUTE}]`, graph);
   return hashed ? { ...compiled, hashed } : compiled;
 }
 
