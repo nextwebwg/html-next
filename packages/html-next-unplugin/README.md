@@ -244,8 +244,10 @@ native build mode. Framework conversion reports unsupported constructs as build 
 import { UiButton, UiDialog } from "./controls.html";
 ```
 
-Local imports are converted on demand and receive a generated `controls.d.html.ts` beside the
-source. Enable TypeScript's `allowArbitraryExtensions` for these imports. To prepare local types
+The adapter converts the app's component files as one graph when it starts: every `.html` file
+under the Vite root that defines a component, outside `node_modules`, dot-directories and the build
+output. An import of a file outside the root is converted on demand. Each local resource receives a
+generated `controls.d.html.ts` beside the source. Enable TypeScript's `allowArbitraryExtensions` for these imports. To prepare local types
 before any runtime import, configure `entries: ["src/controls.html"]` with the framework target.
 `?raw` and `?url` imports keep Vite's normal behavior. Use `publicRootURL` when definitions contain
 component-relative data URLs. The adapter supplies `parse5` for converted `$html` helpers.
@@ -321,6 +323,17 @@ uses one that is off fails `HT024`, and an unknown name fails `HN013`:
 htmlNext({
   entries: ["src/components/app.html"],
   extensions: ["transitions"],
+});
+```
+
+A component publishes a state to `<context>` readers only when a component in the build reads it.
+When components outside the build read a library's state through `<context>`, `publicState`
+publishes every state. The framework adapter accepts it too:
+
+```ts
+htmlNext({
+  entries: ["src/components/app.html"],
+  publicState: true,
 });
 ```
 
