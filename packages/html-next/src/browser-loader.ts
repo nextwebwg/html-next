@@ -12,6 +12,7 @@ import {
   getComponentHost,
   installComponentGraph,
   setDefinitionNonce,
+  installDefinitionPreparer,
   installInlineDefinitionParser,
   installProjectedSlotParser,
   registerComponentDefinitions,
@@ -188,6 +189,8 @@ export async function startBrowserComponents(
   applyNonces(root, loaded.graph, resolver);
   installComponentGraph(loaded.graph, root);
   const report = options.onError ?? ((error: unknown) => console.error(error));
+  // A carrier `componentRegistry.define` registers resolves its stylesheet imports as discovery's do.
+  installDefinitionPreparer((carrier) => prepareInline(carrier).then(() => prepared.get(carrier), (error: unknown) => { report(error); return undefined; }));
   let stopped = false;
   let extensions = Promise.resolve();
   const initialized = new WeakSet<object>();
