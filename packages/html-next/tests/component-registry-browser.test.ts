@@ -50,6 +50,17 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
       await live.ready;
       window.bundles = { live: live.componentRegistry, compiled: compiled.componentRegistry };
     </script></body>`;
+    // Inline definitions with controllers: one the observer discovers, one code defines.
+    files["/nested/inline.js"] = 'export default (host) => { host.root.dataset.controller = "inline"; };';
+    files["/nested/defined.js"] = 'export default (host) => { host.root.dataset.controller = "defined"; };';
+    files["/nested/inline.html"] = `<!doctype html><body>
+      <template component="x-inline" controller="./inline.js"><p>Inline</p></template>
+      <main><x-inline id="discovered"></x-inline><x-defined id="authored"></x-defined></main>
+      <script type="module">
+        import { ready, componentRegistry } from "/browser.js";
+        await ready;
+        window.registry = componentRegistry;
+      </script></body>`;
   });
 
   for (const engine of [chromium, firefox, webkit]) {
@@ -107,6 +118,46 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
           relabeled: "Stable",
           shared: true,
         });
+        assert.deepEqual(errors, []);
+        await page.close();
+      });
+
+      it("runs an inline definition's controller, discovered or defined, for lowered and created instances", async () => {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+        await page.route("https://registry.example/**", (route) => {
+          const path = new URL(route.request().url()).pathname;
+          return route.fulfill({ contentType: path.endsWith(".js") ? "text/javascript" : "text/html", body: files[path]! });
+        });
+        await page.goto("https://registry.example/nested/inline.html");
+        await page.waitForFunction(() => "registry" in window);
+        const result = await page.evaluate(async () => {
+          type Registry = typeof import("../src/component-registry.js").componentRegistry;
+          const registry = (window as unknown as { registry: Registry }).registry;
+          const main = document.querySelector("main")!;
+          const ran = async (element: Element): Promise<string | null> => {
+            for (let tries = 0; tries < 100 && (element as HTMLElement).dataset.controller === undefined; tries += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            return (element as HTMLElement).dataset.controller ?? null;
+          };
+          const carrier = document.createElement("template");
+          carrier.setAttribute("component", "x-defined");
+          carrier.setAttribute("controller", "./defined.js");
+          carrier.innerHTML = "<p>Defined</p>";
+          registry.define(carrier);
+          const created = [registry.create("x-inline"), registry.create("x-defined")];
+          main.append(...created);
+          return {
+            discovered: await ran(document.querySelector("#discovered")!),
+            authored: await ran(document.querySelector("#authored")!),
+            createdInline: await ran(created[0]!),
+            createdDefined: await ran(created[1]!),
+          };
+        });
+        assert.deepEqual(result, { discovered: "inline", authored: "defined", createdInline: "inline", createdDefined: "defined" });
         assert.deepEqual(errors, []);
         await page.close();
       });
