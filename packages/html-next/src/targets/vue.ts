@@ -282,12 +282,12 @@ function isComponentTag(name: string): boolean {
  * holds a newline between elements, so the rendering is unchanged. Text keeps its own whitespace,
  * and a preformatted element keeps its children as written, since Vue keeps the newline there.
  */
-function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context, receivingTag?: string): string {
+function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context): string {
   return nodes.map((child, index) => {
     // Vue drops whitespace at a block's edges and, once a formatter breaks the line there, between
     // elements, so a kept space is an interpolation.
     if (!context.preformatted && isKeptSpace(child)) return "{{ ' ' }}";
-    let markup = renderNode(child, names, context, receivingTag);
+    let markup = renderNode(child, names, context);
     // Authored indentation at the start or end of an element's text goes; a space between
     // siblings stays, as Vue keeps it.
     if (child.kind === "text" && child.segments !== undefined && !context.preformatted) {
@@ -425,7 +425,54 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
   return `<KeyedBoundary>${markup}</KeyedBoundary>`;
 }
 
-function renderNode(node: TemplateNode, names: Names, context: Context, receivingTag?: string): string {
+/** The slot a component's child fills: its `slot`, or the default slot. */
+function assignedSlot(node: TemplateNode): string {
+  const slot = node.kind === "element"
+    ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot")
+    : undefined;
+  return slot?.kind === "literal" ? slot.value : "";
+}
+
+const isSlotTemplate = (node: TemplateNode): node is ElementNode => node.kind === "element" && node.name === "template" &&
+  node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot");
+
+/**
+ * A component's children as Vue slots: each named slot's elements in one `<template #name>`, and
+ * the rest as its default slot. A slot's first `<template slot>` is its whole content, as in the
+ * live runtime, and reads the receiving slot's props.
+ */
+function renderProjection(nodes: readonly TemplateNode[], names: Names, context: Context, tag: string): string {
+  const contracts = context.slotsByTag?.get(tag);
+  const contractOf = (slot: string) => contracts?.find((entry) => !entry.dynamic && (entry.name ?? "") === slot);
+  const groups = new Map<string, TemplateNode[]>();
+  for (const child of nodes) groups.set(assignedSlot(child), [...groups.get(assignedSlot(child)) ?? [], child]);
+  for (const [slot, children] of groups) {
+    if (children.some(isSlotTemplate)) continue;
+    // Default content stays implicit unless a `<template slot="">` names the default slot. Elements
+    // for a scoped slot stay there too, where the receiving host reports the missing template.
+    const scoped = contractOf(slot) ?? contracts?.find((entry) => entry.dynamic && (entry.props?.length ?? 0) > 0);
+    if (slot === "" || (scoped?.props?.length ?? 0) > 0) groups.delete(slot);
+  }
+  const named = [...groups].map(([slot, children]) => {
+    const carrier = children.find(isSlotTemplate);
+    const contract = contractOf(slot);
+    const props = carrier === undefined ? [] : contract?.props ?? projectedNames(carrier.children, names.template);
+    const alias = contract !== undefined && props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
+    const local = alias === undefined ? withLocal(names, props.map((name) => [name, UNKNOWN] as const))
+      : withSlotProps(names, props, alias);
+    // Without `slot`, the carrier renders as a plain `<template>`: its children, under its own flow.
+    const content = carrier === undefined ? renderChildren(children, names, context)
+      : renderNode({ ...carrier, attributes: carrier.attributes.filter((attribute) => !(attribute.kind === "literal" && attribute.name === "slot")) }, local, context);
+    // An unscoped default slot is Vue's `default`; a scoped one, the receiving host's `""`.
+    const slotName = slot === "" && props.length === 0 ? "#default" : /^[A-Za-z_][\w-]*$/.test(slot) ? `#${slot}` : `v-slot:[${quote(slot)}]`;
+    const scopeBinding = props.length === 0 ? "" : `=${bound(alias ?? `{ ${props.join(", ")} }`)}`;
+    return `<template ${slotName}${scopeBinding}>${content}</template>`;
+  });
+  const loose = renderChildren(nodes.filter((child) => !groups.has(assignedSlot(child))), names, context);
+  return [loose, ...named].filter((part) => part !== "").join("\n");
+}
+
+function renderNode(node: TemplateNode, names: Names, context: Context): string {
   const { lowering } = context;
   if (node.kind === "text") {
     if (node.segments?.length === 1) return renderNode(node.segments[0]!, names, context);
@@ -472,22 +519,6 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
     const props = (node.props ?? []).map((prop) => ` :${prop.name}=${bound(lowering.value(prop.expressionPlan.ast, names.template))}`).join("");
     const fallback = renderChildren(node.fallback ?? [], names, context);
     return fallback === "" ? `<slot${name}${props} />` : `<slot${name}${props}>${fallback}</slot>`;
-  }
-  const projected = node.name === "template"
-    ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot")
-    : undefined;
-  if (projected?.kind === "literal") {
-    const contract = receivingTag === undefined ? undefined : context.slotsByTag?.get(receivingTag)
-      ?.find((slot) => !slot.dynamic && slot.name === projected.value);
-    const props = contract?.props ?? projectedNames(node.children, names.template);
-    const alias = contract !== undefined && props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
-    const local = alias === undefined ? withLocal(names, props.map((name) => [name, UNKNOWN] as const))
-      : withSlotProps(names, props, alias);
-    const slotName = /^[A-Za-z_][\w-]*$/.test(projected.value)
-      ? `#${projected.value}`
-      : `v-slot:[${quote(projected.value)}]`;
-    const scopeBinding = props.length === 0 ? "" : `=${bound(alias ?? `{ ${props.join(", ")} }`)}`;
-    return `<template ${slotName}${scopeBinding}>${renderChildren(node.children, local, context)}</template>`;
   }
   const flow = node.flow;
   if (flow?.kind === "each") return renderEachNode(node, flow, names, context);
@@ -728,7 +759,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   if (!component && isVoidElement(node.name)) return open;
   const outerPreformatted = context.preformatted;
   context.preformatted ||= isPreformattedElement(node.name);
-  const renderedChildren = content ?? renderChildren(node.children, names, context, component ? node.name : undefined);
+  const renderedChildren = content ?? (component ? renderProjection(node.children, names, context, node.name) : renderChildren(node.children, names, context));
   context.preformatted = outerPreformatted;
   const selectBinding = node.name === "select" && twoWayControl
     ? node.attributes.find((attribute) => attribute.kind === "attribute" && attribute.twoWay === true && attribute.name === "value")
