@@ -77,6 +77,19 @@ describe("buildComponents", () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
+  it("writes each controller's typed host beside its definition for the CLI", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "html-next-cli-host-"));
+    try {
+      const source = join(directory, "card.html");
+      await writeFile(source, '<template component="x-card" controller="./card.js"><defs><event name="pick" type="integer"></event></defs><article></article></template>');
+      await writeFile(join(directory, "card.js"), "export default function controller() {}\n");
+      await buildComponents([source], join(directory, "plain"), { targets: ["vanilla"] });
+      await assert.rejects(readFile(join(directory, "x-card.host.d.ts"), "utf8"));
+      await buildComponents([source], join(directory, "output"), { targets: ["vanilla"], hostTypes: true });
+      assert.match(await readFile(join(directory, "x-card.host.d.ts"), "utf8"), /export interface HostEvents \{\n {2}pick: number;\n\}/);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it("rejects an empty build and colliding generated paths", async () => {
     const directory = await mkdtemp(join(tmpdir(), "html-next-cli-errors-"));
     try {

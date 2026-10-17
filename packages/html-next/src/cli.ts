@@ -20,6 +20,7 @@ import {
   type GeneratedArtifact,
 } from "./generate.js";
 import { addControllerGraph } from "./controller-files.js";
+import { writeHostDeclarations } from "./host-declarations.js";
 import type { TemplateNode } from "./template.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
 import { compileComponentGraphStylesForBuild } from "./component-styles-build.js";
@@ -28,6 +29,8 @@ export type BuildTarget = "docs" | "styles" | "vanilla" | "vue";
 
 export interface BuildOptions {
   readonly targets?: readonly BuildTarget[];
+  /** Also write `<tag>.host.d.ts` beside each definition that declares a controller, as the CLI does. */
+  readonly hostTypes?: boolean;
 }
 
 export interface BuildManifest {
@@ -110,6 +113,7 @@ export async function buildComponents(
   const components: Array<BuildManifest["components"][number]> = [];
   const selected = new Set(options.targets ?? ["docs", "styles", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
+  if (options.hostTypes === true) await writeHostDeclarations(graph);
   const sharedCSS = [...graph.nodes.values()].some(node => (node.definition.stylesheets?.length ?? 0) > 0);
   if (sharedCSS && selected.has("styles")) artifacts.set("styles/components.css", {
     path: "styles/components.css", content: compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition)) + "\n",
@@ -217,7 +221,7 @@ async function main(argv: readonly string[]): Promise<void> {
   }
   const allowed = new Set<BuildTarget>(["docs", "styles", "vanilla", "vue"]);
   if (targets.some((target) => !allowed.has(target))) throw new Error(`Unknown build target: ${targets.find((target) => !allowed.has(target))}.`);
-  await buildComponents(argv.slice(1, outIndex), outDirectory, targets.length === 0 ? {} : { targets });
+  await buildComponents(argv.slice(1, outIndex), outDirectory, { hostTypes: true, ...targets.length === 0 ? {} : { targets } });
 }
 
 if (import.meta.main) {

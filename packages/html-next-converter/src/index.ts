@@ -47,6 +47,7 @@ import {
   type TemplateNode,
   type GeneratedArtifact,
   transitionElements,
+  writeHostDeclarations,
 } from "@nextwebwg/html-next";
 
 export type FrameworkTarget = "vue" | "react" | "svelte";
@@ -66,6 +67,8 @@ interface BaseConvertOptions {
   readonly root?: string;
   /** Browser URL of `root`, required when a data source is relative to its component file. */
   readonly publicRootURL?: string;
+  /** Also write `<tag>.host.d.ts` beside each definition that declares a controller, as the CLI does. */
+  readonly hostTypes?: boolean;
 }
 
 export interface ApplicationConvertOptions extends BaseConvertOptions {
@@ -371,7 +374,8 @@ export async function checkConversion(options: CheckConversionOptions): Promise<
 }
 
 export async function convertComponents(options: ConvertOptions): Promise<ConversionManifest> {
-  const { manifest, artifacts } = await planConversion(options);
+  const { manifest, artifacts, graph } = await planConversion(options);
+  if (options.hostTypes === true) await writeHostDeclarations(graph);
   const outputRoot = resolve(options.outDirectory);
   for (const artifact of artifacts) await emit(outputRoot, artifact);
   await mkdir(outputRoot, { recursive: true });
@@ -382,6 +386,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
 async function planConversion(options: CheckConversionOptions, collectDiagnostics = false): Promise<{
   readonly manifest: ConversionManifest;
   readonly artifacts: readonly GeneratedArtifact[];
+  readonly graph: ComponentGraph;
 }> {
   const diagnostics: HtmlDiagnostic[] = [];
   const recover = (error: unknown): void => {
@@ -724,5 +729,5 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     components: Object.freeze(manifestComponents),
   });
   for (const warning of [...graph.warnings ?? [], ...unsupported]) options.onWarning?.(warning);
-  return { manifest, artifacts: planned.map(({ artifact }) => artifact) };
+  return { manifest, artifacts: planned.map(({ artifact }) => artifact), graph };
 }
