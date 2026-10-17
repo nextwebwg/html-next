@@ -216,13 +216,35 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   const watch = () => { for (const anchor of document.querySelectorAll("a[href]")) visible.observe(anchor); };
   watch();
 
-  const html = async (url: URL, signal: AbortSignal) => {
-    const response = await loaded(url.pathname + url.search, signal);
+  /** A page's document, whose server markup the components adopt. */
+  const parse = async (response: Response, url: URL): Promise<Rendered> => {
     if (!response.headers.get("content-type")?.startsWith("text/html")) throw new Error(`HTMLKit cannot render ${url.href} in place.`);
     const next = new DOMParser().parseFromString(await response.text(), "text/html");
     const layers: Element[] = [];
     for (let index = 0, root = layer(next, 0); root !== null; root = layer(next, ++index)) layers.push(root);
     return { next, layers, adopt: true };
+  };
+  const html = async (url: URL, signal: AbortSignal) => parse(await loaded(url.pathname + url.search, signal), url);
+  /** A submission's redirect, for the navigation to its URL. */
+  let redirected: { readonly url: string; readonly page: Rendered | undefined } | undefined;
+  /**
+   * A form's POST, as the browser would send it: its action's page, or for a redirect, the page it
+   * redirects to, which replaces the submission's history entry as a document's POST/redirect/GET does.
+   */
+  const submit = async (url: URL, form: HTMLFormElement | undefined, submitter: Element | null, body: FormData, signal: AbortSignal): Promise<Rendered> => {
+    const enctype = submitter?.hasAttribute("formenctype") ? (submitter as HTMLButtonElement).formEnctype : form?.enctype;
+    // An urlencoded form names each file by its name, as the browser does.
+    const fields = enctype === "multipart/form-data" ? body : new URLSearchParams([...body].map(([name, value]) => [name, typeof value === "string" ? value : value.name]));
+    const response = await fetch(url, { method: "POST", body: fields, signal });
+    if (response.redirected) {
+      // The redirect's navigation, which aborts this one, renders its page from this response, read
+      // first, since the abort ends its body. A page it can't render loads as any visit does.
+      redirected = { url: response.url, page: await parse(response, new URL(response.url)).catch(() => undefined) };
+      void navigation.navigate(response.url, { history: "replace" });
+      signal.throwIfAborted();
+    }
+    // A validation error renders the page with its status, such as 422, as a document shows it.
+    return parse(response, url);
   };
   const payload = async (url: URL, signal: AbortSignal) => {
     const cached = prefetched.get(url.pathname + url.search);
@@ -235,18 +257,21 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     return render(runtime, data);
   };
 
-  const visit = async (url: URL, event: NavigateEvent): Promise<void> => {
+  const visit = async (url: URL, event: NavigateEvent, form?: HTMLFormElement): Promise<void> => {
     const { signal } = event;
     const sheets: HTMLLinkElement[] = [];
     let committed = false;
     clearTimeout(intended);
+    const handed = redirected?.url === url.href ? redirected.page : undefined;
+    redirected = undefined;
     try {
       // The payload carries data, not markup; a page it cannot render loads from its HTML.
-      const { next, layers, adopt: hydrate } = await payload(url, signal).catch(error => {
+      const { next, layers, adopt: hydrate } = await (handed !== undefined ? handed :
+        event.formData !== null ? submit(url, form, event.sourceElement, event.formData, signal) : payload(url, signal).catch(error => {
         if (signal.aborted) throw error;
         console.warn("HTMLKit renders this page from its HTML:", error);
         return html(url, signal);
-      });
+      }));
       if (layers.length === 0 || layer(document, 0) === null) throw new Error(`HTMLKit cannot render ${url.href} in place: it has no layers.`);
       // Links both documents share stay; the rest are removed or added at the swap.
       const kept = new Set<Element>();
@@ -298,7 +323,8 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     } catch (error) {
       if (!committed) for (const sheet of sheets) sheet.remove();
       if (signal.aborted) return;
-      // Anything this document cannot render in place loads as a document instead.
+      // Anything this document cannot render in place loads as a document instead. A submission's
+      // URL loads with GET, so a failed render never sends its form twice.
       console.error(error);
       location.reload();
     }
@@ -307,16 +333,33 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   // ponytail: WebKit 26.6 sometimes restores no position for an intercepted back or forward
   // navigation, so HTMLKit records where each entry was left. Other scrolling stays native.
   const positions = new Map<string, readonly [x: number, y: number]>();
+  // While a navigation renders in place: data-hk-navigating on <html>, and on a submitting form,
+  // data-hk-submitting and aria-busy. Only the latest navigation clears <html>'s.
+  let latest = 0;
   navigation.addEventListener("navigate", event => {
     if (navigation.currentEntry !== null) positions.set(navigation.currentEntry.key, [scrollX, scrollY]);
     const url = new URL(event.destination.url);
-    // Reloads, downloads, form posts, fragment and history.pushState changes, and other documents
-    // stay native. Modified clicks and link targets open other browsing contexts without this event.
-    if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null || event.formData !== null ||
-      !local(url, event.sourceElement) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname + url.search === rendered)) return;
+    const source = event.sourceElement;
+    // A submission's source is its submitter, or the form itself without one.
+    const form = event.formData === null ? undefined : source instanceof HTMLFormElement ? source : (source as HTMLButtonElement | null)?.form ?? undefined;
+    // Reloads, downloads, fragment and history.pushState changes, and other documents stay native.
+    // Modified clicks and link and form targets open other browsing contexts without this event.
+    if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null ||
+      !local(url, form ?? source) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname + url.search === rendered)) return;
     // After the swap, a new entry scrolls to its fragment or the top, back and forward return to
     // where the entry was left, and focus resets as after a document load.
-    event.intercept({ scroll: "manual", handler: () => visit(url, event) });
+    event.intercept({ scroll: "manual", async handler() {
+      const id = ++latest;
+      document.documentElement.setAttribute("data-hk-navigating", "");
+      form?.setAttribute("data-hk-submitting", "");
+      form?.setAttribute("aria-busy", "true");
+      try { await visit(url, event, form); }
+      finally {
+        form?.removeAttribute("data-hk-submitting");
+        form?.removeAttribute("aria-busy");
+        if (id === latest) document.documentElement.removeAttribute("data-hk-navigating");
+      }
+    } });
   });
 }
 

@@ -87,6 +87,7 @@ every command and option.
 | Add pages, dynamic URLs, and layouts | [Pages and routing](/htmlkit/routes) |
 | Load data into a page, at build time or on each request | [Loading data](/htmlkit/loaders) |
 | Answer API requests, or run code before every request | [Endpoints and middleware](/htmlkit/server) |
+| Accept form submissions, with validation errors | [Forms](/htmlkit/forms) |
 | Put the site online | [Deployment](/htmlkit/deployment) |
 | Add site navigation and order pages | [Navigation](/htmlkit/navigation) |
 | Move between pages without reloading | [Moving between pages](/htmlkit/client-navigation) |

@@ -15,7 +15,7 @@ import { policyHeader } from "./csp.js";
 import { authoredHead, documentHTML, escapeHTML, pagePayload, redirectPage, type PageAssets } from "./document.js";
 import { matchRoute, parameter, redirectLocation, redirectStatuses } from "./routes.js";
 import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestRedirect, Middleware, NavigationItem,
-  NavigationNode, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
+  NavigationNode, NavigationQuery, PageAction, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
 
 export { setRenderWorkers } from "@nextwebwg/html-next/server";
 export type { ApplicationServer, EndpointContext, EndpointHandler, EndpointModule, Middleware, ServerApplication, StartOptions } from "./types.js";
@@ -209,6 +209,8 @@ export interface RenderInput {
   readonly canonicalOrigin: string;
   /** For the error page: the failure, whose fields it takes as the props it declares. */
   readonly failure?: Failure;
+  /** For a POST, the page's action that pageAction() found, which runs before the loaders. */
+  readonly action?: PageAction;
 }
 /** What app/error.html receives: the status and its standard reason phrase, never the error itself. */
 export interface Failure { readonly status: 500; readonly message: string }
@@ -240,13 +242,11 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   }).join("");
   // An alias marks its page's own URL current, with the alias's parameters.
   const current = route.canonical === undefined ? url.pathname : at(route.canonical);
-  for (const layer of layers) {
-    signal.throwIfAborted();
-    const loaded = await layer.module();
+  const contextOf = (layer: RenderLayer): LoadContext => {
     const prerendering = (name: string): never => {
       throw new HtmlKitError(`${name} is unavailable while prerendering; <meta name="hk:render" content="server"> renders the page on each request.`, layer.origin);
     };
-    const context: LoadContext = { phase: request === undefined ? "prerender" : "request", url: new URL(url), base, params, parent,
+    return { phase: request === undefined ? "prerender" : "request", url: new URL(url), base, params, parent,
       propNames: Object.freeze(Object.keys(layer.definition.contract.props)),
       fetch: globalThis.fetch, signal,
       navigation: query => navigation.navigation({ current, ...query }),
@@ -261,16 +261,41 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
       get request() { return request ?? prerendering("request"); },
       get cookies() { return request === undefined ? prerendering("cookies") : cookies ??= parseCookies(request.headers.get("cookie")); },
       get response() { return request === undefined ? prerendering("response") : response; } };
+  };
+  // What a loader's or action's redirect() and notFound() answer with.
+  const stopped = (error: unknown): Rendered => {
+    if (error instanceof Redirect) return { kind: "redirect", location: error.location, status: error.status, headers: response.headers };
+    if (error instanceof NotFound) return { kind: "notFound", headers: response.headers };
+    throw error;
+  };
+  // The action runs first, so every loader sees what it changed.
+  let submitted: Readonly<Record<string, unknown>> | undefined;
+  if (input.action !== undefined) {
+    const page = layers.at(-1)!;
+    let result: unknown;
+    try { result = await input.action(contextOf(page)); }
+    catch (error) { return stopped(error); }
+    if (result === undefined) {
+      // POST/redirect/GET: the page's own URL, without the action's name.
+      const location = new URL(url);
+      location.search = new URLSearchParams([...location.searchParams].filter(([key]) => !key.startsWith("/"))).toString();
+      return { kind: "redirect", location: location.pathname + location.search, status: 303, headers: response.headers };
+    }
+    if (result === null || typeof result !== "object" || Array.isArray(result)) {
+      throw new HtmlKitError("An action returns nothing, which redirects to its page, or an object of the page's props.", page.origin);
+    }
+    submitted = result as Readonly<Record<string, unknown>>;
+  }
+  for (const layer of layers) {
+    signal.throwIfAborted();
+    const loaded = await layer.module();
+    const context = contextOf(layer);
     let result: LoaderResult;
     // app/error.html takes the failure's status and message as the props it declares.
     const supplied = input.failure === undefined || layer !== layers.at(-1) ? {} : { props: Object.fromEntries(Object.entries(input.failure)
       .filter(([name]) => Object.hasOwn(layer.definition.contract.props, name))) };
     try { result = loaded.load === undefined ? supplied : await loaded.load(context); }
-    catch (error) {
-      if (error instanceof Redirect) return { kind: "redirect", location: error.location, status: error.status, headers: response.headers };
-      if (error instanceof NotFound) return { kind: "notFound", headers: response.headers };
-      throw error;
-    }
+    catch (error) { return stopped(error); }
     if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", layer.origin);
     if (result.head !== undefined) {
       if (Object.keys(result.head).some(name => name !== "lang")) {
@@ -278,6 +303,8 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
       }
       lang = result.head.lang ?? lang;
     }
+    // An action's props are the page's, over its loader's.
+    if (submitted !== undefined && layer === layers.at(-1)) result = { ...result, props: { ...result.props, ...submitted } };
     results.push(result);
     parent = Object.freeze({ ...parent, ...result.data });
     // Checked against the layer's own component, which a prop's diagnostic names.
@@ -385,9 +412,38 @@ async function route<Route extends NavigationRoute>(app: Pipeline<Route>, reques
   }
   const matched = matchRoute(app.routes, pathname, app.base);
   if (matched === undefined) return app.notFound(request, payload);
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  // A POST is a form submission, which a page's actions answer.
+  if (!["GET", "HEAD", "POST"].includes(request.method)) return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
   if (!pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" + url.search } });
+  if (request.method === "POST" && !sameOrigin(request)) return new Response("Cross-origin form submissions are refused.", { status: 403 });
   return app.page(matched.route, matched.params, request, payload);
+}
+
+/**
+ * Whether a request comes from a page of this site, as Go's CrossOriginProtection decides: by
+ * Sec-Fetch-Site, or by Origin from browsers that don't send it. A request with neither isn't a
+ * browser's cross-site form, such as one from curl.
+ */
+function sameOrigin(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin" || site === "none";
+  const origin = request.headers.get("origin");
+  // Hosts, not origins: behind a TLS proxy the request's own URL is http.
+  return origin === null || URL.parse(origin)?.host === new URL(request.url).host;
+}
+
+/** The action a page's POST names, `?/name` or `default`, or the answer that refuses it: 405 for a page without actions, 404 for an unknown name. */
+export function pageAction(module: ServerModule, url: URL): PageAction | Response {
+  const { actions } = module;
+  if (actions === undefined) return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  const name = [...url.searchParams.keys()].find(key => key.startsWith("/"))?.slice(1) ?? "default";
+  const action = Object.hasOwn(actions, name) ? actions[name] : undefined;
+  return typeof action === "function" ? action : new Response(null, { status: 404 });
+}
+
+/** The build error for actions on a page that prerenders. */
+export function prerenderedActions(pattern: string, origin: string): HtmlKitError {
+  return new HtmlKitError(`The page ${pattern} has actions, which answer requests; <meta name="hk:render" content="server"> renders it on each request.`, origin);
 }
 
 async function answerEndpoint<Route extends NavigationRoute>(app: Pipeline<Route>, endpoint: EndpointRoute, params: Params, request: Request): Promise<Response> {
@@ -487,9 +543,9 @@ export async function serverApplication(entry: string, data: ServerData, modules
     return new Response(request.method === "HEAD" ? null : await readFile(path), { status, headers });
   };
   const missing = (request: Request, headers?: Headers) => file(join(output, "404.html"), request, 404, headers, true);
-  const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure) =>
+  const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure, action?: PageAction) =>
     renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions,
-      scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }),
+      scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }), ...(action === undefined ? {} : { action }),
       layers: page.layers.map(layer => ({ ...layer, module: () => layer.module === undefined ? Promise.resolve({}) : load<ServerModule>(layer.module) })) });
   // A failure answers with app/error.html, rendered as the build would render it, and a safe message; the error goes to the console.
   const failed = async (error: unknown, request: Request): Promise<Response> => {
@@ -516,13 +572,21 @@ export async function serverApplication(entry: string, data: ServerData, modules
     async page(route, params, request, payload) {
       const server = data.pages[routes.indexOf(route)];
       const url = new URL(request.url);
+      // The build refuses actions on a prerendered page.
+      let action: PageAction | undefined;
+      if (request.method === "POST") {
+        const module = server?.layers.at(-1)!.module;
+        const found = pageAction(module === undefined ? {} : await load<ServerModule>(module), url);
+        if (found instanceof Response) return found;
+        action = found;
+      }
       if (server === undefined) {
         // A prerendered page: its document or payload, if the build wrote one for this URL.
         const found = await outputPath(output, base, payload ? `${base}_htmlkit/pages/${url.pathname.slice(base.length)}payload.json` : url.pathname);
         if (typeof found === "object") return file(found.file, request, 200, undefined, !payload);
         return payload ? new Response(null, { status: 404 }) : missing(request);
       }
-      const rendered = await render(server, route, params, url, request, request.signal);
+      const rendered = await render(server, route, params, url, request, request.signal, undefined, action);
       if (rendered.kind === "notFound") return payload ? new Response(null, { status: 404, headers: rendered.headers }) : missing(request, rendered.headers);
       return pageResponse(rendered.kind === "page" ? rendered : { ...rendered, body: "", head: { html: "" }, layers: [] }, request, payload, server.assets);
     },

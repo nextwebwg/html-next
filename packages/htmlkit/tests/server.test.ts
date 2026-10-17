@@ -54,6 +54,26 @@ async function serverApp(): Promise<string> {
     export const DELETE = () => new Response(null, { status: 204 });`);
   await write(root, "app/api/fail.server.ts", 'export const GET = () => { throw new Error("database secret"); };');
   await write(root, "app/error.html", '<template component="error-page"><defs><prop name="status" type="number" required>Status</prop><prop name="message" type="string" required>Reason</prop><title>Trouble</title></defs><section><h1>{$status}</h1><p>{$message}</p></section></template>');
+  // Form actions: a validation error renders the page with the submitted value, and success redirects.
+  await write(root, "app/pages/todos.html", `<template component="todos-page"><defs>
+    <prop name="todos" type="list(string)" required>Todos</prop><prop name="parent" type="string" default="">Parent data</prop>
+    <prop name="errors" type="object({ title?: string })" default="{}">Field errors</prop><prop name="values" type="object({ title?: string })" default="{}">Submitted values</prop>
+    <meta name="hk:render" content="server"><title>Todos</title></defs><section>
+    <form method="post" action="?/create"><input name="title" from:value="$values.title"><p class="error" $if="$errors.title">{$errors.title}</p><button>Add</button></form>
+    <ul><li $each="todo of $todos">{$todo}</li></ul><p class="parent">{$parent}</p></section></template>`);
+  await write(root, "app/pages/todos.server.ts", `const todos = ["Write"];
+    export const load = ({ parent }) => ({ props: { todos, parent: parent.owner } });
+    export const actions = {
+      async create({ request, response, parent }) {
+        if (Object.keys(parent).length > 0) throw new Error("Actions run before every loader");
+        const title = String((await request.formData()).get("title") ?? "").trim();
+        if (title.length < 3) { response.status = 422; return { errors: { title: "Use at least 3 characters." }, values: { title } }; }
+        todos.push(title);
+      },
+      clear({ redirect, response }) { todos.length = 0; response.headers.append("set-cookie", "cleared=1; Path=/"); redirect("/todos/?cleared"); },
+      gone({ notFound }) { notFound(); },
+      wrong() { return "no"; },
+    };`);
   await write(root, "app/api/go.server.ts", 'export const GET = request => Response.redirect(new URL("/login/", request.url), 307);');
   await write(root, "app/api/feed.xml.server.ts", 'export const GET = () => new Response("<feed/>", { headers: { "content-type": "application/xml" } });');
   return root;
@@ -62,7 +82,7 @@ async function serverApp(): Promise<string> {
 type Answer = (path: string, init?: RequestInit) => Promise<Response>;
 
 /** The request behavior Application.fetch and the built server share. */
-async function answersRequests(answer: Answer): Promise<void> {
+async function answersRequests(answer: Answer, host: string): Promise<void> {
   const signedIn = { headers: { cookie: "user=ada; theme=light" } };
   // Loaders read the query, cookies, and request headers, and set the status and headers.
   const account = await answer("/account/?page=2", signedIn);
@@ -103,6 +123,39 @@ async function answersRequests(answer: Answer): Promise<void> {
   expect(await prerendered.text()).toContain("kit: one");
   expect((await answer("/login/", { method: "POST" })).status).toBe(405);
 
+  // Form actions answer a POST to their page: a redirect to the page on success, or the page with the action's props.
+  const post = (path: string, fields: Record<string, string>, headers: Record<string, string> = {}) =>
+    answer(path, { method: "POST", body: new URLSearchParams(fields), headers });
+  const added = await post("/todos/?/create", { title: "Test" }, { origin: `http://${host}` });
+  expect([added.status, added.headers.get("location")]).toEqual([303, "/todos/"]);
+  expect(await (await answer("/todos/")).text()).toMatch(/<li>Write<\/li>.*<li>Test<\/li>/);
+  const invalid = await post("/todos/?/create&view=all", { title: " ab " }, { "sec-fetch-site": "same-origin" });
+  const form = await invalid.text();
+  expect([invalid.status, /<input name="title"[^>]* value="ab"/.test(form), form.includes("Use at least 3 characters."), form.includes('class="parent"')]).toEqual([422, true, true, true]);
+  // Loaders run after the action and keep their props; layouts render as on GET.
+  expect([form.includes(">kit</p>"), form.includes("<header>HTMLKit</header>")]).toEqual([true, true]);
+  // A multipart body, as an enhanced submission sends, reads the same.
+  const multipart = new FormData();
+  multipart.set("title", "ok");
+  expect((await answer("/todos/?/create", { method: "POST", body: multipart })).status).toBe(422);
+  const cleared = await post("/todos/?/clear", {});
+  expect([cleared.status, cleared.headers.get("location"), cleared.headers.getSetCookie()]).toEqual([303, "/todos/?cleared", ["cleared=1; Path=/"]]);
+  expect((await post("/todos/?/gone", {})).status).toBe(404);
+  // A page answers only the actions it exports, and POST only with actions.
+  expect((await post("/todos/", {})).status).toBe(404);
+  expect((await post("/todos/?/missing", {})).status).toBe(404);
+  expect((await post("/account/", {}, signedIn.headers)).status).toBe(405);
+  expect((await answer("/todos/", { method: "PUT" })).status).toBe(405);
+  // Cross-site submissions are refused before the action runs, by Sec-Fetch-Site or Origin.
+  expect((await post("/todos/?/clear", {}, { "sec-fetch-site": "cross-site" })).status).toBe(403);
+  expect((await post("/todos/?/clear", {}, { "sec-fetch-site": "same-site" })).status).toBe(403);
+  expect((await post("/todos/?/clear", {}, { origin: "https://attacker.example" })).status).toBe(403);
+  expect((await post("/todos/?/clear", {}, { origin: "null" })).status).toBe(403);
+  expect((await post("/todos/?/create", { title: "Kept" }, { origin: `https://${host}` })).status).toBe(303);
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  expect((await post("/todos/?/wrong", {})).status).toBe(500);
+  logged.mockRestore();
+
   // Endpoints answer each exported method with its Response, HEAD through GET, and 405 with Allow otherwise.
   expect(await (await answer("/api/todos")).json()).toEqual([{ id: "1", title: "Write" }]);
   const created = await answer("/api/todos", { method: "POST", body: JSON.stringify({ id: "2", title: "Test" }), headers: { "content-type": "application/json" } });
@@ -121,11 +174,11 @@ async function answersRequests(answer: Answer): Promise<void> {
   const feed = await answer("/api/feed.xml");
   expect([feed.headers.get("content-type"), feed.headers.get("x-middleware"), await feed.text()]).toEqual(["application/xml", "after", "<feed/>"]);
   // A failing endpoint answers with app/error.html through the layout; the error itself goes to the console.
-  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const failing = vi.spyOn(console, "error").mockImplementation(() => {});
   const failure = await answer("/api/fail");
   const trouble = await failure.text();
   expect([failure.status, trouble.includes("<h1>500</h1><p>Internal Server Error</p>"), trouble.includes("<header>HTMLKit</header>"), trouble.includes("secret")]).toEqual([500, true, true, false]);
-  logged.mockRestore();
+  failing.mockRestore();
   // Middleware sets headers on any response next() answers, Response.redirect()'s included.
   const go = await answer("/api/go", { redirect: "manual" });
   expect([go.status, go.headers.get("location")?.endsWith("/login/"), go.headers.get("x-middleware")]).toEqual([307, true, "after"]);
@@ -142,7 +195,7 @@ describe("request-time rendering", () => {
       expect(application.middleware).toBe(join(root, "app/middleware.server.ts"));
       // Server-rendered pages render on request, so a build lists only prerendered ones.
       expect(await application.entries()).not.toContain("/account/");
-      await answersRequests((path, init) => application.fetch(new Request(`http://localhost${path}`, init)));
+      await answersRequests((path, init) => application.fetch(new Request(`http://localhost${path}`, init)), "localhost");
     } finally { await application.close(); }
   }, 120_000);
 
@@ -161,7 +214,7 @@ describe("request-time rendering", () => {
     const server = await startApplication({ outDir, port: 0 });
     try {
       const url = server.url.slice(0, -1);
-      await answersRequests((path, init) => fetch(url + path, { ...init, redirect: "manual" }));
+      await answersRequests((path, init) => fetch(url + path, { ...init, redirect: "manual" }), new URL(url).host);
       // A server-rendered page loads its own browser bundle, as a prerendered one does.
       const page = await (await fetch(`${url}/account/`, { headers: { cookie: "user=ada" } })).text();
       const module = /<script type="module" src="([^"]+)"/.exec(page)![1]!;
@@ -228,6 +281,15 @@ describe("request-time rendering", () => {
     await expect(buildApplication({ root })).rejects.toThrow(/index\.server\.ts: cookies is unavailable while prerendering; <meta name="hk:render" content="server">/);
     await write(root, "app/pages/index.server.ts", "export const load = ({ response }) => { response.status = 201; return {}; };");
     await expect(buildApplication({ root })).rejects.toThrow(/response is unavailable while prerendering/);
+    // Actions answer requests, so a prerendered page has none, in a build and in development.
+    await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' } }); export const actions = { default() {} };");
+    await expect(buildApplication({ root })).rejects.toThrow(/index\.server\.ts: The page \/ has actions, which answer requests; <meta name="hk:render" content="server">/);
+    const prerendered = await createApplication({ root });
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await prerendered.fetch(new Request("http://localhost/", { method: "POST" }))).status).toBe(500);
+      expect(reported).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringMatching(/The page \/ has actions/) }));
+    } finally { reported.mockRestore(); await prerendered.close(); }
     await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' } });");
     await write(root, "app/pages/items/[slug].server.ts", "export const entries = () => [{ slug: 'one' }, { slug: 'gone' }]; export const load = ({ params, notFound }) => params.slug === 'gone' ? notFound() : ({ props: { label: params.slug, tags: [], slug: params.slug } });");
     // A prerendered entry whose loader calls notFound() is left out of the build.

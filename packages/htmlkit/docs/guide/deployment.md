@@ -1,6 +1,6 @@
 ---
 title: Deployment
-order: 6
+order: 7
 blurb: static hosts · htmlkit start · Deno · Bun · prerendered and server pages
 eyebrow: HTMLKit
 ---

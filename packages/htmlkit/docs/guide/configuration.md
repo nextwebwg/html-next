@@ -1,6 +1,6 @@
 ---
 title: Configuration
-order: 7
+order: 8
 blurb: htmlkit.config.ts · plugins · build hooks · build manifest · command line · using HTMLKit from code
 eyebrow: HTMLKit
 ---

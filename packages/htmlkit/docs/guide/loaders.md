@@ -121,8 +121,8 @@ before it, so a loader can set a cookie and then redirect. A dynamic page that r
 renders any URL its pattern matches, with no `entries()`, and its loader calls `notFound()` for one it
 doesn't know. Client navigation fetches the page's data with the same query and cookies, through the
 same loaders. See [deployment](/htmlkit/deployment#prerendered-and-server-pages) for how the two kinds
-of page are built and served, and [endpoints and middleware](/htmlkit/server) for requests that aren't
-pages.
+of page are built and served, [forms](/htmlkit/forms) for the actions that answer a page's form
+submissions, and [endpoints and middleware](/htmlkit/server) for requests that aren't pages.
 
 ## Dynamic pages
 

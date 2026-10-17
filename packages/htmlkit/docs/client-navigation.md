@@ -19,7 +19,11 @@ in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functio
 | Need | Native mechanism | Support, October 2026 |
 | --- | --- | --- |
 | Intercept same-document navigations of every kind (links, `location`, back and forward) | Navigation API: `navigate` event, `event.intercept()` | Chrome 102 (intercept 105), Firefox 147, Safari 26.2. Baseline since January 2026 |
-| Skip what should stay native | `canIntercept` (other origins), `downloadRequest`, `formData`, `destination.sameDocument` (fragments, `history.pushState`), `navigationType` | Same as above |
+| Skip what should stay native | `canIntercept` (other origins), `downloadRequest`, `destination.sameDocument` (fragments, `history.pushState`), `navigationType` | Same as above |
+| Submit a form as the browser would: its action URL, `formaction`, method, encoding, and constraint validation | The `navigate` event's destination and `formData`, after validation; `sourceElement` is the submitter | Same as Navigation API |
+| Focus after a submission | The intercept's focus reset, which focuses the autofocus delegate, else the body | Same as Navigation API |
+| Pending state for scripts | `navigation.transition`, `navigatesuccess`, `navigateerror` | Same as Navigation API |
+| Pending state for CSS | None: no pseudo-class matches a document or form during a navigation. HTMLKit sets `data-hk-navigating`, and `data-hk-submitting` with `aria-busy` on the form | |
 | Per-link opt-out | `NavigateEvent.sourceElement` | Chrome 135, Firefox 147, Safari 26.2 |
 | Modified clicks, `target`, middle clicks | They open another browsing context, so this document gets no `navigate` event | All |
 | Cancel a superseded navigation | `event.signal` (an `AbortSignal`), passed to `fetch` | Same as Navigation API |
@@ -265,6 +269,10 @@ navigation here.
 - Development keeps component styles Vite injected for earlier pages; builds remove stylesheets the
   next page does not link.
 - `app/head.js` runs once per document load.
-- `GET` forms that submit to an application page render in place; `POST` forms stay native.
+- `GET` forms that submit to an application page render in place. `POST` forms submit with `fetch`,
+  as the browser would send them, and render the answer from its HTML. A redirect's page renders from
+  the same response, in a `replace` navigation to its URL, which aborts the submission's; that
+  navigation reads the body first, since the abort ends it. A response that can't render in place
+  reloads the submission's URL with `GET`, so a form is never sent twice.
 - Links that controllers add after a navigation are not watched for visibility; they still prefetch
   on interaction.
