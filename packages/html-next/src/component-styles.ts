@@ -12,7 +12,7 @@ import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-
  * other's rules, and the remaining selectors are rewritten through the CSS Object Model. Build tools
  * run the same selector rewrite over a CSS parser (`component-styles-build.ts`).
  */
-import { fail } from "./diagnostics.js";
+import { fail, type HtmlDiagnostic } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { parseTypeExpression } from "./type-system.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
@@ -98,6 +98,11 @@ export function restoreStatePseudoClasses(css: string): string {
   return css.replace(/:where\(\s*\[--state\]\s*\):is\(\s*\[([^\]="\s]+)(?:="((?:\\.|[^"\\])*)")?\](?:\[--of="([^"]*)"\])?\s*\)/g,
     (_match, name: string, value: string | undefined, of: string | undefined) =>
       `:state(${name}${value === undefined ? "" : `="${value}"`}${of === undefined ? "" : ` of ${of}`})`);
+}
+
+/** A renamed selector as authored, with its `:slotted()` and `:state()` restored, for messages. */
+export function authoredSelector(selector: string): string {
+  return restoreStatePseudoClasses(selector.replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, ":slotted("));
 }
 
 /** Constructed sheets discard imports, so synchronous compilation must diagnose them first. */
@@ -312,6 +317,63 @@ export function rewriteComponentSelector(
   return rewriteComponentTags(rewriteValiditySelectors(output), componentRoot);
 }
 
+/** The complex selectors of a selector list, split at top-level commas. */
+export function complexSelectors(selector: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < selector.length; index += 1) {
+    const character = selector[index]!;
+    if (character === "\\") { index += 1; continue; }
+    if (quote !== "") { if (character === quote) quote = ""; continue; }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(" || character === "[") depth += 1;
+    else if (character === ")" || character === "]") depth -= 1;
+    else if (character === "," && depth === 0) { parts.push(selector.slice(start, index).trim()); start = index + 1; }
+  }
+  parts.push(selector.slice(start).trim());
+  return parts.filter((part) => part !== "");
+}
+
+/**
+ * The component a renamed complex selector's subject names, if it is one of `tags`. Such a rule
+ * matches nothing: a component's root and everything in it belong to that component's own styles,
+ * and projected content stops at a component root too.
+ */
+export function nestedRootSubject(selector: string, tags: ReadonlySet<string>): string | undefined {
+  let start = 0;
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < selector.length; index += 1) {
+    const character = selector[index]!;
+    if (character === "\\") { index += 1; continue; }
+    if (quote !== "") { if (character === quote) quote = ""; continue; }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(" || character === "[") depth += 1;
+    else if (character === ")" || character === "]") depth -= 1;
+    else if (depth === 0 && /[\s>+~]/.test(character)) start = index + 1;
+  }
+  const subject = selector.slice(start).trim();
+  const slotted = /^:where\(\s*\[--slotted\]\s*\):is\(/.exec(subject);
+  if (slotted !== null) {
+    const open = slotted[0].length - 1;
+    return complexSelectors(subject.slice(open + 1, closingParenthesis(subject, open)))
+      .map((inner) => nestedRootSubject(inner, tags)).find((tag) => tag !== undefined);
+  }
+  const tag = /^(?:(?:[\w-]+|\*)?\|)?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![\w-]|\()/.exec(subject)?.[1];
+  return tag !== undefined && tags.has(tag) ? tag : undefined;
+}
+
+/** HY007: a rule in `owner`'s styles whose subject is `tag`'s root, which those styles never match. */
+export function nestedRootDiagnostic(owner: string, selector: string, tag: string, source?: string): HtmlDiagnostic {
+  const message = tag === owner
+    ? `\`${selector}\` selects <${tag}> by its own tag, which its styles never match; select the root with \`:host\`.`
+    : `\`${selector}\` selects <${tag}>'s root, which <${owner}>'s styles never match: a component styles its own root. ` +
+      `Condition one of <${owner}>'s own elements on it instead, as in \`${tag}:state(name) + label\`, or set a custom property <${tag}> reads.`;
+  return { code: "HY007", message, severity: "warning", ...(source === undefined ? {} : { source }) };
+}
+
 /** Firefox can leak a selector list containing pseudo-elements through an @scope limit. */
 export function guardComponentPseudoElements(selector: string): string {
   if (!selector.includes("::")) return selector;
@@ -416,6 +478,8 @@ export interface CompiledComponentStyles {
    * those components' state attributes must carry, whichever component the stylesheet belongs to.
    */
   readonly testedStates?: Readonly<Record<string, readonly string[]>>;
+  /** Warnings about the styles, such as HY007 for a rule whose subject is a nested component's root. */
+  readonly warnings?: readonly HtmlDiagnostic[];
   /** Vue and Svelte: the components the template invokes, which bound the scope and carry their tag as a class. */
   readonly components?: readonly string[];
   /** Svelte: whether a selector tests Svelte's hash class, which Svelte then puts on the component's markup. */
@@ -441,6 +505,8 @@ export function compileComponentStyles(
   const Sheet = (document.defaultView ?? globalThis).CSSStyleSheet;
   const tested = new Map<string, Set<string>>();
   const foreign = foreignStateResolver(graph, tested, source, true);
+  const warnings: HtmlDiagnostic[] = [];
+  const tags = new Set(graph.keys());
   const renamed = normalizeStylesheetNamespacesInBrowser(renameComponentPseudoClasses(css), document);
   const names = new Set<string>();
   const hoisted: string[] = [];
@@ -450,6 +516,13 @@ export function compileComponentStyles(
   const GroupingRule = view.CSSGroupingRule;
   const owners = adopters.map(owner => ({ owner, names: new Set<string>(), canonical: componentStyleNameResolver(owner, source, true) }));
   const rewriteNested = (rule: CSSStyleRule): void => {
+    // Each rule is kept in exactly one of the two copies, so each is checked once.
+    if (!rule.selectorText.includes("&")) {
+      for (const complex of complexSelectors(rule.selectorText)) {
+        const tag = nestedRootSubject(complex, tags);
+        if (tag !== undefined) warnings.push(nestedRootDiagnostic(definition.contract.tag, authoredSelector(complex), tag, source ?? definition.source.file));
+      }
+    }
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
       rewriteComponentSelector(rule.selectorText, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical,
         undefined, undefined, foreign)))].join(", ");
@@ -497,7 +570,7 @@ export function compileComponentStyles(
   for (const owner of owners) for (const name of owner.names) names.add(name);
   return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }),
-    ...testedStatesField(tested) };
+    ...testedStatesField(tested), ...(warnings.length === 0 ? {} : { warnings }) };
 }
 
 /** `testedStates` for a compilation, omitted when its styles test no other component's state. */

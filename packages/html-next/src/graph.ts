@@ -56,6 +56,8 @@ export interface BuildGraphOptions {
   readonly isApplicationURL?: (url: string) => boolean;
   /** Receives warnings outside check mode, such as an imported component's ignored entries. */
   readonly warn?: (diagnostic: HtmlDiagnostic) => void;
+  /** Warnings about the finished graph's definitions together, such as a build's style checks. */
+  readonly inspectDefinitions?: (definitions: readonly ComponentDefinition[]) => readonly HtmlDiagnostic[];
 }
 
 export interface ParsedComponentResource {
@@ -241,6 +243,7 @@ export async function buildComponentGraph(
       shadowedByCustomElement: draft.shadowedByCustomElement,
     })]);
   }
+  for (const warning of options.inspectDefinitions?.(nodeEntries.map(([, node]) => node.definition)) ?? []) warn(warning);
   return Object.freeze({
     roots: Object.freeze(roots),
     nodes: new Map(nodeEntries),

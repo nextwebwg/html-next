@@ -3,7 +3,8 @@ import { compileStyle } from "@vue/compiler-sfc";
 import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
-import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph } from "../src/component-styles-build.js";
+import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
+import { loadNodeComponents } from "../src/node-loader.js";
 import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
@@ -152,6 +153,27 @@ describe("resolved prop and state selectors", () => {
     assert.deepEqual(componentStateNames(toggle, graph), ["selected"]);
     assert.deepEqual(componentStateNames(list, graph), ["open"]);
     assert.deepEqual(componentStateNames(item), []);
+  });
+
+  it("warns about rules whose subject is a nested component's root (HY007)", async () => {
+    const item = parseComponent(`<template component="x-item"><defs><state name="on" type="boolean" value="false"></state></defs><li></li></template>`);
+    const panel = parseComponent(`<template component="x-panel"><div><x-item></x-item><label>Label</label><slot></slot></div>
+      <style>x-item:state(on) { color: red; } .row x-item, p { color: blue; } :slotted(x-item) { color: green; } x-panel { color: navy; }
+      x-item:state(on) + label { font-weight: 700; } .row:has(x-item) { color: teal; } other-widget { color: gray; } :host { display: block; }
+      x-item { & + label { color: olive; } }</style></template>`);
+    const warnings = nestedRootStyleWarnings([panel, item]);
+    assert.deepEqual(warnings.map(({ code, severity }) => `${code}:${severity}`), Array(5).fill("HY007:warning"));
+    assert.deepEqual(warnings.map(({ message }) => /^`([^`]+)`/.exec(message)![1]),
+      ["x-item:state(on)", ".row x-item", ":slotted(x-item)", "x-panel", "x-item"]);
+    assert.match(warnings[0]!.message, /selects <x-item>'s root, which <x-panel>'s styles never match.*x-item:state\(name\) \+ label/);
+    assert.match(warnings[3]!.message, /select the root with `:host`/);
+    // A build in check mode reports them with the graph's other warnings.
+    const files: Record<string, string> = {
+      "file:///pkg/app.html": `<link rel="component" href="./item.html"><template component="x-panel"><div><x-item></x-item></div><style>x-item { color: red; }</style></template>`,
+      "file:///pkg/item.html": `<template component="x-item"><li></li></template>`,
+    };
+    const graph = await loadNodeComponents(["file:///pkg/app.html"], { collectDiagnostics: true, readComponent: async (url) => ({ url, source: files[url]! }) });
+    assert.deepEqual(graph.warnings?.map(({ code, source }) => `${code} ${source}`), ["HY007 file:///pkg/app.html"]);
   });
 
   it("diagnoses another component's :state() that the graph cannot resolve", () => {
