@@ -28,6 +28,7 @@ To migrate a page or layout:
 ### Fixed
 
 - Server rendering writes an eager declared script's preload `href` as a path, such as `/kit/widget.js`, when the script has the render URL's origin, and as its absolute URL only for another origin. A page rendered at one origin, such as HTMLKit's default `http://localhost`, and served from another preloads from the served origin, and the script entry the client inserts there owns that preload, under a `script-src 'self'` policy too. `renderComponents` and `writeCollectedHead` both write it. A test renders a compiled component at `http://localhost` and hydrates it at another origin under that policy, in Chromium, Firefox and WebKit.
+- HTMLKit's test that a static build has no error page checks exact output paths, `error.html`, `500.html` and `error/index.html`, and that no built page renders `app/error.html`. A file whose name contains `error` or `500`, as a hashed asset's can, passes it.
 
 ## 1.0.0-alpha.55
 

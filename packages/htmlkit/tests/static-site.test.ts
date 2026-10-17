@@ -88,10 +88,17 @@ describe("the error page", () => {
     const root = await failing();
     await rm(join(root, "app/pages/broken.server.ts"));
     await rm(join(root, "app/pages/layout-fails.html"));
+    // A file whose name contains "error" and "500", as a hashed asset's can, is not an error page.
+    await write(root, "public/error-500.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
     const result = await buildApplication({ root });
     expect(result.routes).toEqual(["/", "/broken/"]);
-    const files = await readdir(result.outDir, { recursive: true });
-    expect(files.some(file => file.includes("error") || file.includes("500"))).toBe(false);
+    const files = (await readdir(result.outDir, { recursive: true })).map(file => file.replaceAll("\\", "/"));
+    expect(files).toContain("error-500.svg");
+    expect(files.filter(file => ["error.html", "500.html", "error/index.html"].includes(file))).toEqual([]);
+    // No page is rendered from app/error.html.
+    const pages = await Promise.all(files.filter(file => file.endsWith(".html")).map(file => readFile(join(result.outDir, file), "utf8")));
+    expect(pages.length).toBeGreaterThan(0);
+    expect(pages.filter(html => html.includes("error-page") || html.includes("<title>Trouble</title>"))).toEqual([]);
     await write(root, "app/pages/broken.server.ts", 'export const load = () => { throw new Error("database secret"); };');
     const server = await devApplication({ root, port: 0 });
     try {
