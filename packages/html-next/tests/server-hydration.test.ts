@@ -38,7 +38,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
           await page.evaluate(() => {
             const box = document.querySelector("#server")!;
             const root = box.querySelector("#subject")!;
-            Object.assign(window, { originalRoot: root, originalNodes: Array.from(box.querySelectorAll("button, span, li, b, output, input, strong")) });
+            Object.assign(window, { originalRoot: root, originalNodes: Array.from(box.querySelectorAll("button, span, li, b, i, output, input, strong")) });
             if (root instanceof HTMLInputElement) {
               root.value = "edited before hydration";
               root.focus();

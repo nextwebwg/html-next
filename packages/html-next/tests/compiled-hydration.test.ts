@@ -52,7 +52,7 @@ describe("compiled hydration of Node output", () => {
       const compiled = document.querySelector("#compiled")!;
       const live = document.querySelector("#live")!;
       const root = compiled.querySelector("#subject")!;
-      const originalNodes = Array.from(compiled.querySelectorAll("button, span, li, b, output, input, strong"));
+      const originalNodes = Array.from(compiled.querySelectorAll("button, span, li, b, i, output, input, strong"));
       for (const box of [live, compiled]) {
         const input = box.querySelector("#subject");
         if (!(input instanceof window.HTMLInputElement)) continue;

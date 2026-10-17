@@ -1642,17 +1642,8 @@ function renderEachRegion(
         const blockContext = ownedContext(rowContext, owned);
         const adopted = adopting[adoptionIndex++];
         const existing = adopted === undefined ? [] : rangeNodes(adopted[0], adopted[1]).slice(1, -1);
-        // A row of several nodes (`<template $each>`) adopts each of its server nodes in turn.
-        const rows = adopted !== undefined && node.kind === "element" && node.name === "template" &&
-          !node.attributes.some((attribute) => attribute.kind === "directive");
-        let cursor = 0;
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, blockContext)
-          : rows ? (body as ElementNode).children.flatMap((child) => {
-            const nodes = renderTemplateNode(child, local!, document, blockContext, existing[cursor]);
-            if (nodes[0] === existing[cursor]) cursor += nodes.length;
-            return nodes;
-          })
           : nativePlan !== undefined && adopted === undefined
             ? instantiateNativeTemplate(nativePlan, body as ElementNode, local, document, passThrough, blockContext)
             : renderInstance(body as ElementNode, local, document, passThrough, blockContext, adopted?.[0].nextSibling ?? undefined), document);
@@ -2180,7 +2171,9 @@ function renderInstance(
       });
       return [fragment];
     }
-    return renderChildren(node.children, scope, document, context);
+    // A row of several nodes (`<template $each>`), a `$if`, `$with` or `$match` body, or a plain
+    // fragment adopts each of its server nodes in turn. A framework keeps its own nodes, as before.
+    return renderChildren(node.children, scope, document, context, context.frameworkOwned ? undefined : candidate);
   }
 
   const elementName = node.name;
@@ -2393,9 +2386,17 @@ function renderChildren(
   scope: ReactiveScope,
   document: Document,
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   const out: Node[] = [];
-  for (const child of children) out.push(...renderTemplateNode(child, scope, document, context));
+  // When hydrating, each child adopts the server node after the last one adopted. A child that adopts
+  // nothing leaves the rest unclaimed; nothing adopts a range's end marker, so a walk stops there.
+  let next: Node | null | undefined = candidate;
+  for (const child of children) {
+    const nodes = renderTemplateNode(child, scope, document, context, next ?? undefined);
+    if (next != null && nodes[0] === next) next = nodes[nodes.length - 1]!.nextSibling;
+    out.push(...nodes);
+  }
   return out;
 }
 
