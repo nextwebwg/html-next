@@ -18,7 +18,8 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const child = `<template component="x-graph-item" status="early" summary="Graph child."><defs>
   <prop name="label" type="string" default="Initial">Item label.</prop>
   <event name="saved" type="number"></event>
-  <handler name="save"><dispatch event="saved" expr:value="1"></dispatch></handler>
+  <state name="pressed" type="boolean" value="false"></state>
+  <handler name="save"><set name="pressed" expr:value="true"></set><dispatch event="saved" expr:value="1"></dispatch></handler>
 </defs><li on:click="save"><slot></slot><output $value="$label"></output></li>
 <style>:host { color: rgb(20 40 80); } :slotted(strong) { color: rgb(90 30 60); }</style></template>`;
 const parent = `<template component="x-graph-list" status="early" summary="Graph parent."><defs>
@@ -33,7 +34,9 @@ const parent = `<template component="x-graph-list" status="early" summary="Graph
   <ul><x-graph-item from:label="$count = 0 ? 'Item0' : 'Item1'" on:saved.stop="recordSaved"><strong>Child: </strong></x-graph-item></ul>
   <output class="saved" $value="$saved"></output><output class="ancestor-saved" $value="$ancestorSaved"></output>
 </section><style>:host { display: block; padding: 8px; background: rgb(225 235 245); }
-  :host(:state(active)) { background: rgb(200 220 240); }</style></template>`;
+  :host(:state(active)) { background: rgb(200 220 240); }
+  ul:has(:state(pressed of x-graph-item)) { border-inline-start: 3px solid rgb(10 120 30); }
+  :host:has(x-graph-item:state(pressed)) > output { color: rgb(150 20 20); }</style></template>`;
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -48,6 +51,8 @@ async function snapshot(page: Page) {
         color: getComputedStyle(item).color,
         projectedColor: getComputedStyle(item.querySelector("strong")!).color,
         background: getComputedStyle(root).backgroundColor,
+        listBorder: getComputedStyle(root.querySelector("ul")!).borderInlineStartColor,
+        outputColor: getComputedStyle(root.querySelector(":scope > output")!).color,
       };
     }),
     pixels: await page.locator("#case").screenshot({ animations: "disabled" }),
@@ -134,6 +139,9 @@ else createRoot(mount).render(<XGraphList id="case" />);`);
             assert.equal(native.behavior.ancestorSaved, "0");
             assert.equal(native.behavior.background, expected === "Child:Item0" ? "rgb(200, 220, 240)" : "rgb(225, 235, 245)");
             assert.equal(native.behavior.projectedColor, "rgb(90, 30, 60)");
+            // Before the child is pressed, the parent's :state() conditions on it do not hold.
+            assert.notEqual(native.behavior.listBorder, "rgb(10, 120, 30)");
+            assert.notEqual(native.behavior.outputColor, "rgb(150, 20, 20)");
             if (expected === "Child:Item0") await Promise.all(pages.map((page) => page.getByRole("button", { name: "Increment" }).click()));
           }
           await Promise.all(pages.map((page) => page.locator("#case li").click()));
@@ -143,6 +151,8 @@ else createRoot(mount).render(<XGraphList id="case" />);`);
           await assertPixelsEqual(react, mountedEvent.pixels, nativeEvent.pixels, "nested event pixels differ", live);
           await assertPixelsEqual(hydrated, claimedEvent.pixels, nativeEvent.pixels, "nested hydrated event pixels differ", live);
           assert.equal(nativeEvent.behavior.saved, "1");
+          assert.equal(nativeEvent.behavior.listBorder, "rgb(10, 120, 30)");
+          assert.equal(nativeEvent.behavior.outputColor, "rgb(150, 20, 20)");
           assert.equal(nativeEvent.behavior.ancestorSaved, "0");
           assert.deepEqual(recoveries, []);
           assert.deepEqual(errors, []);

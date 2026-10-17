@@ -69,8 +69,7 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
       html: serializeRenderedForm(document.body),
       head: Array.from(document.head.children, (element) => authored.has(element) || element.hasAttribute(HEAD_MARKER) ? element.outerHTML : "").join(""),
       css: hoistStylesheetNamespaces(Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n")),
-      styleOwnership: Object.assign({}, ...Array.from(document.head.querySelectorAll("style[data-html-next-component-styles]"),
-        (style) => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}"))) as Record<string, string[]>,
+      styleOwnership: styleOwnership(document),
     };
   } finally {
     dom.window.close();
@@ -79,6 +78,22 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
       else Object.defineProperty(globalThis, name, descriptor);
     }
   }
+}
+
+/**
+ * Each rendered component's state names for the carrier delivering the bundled CSS: those its own
+ * styles test, and those any component's `:state()` conditions test on it, so a hydrating client
+ * keeps writing every one without compiling the styles again.
+ */
+function styleOwnership(document: Document): Record<string, string[]> {
+  const ownership: Record<string, string[]> = Object.assign({}, ...Array.from(document.head.querySelectorAll("style[data-html-next-component-styles]"),
+    (style) => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}")));
+  for (const style of document.head.querySelectorAll("style[data-html-next-tested-states]")) {
+    for (const [tag, names] of Object.entries(JSON.parse(style.getAttribute("data-html-next-tested-states")!) as Record<string, string[]>)) {
+      ownership[tag] = [...new Set([...ownership[tag] ?? [], ...names])];
+    }
+  }
+  return ownership;
 }
 
 // The pool sends one render at a time and waits for its reply.

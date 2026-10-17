@@ -445,6 +445,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     } catch (error) { recover(error); }
   }
   const slotsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition.slots ?? []] as const));
+  // Another component's `:state()` tests resolve against the whole graph, and each root carries the states they test on it.
+  const componentGraph = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition] as const));
   const propsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     new Set(Object.keys(node.definition.contract.props))] as const));
   const propContractsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
@@ -511,6 +513,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "vue" ? generateVueComponent(definition, {
           slotsByTag,
+          componentGraph,
           propContractsByTag,
           guardNestedDepth,
           importSpecifier,
@@ -521,6 +524,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
           slotsByTag,
+          componentGraph,
           guardNestedDepth,
           rootDecorations: decorationReceivers?.get(tag),
           ...(bindingReceivers?.has(tag) === true ? { rootBindings: [...bindingReceivers.get(tag)!] } : {}),
@@ -542,6 +546,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           headSpecifier: relativeImport(componentPath, "svelte/head.svelte.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
           slotsByTag,
+          componentGraph,
           propsByTag,
           propContractsByTag,
           guardNestedDepth,

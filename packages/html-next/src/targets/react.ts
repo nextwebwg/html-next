@@ -10,7 +10,7 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type Compone
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
-import { compileComponentStylesForBuild } from "../component-styles-build.js";
+import { compileComponentStylesForBuild, componentStateNames } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
@@ -85,6 +85,11 @@ const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTexta
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
+  /**
+   * The linked graph's definitions, by tag. A \`:state()\` condition on another component resolves
+   * against them, and the component's root carries the states their styles test on it.
+   */
+  readonly componentGraph?: ReadonlyMap<string, ComponentDefinition>;
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly propsByTag?: ReadonlyMap<string, ReadonlySet<string>>;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
@@ -933,12 +938,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const root: ElementNode = template;
   const scope = { code, types };
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
-  const styles = compileComponentStylesForBuild(definition.css, definition);
+  const styles = compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, options.componentGraph);
+  const hostStateNames = componentStateNames(definition, options.componentGraph);
   const renderState: RenderState = { definition, slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
     nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
-    { tag: definition.contract.tag, reflections, captureRoot: true, hostState: styles.stateNames.length > 0 });
+    { tag: definition.contract.tag, reflections, captureRoot: true, hostState: hostStateNames.length > 0 });
   const usesEvents = attachments.some((attachment) => attachment.bindings.length > 0) || target.events.length > 0;
   const hasNativeBindings = attachments.some((attachment) => attachment.bindings.length > 0 && !attachment.listensOnly);
   const usesEventHooks = attachments.some((attachment) => attachment.listensOnly);
@@ -1131,8 +1137,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }
       return `  const ${valueNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>((): ${type} => (${expression}) as any);`;
     }),
-    ...(styles.stateNames.length === 0 ? [] : [
-      `  const hostState = [${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" ");`,
+    ...(hostStateNames.length === 0 ? [] : [
+      `  const hostState = [${hostStateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" ");`,
     ]),
     ...(capturesRoot ? [
       `  const rootRef = React.useRef<${publicRootType} | null>(null);`,

@@ -147,7 +147,7 @@ function stateToken(test: string, tag: string, names: Set<string>, canonical: St
  * A `:host(...)` argument: attribute tests are props, renamed `:state()` tests are the component's own
  * state, and anything else (a class, say) stays a condition on the root.
  */
-function hostTests(tests: string, tag: string, names: Set<string>, canonical: StyleNameResolver): string {
+function hostTests(tests: string, tag: string, names: Set<string>, canonical: StyleNameResolver, foreign: ForeignStateResolver): string {
   let output = "";
   let index = 0;
   const props = (part: string): string => part.replace(ATTRIBUTE_TEST, (test) => stateToken(test, tag, names, canonical, "prop"));
@@ -155,20 +155,89 @@ function hostTests(tests: string, tag: string, names: Set<string>, canonical: St
     if (match.index < index) continue;
     const open = match.index + match[0].length - 1;
     const close = closingParenthesis(tests, open);
-    output += props(tests.slice(index, match.index)) + ownState(tests.slice(open + 1, close), tag, names, canonical);
+    output += props(tests.slice(index, match.index)) + ownState(tests.slice(open + 1, close), tag, names, canonical, foreign);
     index = close + 1;
   }
   return output + props(tests.slice(index));
 }
 
-/** A renamed `:state()` inside `:host()`, which tests the stylesheet's own component. */
-function ownState(test: string, tag: string, names: Set<string>, canonical: StyleNameResolver): string {
+/**
+ * A renamed `:state()` inside `:host()`, which tests the stylesheet's own component, or with `of`, the
+ * other component rendered at the same root.
+ */
+function ownState(test: string, tag: string, names: Set<string>, canonical: StyleNameResolver, foreign: ForeignStateResolver): string {
   const of = OF_TEST.exec(test)?.[1];
-  if (of !== undefined && of !== tag) {
-    fail("HY006", `\`:state(... of ${of})\` tests another component's state; this implementation supports \`:state()\` only on the component's own root, as \`:host(:state(name))\` (in <${tag}>).`);
-  }
-  return stateToken(test.replace(OF_TEST, "").trim(), tag, names, canonical, "state");
+  const bare = test.replace(OF_TEST, "").trim();
+  return of !== undefined && of !== tag ? foreign(bare, of) : stateToken(bare, tag, names, canonical, "state");
 }
+
+/** The definitions a stylesheet's `:state()` tests on other components resolve against, by tag. */
+export type ComponentStyleGraph = ReadonlyMap<string, ComponentDefinition>;
+
+/**
+ * Resolves a renamed `:state()` test (`[name]` or `[name="value"]`) on another component's root to
+ * state-attribute tests. `of` names the component; without it the test matches any component rendered
+ * at the element that declares the state, as the Style Scoping chapter defines.
+ */
+export type ForeignStateResolver = (test: string, of: string | undefined) => string;
+
+/** The graph a stylesheet compiles against when its caller supplies none: its own adopters. */
+export function adopterGraph(adopters: readonly ComponentDefinition[]): ComponentStyleGraph {
+  return new Map(adopters.map((adopter) => [adopter.contract.tag, adopter] as const));
+}
+
+function declaresState(definition: ComponentDefinition, name: string, ignoreCase: boolean): boolean {
+  return (definition.declarations ?? []).some((declaration) => (declaration.kind === "state" || declaration.kind === "computed")
+    && (ignoreCase ? declaration.name.toLowerCase() === name.toLowerCase() : declaration.name === name));
+}
+
+/**
+ * A resolver over `graph` that records, in `tested`, each state name it reads by component tag: the
+ * names those components' roots must carry in their state attribute.
+ */
+export function foreignStateResolver(graph: ComponentStyleGraph, tested: Map<string, Set<string>>, source?: string,
+  ignoreCase = false): ForeignStateResolver {
+  const resolvers = new Map<string, StyleNameResolver>();
+  const resolve = (definition: ComponentDefinition, input: string): string => {
+    const tag = definition.contract.tag;
+    let resolver = resolvers.get(tag);
+    if (resolver === undefined) resolvers.set(tag, resolver = componentStyleNameResolver(definition, source, ignoreCase));
+    const name = resolver(input, "state");
+    let names = tested.get(tag);
+    if (names === undefined) tested.set(tag, names = new Set());
+    names.add(name);
+    return name;
+  };
+  return (test, of) => {
+    const match = STATE_TEST.exec(test);
+    if (match === null) fail("HY002", "`:state()` supports only presence and equality tests on declared values.", source);
+    const value = match[2] ?? match[3] ?? match[4];
+    const token = (tag: string, name: string): string =>
+      `[${stateAttribute(tag)}~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`;
+    if (of !== undefined) {
+      const definition = graph.get(of);
+      if (definition === undefined) fail("HY001", `\`:state(${match[1]} of ${of})\` names <${of}>, which is not in the component graph.`, source);
+      return token(of, resolve(definition, match[1]!));
+    }
+    // Every component that declares the state, since any of them may be the one rendered at the element.
+    const tests: string[] = [];
+    let unstylable: unknown;
+    for (const [tag, definition] of graph) {
+      if (!declaresState(definition, match[1]!, ignoreCase)) continue;
+      try {
+        tests.push(token(tag, resolve(definition, match[1]!)));
+      } catch (error) {
+        unstylable = error;
+      }
+    }
+    if (tests.length === 0 && unstylable !== undefined) throw unstylable;
+    if (tests.length === 0) fail("HY001", `\`:state(${match[1]})\` tests \`${match[1]}\`, which no component in the graph declares as mutable or computed state.`, source);
+    return tests.length === 1 ? tests[0]! : `:is(${tests.join(", ")})`;
+  };
+}
+
+const NO_GRAPH: ForeignStateResolver = () =>
+  fail("HY006", "`:state()` outside `:host()` tests another component's state, which needs the component graph to resolve.");
 
 /**
  * What a component's root is in the default build: its `data-component` owner list. `namespace` is
@@ -217,6 +286,7 @@ export function rewriteComponentSelector(
   canonical: StyleNameResolver = (name) => name,
   projected: string = `[${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *`,
   componentRoot: (tag: string, namespace: string) => string = componentOwner,
+  foreign: ForeignStateResolver = NO_GRAPH,
 ): string {
   if (/:scope(?![\w-])/.test(selector)) {
     fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
@@ -225,12 +295,13 @@ export function rewriteComponentSelector(
   let index = 0;
   const resolved = /:where\(\s*\[--state\]\s*\):is\(|:host\(/g;
   for (let match = resolved.exec(selector); match !== null; match = resolved.exec(selector)) {
-    if (match[0] !== ":host(") {
-      fail("HY006", `\`:state()\` outside \`:host()\` tests another component's state; this implementation supports it only on the component's own root, as \`:host(:state(name))\` (in <${tag}>).`);
-    }
     const open = match.index + match[0].length - 1;
     const close = closingParenthesis(selector, open);
-    output += `${selector.slice(index, match.index)}${host}${hostTests(selector.slice(open + 1, close), tag, names, canonical)}`;
+    const inner = selector.slice(open + 1, close);
+    // Outside `:host()`, `:state()` is a condition on another component's root.
+    output += selector.slice(index, match.index) + (match[0] === ":host("
+      ? host + hostTests(inner, tag, names, canonical, foreign)
+      : foreign(inner.replace(OF_TEST, "").trim(), OF_TEST.exec(inner)?.[1]));
     index = close + 1;
     resolved.lastIndex = index;
   }
@@ -340,6 +411,11 @@ export interface CompiledComponentStyles {
   /** The props and state the state attribute must carry, in first-use order. */
   readonly stateNames: readonly string[];
   readonly stateNamesByTag?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The state names the styles test on component roots with `:state()` conditions, by tag: names
+   * those components' state attributes must carry, whichever component the stylesheet belongs to.
+   */
+  readonly testedStates?: Readonly<Record<string, readonly string[]>>;
   /** Vue and Svelte: the components the template invokes, which bound the scope and carry their tag as a class. */
   readonly components?: readonly string[];
   /** Svelte: whether a selector tests Svelte's hash class, which Svelte then puts on the component's markup. */
@@ -358,10 +434,13 @@ export function compileComponentStyles(
   source?: string,
   adopters: readonly ComponentDefinition[] = [definition],
   includeBoundaryReset = true,
+  graph: ComponentStyleGraph = adopterGraph(adopters),
 ): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
   const Sheet = (document.defaultView ?? globalThis).CSSStyleSheet;
+  const tested = new Map<string, Set<string>>();
+  const foreign = foreignStateResolver(graph, tested, source, true);
   const renamed = normalizeStylesheetNamespacesInBrowser(renameComponentPseudoClasses(css), document);
   const names = new Set<string>();
   const hoisted: string[] = [];
@@ -372,7 +451,8 @@ export function compileComponentStyles(
   const owners = adopters.map(owner => ({ owner, names: new Set<string>(), canonical: componentStyleNameResolver(owner, source, true) }));
   const rewriteNested = (rule: CSSStyleRule): void => {
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
-      rewriteComponentSelector(rule.selectorText, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical)))].join(", ");
+      rewriteComponentSelector(rule.selectorText, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical,
+        undefined, undefined, foreign)))].join(", ");
     rule.selectorText = styleRuleKind(rule.selectorText) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
     for (const child of Array.from(rule.cssRules ?? [])) {
       if (child instanceof StyleRule) rewriteNested(child);
@@ -416,7 +496,13 @@ export function compileComponentStyles(
   const slotted = compile("slotted");
   for (const owner of owners) for (const name of owner.names) names.add(name);
   return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
-    ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
+    ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }),
+    ...testedStatesField(tested) };
+}
+
+/** `testedStates` for a compilation, omitted when its styles test no other component's state. */
+export function testedStatesField(tested: ReadonlyMap<string, ReadonlySet<string>>): Pick<CompiledComponentStyles, "testedStates"> {
+  return tested.size === 0 ? {} : { testedStates: Object.fromEntries([...tested].map(([tag, names]) => [tag, [...names]])) };
 }
 
 /** The state attribute's tokens for the current values: `name` while truthy, `name=value` for text. */

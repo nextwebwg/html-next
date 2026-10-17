@@ -7,6 +7,7 @@ import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import postcss, { type AtRule, type ChildNode, type Container, type Rule } from "postcss";
 
 import {
+  adopterGraph,
   assembleComponentStyles,
   assertResolvedStylesheet,
   componentStyleNameResolver,
@@ -15,10 +16,13 @@ import {
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
   type ComponentPseudoClass,
+  type ComponentStyleGraph,
+  foreignStateResolver,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
   styleRuleKind,
   type StyleRuleKind,
+  testedStatesField,
 } from "./component-styles.js";
 import { getDomInterface } from "./platform.js";
 import type { ComponentDefinition, TemplateNode } from "./template.js";
@@ -35,40 +39,59 @@ export function compileComponentStylesForBuild(
   source?: string,
   adopters?: readonly ComponentDefinition[],
   includeBoundaryReset = true,
+  graph?: ComponentStyleGraph,
 ): CompiledComponentStyles {
-  const compiled = compileStyles(css, definition, source, adopters, includeBoundaryReset);
-  return adopters === undefined ? withImportedStateNames(compiled, definition) : compiled;
+  const compiled = compileStyles(css, definition, source, adopters, includeBoundaryReset, graph);
+  return adopters === undefined ? withImportedStateNames(compiled, definition, graph) : compiled;
 }
 
-function withImportedStateNames(compiled: CompiledComponentStyles, definition: ComponentDefinition): CompiledComponentStyles {
-  const imported = (definition.stylesheets ?? []).flatMap(sheet => compileStyles(sheet.css, definition, sheet.url).stateNames);
-  return { ...compiled, stateNames: [...new Set([...imported, ...compiled.stateNames])] };
+function withImportedStateNames(compiled: CompiledComponentStyles, definition: ComponentDefinition, graph?: ComponentStyleGraph): CompiledComponentStyles {
+  const imports = (definition.stylesheets ?? []).map(sheet => compileStyles(sheet.css, definition, sheet.url, undefined, true, graph));
+  if (imports.length === 0) return compiled;
+  const tested = new Map<string, Set<string>>();
+  for (const { testedStates } of [...imports, compiled]) {
+    for (const [tag, names] of Object.entries(testedStates ?? {})) {
+      const set = tested.get(tag) ?? new Set<string>();
+      for (const name of names) set.add(name);
+      tested.set(tag, set);
+    }
+  }
+  return { ...compiled, stateNames: [...new Set([...imports.flatMap(({ stateNames }) => stateNames), ...compiled.stateNames])], ...testedStatesField(tested) };
 }
 
 /** One shared body, with selector tests resolved independently for every adopting contract. */
-export function compileSharedComponentStylesForBuild(css: string, adopters: readonly ComponentDefinition[], source?: string, includeBoundaryReset = true): CompiledComponentStyles {
+export function compileSharedComponentStylesForBuild(css: string, adopters: readonly ComponentDefinition[], source?: string, includeBoundaryReset = true,
+  graph?: ComponentStyleGraph): CompiledComponentStyles {
   if (adopters.length === 0) return { css: "", stateNames: [] };
-  return compileStyles(css, adopters[0]!, source, adopters, includeBoundaryReset);
+  return compileStyles(css, adopters[0]!, source, adopters, includeBoundaryReset, graph);
+}
+
+/** The component graph of a closed set of definitions, by tag. */
+export function definitionGraph(definitions: Iterable<ComponentDefinition>): ComponentStyleGraph {
+  return new Map([...definitions].map((definition) => [definition.contract.tag, definition] as const));
 }
 
 /** Delivers a closed graph in definition order, interleaving imports and local overrides. */
-export function compileComponentGraphStylesForBuild(definitions: readonly ComponentDefinition[]): string {
+export function compileComponentGraphStylesForBuild(definitions: readonly ComponentDefinition[],
+  graph: ComponentStyleGraph = definitionGraph(definitions)): string {
   const groups = collectSharedStylesheets(definitions);
   const css: string[] = [];
   for (const definition of definitions) {
     for (const group of groups.filter(group => group.adopters[0] === definition)) {
-      css.push(wrapStylesheetConditions(compileSharedComponentStylesForBuild(group.stylesheet.css, group.adopters, group.stylesheet.url, false).css, group.stylesheet.conditions));
+      css.push(wrapStylesheetConditions(compileSharedComponentStylesForBuild(group.stylesheet.css, group.adopters, group.stylesheet.url, false, graph).css, group.stylesheet.conditions));
     }
-    css.push(compileComponentStylesForBuild(definition.css, definition, undefined, undefined, false).css);
+    css.push(compileComponentStylesForBuild(definition.css, definition, undefined, undefined, false, graph).css);
   }
   const body = css.filter(part => part !== "").join("\n");
   return hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body);
 }
 
 function compileStyles(css: string, definition: ComponentDefinition, source?: string,
-  adopters: readonly ComponentDefinition[] = [definition], includeBoundaryReset = true): CompiledComponentStyles {
+  adopters: readonly ComponentDefinition[] = [definition], includeBoundaryReset = true, graph: ComponentStyleGraph = adopterGraph(adopters)): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
+  const tested = new Map<string, Set<string>>();
+  const foreign = foreignStateResolver(graph, tested, source);
   const renamed = renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css));
   const names = new Set<string>();
   const hoisted: string[] = [];
@@ -76,7 +99,8 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
 
   const selector = (input: string): string => {
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
-      rewriteComponentSelector(input, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical)))].join(", ");
+      rewriteComponentSelector(input, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical,
+        undefined, undefined, foreign)))].join(", ");
     return styleRuleKind(input) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
   };
 
@@ -112,7 +136,34 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   const slotted = compile("slotted");
   for (const owner of owners) for (const name of owner.names) names.add(name);
   return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
-    ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
+    ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }),
+    ...testedStatesField(tested) };
+}
+
+const testedByDefinition = new WeakMap<ComponentDefinition, { readonly graph: string; readonly tested: Readonly<Record<string, readonly string[]>> }>();
+
+/** The states a definition's own styles and imports test on component roots, by tag, compiled once per graph. */
+function testedStates(definition: ComponentDefinition, graph: ComponentStyleGraph): Readonly<Record<string, readonly string[]>> {
+  const key = [...graph.keys()].sort().join(" ");
+  const cached = testedByDefinition.get(definition);
+  if (cached?.graph === key) return cached.tested;
+  const tested = compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, graph).testedStates ?? {};
+  testedByDefinition.set(definition, { graph: key, tested });
+  return tested;
+}
+
+/**
+ * The props and state a component's root carries in its state attribute: those its own styles test,
+ * then those any stylesheet in the graph tests on it with a `:state()` condition, so another
+ * component's styles see its state.
+ */
+export function componentStateNames(definition: ComponentDefinition, graph: ComponentStyleGraph = adopterGraph([definition])): readonly string[] {
+  const tag = definition.contract.tag;
+  const names = new Set(compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, graph).stateNames);
+  for (const other of new Set([definition, ...graph.values()])) {
+    for (const name of testedStates(other, graph)[tag] ?? []) names.add(name);
+  }
+  return [...names];
 }
 
 /** Every converted Vue component's root, which bounds every other component's styles. */
@@ -142,6 +193,7 @@ export function compileComponentStylesForVue(
   css: string,
   definition: ComponentDefinition,
   source?: string,
+  graph?: ComponentStyleGraph,
 ): CompiledComponentStyles {
   const projects = (definition.slots?.length ?? 0) > 0;
   const attribute = vueOwnerAttribute(definition.contract.tag);
@@ -162,7 +214,7 @@ export function compileComponentStylesForVue(
         run.append(node);
       }
     }
-  }), () => `[${VUE_ROOT_ATTRIBUTE}]`);
+  }), () => `[${VUE_ROOT_ATTRIBUTE}]`, graph);
   return projects && compiled.components !== undefined ? { ...compiled, owner: attribute } : compiled;
 }
 
@@ -180,6 +232,7 @@ export function compileComponentStylesForSvelte(
   css: string,
   definition: ComponentDefinition,
   source?: string,
+  graph?: ComponentStyleGraph,
 ): CompiledComponentStyles {
   const projects = (definition.slots?.length ?? 0) > 0;
   const owner = projects && usesHtml(definition.template) ? `[${SVELTE_OWNER_ATTRIBUTE}~="${definition.contract.tag}"]` : undefined;
@@ -196,7 +249,7 @@ export function compileComponentStylesForSvelte(
     }).join(", ");
   }, (root) => root.walkAtRules(/keyframes$/i, (rule) => {
     if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
-  }), () => descends);
+  }), () => descends, graph);
   return hashed ? { ...compiled, hashed } : compiled;
 }
 
@@ -204,10 +257,12 @@ const SLOTTED = ":where([--slotted])";
 
 function compileClassScopedStyles(css: string, definition: ComponentDefinition, source: string | undefined,
   renames: readonly ComponentPseudoClass[], target: (selector: string, rule: Rule) => string,
-  prepare?: (root: postcss.Root) => void, limited = (): boolean | string => true): CompiledComponentStyles {
+  prepare?: (root: postcss.Root) => void, limited = (): boolean | string => true, graph: ComponentStyleGraph = adopterGraph([definition])): CompiledComponentStyles {
   const tag = definition.contract.tag;
-  if (css.trim() === "") return withImportedStateNames({ css: "", stateNames: [] }, definition);
+  if (css.trim() === "") return withImportedStateNames({ css: "", stateNames: [] }, definition, graph);
   assertResolvedStylesheet(css, source ?? definition.source.file);
+  const tested = new Map<string, Set<string>>();
+  const foreign = foreignStateResolver(graph, tested, source);
   const names = new Set<string>();
   const canonical = componentStyleNameResolver(definition, source);
   const root = postcss.parse(renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css), renames));
@@ -215,7 +270,7 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`), rule);
+    rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`, foreign), rule);
   });
   const limit = limited();
   const limits = limit === false ? [] : [...componentTags(definition.template)];
@@ -227,10 +282,10 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
     }
   }
   if (scope.nodes === undefined || scope.nodes.length === 0) {
-    return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names) }, definition);
+    return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
   }
   root.append(scope);
-  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), components: limits }, definition);
+  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
 }
 
 /** One complex selector as `:global()`, with any test of its subject's ownership before its pseudo-element. */

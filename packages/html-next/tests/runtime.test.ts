@@ -1820,6 +1820,69 @@ describe.skipIf(!enabled)("browser runtime", () => {
       });
     }
 
+    it(`${name} writes a component's state once a later stylesheet tests it with :state()`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-late-item" status="early" summary="Late item.">` +
+          `<defs><state name="selected" type="boolean" value="false"></state></defs><li></li></template>` +
+          `<ul><x-late-item></x-late-item></ul>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          window.HtmlRuntime.lowerDocument();
+          const item = document.querySelector('li');
+          window.HtmlRuntime.getComponentHost(item).state.selected = true;
+          await tick();
+          const before = item.getAttribute('data-x-late-item-state');
+          // A component defined later whose styles test the item's state, as a lazily loaded graph would add.
+          document.body.insertAdjacentHTML('beforeend', '<template component="x-late-watch" status="early" summary="Late watcher.">' +
+            '<p></p><style>p:has(x-late-item:state(selected)) { color: red; }</style></template>');
+          window.HtmlRuntime.lowerDocument();
+          await tick();
+          const after = item.getAttribute('data-x-late-item-state');
+          window.HtmlRuntime.getComponentHost(item).state.selected = false;
+          await tick();
+          return { before, after, cleared: item.getAttribute('data-x-late-item-state') };
+        })()`);
+        assert.deepEqual(result, { before: null, after: "selected", cleared: null });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} hydrates server-rendered roots that another component's :state() tests`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const item = `<template component="x-ssr-switch" status="early" summary="Switch.">` +
+          `<defs><state name="on" type="boolean" value="false"></state>` +
+          `<handler name="flip"><set name="on" expr:value="not $on"></set></handler></defs>` +
+          `<button type="button" on:click="flip">Switch</button></template>`;
+        const panel = `<template component="x-ssr-panel" status="early" summary="Panel.">` +
+          `<div><x-ssr-switch></x-ssr-switch><label>Label</label></div>` +
+          `<style>x-ssr-switch:state(on) + label { font-weight: 700 }</style></template>`;
+        const rendered = await renderComponents(`<x-ssr-panel></x-ssr-panel>`, { definitions: [parseComponent(panel), parseComponent(item)] });
+        // The switch has no styles of its own; the bundled carrier still names the state the panel tests.
+        assert.deepEqual(rendered.styleOwnership["x-ssr-switch"], ["on"]);
+        const carrier = `<style data-html-next-component-styles="${Object.keys(rendered.styleOwnership).join(" ")}" ` +
+          `data-html-next-style-states='${JSON.stringify(rendered.styleOwnership)}'>${rendered.css}</style>`;
+        await page.setContent(carrier + item + panel + rendered.html);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const label = () => getComputedStyle(document.querySelector('label')).fontWeight;
+          const before = label();
+          document.querySelector('button').click();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          return { before, after: label(), state: document.querySelector('button').getAttribute('data-x-ssr-switch-state') };
+        })()`);
+        assert.deepEqual(result, { before: "400", after: "700", state: "on" });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} can leave application-owned roots out of document observation`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -344,6 +344,8 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   );
 
   const sortedNodes = [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url));
+  // Every component's styles may test another's state, so each sees the whole graph.
+  const definitionsByTag = new Map(sortedNodes.map((node) => [node.definition.contract.tag, node.definition] as const));
   const generated = sortedNodes.flatMap((node) => {
     try {
       const definition: ComponentDefinition = node.controller === undefined
@@ -351,6 +353,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
         noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
+        definitions: definitionsByTag,
         ...options.extensions === undefined ? {} : { extensions: options.extensions },
         // Each component the template invokes, by the module exporting its factory.
         invocations: new Map([...invocations.edges.get(node.id) ?? []].map(([tag, url]) =>
