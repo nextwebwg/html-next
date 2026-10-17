@@ -147,7 +147,7 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
             await assertObservedEqual(vue, await observe(vue), await observe(live), "initial reactive prop output differs");
 
             const liveCode = await live.evaluate(() => {
-              try { (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: "bad" }); return null; }
+              try { (window.HtmlRuntime as typeof window.HtmlRuntime & { componentRegistry: { update(element: Element, props: Record<string, unknown>): void }; }).componentRegistry.update(document.querySelector("#case")!, { n: "bad" }); return null; }
               catch (error) { return (error as { diagnostic?: { code?: string } }).diagnostic?.code ?? "THROWN"; }
             });
             await vue.evaluate(() => window.setCase("bad"));
@@ -155,14 +155,14 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
             assert.deepEqual(await vue.evaluate(() => window.vueErrors), [], "invalid update raised a Vue error");
 
             const nullCode = await live.evaluate(() => {
-              try { (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: null }); return null; }
+              try { (window.HtmlRuntime as typeof window.HtmlRuntime & { componentRegistry: { update(element: Element, props: Record<string, unknown>): void }; }).componentRegistry.update(document.querySelector("#case")!, { n: null }); return null; }
               catch (error) { return (error as { diagnostic?: { code?: string } }).diagnostic?.code ?? "THROWN"; }
             });
             await vue.evaluate(() => window.setCase(null));
             assert.equal(nullCode, null);
             assert.deepEqual(await vue.evaluate(() => window.vueErrors), [], "required null raised a Vue error");
 
-            await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: 43 }));
+            await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { componentRegistry: { update(element: Element, props: Record<string, unknown>): void }; }).componentRegistry.update(document.querySelector("#case")!, { n: 43 }));
             await vue.evaluate(() => window.setCase(43));
             const [liveRecovered, vueRecovered] = await Promise.all([observe(live), observe(vue)]);
             assert.equal(liveRecovered.output, "44");

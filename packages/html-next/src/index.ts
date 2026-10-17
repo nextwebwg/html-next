@@ -53,7 +53,8 @@ export { assembleComponentPackage } from "./package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
 export { expandComponentEntries, loadNodeComponents } from "./node-loader.js";
-export { ComponentRegistry } from "./registry.js";
+export { ComponentGraphRegistry } from "./registry.js";
+export { ComponentRegistry, componentRegistry, type ComponentInit } from "./component-registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
 export {
   clearControllerCache,

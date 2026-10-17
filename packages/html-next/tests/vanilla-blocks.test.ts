@@ -88,7 +88,7 @@ describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
     const module = vanilla(benchmarkShape);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
-    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, visitSelected, writeAttribute, writeText \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, visitSelected, writeAttribute, writeText, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
     const { inputs } = await bundle(module, true);
     const forbidden = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
@@ -262,7 +262,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const [root, ...invoked] = typeof text === "string" ? [text] : text;
     const compiled = directExtend ? graph([root!, ...invoked]) : undefined;
     const { text: code } = await bundle(compiled !== undefined
-      ? `${compiled.entry}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`
+      ? `${compiled.entry}\nimport { componentRegistry } from "@nextwebwg/html-next/generated-runtime"; export const { update } = componentRegistry;`
       : reference(root!, invoked), false, compiled?.modules);
     const { window } = new JSDOM("<!doctype html><body></body>");
     for (const key of Object.getOwnPropertyNames(window)) {
@@ -899,7 +899,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   const poke = (host: any, update: (props: Record<string, unknown>) => void, round: number): void => {
     const root: Element = host.root;
     if (round === 0) root.addEventListener("saved", (event) => log(`saved ${JSON.stringify((event as CustomEvent).detail)}`));
-    update(round === 0 ? { label: "Hi", value: 5 } : round === 1 ? { label: null, value: "bad" } : { label: undefined, value: undefined });
+    // Each prop the shape declares; componentRegistry.update refuses an undeclared one with a TypeError.
+    for (const prop of Object.entries(round === 0 ? { label: "Hi", value: 5 } : round === 1 ? { label: null, value: "bad" } : { label: undefined, value: undefined })) {
+      try { update(Object.fromEntries([prop])); } catch (error) { if (!(error instanceof TypeError)) throw error; }
+    }
     for (const control of root.querySelectorAll<HTMLInputElement>("input, textarea, select")) {
       if (control.type === "checkbox") control.click();
       else if (control instanceof HTMLSelectElement) { control.value = round === 1 ? "one" : "two"; fire(control, "change"); }
@@ -1297,7 +1300,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       // Invalid inputs are refused and leave the value; null clears and undefined returns the default.
       (_host, update) => { update({ count: "4", variant: "loud", ratio: Number.NaN }); },
       (_host, update) => { update({ label: null, count: undefined }); },
-      (_host, update) => { update({ open: false, unknown: 1 }); },
+      (_host, update) => { update({ open: false }); },
     ], { variant: "outline", label: "Start", ratio: 1.5 });
   });
 
@@ -1673,7 +1676,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <template $match><a $when="$as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
     const compiled = graph([parent(`
       <section><x-badge $each="n of $rows" $key="$n" from:count="$n"><x-action from:as="$flag ? 'a' : 'button'">{$n}</x-action></x-badge></section>`), badge, action]);
-    const { text: code } = await bundle(`${compiled.entry}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`, false, compiled.modules);
+    const { text: code } = await bundle(`${compiled.entry}\nimport { componentRegistry } from "@nextwebwg/html-next/generated-runtime"; export const { update } = componentRegistry;`, false, compiled.modules);
     const { window } = new JSDOM("<!doctype html><body></body>");
     let observers = 0;
     const Native = window.MutationObserver;

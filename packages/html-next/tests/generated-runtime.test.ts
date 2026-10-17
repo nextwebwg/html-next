@@ -19,7 +19,7 @@ import {
 } from "../src/generated-runtime.js";
 import { manageIndexedLifecycle } from "../src/generated-lifecycle-index.js";
 import { NESTED, raw } from "../src/keyed.js";
-import { manageComponentLifecycle, updateComponentProps } from "../src/runtime.js";
+import { manageComponentLifecycle, componentRegistry } from "../src/runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 
 setFlagsFromString("--expose-gc");
@@ -321,7 +321,7 @@ describe("generated lifecycle coordinator", () => {
     manageComponentLifecycle(button, definition, { props: {} });
     document.body.append(button);
     await flush();
-    updateComponentProps(button, { as: "a" });
+    componentRegistry.update(button, { as: "a" });
     await flush();
     const link = document.querySelector("a[data-component]")!;
     const record = (link as unknown as Record<symbol, { disconnect?: unknown }>)[Symbol.for("@nextwebwg/html-next.lifecycle.v1")];

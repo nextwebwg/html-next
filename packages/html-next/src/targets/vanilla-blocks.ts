@@ -2599,6 +2599,8 @@ export function emitBlocks(
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && definition.controller !== undefined) helpers.push("scriptHost");
+  // Evaluating the module defines the component in the document's componentRegistry.
+  helpers.push("defineComponent");
   // Decimal operations are `binaryValue`'s last argument; their names are also common authored names.
   helpers.push(...Object.values(DECIMAL).filter((name) => `${source}\n${stateSpec}`.includes(`, ${name})`)));
   // A root without children, and an arm without them, build no prototype.
@@ -2641,6 +2643,7 @@ export function emitBlocks(
         .reduce((wrapped, wrap) => `${wrap}(${wrapped}, I)`, "host")});`]),
     "",
     source,
+    `defineComponent(${JSON.stringify(contract.tag)}, create${contract.name}, ${JSON.stringify(propNames)});`,
     "",
   ].join("\n");
 }

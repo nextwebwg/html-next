@@ -1,5 +1,5 @@
 import { buildComponentGraph, type ComponentGraph } from "./graph.js";
-import { ComponentRegistry } from "./registry.js";
+import { ComponentGraphRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
 import { loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
 import { parseBrowserComponent, parseBrowserComponentResource } from "./browser-source.js";
@@ -22,7 +22,7 @@ export interface BrowserLoaderOptions {
   readonly importMap?: ImportMapLike;
   readonly fetch?: typeof fetch;
   readonly importer?: ModuleImporter;
-  readonly registry?: ComponentRegistry;
+  readonly registry?: ComponentGraphRegistry;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -63,7 +63,7 @@ function readImportMap(root: Document): ImportMapLike {
 export async function loadBrowserComponents(
   rootSpecifiers: readonly string[],
   options: BrowserLoaderOptions = {},
-): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
+): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentGraphRegistry }> {
   return loadWithStylesheets(rootSpecifiers, options);
 }
 
@@ -71,7 +71,7 @@ async function loadWithStylesheets(
   rootSpecifiers: readonly string[],
   options: BrowserLoaderOptions,
   stylesheetLoader?: ReturnType<typeof createStylesheetLoader>,
-): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
+): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentGraphRegistry }> {
   const root = options.document ?? document;
   const request = options.fetch ?? fetch;
   const resolver = documentResolver(root, options.importMap);
@@ -95,7 +95,7 @@ async function loadWithStylesheets(
     isCustomElementRegistered: (tag) => root.defaultView?.customElements.get(tag) !== undefined,
     isApplicationURL: (url) => matchesSourceList(url, applicationSourceList(root), root.URL),
   });
-  const registry = options.registry ?? new ComponentRegistry();
+  const registry = options.registry ?? new ComponentGraphRegistry();
   registry.addGraph(graph, (node) => loadController(node, options.importer));
   return Object.freeze({ graph, registry });
 }
@@ -133,7 +133,7 @@ function applyNonces(root: Document, graph: ComponentGraph, resolver: ResourceRe
 
 export interface StartedBrowserComponents {
   readonly graph: ComponentGraph;
-  readonly registry: ComponentRegistry;
+  readonly registry: ComponentGraphRegistry;
   readonly stop: () => void;
 }
 

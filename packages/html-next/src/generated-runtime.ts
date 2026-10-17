@@ -1,6 +1,7 @@
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
+import { checkProps, registerEntry, registryRecord } from "./component-registry.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
@@ -47,6 +48,7 @@ export {
 } from "./type-checks.js";
 export { boundFailures } from "./value-constraints.js";
 export { RequestEvent } from "./requests.js";
+export { ComponentRegistry, componentRegistry, type ComponentDefinition, type ComponentInit } from "./component-registry.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
 export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
@@ -507,9 +509,35 @@ export function manageData(
   return () => { if (connected) request(); };
 }
 
-/** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
-export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
-  generatedPropUpdaters.get(element)?.(props);
+/** A compiled root's prop channel, which `componentRegistry.update` finds. */
+const generatedChannel = (element: Element) => generatedPropUpdaters.get(element);
+
+/**
+ * Defines a compiled component in the document's `componentRegistry` when its module is evaluated,
+ * so `create` makes it: `content` goes to the slot each node's `slot` attribute names, or the default.
+ */
+export function defineComponent(
+  tag: string,
+  factory: (options: Readonly<Record<string, unknown>>) => Element,
+  props: readonly string[],
+): void {
+  if (typeof document === "undefined") return;
+  registerEntry(document, {
+    d: Object.freeze({ tag }),
+    p: props,
+    c: (values, nodes) => {
+      const children: Node[] = [];
+      const slots: Record<string, Node[]> = {};
+      for (const node of nodes) {
+        const slot = node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "";
+        if (slot === "") children.push(node);
+        else (slots[slot] ??= []).push(node);
+      }
+      return factory({ ...values, children, slots });
+    },
+    k: factory,
+  }, true);
+  registryRecord(document).i.add(generatedChannel);
 }
 
 interface PropInput { readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean }
@@ -676,8 +704,8 @@ export function acceptProps(
 /**
  * The live runtime's prop boundary for an attached compiled instance: on first connect the root
  * takes its validity and bound props their reflection; a reconnect reflects every explicit or bound
- * prop again; and the framework channel (`updateGeneratedProps`) applies inputs as
- * `updateComponentProps` does, recording the raw input and re-rendering what an accepted value changed.
+ * prop again; and its prop channel, which `componentRegistry.update` reaches, applies inputs as
+ * a live instance's does, recording the raw input and re-rendering what an accepted value changed.
  */
 export function manageProps(instance: GeneratedInstance): void {
   const record = instance.B!;
@@ -748,6 +776,7 @@ export function manageProps(instance: GeneratedInstance): void {
     job.schedule();
   };
   const update = (input: Readonly<Record<string, unknown>>): void => {
+    checkProps(names, input, D.g);
     const element = instance.e;
     const next: Record<string, unknown> = {};
     for (const name of names) {

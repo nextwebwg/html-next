@@ -13,7 +13,7 @@ export function liveReference(definition: ComponentDefinition, others: readonly 
   const root = definition.template.name;
   return [
     'import { componentRootIndex, getComponentHost, manageComponentLifecycle, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
-    'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
+    'import { componentRegistry } from "@nextwebwg/html-next/runtime"; export const { update } = componentRegistry;',
     ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
     ...others.flatMap((other, index) => other.controller === undefined ? [] : [`import * as controller${index} from ${JSON.stringify(other.controller)};`]),
     // Registered as a live document registers it, with its styles and their `:state()` names.

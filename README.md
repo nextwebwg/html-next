@@ -298,6 +298,26 @@ imports, following the [proposal's lifecycle](https://nextwebwg.org/declarative-
 Tests cover both the live loader and a tree-shaken browser bundle, including later controller and
 read updates. The specialized build and converter delivery tracks have separate completion criteria.
 
+## Create components from code
+
+Code that renders where markup cannot, such as an editor's document, creates and updates instances
+with [`componentRegistry`](https://nextwebwg.org/declarative-components/javascript#component-registry),
+modeled on `customElements`:
+
+```ts
+import { componentRegistry } from "@nextwebwg/html-next/runtime";
+
+const { create, update, whenDefined } = componentRegistry;
+await whenDefined("ui-callout");
+const callout = create("ui-callout", { props: { tone: "tip" }, content: ["Install first."] });
+editorBody.append(callout);
+update(callout, { tone: "warning" });
+```
+
+`create` returns the instance's native root; inserting it connects the instance. The live runtime
+registers every definition it reads, and a compiled Vanilla module defines its component when it is
+evaluated. Every bundle on the page shares one registry for each document.
+
 ## Types and validation
 
 HTML Next has a fully specified type grammar rather than a loose “CSS-like” shorthand.

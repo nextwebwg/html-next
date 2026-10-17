@@ -913,7 +913,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
             getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown; inputValue: unknown; validity: ValidityState; validate(): ValidityState }> } | undefined;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const owner = document.querySelector("#owner") as Element & { validity: ValidityState };
@@ -942,16 +942,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
           const flush = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
           const initial = read();
-          runtime.updateComponentProps(owner, { incoming: 2 });
+          runtime.componentRegistry.update(owner, { incoming: 2 });
           await flush();
           const valid = read();
-          runtime.updateComponentProps(owner, { incoming: "oops" });
+          runtime.componentRegistry.update(owner, { incoming: "oops" });
           await flush();
           const rejected = read();
-          runtime.updateComponentProps(owner, { incoming: 7 });
+          runtime.componentRegistry.update(owner, { incoming: 7 });
           await flush();
           const recovered = read();
-          runtime.updateComponentProps(owner, { incoming: 130 });
+          runtime.componentRegistry.update(owner, { incoming: 130 });
           await flush();
           return { initial, valid, rejected, recovered, constrained: read() };
         });
@@ -1133,16 +1133,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
             getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#bounded") as HTMLDivElement & { validity: ValidityState };
           const initial = { amount: runtime.getComponentHost(root)?.props.amount?.value,
             rangeUnderflow: root.validity.rangeUnderflow, tooShort: root.validity.tooShort };
-          runtime.updateComponentProps(root, { amount: 6, code: "abcde" });
+          runtime.componentRegistry.update(root, { amount: 6, code: "abcde" });
           await Promise.resolve();
           const changed = { rangeOverflow: root.validity.rangeOverflow, tooLong: root.validity.tooLong };
-          runtime.updateComponentProps(root, { amount: 3, code: "abc" });
+          runtime.componentRegistry.update(root, { amount: 3, code: "abc" });
           await Promise.resolve();
           return { initial, changed, valid: root.validity.valid };
         });
@@ -1168,13 +1168,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const button = document.querySelector<HTMLButtonElement>("#test")!;
           const read = () => [button.getAttribute("data-label"), button.getAttribute("data-count")];
           const initial = read();
-          runtime.updateComponentProps(button, { label: "Second" });
+          runtime.componentRegistry.update(button, { label: "Second" });
           await Promise.resolve();
           const afterProp = read();
           button.click();
@@ -1207,20 +1207,20 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
             getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const button = document.querySelector<HTMLButtonElement>("#test")!;
           const read = () => ({ mode: runtime.getComponentHost(button)?.state.mode, value: runtime.getComponentHost(button)?.props.value?.value });
-          runtime.updateComponentProps(button, { value: "2.5" });
+          runtime.componentRegistry.update(button, { value: "2.5" });
           const textValue = read();
-          runtime.updateComponentProps(button, { value: undefined });
+          runtime.componentRegistry.update(button, { value: undefined });
           button.click();
           await Promise.resolve();
-          runtime.updateComponentProps(button, { value: 2.5 });
+          runtime.componentRegistry.update(button, { value: 2.5 });
           const numberValue = read();
           let rejected = false;
-          try { runtime.updateComponentProps(button, { value: "2.5" }); }
+          try { runtime.componentRegistry.update(button, { value: "2.5" }); }
           catch (error) { rejected = String(error).includes("HR002"); }
           return { textValue, numberValue, rejected };
         });
@@ -1341,17 +1341,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
             const runtime = (window as unknown as { HtmlRuntime: {
               lowerDocument(): void;
               getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
-              updateComponentProps(element: Element, props: Record<string, unknown>): void;
+              componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
             } }).HtmlRuntime;
             runtime.lowerDocument();
             const numeric = document.querySelector("#numeric")!;
             const text = document.querySelector("#text")!;
             const empty = document.querySelector("#empty")!;
             const initial = [numeric, text, empty].map((element) => runtime.getComponentHost(element)?.props.value?.value);
-            runtime.updateComponentProps(numeric, { type: "text", value: "2.5" });
+            runtime.componentRegistry.update(numeric, { type: "text", value: "2.5" });
             const changed = runtime.getComponentHost(numeric)?.props.value?.value;
             let rejected = false;
-            try { runtime.updateComponentProps(numeric, { type: "number", value: "2.5" }); }
+            try { runtime.componentRegistry.update(numeric, { type: "number", value: "2.5" }); }
             catch (error) { rejected = String(error).includes("HR002"); }
             return { initial, changed, rejected, typeAfterRejection: runtime.getComponentHost(numeric)?.props.type?.value };
           });
@@ -1446,13 +1446,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const nativeInvalid = native.validity.typeMismatch;
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
             getComponentHost(element: Element): { props: Record<string, { value: unknown; inputValue: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#valid")!;
           let rejected = false;
-          try { runtime.updateComponentProps(root, { address: "a@-b" }); }
+          try { runtime.componentRegistry.update(root, { address: "a@-b" }); }
           catch (error) { rejected = String(error).includes("HR002"); }
           const address = runtime.getComponentHost(root)?.props.address;
           return { nativeValid, nativeInvalid, reflected: root.getAttribute("data-address"),
@@ -1477,17 +1477,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
             getComponentHost(element: Element): { state: { current: unknown }; props: { current: { inputValue: unknown; value: unknown; validity: ValidityState } } } | undefined;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#current")!;
           const fromHtml = runtime.getComponentHost(root)?.props.current.value;
-          runtime.updateComponentProps(root, { current: "2" });
+          runtime.componentRegistry.update(root, { current: "2" });
           const invalidValue = runtime.getComponentHost(root)?.props.current.value;
           const invalidInput = runtime.getComponentHost(root)?.props.current.inputValue;
           const propBadInput = runtime.getComponentHost(root)?.props.current.validity.badInput;
           const invalidValidity = (root as HTMLDivElement & { checkValidity(): boolean }).checkValidity();
-          runtime.updateComponentProps(root, { current: 3 });
+          runtime.componentRegistry.update(root, { current: 3 });
           return { fromHtml, invalidValue, invalidInput, propBadInput, invalidValidity, fromValue: runtime.getComponentHost(root)?.props.current.value };
         });
         assert.deepEqual(result, { fromHtml: 2, invalidValue: 2, invalidInput: "2", propBadInput: true, invalidValidity: false, fromValue: 3 });
@@ -1507,12 +1507,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#valid") as HTMLDivElement & { validity: ValidityState };
           const initial = root.getAttribute("data-sku");
-          runtime.updateComponentProps(root, { sku: "xABC-1234" });
+          runtime.componentRegistry.update(root, { sku: "xABC-1234" });
           await Promise.resolve();
           return { initial, patternMismatch: root.validity.patternMismatch, after: root.getAttribute("data-sku") };
         });
@@ -4075,7 +4075,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           window.HtmlRuntime.lowerDocument();
           const own = document.querySelector('#own');
           const passed = document.querySelector('#passed');
-          window.HtmlRuntime.updateComponentProps(passed, { placement: 'start' });
+          window.HtmlRuntime.componentRegistry.update(passed, { placement: 'start' });
           await Promise.resolve();
           await Promise.resolve();
           return {
@@ -4143,7 +4143,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           await Promise.resolve();
           await Promise.resolve();
           const written = filled.querySelector('.label').textContent;
-          window.HtmlRuntime.updateComponentProps(filled, { label: 'Updated' });
+          window.HtmlRuntime.componentRegistry.update(filled, { label: 'Updated' });
           await Promise.resolve();
           await Promise.resolve();
           return {
@@ -4280,13 +4280,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
           button.click();
           await settle();
           const before = describe(button);
-          runtime.updateComponentProps(button, { as: 'a' });
+          runtime.componentRegistry.update(button, { as: 'a' });
           await settle();
           const link = document.querySelector('#action');
           link.click();
           await settle();
           const linked = { ...describe(link), replaced: !button.isConnected, dataAs: link.getAttribute('data-x-action-prop-as') };
-          runtime.updateComponentProps(link, { as: undefined });
+          runtime.componentRegistry.update(link, { as: undefined });
           await settle();
           const back = document.querySelector('#action');
           back.click();
@@ -4469,7 +4469,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           before.querySelector('button').click();
           await settle();
           const root = document.querySelector('#card');
-          window.HtmlRuntime.updateComponentProps(root, { tone: 'cool' });
+          window.HtmlRuntime.componentRegistry.update(root, { tone: 'cool' });
           await settle();
           return {
             tags: [before.localName, root.localName],
@@ -4596,7 +4596,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           authored.setAttribute("data-tags", '["api"]');
           await new Promise((resolve) => setTimeout(resolve, 0));
           const written = read(authored);
-          window.HtmlRuntime.updateComponentProps(authored, { tags: ["api"] });
+          window.HtmlRuntime.componentRegistry.update(authored, { tags: ["api"] });
           await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, written, updated: read(authored) };
         })()`);
@@ -4728,7 +4728,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             focused: document.activeElement === input,
             selection: [input.selectionStart, input.selectionEnd],
           };
-          window.HtmlRuntime.updateComponentProps(root, { label: 'Next' });
+          window.HtmlRuntime.componentRegistry.update(root, { label: 'Next' });
           await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, updated: { heading: root.querySelector('h2').textContent, value: input.value } };
         })()`);

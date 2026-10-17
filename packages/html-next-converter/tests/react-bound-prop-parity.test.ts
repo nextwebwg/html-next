@@ -117,8 +117,8 @@ const root = createRoot(document.querySelector("main")!);
             ["oops", { source: "oops", outerBadInput: true, amount: "7", text: "7", innerValid: false, direct: "7", directText: "7", html: "7", propertyText: "7", controlValue: "7", propertyTitle: "7", large: true, color: "red" }],
           ] as const) {
             await live.evaluate((value) => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-              updateComponentProps(element: Element, props: Record<string, unknown>): void;
-            }).updateComponentProps(document.querySelector("section")!, { incoming: value }), incoming);
+              componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+            }).componentRegistry.update(document.querySelector("section")!, { incoming: value }), incoming);
             await react.evaluate((value) => window.setIncoming(value), incoming);
             await react.locator("section").waitFor({ state: "attached" });
             const native = await observe(live);
@@ -163,8 +163,8 @@ const root = createRoot(document.querySelector("main")!);
           await react.addScriptTag({ path: output.browser });
           for (const [selected, incoming] of [["number", 2], ["number", "oops"], ["text", "hello"], ["text", 42]] as const) {
             await live.evaluate(({ selected: choice, incoming: value }) => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-              updateComponentProps(element: Element, props: Record<string, unknown>): void;
-            }).updateComponentProps(document.querySelector("section")!, { mode: choice, incoming: value }), { selected, incoming });
+              componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+            }).componentRegistry.update(document.querySelector("section")!, { mode: choice, incoming: value }), { selected, incoming });
             await react.evaluate(({ selected: choice, incoming: value }) => window.setModeCase(choice, value), { selected, incoming });
             await react.locator("section").waitFor({ state: "attached" });
             await Promise.all([live, react].map((page) => page.evaluate(() => new Promise<void>((done) =>
@@ -200,8 +200,8 @@ const root = createRoot(document.querySelector("main")!);
           await live.addScriptTag({ path: liveBundle });
           await live.evaluate(() => window.HtmlRuntime.lowerDocument());
           await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
-          }).updateComponentProps(document.querySelector("button")!, { value: 2 }));
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+          }).componentRegistry.update(document.querySelector("button")!, { value: 2 }));
           const output = bundles.get(mode)!;
           await react.setContent(`<style>${output.css}</style><main></main>`);
           await react.addScriptTag({ path: output.browser });
@@ -227,13 +227,13 @@ const root = createRoot(document.querySelector("main")!);
           await react.locator("button").click();
           await compare({ mode: "text", value: "2", title: "two", text: "2", valid: false });
           await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
-          }).updateComponentProps(document.querySelector("button")!, { value: 42 }));
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+          }).componentRegistry.update(document.querySelector("button")!, { value: 42 }));
           await react.evaluate(() => window.setStateReading(42));
           await compare({ mode: "text", value: "2", title: "two", text: "2", valid: false });
           await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-            updateComponentProps(element: Element, props: Record<string, unknown>): void;
-          }).updateComponentProps(document.querySelector("button")!, { value: "hello" }));
+            componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+          }).componentRegistry.update(document.querySelector("button")!, { value: "hello" }));
           await react.evaluate(() => window.setStateReading("hello"));
           await compare({ mode: "text", value: "hello", title: "other", text: "hello", valid: true });
         } finally {

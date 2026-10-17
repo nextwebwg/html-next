@@ -17,3 +17,8 @@ export interface XButtonProps {
   slots?: Readonly<Record<string, readonly (string | Node)[]>>;
 }
 export declare function createXButton(props?: XButtonProps): XButtonElement;
+declare global {
+  interface ComponentTagMap {
+    "x-button": { element: XButtonElement; props: Omit<XButtonProps, "attributes" | "children" | "slots"> };
+  }
+}

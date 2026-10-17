@@ -99,7 +99,7 @@ describe("head declarations in the live runtime", () => {
     const title = document.querySelector("title")!;
     assert.equal(document.title, "Install · Docs");
     // A bound title updates the same element.
-    runtime.updateComponentProps(main.querySelector("[data-component~=page-a]")!, { section: "Upgrade" });
+    runtime.componentRegistry.update(main.querySelector("[data-component~=page-a]")!, { section: "Upgrade" });
     await settle();
     assert.equal(document.title, "Upgrade · Docs");
     assert.equal(document.querySelector("title"), title);
@@ -196,7 +196,7 @@ describe("head declarations in the live runtime", () => {
     // Identical JSON-LD from two instances is two blocks.
     assert.deepEqual(head(), ['<script type="application/ld+json" *>{"name":"Anvil"}</script>', '<script type="application/ld+json" *>{"name":"Anvil"}</script>']);
     const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
-    runtime.updateComponentProps(main.firstElementChild!, { name: "Hammer" });
+    runtime.componentRegistry.update(main.firstElementChild!, { name: "Hammer" });
     await settle();
     assert.deepEqual(head(), ['<script type="application/ld+json" *>{"name":"Hammer"}</script>', '<script type="application/ld+json" *>{"name":"Anvil"}</script>']);
     assert.deepEqual(Array.from(document.querySelectorAll('script[type="application/ld+json"]')), blocks);

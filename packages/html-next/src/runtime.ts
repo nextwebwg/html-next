@@ -3,7 +3,8 @@ import { selectedPropType } from "./contract.js";
 import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes } from "./declared-types.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
-import { fail } from "./diagnostics.js";
+import { fail, HtmlDiagnosticAggregateError, HtmlDiagnosticError } from "./diagnostics.js";
+import { checkDefinable, checkProps, domError, registerEntry, registryRecord, type PropChannel } from "./component-registry.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { eventPasses } from "./event-filter.js";
 import { isPlatformObject } from "./freeze.js";
@@ -87,6 +88,11 @@ import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
 import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
+
+/** The document's component registry (src/component-registry.ts), shared by every bundle. */
+export {
+  ComponentRegistry, componentRegistry, type ComponentDefinition, type ComponentInit,
+} from "./component-registry.js";
 
 /** Requests: what a component asks its consumer (src/requests.ts). Loaders hold a root until its controller runs. */
 export {
@@ -313,7 +319,7 @@ interface CompiledHandle {
   /** Its props: their latest inputs and the explicit ones; values follow the state's in `v`. */
   readonly B?: {
     readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string>;
-    /** Applies props, as `updateComponentProps` applies a live instance's. */
+    /** Applies props, as `componentRegistry.update` applies a live instance's. */
     readonly u?: (props: Readonly<Record<string, unknown>>) => void;
   };
   /** Its projected nodes and the slot each is for. */
@@ -348,6 +354,11 @@ function registryFor(root: Document): DocumentRegistry {
   if (registry === undefined || registry.root !== root.documentElement) {
     registry = { root: root.documentElement, definitions: new Map(), discoverySelector: undefined };
     state.registry = registry;
+    // This runtime creates, updates, defines and upgrades through the document's componentRegistry.
+    const record = registryRecord(root);
+    record.i.add(liveChannel);
+    record.f = (carrier) => defineCarrier(root, carrier);
+    record.u = (node) => { if ("querySelectorAll" in node) lowerScopes(root, [node as QueryRoot]); };
   }
   return registry;
 }
@@ -515,10 +526,84 @@ function warnUnsupportedTransitions(definition: ComponentDefinition): void {
     "Build it with the html-next Vite plugin's `extensions: [\"transitions\"]` option to animate it.");
 }
 
-function registerDefinition(registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
+function registerDefinition(root: Document, registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
   warnUnsupportedTransitions(definition.definition);
   registry.definitions.set(tag, definition);
   if (registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
+  registerEntry(root, {
+    d: Object.freeze({ tag }),
+    p: Object.keys(definition.definition.contract.props),
+    c: (props, nodes) => createInstance(root, tag, props, nodes),
+    k: definition.wrapper ?? definition.definition,
+  });
+}
+
+/** `componentRegistry.define(carrier)` steps 2 to 5, with the live delivery's parser. */
+function defineCarrier(root: Document, carrier: HTMLTemplateElement): void {
+  if (inlineDefinitionParser === undefined) {
+    throw domError("Defining from a <template component> requires the live delivery's parser.", "NotSupportedError");
+  }
+  let definition: ComponentDefinition | undefined;
+  try {
+    definition = inlineDefinitionParser(carrier, `${root.URL}#template[component="${carrier.getAttribute("component")}"]`);
+  } catch (error) {
+    const code = error instanceof HtmlDiagnosticError ? error.diagnostic.code
+      : error instanceof HtmlDiagnosticAggregateError ? error.diagnostics[0]?.code : undefined;
+    if (code === undefined) throw error;
+    throw domError(`${code}: ${(error as Error).message}`, "SyntaxError");
+  }
+  // The live loader is still preparing this carrier's stylesheets; it defines it once they are ready.
+  if (definition === undefined) return;
+  const tag = definition.contract.tag;
+  const registry = registryFor(root);
+  if (checkDefinable(root, tag, carrier, () =>
+    JSON.stringify(registry.definitions.get(tag)?.definition) === JSON.stringify(definition))) return;
+  const style = Array.from(carrier.content.children).find(
+    (element): element is HTMLStyleElement => element.localName === "style");
+  registerDefinition(root, registry, tag, { wrapper: carrier, style: installComponentStyles(definition, root, style, undefined, styleGraph(registry, [definition])), definition });
+  carrier.remove();
+  const state = documentState(root);
+  if (state.rescan === undefined) lowerScopes(root, [root]);
+  else state.rescan();
+}
+
+/**
+ * `componentRegistry.create` step 5: lowers an invocation of `tag` holding `nodes`, with `props` as
+ * its inputs, and returns the native root, outside the document.
+ */
+function createInstance(root: Document, tag: string, props: Readonly<Record<string, unknown>>, nodes: readonly Node[]): Element {
+  const registry = registryFor(root);
+  const invocation = root.createElement(tag);
+  invocation.append(...nodes);
+  root.createDocumentFragment().append(invocation);
+  const state = documentState(root);
+  const wasStatic = state.staticRendering;
+  // ponytail: an observed document connects the instance when it is inserted, as any instance;
+  // explicit lowering, which observes nothing, connects it as it lowers, as it does every instance.
+  if (state.observer !== undefined) state.staticRendering = true;
+  try {
+    const prepared = [prepareRuntimeInvocation(invocation, registry.definitions.get(tag)!.definition, false,
+      undefined, undefined, false, undefined, props)];
+    commitRuntimeInvocations(registry, prepared);
+    lowerRenderedComponents(root, registry, prepared);
+    // The props are the instance's explicit input, as a framework attachment's are.
+    applyComponentProps(prepared[0]!.instance, props);
+    const element = prepared[0]!.host ?? prepared[0]!.nativeRoot;
+    element.remove();
+    return element;
+  } finally {
+    state.staticRendering = wasStatic === true;
+  }
+}
+
+/** A live instance's prop channel; a compiled root attached here takes its own. */
+function liveChannel(element: Element): PropChannel | undefined {
+  const instance = runtimeInstance(element);
+  if (instance === undefined) return compiledHandle(element)?.B?.u;
+  return (props) => {
+    checkProps(Object.keys(instance.definition.contract.props), props, instance.definition.contract.tag);
+    applyComponentProps(instance, props);
+  };
 }
 
 function discoverySelector(registry: DocumentRegistry): string {
@@ -595,7 +680,7 @@ export function installComponentGraph(
     const tag = node.definition.contract.tag;
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
     const style = installComponentStyles(node.definition, root, undefined, undefined, styles);
-    registerDefinition(registry, tag, {
+    registerDefinition(root, registry, tag, {
       definition: node.definition,
       style,
     });
@@ -3419,7 +3504,7 @@ function lowerScopes(
   // Parent bindings can run while their child invocations are being prepared. Make every newly
   // parsed contract available for the bound-value type check before preparing any parent.
   const existingDefinitions = new Map(registry.definitions);
-  for (const live of definitions) registerDefinition(registry, live.definition.contract.tag, live);
+  for (const live of definitions) registerDefinition(root, registry, live.definition.contract.tag, live);
 
   const roots = new Set<Element>();
   const lowered: Element[] = [];
@@ -3684,7 +3769,7 @@ export function registerComponentDefinitions(
       }
       continue;
     }
-    registerDefinition(registry, definition.contract.tag, {
+    registerDefinition(root, registry, definition.contract.tag, {
       definition,
       style: installComponentStyles(definition, root, undefined, styleCompiler, styles),
     });
@@ -3715,7 +3800,7 @@ function attachRuntimeComponent(
   const registry = registryFor(root);
   const existing = registry.definitions.get(definition.contract.tag);
   if (existing === undefined) {
-    registerDefinition(registry, definition.contract.tag, {
+    registerDefinition(root, registry, definition.contract.tag, {
       definition,
       style: undefined,
     });
@@ -3764,7 +3849,7 @@ function attachRuntimeComponent(
   const attached = runtimeInstance(element);
   if (attached === undefined) fail("HR005", `Could not attach <${definition.contract.tag}> to its native root.`);
   // The options' props are the instance's initial input; a reconnect keeps whatever they became since.
-  if (instance === undefined) updateComponentProps(element, options.props ?? {});
+  if (instance === undefined) applyComponentProps(attached, options.props ?? {});
   connectRuntimeInstance(attached);
 
   let controllerCleanup: void | (() => void);
@@ -3783,21 +3868,6 @@ function attachRuntimeComponent(
     controllerCleanup?.();
     disconnectRuntimeInstance(attached);
   };
-}
-
-/**
- * The framework-adapter prop channel. A framework's props are the equivalent of authored
- * attributes: each defined value becomes explicit (and is reflected as `data-<tag>-prop-<name>`), and
- * `undefined` returns the prop to its implicit default. This is not a page-authoring API.
- */
-export function updateComponentProps(
-  element: Element,
-  props: Readonly<Record<string, unknown>>,
-): void {
-  const instance = runtimeInstance(element);
-  // A compiled root takes them through its own prop channel, which applies them as below.
-  if (instance === undefined) compiledHandle(element)?.B?.u?.(props);
-  else applyComponentProps(instance, props);
 }
 
 /**
@@ -3820,7 +3890,7 @@ export function replaceProjectedNode(current: ChildNode, next: ChildNode): void 
 
 /**
  * Carries a fresh server rendering's props onto a live instance that a framework keeps, through
- * the same channel as `updateComponentProps`: `rendered` is that component's root in the new
+ * the same channel as `componentRegistry.update`: `rendered` is that component's root in the new
  * server output, not yet hydrated. The instance keeps its DOM, state, and controller; props the
  * rendering left implicit return to their defaults.
  */
@@ -3834,7 +3904,11 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
     .map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
 }
 
-/** Applies props to one named instance, which a shared root makes explicit. */
+/**
+ * Applies props to one named instance, which a shared root makes explicit: the prop channel of
+ * `componentRegistry.update` and framework attachments. Each defined value becomes explicit (and is
+ * reflected as `data-<tag>-prop-<name>`), and `undefined` returns the prop to its implicit default.
+ */
 function applyComponentProps(
   instance: RuntimeInstance,
   props: Readonly<Record<string, unknown>>,

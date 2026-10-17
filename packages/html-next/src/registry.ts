@@ -1,24 +1,24 @@
 import { fail } from "./diagnostics.js";
 import type { ComponentGraph, ComponentGraphNode } from "./graph.js";
 
-export interface ComponentRegistryEntry {
+export interface ComponentGraphEntry {
   readonly node: ComponentGraphNode;
   readonly loadController?: () => Promise<unknown>;
 }
 
 /** A deterministic, customElements-shaped registry for validated graph entries. */
-export class ComponentRegistry {
-  readonly #entries = new Map<string, ComponentRegistryEntry>();
+export class ComponentGraphRegistry {
+  readonly #entries = new Map<string, ComponentGraphEntry>();
   readonly #waiters = new Map<string, Array<() => void>>();
 
-  define(tag: string, entry: ComponentRegistryEntry): void {
+  define(tag: string, entry: ComponentGraphEntry): void {
     if (this.#entries.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
     this.#entries.set(tag, Object.freeze(entry));
     for (const resolve of this.#waiters.get(tag) ?? []) resolve();
     this.#waiters.delete(tag);
   }
 
-  get(tag: string): ComponentRegistryEntry | undefined {
+  get(tag: string): ComponentGraphEntry | undefined {
     return this.#entries.get(tag);
   }
 

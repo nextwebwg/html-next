@@ -49,7 +49,7 @@ describe.skipIf(!enabled)("React controller parity", () => {
     await writeFile(join(directory, "components/controlled.js"), controller);
     const loaderEntry = join(directory, "loader-entry.ts");
     await writeFile(loaderEntry, `export { startBrowserComponents } from ${JSON.stringify(fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url)))};
-export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../../html-next/src/runtime.ts", import.meta.url)))};`);
+export { componentRegistry } from ${JSON.stringify(fileURLToPath(new URL("../../html-next/src/runtime.ts", import.meta.url)))};`);
     loaderBundle = join(directory, "loader.js");
     await build({ entryPoints: [loaderEntry],
       outfile: loaderBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
@@ -144,8 +144,8 @@ const props: { amount?: number; tone?: string } = {};
             await compare();
             for (const amount of [2, "bad", 7] as const) {
               await live.evaluate((value) => (window as unknown as { HtmlNextLoader: {
-                updateComponentProps(element: Element, props: Record<string, unknown>): void;
-              } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { amount: value }), amount);
+                componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+              } }).HtmlNextLoader.componentRegistry.update(document.querySelector("#case")!, { amount: value }), amount);
               await react.evaluate((value) => (window as unknown as { reactSetAmount(value: unknown): void }).reactSetAmount(value), amount);
               await Promise.all([live, react].map((page) => page.waitForFunction((value) =>
                 document.querySelector("#case")?.getAttribute("data-amount-input") === String(value), amount)));
@@ -154,8 +154,8 @@ const props: { amount?: number; tone?: string } = {};
             // Another prop changing does not rerun an effect that read only `amount`.
             const amountRuns = (await snapshot(live)).behavior.trace.amountEffects;
             await live.evaluate(() => (window as unknown as { HtmlNextLoader: {
-              updateComponentProps(element: Element, props: Record<string, unknown>): void;
-            } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
+              componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+            } }).HtmlNextLoader.componentRegistry.update(document.querySelector("#case")!, { tone: "loud" }));
             await react.evaluate(() => (window as unknown as { reactSetTone(value: unknown): void }).reactSetTone("loud"));
             await Promise.all([live, react].map((page) => page.waitForTimeout(50)));
             assert.equal((await snapshot(live)).behavior.trace.amountEffects, amountRuns, "another prop must not rerun the amount effect");

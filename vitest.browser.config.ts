@@ -19,6 +19,7 @@ config.test!.include = [
   "packages/htmlkit/tests/browser.test.ts",
   "packages/htmlkit/tests/client-navigation.test.ts",
   "packages/html-next/tests/browser-loader.test.ts",
+  "packages/html-next/tests/component-registry-browser.test.ts",
   "packages/html-next/tests/conformance.test.ts",
   "packages/html-next/tests/forms.test.ts",
   "packages/html-next/tests/head-conformance.test.ts",
