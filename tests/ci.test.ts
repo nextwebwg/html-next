@@ -9,6 +9,17 @@ import { describe, expect, it } from "vitest";
 import { affectedPackages, createPlan, isReleaseMetadataChange } from "../scripts/ci-plan.js";
 
 describe("affected CI", () => {
+  it("builds a packed consumer together with its workspace dependencies", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const selector = /pnpm --filter '([^']+)' build/.exec(workflow)?.[1];
+    expect(selector).toBeDefined();
+    const selected = JSON.parse(execFileSync("corepack", ["pnpm", "--filter",
+      selector!.replace("${{ matrix.package }}", "htmlkit"), "list", "--depth", "-1", "--json"], {
+      cwd: fileURLToPath(new URL("../", import.meta.url)), encoding: "utf8", shell: process.platform === "win32",
+    })) as { name: string }[];
+    expect(selected.map(({ name }) => name).sort()).toEqual(["@nextwebwg/html-next", "@nextwebwg/htmlkit"]);
+  });
+
   it("keeps Expressive Markdown independent of the component packages", () => {
     expect(affectedPackages(["packages/expressmark/src/index.ts"])).toEqual(["expressmark"]);
     const plan = createPlan(["packages/expressmark/src/index.ts"]);

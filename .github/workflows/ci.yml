@@ -130,7 +130,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - if: matrix.package != 'expressmark'
-        run: pnpm --filter './packages/${{ matrix.package }}...' build
+        run: pnpm --filter '{./packages/${{ matrix.package }}}...' build
       - if: matrix.package != 'expressmark'
         env:
           HTMLNEXT_PACKAGE_TEST: ${{ matrix.package }}
