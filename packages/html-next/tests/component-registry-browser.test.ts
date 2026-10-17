@@ -25,6 +25,12 @@ const badge = `<template component="ui-badge">
   <strong>{$label}</strong>
 </template>`;
 
+// A scoped slot that owns iteration, and a plain slot with a fallback.
+const list = `<template component="x-list">
+  <defs><prop name="rows" type="list(string)" default="['a', 'b']">Rows.</prop></defs>
+  <ul><li $each="row of $rows"><slot name="row" from:item="$row"></slot></li><li><slot name="plain">fallback</slot></li></ul>
+</template>`;
+
 describe.skipIf(!enabled)("componentRegistry across bundles", () => {
   const files: Record<string, string> = {};
 
@@ -44,6 +50,19 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
     files["/compiled.js"] = await bundle(`${compiled}\nexport { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
     files["/callout.js"] = 'export default (host) => { host.root.dataset.controller = "ran"; };';
     files["/callout.html"] = callout;
+    // The same list, live as x-list and compiled as x-clist, each its own bundle.
+    files["/list.html"] = list;
+    const compiledList = generateComponent(parseComponent(list.replace("x-list", "x-clist"), "https://registry.example/clist.html")).find((artifact) => artifact.path.endsWith(".js"))!.content;
+    files["/clist.js"] = await bundle(`${compiledList}\nexport { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
+    const listScript = `<script type="module">
+      import { componentRegistry } from "/clist.js";
+      const live = location.pathname === "/lists.html" ? await import("/browser.js") : undefined;
+      await live?.ready;
+      window.registry = componentRegistry;
+    </script>`;
+    files["/lists.html"] = `<!doctype html><head><link rel="component" href="/list.html"></head><body><main></main>
+      <x-list id="authored"><template slot="row"><b>{$item}</b></template><template slot="plain"><i>static</i></template>dropped</x-list>${listScript}</body>`;
+    files["/compiled-lists.html"] = `<!doctype html><body><main></main>${listScript}</body>`;
     files["/"] = `<!doctype html><head><link rel="component" href="/callout.html"></head><body><main></main><script type="module">
       import * as live from "/browser.js";
       import * as compiled from "/compiled.js";
@@ -118,6 +137,57 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
           relabeled: "Stable",
           shared: true,
         });
+        assert.deepEqual(errors, []);
+        await page.close();
+      });
+
+      it("renders a <template slot> given to create, scoped and plain, live and compiled", async () => {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.route("https://registry.example/**", (route) => {
+          const path = new URL(route.request().url()).pathname;
+          return route.fulfill({ contentType: path.endsWith(".js") ? "text/javascript" : "text/html", body: files[path]! });
+        });
+        const run = async (path: string, tags: readonly string[], scoped: string) => {
+          await page.goto(`https://registry.example${path}`);
+          await page.waitForFunction(() => "registry" in window);
+          return page.evaluate(async ({ tags, scoped }) => {
+            type Registry = typeof import("../src/component-registry.js").componentRegistry;
+            const registry = (window as unknown as { registry: Registry }).registry;
+            const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+            const template = (slot: string, html: string): HTMLTemplateElement => {
+              const element = document.createElement("template");
+              element.setAttribute("slot", slot);
+              element.innerHTML = html;
+              return element;
+            };
+            const results: Record<string, unknown> = {};
+            for (const tag of tags) {
+              try {
+                const root = registry.create(tag, { content: [template("row", scoped), template("plain", "<i>static</i>"), "dropped"] });
+                const rows = () => Array.from(root.querySelectorAll("li"), (item) => item.textContent);
+                const before = rows();
+                document.querySelector("main")!.append(root);
+                await settle();
+                const connected = rows();
+                registry.update(root, { rows: ["a", "z", "c"] });
+                await settle();
+                results[tag] = { before, connected, updated: rows() };
+              } catch (error) { results[tag] = (error as Error).message.replace(/^.*?(HR\d+)/, "$1"); }
+            }
+            return results;
+          }, { tags, scoped });
+        };
+        // Bindings in the template read the slot's props, in the live runtime and in compiled output beside it.
+        const rendered = { before: ["a", "b", "static"], connected: ["a", "b", "static"], updated: ["a", "z", "c", "static"] };
+        assert.deepEqual(await run("/lists.html", ["x-list", "x-clist"], "<b>{$item}</b>"), { "x-list": rendered, "x-clist": rendered });
+        // The same content authored in the document renders the same rows.
+        assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll("#authored li"), (item) => item.textContent)), ["a", "b", "static"]);
+        // Compiled output alone renders a template without bindings, and needs the parser for one with them.
+        assert.deepEqual(await run("/compiled-lists.html", ["x-clist"], "<b>row</b>"),
+          { "x-clist": { before: ["row", "row", "static"], connected: ["row", "row", "static"], updated: ["row", "row", "row", "static"] } });
+        assert.match(String((await run("/compiled-lists.html", ["x-clist"], "<b>{$item}</b>"))["x-clist"]), /^HR007/);
         assert.deepEqual(errors, []);
         await page.close();
       });

@@ -50,6 +50,8 @@ interface RegistryRecord {
   /** The live runtime's `define` and `upgrade`, present only where a live runtime is. */
   f?: (carrier: HTMLTemplateElement) => void;
   u?: (root: Node) => void;
+  /** The live runtime's rendering of a `<template slot>` no compiled consumer registered. */
+  t?: (carrier: HTMLTemplateElement, names: readonly string[]) => unknown;
 }
 
 const runtimeKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
