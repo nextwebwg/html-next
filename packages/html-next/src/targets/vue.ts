@@ -31,7 +31,7 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { conformingScalarStates } from "./state-roots.js";
-import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -52,7 +52,7 @@ export const VUE_HEAD_SPECIFIER = "./head";
 export function importsVueHead(source: string): boolean {
   return new RegExp(`from ['"]${VUE_HEAD_SPECIFIER}['"]`).test(source);
 }
-import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
+import { category, Lowering, mayProduceInvalidResult, present, provenSlotProp, slotPropStatic, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 import { handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
@@ -321,8 +321,8 @@ function localIdentifier(name: string, context: Context): string {
 }
 
 /** Slot props shadow consumer names only when the receiving outlet actually supplies them. */
-function withSlotProps(names: Names, props: readonly string[], alias: string): Names {
-  const local = withLocal(names, props.map((name) => [name, UNKNOWN] as const));
+function withSlotProps(names: Names, props: readonly string[], alias: string, declared?: Readonly<Record<string, PropContract>>): Names {
+  const local = withLocal(names, props.map((name) => [name, slotPropStatic(declared?.[name])] as const));
   const remap = (scope: Scope, parent: Scope): Scope => {
     const code = new Map(scope.code);
     for (const name of props) {
@@ -370,7 +370,6 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
       if (flow.alias !== undefined) known.add(flow.alias);
     }
     if (node.kind === "slot") {
-      dependencies(node.nameExpression, known);
       for (const prop of node.props ?? []) dependencies(prop.expressionPlan, known);
       for (const child of node.fallback ?? []) visit(child, known);
       return;
@@ -443,15 +442,14 @@ const isSlotTemplate = (node: TemplateNode): node is ElementNode => node.kind ==
  */
 function renderProjection(nodes: readonly TemplateNode[], names: Names, context: Context, tag: string): string {
   const contracts = context.slotsByTag?.get(tag);
-  const contractOf = (slot: string) => contracts?.find((entry) => !entry.dynamic && (entry.name ?? "") === slot);
+  const contractOf = (slot: string) => contracts?.find((entry) => (entry.name ?? "") === slot);
   const groups = new Map<string, TemplateNode[]>();
   for (const child of nodes) groups.set(assignedSlot(child), [...groups.get(assignedSlot(child)) ?? [], child]);
   for (const [slot, children] of groups) {
     if (children.some(isSlotTemplate)) continue;
     // Default content stays implicit unless a `<template slot="">` names the default slot. Elements
     // for a scoped slot stay there too, where the receiving host reports the missing template.
-    const scoped = contractOf(slot) ?? contracts?.find((entry) => entry.dynamic && (entry.props?.length ?? 0) > 0);
-    if (slot === "" || (scoped?.props?.length ?? 0) > 0) groups.delete(slot);
+    if (slot === "" || (contractOf(slot)?.props?.length ?? 0) > 0) groups.delete(slot);
   }
   const named = [...groups].map(([slot, children]) => {
     const carrier = children.find(isSlotTemplate);
@@ -459,7 +457,7 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
     const props = carrier === undefined ? [] : contract?.props ?? projectedNames(carrier.children, names.template);
     const alias = contract !== undefined && props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
     const local = alias === undefined ? withLocal(names, props.map((name) => [name, UNKNOWN] as const))
-      : withSlotProps(names, props, alias);
+      : withSlotProps(names, props, alias, contract?.declared);
     // Without `slot`, the carrier renders as a plain `<template>`: its children, under its own flow.
     const content = carrier === undefined ? renderChildren(children, names, context)
       : renderNode({ ...carrier, attributes: carrier.attributes.filter((attribute) => !(attribute.kind === "literal" && attribute.name === "slot")) }, local, context);
@@ -509,16 +507,24 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEachNode(node, node.flow, names, context);
     const scoped = (node.props?.length ?? 0) > 0;
-    const slotName = node.nameExpression !== undefined
-      ? lowering.value(ast(node.nameExpression, "slot name"), names.template)
-      : quote(node.name ?? "");
-    const name = node.nameExpression !== undefined
-      ? ` :name=${bound(scoped ? `scopedSlotName(${slotName})` : slotName)}`
-      : scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
-        : node.name === undefined ? "" : ` name=${quote(node.name)}`;
-    const props = (node.props ?? []).map((prop) => ` :${prop.name}=${bound(lowering.value(prop.expressionPlan.ast, names.template))}`).join("");
+    const slotName = quote(node.name ?? "");
+    const name = scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
+      : node.name === undefined ? "" : ` name=${quote(node.name)}`;
+    // A bound value its declared type does not accept is not given, as live leaves it unset.
+    const unchecked = (prop: NonNullable<SlotNode["props"]>[number]): boolean =>
+      prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, names.template));
+    const props = (node.props ?? []).filter(unchecked)
+      .map((prop) => ` :${prop.name}=${bound(lowering.value(prop.expressionPlan.ast, names.template))}`).join("");
+    const checked = (node.props ?? []).flatMap((prop) => {
+      if (unchecked(prop) || prop.type === undefined) return [];
+      const accept = context.identifiers.take("slotProp", "");
+      // Its declared type says what a consumer reads; a value that does not conform is left out, so the props are not that type.
+      context.guarded.push(`const ${accept} = (value: unknown): any => ${typeCheck(normalizeType(prop.type), "value")} ? { ${quote(prop.name)}: value } : {};`);
+      return [`...${accept}(${lowering.value(prop.expressionPlan.ast, names.template)})`];
+    });
+    const spread = checked.length === 0 ? "" : ` v-bind=${bound(`{ ${checked.join(", ")} }`)}`;
     const fallback = renderChildren(node.fallback ?? [], names, context);
-    return fallback === "" ? `<slot${name}${props} />` : `<slot${name}${props}>${fallback}</slot>`;
+    return fallback === "" ? `<slot${name}${props}${spread} />` : `<slot${name}${props}${spread}>${fallback}</slot>`;
   }
   const flow = node.flow;
   if (flow?.kind === "each") return renderEachNode(node, flow, names, context);
@@ -1237,6 +1243,14 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
     ...(!(definition.slots ?? []).some((slot) => (slot.props?.length ?? 0) > 0) ? [] : ["const scopedSlotName = useScopedSlotName();"]),
+    // Declared slot props type each slot's props for a consumer's slot templates.
+    ...(!(definition.slots ?? []).some((slot) => slot.declared !== undefined) ? [] : [`defineSlots<{ ${(definition.slots ?? []).map((slot) => {
+      const scoped = (slot.props?.length ?? 0) > 0;
+      // A scoped default slot is the receiving host's `""`; an unscoped one, Vue's `default`.
+      const key = slot.name ?? (scoped ? "" : "default");
+      const props = !scoped ? "Record<string, never>" : slot.declared === undefined ? "Record<string, any>" : slotPropsType(slot.declared);
+      return `${quote(key)}?(props: ${props}): any;`;
+    }).join(" ")} }>();`]),
     `checkHydratedRoot(${hydrationExpectedTag}, ${quote(contract.tag)});`,
     ...(hostStateNames.length === 0 ? [] : [
       "",

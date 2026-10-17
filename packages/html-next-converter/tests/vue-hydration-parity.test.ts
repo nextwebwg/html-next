@@ -27,7 +27,7 @@ const baseSource = `<template component="x-hydrated-field" status="early" summar
   <handler name="chooseB"><set name="choice" expr:value="'b'"></set></handler>
   <handler name="chooseA"><set name="choice" expr:value="'a'"></set></handler>
   <handler name="mutateChoices"><set name="choices.0" expr:value="'c'"></set><set name="count" expr:value="$count + 1"></set></handler>
-</defs><article><form><h2 $value="$label"></h2><input .value="$label" value="authored input"><textarea bind:value="text">authored text</textarea><input type="checkbox" checked bind:checked="checked"><select class="plain" bind:value="choice"><option value="a" selected>A</option><option value="b">B</option></select><select bind:value="choice"><option value="a">A</option><slot name="choice-option"><option value="b">B</option></slot></select><select class="projected" bind:value="choice"><option value="a">A</option><slot name="projected-option"><option value="b">Fallback B</option></slot></select><select class="multiple" multiple bind:value="choices"><option value="a" selected>A</option><option value="b">B</option><option value="c">C</option></select><select class="read-only" .value="$choice"><option value="a">A</option><option value="b">B</option></select><select class="null-bind" bind:value="emptyChoice"><option value="">Empty</option><option value="null">Null</option></select><select class="null-read-only" .value="$emptyChoice"><option value="">Empty</option><option value="null">Null</option></select><button type="button" on:click="increment">Increment</button><button type="button" class="choose-b" on:click="chooseB">B</button><button type="button" class="choose-a" on:click="chooseA">A</button><button type="button" class="mutate-choices" on:click="mutateChoices">Mutate choices</button><output $value="$count"></output><output class="text-state" $value="$text"></output><output class="checked-state" $value="$checked"></output><output class="choice-state" $value="$choice"></output></form></article></template>`;
+</defs><article><form><h2 $value="$label"></h2><input .value="$label" value="authored input"><textarea bind:value="text">authored text</textarea><input type="checkbox" checked bind:checked="checked"><select class="plain" bind:value="choice"><option value="a" selected>A</option><option value="b">B</option></select><select bind:value="choice"><option value="a">A</option><slot name="choiceOption"><option value="b">B</option></slot></select><select class="projected" bind:value="choice"><option value="a">A</option><slot name="projectedOption"><option value="b">Fallback B</option></slot></select><select class="multiple" multiple bind:value="choices"><option value="a" selected>A</option><option value="b">B</option><option value="c">C</option></select><select class="read-only" .value="$choice"><option value="a">A</option><option value="b">B</option></select><select class="null-bind" bind:value="emptyChoice"><option value="">Empty</option><option value="null">Null</option></select><select class="null-read-only" .value="$emptyChoice"><option value="">Empty</option><option value="null">Null</option></select><button type="button" on:click="increment">Increment</button><button type="button" class="choose-b" on:click="chooseB">B</button><button type="button" class="choose-a" on:click="chooseA">A</button><button type="button" class="mutate-choices" on:click="mutateChoices">Mutate choices</button><output $value="$count"></output><output class="text-state" $value="$text"></output><output class="checked-state" $value="$checked"></output><output class="choice-state" $value="$choice"></output></form></article></template>`;
 const source = baseSource
   .replace("</defs>", `<state type="list(unknown)" name="combined" value="['b', 'c']"></state></defs>`)
   .replace("</form>", `<select class="null-multiple" multiple bind:value="emptyChoice"><option value="">Empty</option><option value="a">A</option></select>
@@ -142,14 +142,14 @@ ${entryImport}
 const label = ref("Server");
 window.changeHydratedLabel = (value) => { label.value = value; };
 createSSRApp({ render: () => h(XHydratedField, { id: "case", label: label.value }, {
-  "projected-option": () => h("option", { id: "projected-option", value: "b" }, "Projected B"),
+  projectedOption: () => h("option", { id: "projected-option", value: "b" }, "Projected B"),
 }) }).mount(document.querySelector("main"));\n`);
       const serverEntry = join(outDirectory, "server.ts");
       await writeFile(serverEntry, `import { createSSRApp, h } from "vue";
 import { renderToString } from "@vue/server-renderer";
 import XHydratedField from "./${manifest.components[0]!.artifact.replace(/\.vue$/, ".ssr")}";
 export const render = () => renderToString(createSSRApp({ render: () => h(XHydratedField, { id: "case", label: "Server" }, {
-  "projected-option": () => h("option", { id: "projected-option", value: "b" }, "Projected B"),
+  projectedOption: () => h("option", { id: "projected-option", value: "b" }, "Projected B"),
 }) }));\n`);
       const plugin = { name: "compiled-vue-sfc", setup(pluginBuild: Parameters<NonNullable<Parameters<typeof build>[0]["plugins"]>[number]["setup"]>[0]) {
         pluginBuild.onResolve({ filter: /\.vue$/ }, (args) => ({ path: resolve(args.resolveDir, args.path.replace(/\.vue$/, ".ts")) }));
@@ -190,7 +190,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XHydra
           const serverPage = await browser.newPage();
           let liveServer: string;
           try {
-            await serverPage.setContent(`${source}<main><x-hydrated-field id="case" label="Server"><option id="projected-option" slot="projected-option" value="b">Projected B</option></x-hydrated-field></main>`);
+            await serverPage.setContent(`${source}<main><x-hydrated-field id="case" label="Server"><option id="projected-option" slot="projectedOption" value="b">Projected B</option></x-hydrated-field></main>`);
             await serverPage.addScriptTag({ path: liveBundle });
             liveServer = await serverPage.evaluate(() => {
               window.HtmlRuntime.lowerDocument();

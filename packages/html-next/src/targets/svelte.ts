@@ -12,9 +12,9 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
-import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
+import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
+import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { formatSvelteScript } from "./vue-format.js";
@@ -151,7 +151,6 @@ interface RenderContext {
   readonly inputNames: ReadonlyMap<string, string>;
   readonly slotsByTag?: SvelteConversionOptions["slotsByTag"];
   usesScopedSlots: boolean;
-  usesSampledSlots: boolean;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   readonly styleOwner?: string;
   /** The scoped styles' root and limits: the root's tag, and each invoked component's, as classes. */
@@ -385,23 +384,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
     const fallback = (node.fallback ?? []).map((child, index, nodes) => isEdgeSpace(nodes, index) ? '{" "}' : renderNode(child, false, scope, lowering, context)).join("");
-    const sampledName = node.nameExpression === undefined ? undefined : context.freshIdentifier("htmlNextSlotName");
-    if (sampledName !== undefined) context.usesSampledSlots = true;
-    const name = sampledName ?? quote(node.name ?? "");
-    const nameDeclaration = sampledName === undefined ? "" : `{@const ${sampledName} = untrack(() => String(${lowering.value(node.nameExpression!.ast, scope)}))}`;
+    const name = quote(node.name ?? "");
     const selected = context.freshIdentifier("slot");
     const scoped = (node.props?.length ?? 0) > 0;
     if (scoped) context.usesScopedSlots = true;
-    const defaultSlot = node.name === undefined && node.nameExpression === undefined;
+    const defaultSlot = node.name === undefined;
     const hasChildren = context.definition.contract.props.children === undefined;
     const supplied = defaultSlot ? `slots?.[""]${scoped && hasChildren ? " ?? (children === undefined ? undefined : null)" : ""}` : `slots?.[${name}]`;
     const checked = scoped ? `checkedSlot(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
-      const source = lowering.value(prop.expressionPlan.ast, scope);
-      return `${objectKey(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
+      const value = lowering.value(prop.expressionPlan.ast, scope);
+      // A bound value its declared type does not accept keeps the last one it did, as live keeps it.
+      const source = prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope)) ? value
+        : `((value: unknown) => ${typeCheck(normalizeType(prop.type), "value")} ? value : Symbol.for('html-next.invalid-result'))(${value})`;
+      return `${objectKey(prop.name)}: ${source !== value || mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
     }).join(", ")} }` : "{}";
     const children = !scoped && defaultSlot && hasChildren ? "{:else if children}{@render children()}" : "";
-    return `{#if true}${nameDeclaration}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
+    return `{#if true}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
   }
   if (node.flow?.kind === "each") return renderEach(node, scope, lowering, context);
   if (node.flow?.kind === "if") {
@@ -535,8 +534,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     for (const [slot, children] of groups) {
       const contracts = context.slotsByTag?.get(node.name);
-      const contract = contracts?.find((entry) => !entry.dynamic && entry.name === slot)
-        ?? contracts?.find((entry) => entry.dynamic && (entry.props?.length ?? 0) > 0);
+      const contract = contracts?.find((entry) => entry.name === slot);
       const scoped = (contract?.props?.length ?? 0) > 0;
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
       if (scoped && carrier === undefined) { slotBindings.push(`${objectKey(slot)}: null`); continue; }
@@ -545,7 +543,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const projectedScope: Scope = !scoped ? scope : {
         ...scope,
         code: new Map([...scope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
-        types: new Map<string, Static>([...scope.types, ...contract!.props!.map((prop) => [prop, { type: { kind: "terminal" as const, name: "unknown" }, nullable: true }] as const)]),
+        types: new Map<string, Static>([...scope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
       };
       const firstHtml = context.htmlSites;
       const firstRetention = context.retentions.size;
@@ -1171,7 +1169,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     types,
   };
   const lowering = new Lowering("warnUnless");
-  const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, propContractsByTag: options.propContractsByTag,
+  const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, propContractsByTag: options.propContractsByTag,
     ...(styles.hashed === true ? { styleOwner: definition.contract.tag } : {}),
     hostClass: styles.components !== undefined, styledComponents: new Set(styles.components ?? []),
     htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
@@ -1197,11 +1195,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const eventCallbacks = target.events.flatMap((event) => [`on${event.name}`, `on${event.name}capture`]
     .filter((name) => definition.contract.props[name] === undefined)
     .map((name) => ({ name, type: `((event: CustomEvent<${event.detailType}>) => void) | null` })));
-  const slotType = (slot: SlotContract): string => `Snippet<[${(slot.props?.length ?? 0) === 0 ? "Record<string, any>" : `Readonly<{ ${slot.props!.map((name) => `${quote(name)}: any;`).join(" ")} }>`}]>`;
-  const namedSlots = target.slots.filter((slot) => !slot.dynamic);
-  const dynamicSlots = target.slots.filter((slot) => slot.dynamic);
+  const slotType = (slot: SlotContract): string => `Snippet<[${(slot.props?.length ?? 0) === 0 ? "Record<string, any>"
+    : slot.declared !== undefined ? slotPropsType(slot.declared) : `Readonly<{ ${slot.props!.map((name) => `${quote(name)}: any;`).join(" ")} }>`}]>`;
   const slotsType = target.slots.length === 0 ? "Record<string, Snippet<[Record<string, any>]> | null>"
-    : `Readonly<{ ${namedSlots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`).join(" ")}${dynamicSlots.length === 0 ? "" : ` [name: string]: ${[...new Set(target.slots.map(slotType))].join(" | ")} | null | undefined;`} }>`;
+    : `Readonly<{ ${target.slots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`).join(" ")} }>`;
   // Each request is a function prop that answers it, and the event prop Svelte uses for declared events.
   const requestProps = target.requests.map((request) => ({
     request, listenerProp: `on${request.name}`, responder: freshIdentifier("htmlNextResponder"), listener: freshIdentifier("htmlNextRequestListener"),
@@ -1359,7 +1356,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   let script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     `import type { HTMLAttributes${nativeAttributes === "HTMLAttributes" ? "" : ` as ${nativeAttributes}`} } from "svelte/elements";`,
-    ...svelteImport([...(nestedDepthLimit !== undefined || context.imports.size > 0) ? ["getContext", "setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
+    ...svelteImport([...(nestedDepthLimit !== undefined || context.imports.size > 0) ? ["getContext", "setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
     RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(requestProps.length === 0 ? [] : [

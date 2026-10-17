@@ -27,7 +27,8 @@ const badge = `<template component="ui-badge">
 
 // A scoped slot that owns iteration, and a plain slot with a fallback.
 const list = `<template component="x-list">
-  <defs><prop name="rows" type="list(string)" default="['a', 'b']">Rows.</prop></defs>
+  <defs><prop name="rows" type="list(string)" default="['a', 'b']">Rows.</prop>
+    <slot name="row"><prop name="item" type="string" required>The row.</prop></slot></defs>
   <ul><li $each="row of $rows"><slot name="row" from:item="$row"></slot></li><li><slot name="plain">fallback</slot></li></ul>
 </template>`;
 

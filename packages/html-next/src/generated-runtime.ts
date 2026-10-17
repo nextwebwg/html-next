@@ -635,7 +635,8 @@ function reflected(value: unknown, checks: PropChecks | null): string {
 }
 
 /** The destination check (`conformsAtDestination`) on a compact type, or on null, a select prop's type without an option. */
-const fits = (value: unknown, type: CompactType | null): boolean => value === ABSENT || type !== null && conforms(value, type);
+/** Whether a value fits a declared destination type: a prop's, or a slot prop's in a compiled outlet. */
+export const fits = (value: unknown, type: CompactType | null): boolean => value === ABSENT || type !== null && conforms(value, type);
 
 /** A compiled instance's props, as the live runtime keeps an instance's. */
 export interface GeneratedPropRecord {

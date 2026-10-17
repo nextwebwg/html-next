@@ -67,6 +67,13 @@ export interface ComponentContract {
   readonly requests?: Readonly<Record<string, RequestContract>>;
   /** Declared `<script src>` elements, in declared order: the code the component loads. Omitted when none. */
   readonly scripts?: readonly ScriptContract[];
+  /** The props each slot gives its consumer's `<template slot>`, by slot name (`""` for the default slot). Omitted when none. */
+  readonly slots?: Readonly<Record<string, SlotDeclaration>>;
+}
+
+/** A `<slot>` declaration in `<defs>`: the props its outlets give, declared as a component's props are. */
+export interface SlotDeclaration {
+  readonly props: Readonly<Record<string, PropContract>>;
 }
 
 /**

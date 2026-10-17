@@ -192,9 +192,8 @@ export function generateHostDeclaration(
   });
   const slotContracts = definition.slots ?? [];
   const slots = [
-    ...new Set(slotContracts.filter((slot) => !slot.dynamic).map((slot) => slot.name ?? "default")),
+    ...new Set(slotContracts.map((slot) => slot.name ?? "default")),
   ].map((name) => `readonly ${propKey(name)}: readonly Element[]`);
-  if (slotContracts.some((slot) => slot.dynamic)) slots.push("readonly [name: string]: readonly Element[]");
   const scripts = (contract.scripts ?? []).flatMap((script) =>
     script.name === undefined ? [] : [`readonly ${propKey(script.name)}: HostScript`]);
 

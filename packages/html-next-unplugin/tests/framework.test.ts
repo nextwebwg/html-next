@@ -431,7 +431,7 @@ describe("svelte source adapter", () => {
         <section .scrollTop="10">Badge<output $value="$feed.value.label"></output><p .textContent="$form.text"></p><input value="authored" .title="$form.text" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
           <select multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select>
           <ui-rows><template slot="row"><li .title="$item.name" $value="$item.name"></li></template></ui-rows></section>`)
-      + `<template component="ui-rows" status="early" summary="Scoped rows."><defs>
+      + `<template component="ui-rows" status="early" summary="Scoped rows."><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop></slot>
         <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state></defs>
         <ul><slot name="row" $each="row of $rows" $key="$row.id" from:item="$row"><li>Fallback</li></slot></ul></template>
         <template component="ui-selected" status="early" summary="Selected input."><defs>

@@ -19,18 +19,18 @@ const panelBody = `<button type="button" class="expand" on:click="expand">Expand
   <button type="button" class="switch" on:click="switchRoot">Switch</button>
   <header><slot name="title"><h2>Untitled</h2></slot></header>
   <main><slot><p>Empty</p></slot></main>
-  <ul><li $each="row of $rows" $key="$row"><slot from:name="concat('row-', $row)"><span class="missing">Missing</span></slot></li></ul>
+  <ul><li $each="row of $rows" $key="$row"><slot name="row" from:label="$row"><span class="missing">Missing</span></slot></li></ul>
   <div class="extra" $if="$open"><slot name="extra"><em>Extra fallback</em></slot></div>`;
-const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs>
+const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs><slot name="row"><prop name="label" type="string" required>The row's label.</prop></slot>
   <state name="branch" type="keyword" value="section"></state>
-  <state type="list(unknown)" name="rows" value="['a']"></state>
+  <state type="list(string)" name="rows" value="['A']"></state>
   <state type="boolean" name="open" value="false"></state>
-  <handler name="expand"><set name="rows" expr:value="['a', 'b']"></set><set name="open" value="true"></set></handler>
+  <handler name="expand"><set name="rows" expr:value="['A', 'B']"></set><set name="open" value="true"></set></handler>
   <handler name="switchRoot"><set name="branch" expr:value="'article'"></set></handler>
 </defs><template $match><article $when="$branch = 'article'">${panelBody}</article><section $else>${panelBody}</section></template></template>`;
 const invocation = `<x-slot-panel id="case"><h2 id="title-node" slot="title">Title</h2>
-  <p id="body-node">Body</p><strong id="row-a" slot="row-a">A</strong>
-  <b id="row-b" slot="row-b">B</b></x-slot-panel>`;
+  <p id="body-node">Body</p>
+  <template slot="row"><strong from:id="concat('row-', $label)" $value="$label"></strong></template></x-slot-panel>`;
 
 type Behavior = {
   readonly root: string;
@@ -103,8 +103,7 @@ import { XSlotPanel } from "./vue/${mode === "application" ? "application" : "in
 const slots = {
   title: () => h("h2", { id: "title-node" }, "Title"),
   default: () => h("p", { id: "body-node" }, "Body"),
-  "row-a": () => h("strong", { id: "row-a" }, "A"),
-  "row-b": () => h("b", { id: "row-b" }, "B"),
+  row: ({ label }: { label: string }) => h("strong", { id: "row-" + label }, label),
 };
 createApp({ render: () => h(XSlotPanel, { id: "case" }, slots) }).mount(document.querySelector("main"));\n`);
       await build({
@@ -120,8 +119,7 @@ import { XSlotPanel } from "./vue/${mode === "application" ? "application" : "in
 const slots = {
   title: () => h("h2", { id: "title-node" }, "Title"),
   default: () => h("p", { id: "body-node" }, "Body"),
-  "row-a": () => h("strong", { id: "row-a" }, "A"),
-  "row-b": () => h("b", { id: "row-b" }, "B"),
+  row: ({ label }: { label: string }) => h("strong", { id: "row-" + label }, label),
 };
 createSSRApp({ render: () => h(XSlotPanel, { id: "case" }, slots) }).mount(document.querySelector("main"));\n`);
       await build({
@@ -137,8 +135,7 @@ import { XSlotPanel } from "./vue/${mode === "application" ? "application" : "in
 const slots = {
   title: () => h("h2", { id: "title-node" }, "Title"),
   default: () => h("p", { id: "body-node" }, "Body"),
-  "row-a": () => h("strong", { id: "row-a" }, "A"),
-  "row-b": () => h("b", { id: "row-b" }, "B"),
+  row: ({ label }: { label: string }) => h("strong", { id: "row-" + label }, label),
 };
 export const render = () => renderToString(createSSRApp({ render: () => h(XSlotPanel, { id: "case" }, slots) }));\n`);
       const serverBuild = await build({
@@ -159,7 +156,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XSlotP
   for (const mode of ["application", "library"] as const) {
     for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
       for (const switchRoot of [false, true] as const) {
-      it(`${engine} ${mode} ${switchRoot ? "matches hydrated slots across a root switch" : "matches hydrated named, dynamic, and fallback slots"}`, async () => {
+      it(`${engine} ${mode} ${switchRoot ? "matches hydrated slots across a root switch" : "matches hydrated named, scoped, and fallback slots"}`, async () => {
         const browser = await launchParityBrowser(browserType);
         const [live, vue, hydrated] = await Promise.all([browser.newPage(), browser.newPage(), browser.newPage()]);
         const pages = [live, vue, hydrated];

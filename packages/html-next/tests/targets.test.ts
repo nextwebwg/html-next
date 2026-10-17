@@ -215,6 +215,19 @@ describe("official target compilers", () => {
     compileVue(vue, "XIndexed.vue");
     await transform(vanilla, { loader: "js", format: "esm" });
   });
+  it("types a declared slot's props in the Vanilla declaration and the docs", () => {
+    const outputs = generated(`<template component="x-disclosure" status="early" summary="Disclosure."><defs>
+      <prop name="items" type="list(string)" default="[]">Items.</prop>
+      <slot name="summary"><prop name="label" type="string" default="Details">The summary's text.</prop>
+        <prop name="count" type="number" required>How many.</prop><prop name="tone" type="keyword" values="quiet, loud">Tone.</prop></slot>
+    </defs><div><slot name="summary" label="Open" from:count="$items.length">Details</slot></div></template>`);
+    const vanilla = outputs.get("vanilla/XDisclosure.d.ts")!;
+    assert.match(vanilla, /export interface XDisclosureSlots \{\n  readonly summary: \{ readonly count: number; readonly label: string; readonly tone\?: "quiet" \| "loud"; \};\n\}/);
+    assert.match(vanilla, /"x-disclosure": \{ element: XDisclosureElement; props: [^;]*; slots: XDisclosureSlots \}/);
+    const docs = outputs.get("docs/x-disclosure.md")!;
+    assert.match(docs, /- `summary`: optional; its `<template slot>` reads these props\.\n  - `count` \(`number`, required\): How many\./);
+  });
+
   it("preserves nested permitted event values in generated targets", () => {
     const outputs = generated(`<template component="x-nested-event"><defs>
       <event name="change" type="object">
@@ -507,7 +520,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   });
 
   it("passes repeated scoped-slot values through Vue's native slot outlet", () => {
-    const vue = generated(`<template component="x-row-list"><defs>` +
+    const vue = generated(`<template component="x-row-list"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>` +
       '<prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>' +
       '<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"><li $value="$row.name"></li></slot></ul></template>')
       .get("vue/XRowList.vue")!;

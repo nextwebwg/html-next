@@ -10,7 +10,7 @@ import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 
-const receiver = `<template component="x-slot-host" controller="./slots.js"><defs>
+const receiver = `<template component="x-slot-host" controller="./slots.js"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot>
   <state name="item" value="Ada"></state><handler name="rename"><set name="item" value="Grace"></set></handler>
 </defs><section><button on:click="rename">Rename</button><slot name="row" from:item="$item"></slot><slot name="shown"></slot><slot></slot></section><style>:host { display: block; width: 240px; font: 16px/24px Arial, sans-serif; }</style></template>`;
 const owner = `<link rel="component" href="./receiver.html"><template component="x-slot-owner"><defs>

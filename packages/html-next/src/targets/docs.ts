@@ -56,9 +56,15 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     "",
     ...(target.slots.length === 0
       ? ["This component has no projected-content slots."]
-      : target.slots.map((slot) =>
-        `- ${slot.name === undefined ? "Default slot" : `\`${slot.name}\``}: ${slot.required ? "required" : "optional"}${slot.dynamic ? "; selected from data at runtime" : ""}.`
-      )),
+      : target.slots.flatMap((slot) => {
+        const declared = contract.slots?.[slot.name ?? ""]?.props;
+        return [
+          `- ${slot.name === undefined ? "Default slot" : `\`${slot.name}\``}: ${slot.required ? "required" : "optional"}${declared === undefined ? "" : "; its `<template slot>` reads these props"}.`,
+          // Each declared slot prop, as a component prop is listed.
+          ...Object.entries(declared ?? {}).map(([name, prop]) =>
+            `  - \`${name}\` (${typeSource(prop.type)}${prop.required ? ", required" : prop.default === undefined ? "" : `, default ${defaultSource(prop)}`}): ${prop.description}`),
+        ];
+      })),
     "",
     "## Events",
     "",

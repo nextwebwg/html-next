@@ -387,7 +387,7 @@ describe("parseComponent", () => {
         `<computed name="empty" from="not $query"></computed>` +
         `<event name="value-change" type="string"></event>` +
         `</defs>` +
-        `<div><slot name="start"><span>Start</span></slot><slot from:name="$query"></slot></div>` +
+        `<div><slot name="start"><span>Start</span></slot><slot></slot></div>` +
         `</template>`,
       "combobox.html",
     );
@@ -404,18 +404,79 @@ describe("parseComponent", () => {
     assert.ok(computed?.kind === "computed");
     assert.deepEqual(state.expression?.dependencies, []);
     assert.deepEqual(computed.expression?.dependencies, ["query"]);
-    assert.deepEqual(definition.slots!.map(({ name, dynamic, required }) => ({ name, dynamic, required })), [
-      { name: "start", dynamic: false, required: false },
-      { name: undefined, dynamic: true, required: true },
+    assert.deepEqual(definition.slots!.map(({ name, required }) => ({ name, required })), [
+      { name: "start", required: false },
+      { name: undefined, required: true },
     ]);
     assert.ok(Object.isFrozen(definition));
     assert.ok(Object.isFrozen(definition.contract));
     assert.ok(Object.isFrozen(definition.contract.props));
   });
 
+  it("names slots with literal identifiers on outlets and consumers alike", () => {
+    const card = (markup: string): string => `<template component="x-card" status="early" summary="Card.">${markup}</template>`;
+    const message = (source: string): string => {
+      try { parseComponent(source, "component.html"); } catch (error) { if (error instanceof HtmlDiagnosticError) return error.diagnostic.message; }
+      return "";
+    };
+    // An outlet's name is written, never computed; the diagnostic points to a scoped slot that passes the item.
+    assert.match(message(card(`<defs><state name="rows" type="list(object({ id: string }))" value="[]"></state></defs>` +
+      `<ul><li $each="row of $rows"><slot from:name="concat('option-', $row.id)"></slot></li></ul>`)),
+      /never computed with `from:name`.*one named scoped slot that passes the item as a prop/);
+    // A slot name is an expression-scope identifier: no `-`.
+    assert.match(message(card(`<div><slot name="label-action"></slot></div>`)), /`label-action` is not an identifier.*such as `labelAction`/);
+    assert.deepEqual(parseComponent(card(`<div><slot name="labelAction"></slot><slot name="_end2"></slot></div>`)).slots?.map((slot) => slot.name), ["labelAction", "_end2"]);
+    // A consumer names the slot it fills the same way, on an element or a <template slot>.
+    const page = (children: string): string => `<template component="x-page" status="early" summary="Page."><main><x-card>${children}</x-card></main></template>`;
+    expectDiagnostic("HT008", page(`<b slot="label-action">A</b>`));
+    expectDiagnostic("HT008", page(`<b slot="$which">A</b>`));
+    expectDiagnostic("HT008", page(`<template slot="row-a"><b>A</b></template>`));
+    assert.match(message(page(`<b from:slot="'title'">A</b>`)), /cannot be bound with `from:slot`/);
+    // An empty `slot` assigns the default slot, and a plain element outside a component keeps its native `slot`.
+    parseComponent(page(`<b slot="">A</b><b slot="labelAction">B</b>`));
+    parseComponent(`<template component="x-plain" status="early" summary="Plain."><div><b slot="header-actions">A</b></div></template>`);
+  });
+
+  it("declares a slot's props in <defs> and checks each outlet against them", () => {
+    const disclosure = (outlet: string, slot = `<slot name="summary"><prop name="label" type="string" default="Details">Text.</prop>` +
+      `<prop name="count" type="number" required>Count.</prop><prop name="tone" type="keyword" values="quiet, loud">Tone.</prop></slot>`): string =>
+      `<template component="x-disclosure" status="early" summary="D."><defs><prop name="items" type="list(string)" default="[]">Items.</prop>${slot}</defs>` +
+      `<button>${outlet}</button></template>`;
+    const message = (source: string): string => {
+      try { parseComponent(source, "component.html"); } catch (error) { if (error instanceof HtmlDiagnosticError) return `${error.diagnostic.code}: ${error.diagnostic.message}`; }
+      return "";
+    };
+    const definition = parseComponent(disclosure(`<slot name="summary" count="3" tone="loud"></slot>`));
+    // The normalized contract lists each declared slot's props, as it lists the component's.
+    assert.deepEqual(Object.keys(definition.contract.slots ?? {}), ["summary"]);
+    assert.deepEqual(definition.contract.slots?.summary?.props.count, { type: "number", required: true, target: { attribute: "count" }, description: "Count." });
+    // A static prop converts by its declared type; a default fills what the outlet leaves out.
+    const outlet = definition.template.children[0];
+    assert.ok(outlet?.kind === "slot");
+    assert.deepEqual(outlet.props?.map(({ name, expression }) => [name, expression]), [["count", "3"], ["tone", "'loud'"], ["label", "'Details'"]]);
+    // A bound prop keeps its expression and takes the type its value must conform to.
+    const bound = parseComponent(disclosure(`<slot name="summary" label="Open" from:count="$items.length"></slot>`));
+    const boundOutlet = bound.template.children[0];
+    assert.ok(boundOutlet?.kind === "slot");
+    assert.deepEqual(boundOutlet.props?.map(({ name, expression, type }) => [name, expression, type]), [["count", "$items.length", "number"], ["label", "'Open'", undefined]]);
+    // Each mistake names the outlet; an undeclared prop names the declaration to add.
+    assert.match(message(disclosure(`<slot name="summary" count="1" from:count="$items.length"></slot>`)), /HT008: .*gives prop `count` more than once/);
+    assert.match(message(disclosure(`<slot name="summary" count="1" size="2"></slot>`)), /HT008: .*`size`, which slot `summary` does not declare; add <slot name="summary"><prop name="size"/);
+    assert.match(message(disclosure(`<slot name="summary" label="x"></slot>`)), /HT008: .*must give prop `count`/);
+    assert.match(message(disclosure(`<slot name="summary" count="many"></slot>`)), /HT008: .*the value `many`, which does not satisfy its declared type `number`/);
+    assert.match(message(disclosure(`<slot name="summary" count="1" tone="soft"></slot>`)), /HT008: .*the value `soft`/);
+    assert.match(message(disclosure(`<slot name="other" from:item="$items"></slot>`)), /HT008: .*gives props to slot `other`, which declares none; declare them in <defs>: <slot name="other"><prop name="item"/);
+    // A slot without props is never declared; a declaration declares at least one prop, once.
+    assert.match(message(disclosure(`<slot name="summary"></slot>`, `<slot name="summary"></slot>`)), /HC013: .*at least one <prop>/);
+    assert.match(message(disclosure(`<slot name="summary" count="1"></slot>`, `<slot name="summary"><prop name="count" type="number">C.</prop></slot><slot name="summary"><prop name="count" type="number">C.</prop></slot>`)), /HC020: Slot `summary` is declared more than once/);
+    assert.match(message(disclosure(`<slot></slot>`, `<slot name="label-action"><prop name="a" type="string">A.</prop></slot>`)), /HC013: Slot name `label-action` is not an identifier/);
+    // A plain slot needs no declaration, and a declared slot's props may be any type, as only static ones are attributes.
+    parseComponent(disclosure(`<slot name="summary" from:count="$items.length"></slot>`, `<slot name="summary"><prop name="count" type="unknown" required>C.</prop></slot>`));
+  });
+
   it("parses repeated scoped slots and exposes their row bindings", () => {
     const definition = parseComponent(
-      `<template component="x-rows"><defs><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
+      `<template component="x-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
       `<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">` +
       `<li $value="$row.name"></li></slot></ul></template>`,
     );
@@ -427,18 +488,19 @@ describe("parseComponent", () => {
     assert.deepEqual(slot.props?.map((prop) => [prop.name, prop.expressionPlan.dependencies]), [
       ["item", ["row"]], ["index", ["loop.index"]],
     ]);
-    assert.deepEqual(definition.slots, [{ name: "row", dynamic: false, required: false, props: ["item", "index"] }]);
+    assert.deepEqual(definition.slots?.map(({ declared: _declared, ...slot }) => slot), [{ name: "row", required: false, props: ["item", "index"] }]);
     assert.deepEqual(slot.fallback?.[0]?.kind === "element" && slot.fallback[0].attributes[0]?.kind === "directive"
       && slot.fallback[0].attributes[0].expressionPlan?.dependencies, ["row.name"]);
   });
 
   it("retains every scoped prop when root alternatives expose the same slot", () => {
-    const definition = parseComponent(`<template component="x-alternate-slots"><defs>` +
+    const definition = parseComponent(`<template component="x-alternate-slots"><defs><slot name="item"><prop name="first" type="string">The first.</prop><prop name="second" type="string">The second.</prop></slot>` +
       `<state name="first" value="First"></state><state name="second" value="Second"></state>` +
       `<state type="boolean" name="alternate" value="false"></state></defs>` +
       `<template $match><section $when="$alternate"><slot name="item" from:first="$first"></slot></section>` +
       `<article $else><slot name="item" from:second="$second"></slot></article></template></template>`);
-    assert.deepEqual(definition.slots, [{ name: "item", dynamic: false, required: true, props: ["first", "second"] }]);
+    assert.deepEqual(definition.slots?.map(({ declared: _declared, ...slot }) => slot), [{ name: "item", required: true, props: ["first", "second"] }]);
+    assert.deepEqual(Object.keys(definition.contract.slots?.item?.props ?? {}), ["first", "second"]);
   });
 
   it("defers unknown names only inside a consumer's scoped-slot template", () => {
@@ -764,7 +826,7 @@ describe("parseComponent", () => {
         `<section from:data-ready="$hasQuery" class:active="$hasQuery" style:opacity="$hasQuery" $ref="root">` +
         `<input .value="$query" bind:data-index="form.selected" $ref="search" on:input.capture.once="select">` +
         `<ol><li $each="row, i of $results.value" $where="$row.visible" $sort="-row.score,row.name" $limit="3" $key="$row.id">` +
-        `<slot from:name="$row.id"><span $value="$i"></span></slot></li></ol>` +
+        `<slot name="row"><span $value="$i"></span></slot></li></ol>` +
         `<div $with="$form as current"><output $value="$current.selected"></output></div>` +
         `<div $match="$form as current"><span $when="$current.selected > 0">Selected</span><span $else>None</span></div>` +
         `</section><style>:scope { display: block; }</style></template>`,
@@ -812,7 +874,7 @@ describe("parseComponent", () => {
     const item = list.children[0];
     assert.ok(item?.kind === "element" && item.flow?.kind === "each");
     assert.deepEqual(item.flow?.kind === "each" && item.flow.keyPlan?.dependencies, ["row.id"]);
-    assert.deepEqual(definition.slots, [{ dynamic: true, required: false }]);
+    assert.deepEqual(definition.slots, [{ name: "row", required: false }]);
   });
 
   it("records polymorphic native roots and delegated component roots", () => {
@@ -826,7 +888,7 @@ describe("parseComponent", () => {
     assert.deepEqual(polymorphic.root, { kind: "native", element: "button", choices: ["a", "button"] });
     assert.equal(polymorphic.contract.nativeElement, "button");
     // Each arm declares the same slots; the contract lists each once.
-    assert.deepEqual(polymorphic.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: false, required: true }]);
+    assert.deepEqual(polymorphic.slots, [{ name: "icon", required: true }, { required: true }]);
     // `as` does not retag an element.
     expectDiagnostic("HT021", componentSource(`<button as="button|a"></button>`));
     // Exactly one native root is always chosen.
@@ -839,12 +901,12 @@ describe("parseComponent", () => {
       `<prop name="as" type="keyword" values="button, a" default="button">Root.</prop><state type="boolean" name="open" value="false"></state>` +
         `<computed name="linked" from="$as = 'a'"></computed>`,
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
-    // A slot required by any arm is required; arms' dynamic slots merge by position.
+    // A slot required by any arm is required.
     const merged = parseComponent(button(
-      `<template $match><a $when="$as = 'a'"><slot name="icon"></slot><slot from:name="$as"></slot></a>` +
-        `<button $else><slot name="icon">★</slot><slot from:name="$as">fallback</slot></button></template>`,
+      `<template $match><a $when="$as = 'a'"><slot name="icon"></slot><slot name="label"></slot></a>` +
+        `<button $else><slot name="icon">★</slot><slot name="label">fallback</slot></button></template>`,
     ));
-    assert.deepEqual(merged.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: true, required: true }]);
+    assert.deepEqual(merged.slots, [{ name: "icon", required: true }, { name: "label", required: true }]);
     // A slot is not a native root.
     expectDiagnostic("HT021", button(`<template $match><slot></slot><button $else></button></template>`));
     // A slot is still declared once within an arm.

@@ -587,7 +587,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       // A slot's elements share one Vue slot, in authored order; its `<template slot>` replaces them.
       assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in tags"[\s\S]*slot="leading"/);
       assert.equal(slots.get("#trailing"), "<b>!</b>");
-      assert.match(invocation, /<template #action="(\w+)"><button type="button" class="act">\s*\{\{ text\(Object\.hasOwn\(\1, 'value'\)/);
+      assert.match(invocation, /<template #action="(\w+)"><button type="button" class="act">\s*\{\{ Object\.hasOwn\(\1, 'value'\)/);
       // Only default content stays outside a named slot.
       assert.match(invocation, /^<p>Body text<\/p>\n\s*<template #prefix>/);
     }
@@ -1534,7 +1534,7 @@ void [named, functionSlot, undeclared];`);
     const root = await mkdtemp(join(tmpdir(), "html-next-react-scoped-slots-"));
     temporary.push(root);
     await mkdir(join(root, "components"), { recursive: true });
-    await writeFile(join(root, "components/rows.html"), `<template component="x-rows" status="early" summary="Rows."><defs>
+    await writeFile(join(root, "components/rows.html"), `<template component="x-rows" status="early" summary="Rows."><defs><slot name="row"><prop name="item" type="object({ id: string, name: string })" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
       <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></state>
     </defs><ul><slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot></ul></template>`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./rows.html">
@@ -1569,7 +1569,7 @@ void [scoped, staticNode];`);
     const root = await mkdtemp(join(tmpdir(), "html-next-react-invalid-scoped-slot-"));
     temporary.push(root);
     await mkdir(join(root, "components"), { recursive: true });
-    await writeFile(join(root, "components/rows.html"), '<template component="x-rows" status="early" summary="Rows."><div><slot name="row" from:item="\'Ada\'"><span>Fallback</span></slot></div></template>');
+    await writeFile(join(root, "components/rows.html"), '<template component="x-rows" status="early" summary="Rows."><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs><div><slot name="row" from:item="\'Ada\'"><span>Fallback</span></slot></div></template>');
     await writeFile(join(root, "components/app.html"), '<link rel="component" href="./rows.html"><template component="x-app" status="early" summary="App."><main><x-rows><span slot="row">Invalid</span></x-rows></main></template>');
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
@@ -1584,34 +1584,6 @@ void [scoped, staticNode];`);
       return diagnostic.name === "HtmlDiagnosticError" && diagnostic.diagnostic?.code === "HR007" &&
         diagnostic.diagnostic.message === 'Scoped slot `row` requires a consumer <template slot="row">.';
     });
-  });
-
-  it("selects React scoped slots by a dynamic outlet name", async () => {
-    const root = await mkdtemp(join(tmpdir(), "html-next-react-dynamic-scoped-slot-"));
-    temporary.push(root);
-    await mkdir(join(root, "components"), { recursive: true });
-    await writeFile(join(root, "components/receiver.html"), `<template component="x-receiver" status="early" summary="Receiver.">
-      <props><prop name="which" type="string">Outlet name.</prop></props>
-      <div from:data-which="$which"><slot from:name="$which" from:item="'Ada'"><span>Fallback</span></slot></div></template>`);
-    await writeFile(join(root, "components/app.html"), `<link rel="component" href="./receiver.html">
-      <template component="x-app" status="early" summary="App."><main>
-      <x-receiver which="row"><template slot="row"><b $value="$item"></b></template></x-receiver>
-      <x-receiver which="other"><template slot="row"><b $value="$item"></b></template></x-receiver>
-      </main></template>`);
-    const outDirectory = join(root, "out");
-    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
-    const files = manifest.output.artifacts
-      .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
-      .map((artifact) => join(outDirectory, artifact.path));
-    await typecheckReact(root, files);
-    const bundle = await build({
-      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
-      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
-    });
-    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
-    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-    assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><div data-which="row" data-x-receiver-prop-which="row" data-component="x-receiver"><b data-slotted="">Ada</b></div> <div data-which="other" data-x-receiver-prop-which="other" data-component="x-receiver"><span>Fallback</span></div></main>');
   });
 
   it("marks sanitized fragment roots projected through a React slot", async () => {

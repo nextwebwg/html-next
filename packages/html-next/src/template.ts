@@ -1,4 +1,4 @@
-import type { ComponentContract, ScriptContract } from "./types.js";
+import type { ComponentContract, PropContract, PropType, ScriptContract } from "./types.js";
 import type { CompiledExpression, WritablePath } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 
@@ -152,9 +152,10 @@ export type HandlerStep =
 
 export interface SlotContract {
   readonly name?: string;
-  readonly dynamic: boolean;
   readonly required: boolean;
   readonly props?: readonly string[];
+  /** The slot's declared props, from its `<slot>` declaration in `<defs>`. */
+  readonly declared?: Readonly<Record<string, PropContract>>;
 }
 
 export type TemplateNode = ElementNode | TextNode | SlotNode;
@@ -253,12 +254,13 @@ export interface TextNode {
 export interface SlotNode {
   readonly kind: "slot";
   readonly name?: string;
-  readonly nameExpression?: CompiledExpression;
   readonly flow?: Extract<Flow, { kind: "each" }>;
   readonly props?: readonly {
     readonly name: string;
     readonly expression: string;
     readonly expressionPlan: CompiledExpression;
+    /** The declared type a bound value must conform to; a static or default value already does. */
+    readonly type?: PropType;
   }[];
   readonly fallback?: readonly TemplateNode[];
 }
@@ -318,21 +320,6 @@ export function elementMatchRoot(node: ElementNode): ElementNode {
   };
 }
 
-/**
- * The dynamic slot names a region's body reads as it renders: outside its own regions, fallbacks
- * included. A change to their text rebuilds the body, as a change to its decision does.
- */
-const slotNames = new WeakMap<ElementNode, readonly CompiledExpression[]>();
-
-export function dynamicSlotNames(body: ElementNode): readonly CompiledExpression[] {
-  const collect = (children: readonly TemplateNode[]): CompiledExpression[] => children.flatMap((child): CompiledExpression[] => {
-    if (child.kind === "slot") return child.flow !== undefined ? [] : [...child.nameExpression === undefined ? [] : [child.nameExpression], ...collect(child.fallback ?? [])];
-    return child.kind === "element" && child.flow === undefined ? collect(child.children) : [];
-  });
-  let names = slotNames.get(body);
-  if (names === undefined) slotNames.set(body, names = collect(body.children));
-  return names;
-}
 
 /**
  * The ref names a definition places inside an iteration. Multiplicity is a property of where the

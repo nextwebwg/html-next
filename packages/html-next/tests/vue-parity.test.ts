@@ -707,7 +707,7 @@ const cases: readonly ParityCase[] = [
     name: "nested scoped projection keeps consumer state and receiving row props",
     features: ["scoped slots", "consumer lexical state", "nested component conversion", "slot repetition"],
     definitions: {
-      "x-scoped-rows": `<template component="x-scoped-rows"><defs>
+      "x-scoped-rows": `<template component="x-scoped-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop></slot>
         <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
         <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
@@ -729,7 +729,7 @@ const cases: readonly ParityCase[] = [
     name: "repeated scoped slots pass row data into consumer templates",
     features: ["scoped slots", "slot props", "slot repetition", "slot fallback"],
     definitions: {
-      "x-scoped-list": `<template component="x-scoped-list"><defs>
+      "x-scoped-list": `<template component="x-scoped-list"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
         <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
         <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button type="button" on:click="add">Add</button><ul>

@@ -15,7 +15,7 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
-const rows = `<template component="x-scoped-rows"><defs>
+const rows = `<template component="x-scoped-rows"><defs><slot name="row"><prop name="item" type="unknown">The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
   <state type="boolean" name="alternate" value="false"></state>
   <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>

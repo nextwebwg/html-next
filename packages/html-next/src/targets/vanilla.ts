@@ -3,7 +3,7 @@ import type { ComponentDefinition } from "../template.js";
 import { rootArms } from "../template.js";
 import type { PropContract } from "../types.js";
 import { getDomInterface } from "../platform.js";
-import { dependentPropTypeSource, selectorGenerics } from "./shared.js";
+import { dependentPropTypeSource, selectorGenerics, slotPropsType } from "./shared.js";
 import { targetComponent } from "./backend.js";
 import { blockPlan, emitBlocks } from "./vanilla-blocks.js";
 import type { Invoked } from "../generate.js";
@@ -81,11 +81,17 @@ export function generateVanilla(
     "  children?: readonly (string | Node)[];",
     "  slots?: Readonly<Record<string, readonly (string | Node)[]>>;",
     "}",
+    // Each declared slot's props, as its consumer's <template slot> reads them.
+    ...Object.keys(contract.slots ?? {}).length === 0 ? [] : [
+      `export interface ${contract.name}Slots {`,
+      ...Object.entries(contract.slots!).map(([slot, declaration]) => `  readonly ${tsKey(slot === "" ? "default" : slot)}: ${slotPropsType(declaration.props)};`),
+      "}",
+    ],
     `export declare function create${contract.name}${genericDeclaration}(props${hasRequired ? "" : "?"}: ${contract.name}Props${genericReference}): ${elementType};`,
     // `componentRegistry.create` types this tag's props and root, as HTMLElementTagNameMap types createElement.
     "declare global {",
     "  interface ComponentTagMap {",
-    `    ${js(contract.tag)}: { element: ${elementType}; props: Omit<${contract.name}Props, "attributes" | "children" | "slots"> };`,
+    `    ${js(contract.tag)}: { element: ${elementType}; props: Omit<${contract.name}Props, "attributes" | "children" | "slots">${Object.keys(contract.slots ?? {}).length === 0 ? "" : `; slots: ${contract.name}Slots`} };`,
     "  }",
     "}",
     "",
