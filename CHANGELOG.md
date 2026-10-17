@@ -1,5 +1,9 @@
 # Changelog
 
+## expressmark 0.0.1
+
+- Establish the independently versioned Expressive Markdown package with ESM/types, installed-consumer verification, and a protected release workflow. This is a name reservation with no public API; parsing and writing are not implemented.
+
 ## 1.0.0-alpha.58
 
 ### Added

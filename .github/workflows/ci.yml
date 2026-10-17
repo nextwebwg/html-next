@@ -129,10 +129,14 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter '@nextwebwg/${{ matrix.package }}...' build
-      - env:
+      - if: matrix.package != 'expressmark'
+        run: pnpm --filter '{./packages/${{ matrix.package }}}...' build
+      - if: matrix.package != 'expressmark'
+        env:
           HTMLNEXT_PACKAGE_TEST: ${{ matrix.package }}
         run: pnpm test:package
+      - if: matrix.package == 'expressmark'
+        run: pnpm --filter expressmark verify
 
   runtimes:
     name: Deno and Bun runtime
