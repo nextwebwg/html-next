@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
@@ -257,13 +257,35 @@ for (const target of ["vue", "react"] as const) it(`${target} supports named loc
   const server = await createServer({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()] });
   try {
     const resolved = await server.pluginContainer.resolveId("./controls.html", join(root, "src", "main.ts"));
-    assert.ok(resolved?.id.endsWith("index.ts"));
+    // The app's components convert as one graph; each resource imports its own entry from it.
+    assert.match(normalizePath(resolved!.id), new RegExp(`/\\.html-next/${target}/app/resource-entries/[^/]+\\.ts$`));
     const raw = await server.pluginContainer.resolveId("./controls.html?raw", join(root, "src", "main.ts"));
     assert.ok(raw);
     assert.ok(raw.id.endsWith("?raw"));
     const rawSource = await realpath(raw.id.slice(0, -"?raw".length));
     assert.equal(normalizePath(rawSource), normalizePath(await realpath(join(root, "src", "controls.html"))));
   } finally { await server.close(); }
+}, 60_000);
+
+it("converts the app's components as one graph, publishing the state another file reads", async () => {
+  const { root } = await fixture();
+  await writeFile(join(root, "src", "steps.html"), `<template component="x-steps" status="early" summary="Steps."><defs>
+    <state name="current" type="number" value="1"></state><state name="unread" type="number" value="2"></state>
+  </defs><ol><slot></slot></ol></template>`);
+  // The reader is its own file; framework code composes <x-steps><x-step>, so x-steps' template never names it.
+  await writeFile(join(root, "src", "step.html"), `<template component="x-step" status="early" summary="Step."><defs>
+    <context name="current" from="x-steps"></context>
+  </defs><li $value="$current"></li></template>`);
+  const provider = async (): Promise<string> => {
+    const resources = join(root, "node_modules", ".html-next", "vue", "app", "resources");
+    const artifact = (await readdir(resources, { recursive: true })).find((path) => basename(path) === "XSteps.vue")!;
+    return readFile(join(resources, artifact), "utf8");
+  };
+  await syncHtmlNext({ target: "vue", root, entries: ["src/steps.html"] });
+  assert.match(await provider(), /provide\('html-next:x-steps:current'/);
+  assert.doesNotMatch(await provider(), /html-next:x-steps:unread/);
+  await syncHtmlNext({ target: "vue", root, entries: ["src/steps.html"], publicState: true });
+  assert.match(await provider(), /provide\('html-next:x-steps:unread'/);
 }, 60_000);
 
 it("converts a local HTML resource when a React TSX entry first imports it", async () => {

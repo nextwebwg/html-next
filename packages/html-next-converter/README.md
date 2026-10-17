@@ -55,6 +55,10 @@ definition-relative requests in the browser. Root-relative and absolute request 
 mapping; a missing mapping for a component-relative URL is a conversion error. The equivalent
 JavaScript option is `publicRootURL`.
 
+A component publishes a state to `<context>` readers only when a converted component reads it.
+Pass `--public-state` (`publicState: true`) when components outside the conversion, such as another
+library's, read your components' state through `<context>`; every state is then published.
+
 Application conversion emits an `application.ts` entry for the selected graph roots. Library
 conversion emits an `index.ts` entry whose named exports are independently consumable. Both modes
 emit `html-next.conversion.json`, which records the input entries, output entry, every artifact,

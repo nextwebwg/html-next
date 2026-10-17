@@ -10,6 +10,7 @@ import {
   generateReactConversion,
   generateSvelteConversion,
   HtmlDiagnosticError,
+  publishedStates,
   HtmlDiagnosticAggregateError,
   type HtmlDiagnostic,
   loadNodeComponents,
@@ -67,6 +68,11 @@ interface BaseConvertOptions {
   readonly root?: string;
   /** Browser URL of `root`, required when a data source is relative to its component file. */
   readonly publicRootURL?: string;
+  /**
+   * Publish every state to `<context>` readers, including readers outside this conversion. Without
+   * it, a component publishes only the states the converted components read.
+   */
+  readonly publicState?: boolean;
   /** Also write `<tag>.host.d.ts` beside each definition that declares a controller, as the CLI does. */
   readonly hostTypes?: boolean;
 }
@@ -444,6 +450,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       names.set(name, { path, source });
     } catch (error) { recover(error); }
   }
+  const definitions = [...graph.nodes.values()].map((node) => node.definition);
   const slotsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition.slots ?? []] as const));
   const propsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     new Set(Object.keys(node.definition.contract.props))] as const));
@@ -498,6 +505,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         source: Object.freeze({ file: definitionURL }),
         ...(controller === undefined ? {} : { controller: relativeImport(componentPath, controller) }),
       });
+      // A state is published only for the readers the build knows of, unless every state is public.
+      const published = options.publicState === true ? undefined : publishedStates(node.definition, definitions);
       let content: string;
       let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
       let svelteConversion: ReturnType<typeof generateSvelteConversion> | undefined;
@@ -510,6 +519,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         };
         const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "vue" ? generateVueComponent(definition, {
+          publishedStates: published,
           slotsByTag,
           propContractsByTag,
           guardNestedDepth,
@@ -520,6 +530,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           },
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
+          publishedStates: published,
           slotsByTag,
           guardNestedDepth,
           rootDecorations: decorationReceivers?.get(tag),
@@ -541,6 +552,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           requestsSpecifier: relativeImport(componentPath, "svelte/requests.ts").replace(/\.ts$/, ""),
           headSpecifier: relativeImport(componentPath, "svelte/head.svelte.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
+          publishedStates: published,
           slotsByTag,
           propsByTag,
           propContractsByTag,

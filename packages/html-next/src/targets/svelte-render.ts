@@ -26,9 +26,10 @@ const INTERNAL_PROPS = [ROOT_OWNER_PROP, DECORATIONS_PROP, BINDING_INPUTS_PROP, 
 /** Helpers a component calls by these names; the expression helpers come from its lowering. */
 export const SVELTE_RENDER_COMPONENTS = ["formatValue", "isString", "isNumber", "isInteger", "isBoolean", "rootAttributes",
   "retainedValue", "retainedStructuralValue", "writePath", "checkedSlot", "setProperty",
-  "decorate", "hostStateTokens"] as const;
+  "decorate", "hostStateTokens", "publishState", "injectContext"] as const;
 
-const SOURCE = `import { createAttachmentKey } from "svelte/attachments";
+const SOURCE = `import { getContext, setContext } from "svelte";
+import { createAttachmentKey } from "svelte/attachments";
 
 ${expressionHelpersSource()}
 
@@ -112,6 +113,22 @@ export function writePath(root: unknown, path: readonly unknown[], value: unknow
     if (index === path.length - 1) { if (!Object.is((target as Record<string | number, unknown>)[key], value)) (target as Record<string | number, unknown>)[key] = value; }
     else target = (target as Record<string | number, unknown>)[key];
   }
+}
+
+/**
+ * Publishes a state to the component's descendants, which read it with \`<context>\`. The getter
+ * keeps every read current.
+ */
+export function publishState(tag: string, name: string, read: () => unknown): void {
+  setContext(\`html-next:\${tag}:\${name}\`, { get value() { return read(); } });
+}
+
+/** The state an ancestor component publishes; a reader with no such ancestor is HR009. */
+export function injectContext(reader: string, from: string, name: string): { readonly value: unknown } {
+  const context = getContext<{ readonly value: unknown } | undefined>(\`html-next:\${from}:\${name}\`);
+  if (context !== undefined) return context;
+  const message = "<" + reader + "> requires context \u0060" + name + "\u0060 from <" + from + ">.";
+  throw Object.assign(new Error("HR009: " + message), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message }) });
 }
 
 /** A scoped slot's snippet; plain children cannot fill it (HR007). */

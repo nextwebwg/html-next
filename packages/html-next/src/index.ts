@@ -44,6 +44,7 @@ export {
   type GeneratedArtifact,
 } from "./generate.js";
 export { LANGUAGE_EXTENSIONS, TRANSITIONS_EXTENSION, transitionElements } from "./transition-syntax.js";
+export { publishedStates } from "./targets/state-roots.js";
 export { addControllerGraph } from "./controller-files.js";
 export { writeHostDeclarations } from "./host-declarations.js";
 export { parseComponent } from "./source-parser.js";

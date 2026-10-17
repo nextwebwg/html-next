@@ -400,6 +400,30 @@ describe("HTML Next unplugin", () => {
 
   });
 
+  it("leaves out context providing that nothing in the build reads, unless state is public", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-public-state-"));
+    temporary.push(root);
+    await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter."><defs>
+      <state name="count" type="number" value="0"></state>
+      <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+    </defs><button on:click="increment">{$count}</button></template>`);
+    await writeFile(join(root, "main.js"), `export { createXCounter } from ${JSON.stringify(componentsModule)};`);
+    const built = async (publicState: boolean): Promise<string> => {
+      await build({
+        root,
+        logLevel: "silent",
+        plugins: [htmlNext.vite({ entries: ["counter.html"], root, mode: "application", publicState })],
+        resolve: { alias: generatedRuntimeAlias },
+        build: { minify: false, outDir: `dist-${publicState}`, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
+      });
+      return readFile(join(root, `dist-${publicState}/app.js`), "utf8");
+    };
+    // A provider keeps the set of readers it tells after each render.
+    const provider = /I\.R = (?:\/\* @__PURE__ \*\/ )?new Set\(\)/;
+    assert.doesNotMatch(await built(false), provider);
+    assert.match(await built(true), provider);
+  });
+
   it("compiles a read-only reactive parent with a bare child invocation through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-linked-"));
     temporary.push(root);
