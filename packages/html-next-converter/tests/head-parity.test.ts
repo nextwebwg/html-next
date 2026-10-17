@@ -50,7 +50,7 @@ const detach = {
 
 /** What each page does with the components: the scenario's `app` and `scripts`, through the framework's own state. */
 const vanillaEntry = `${tags.map((tag) => `import { create${pascal(tag)} } from "./${pascal(tag)}.js";`).join("\n")}
-import { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";
+import { componentRegistry } from "@nextwebwg/html-next/generated-runtime";
 ${detach}const mount = () => document.querySelector("#mount");
 let pageA, product, note, cards = [];
 globalThis.app = {
@@ -60,10 +60,10 @@ globalThis.app = {
     product = createXProduct();
     mount().append(createDocsLayout({ children: [pageA] }), ...cards, product, createXProduct(), createVendorWidget(), createCdnBadge());
   },
-  section(text) { updateGeneratedProps(pageA, { section: text }); },
+  section(text) { componentRegistry.update(pageA, { section: text }); },
   note(shown) { if (shown) pageA.append(note = createXNote()); else note.remove(); },
   cards(count) { for (const card of cards.splice(count)) card.remove(); },
-  schema(value) { updateGeneratedProps(product, { schema: value }); },
+  schema(value) { componentRegistry.update(product, { schema: value }); },
   page() { pageA.replaceWith(createPageB()); },
   unmount() { mount().replaceChildren(); },
 };

@@ -70,8 +70,8 @@ let value = $state<string | number>(2);
           await live.evaluate(() => window.HtmlRuntime.lowerDocument());
           // A native HTML attribute is a string input. Match the Svelte consumer's actual numeric value.
           await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-            updateComponentProps(root: Element, props: Record<string, unknown>): void;
-          }).updateComponentProps(document.querySelector("button")!, { value: 2 }));
+            componentRegistry: { update(root: Element, props: Record<string, unknown>): void };
+          }).componentRegistry.update(document.querySelector("button")!, { value: 2 }));
           const output = bundles.get(mode)!;
           await svelte.setContent(`<main>${hydrate ? output.server : ""}</main>`);
           await svelte.addScriptTag({ path: output.browser });
@@ -93,8 +93,8 @@ let value = $state<string | number>(2);
           await compare({ mode: "text", value: "2", title: "two", text: "2", valid: false });
           const set = async (value: number | string) => {
             await live.evaluate((next) => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-              updateComponentProps(root: Element, props: Record<string, unknown>): void;
-            }).updateComponentProps(document.querySelector("button")!, { value: next }), value);
+              componentRegistry: { update(root: Element, props: Record<string, unknown>): void };
+            }).componentRegistry.update(document.querySelector("button")!, { value: next }), value);
             await svelte.evaluate((next) => (window as unknown as { svelteSetValue(value: string | number): void }).svelteSetValue(next), value);
           };
           await set(42);

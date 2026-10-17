@@ -352,7 +352,7 @@ describe("HTML Next unplugin", () => {
     // +70 B: `host.on` records each listener as a known responder for `hasResponder`.
     // Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_861, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 9_083, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

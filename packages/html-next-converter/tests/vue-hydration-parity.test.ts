@@ -255,8 +255,8 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XHydra
           await Promise.all([live, vue].map((page) => page.locator("#case button").first().click()));
           await Promise.all([live, vue].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "1")));
           await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & {
-            updateComponentProps(element: Element, values: Record<string, unknown>): void;
-          }).updateComponentProps(document.querySelector("#case")!, { label: "Next" }));
+            componentRegistry: { update(element: Element, values: Record<string, unknown>): void };
+          }).componentRegistry.update(document.querySelector("#case")!, { label: "Next" }));
           await vue.evaluate(() => window.changeHydratedLabel("Next"));
           await Promise.all([live, vue].map((page) => page.waitForFunction(() => document.querySelector("#case h2")?.textContent === "Next")));
           const [updatedLive, updatedVue] = await Promise.all([snapshot(live), snapshot(vue)]);

@@ -100,11 +100,11 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== '1')('Node output continue
         registerComponentDefinitions(${JSON.stringify([definition])});
         lowerDocument(document, { connect: false });`,
       live: `import { startBrowserComponents } from ${JSON.stringify(loader)};
-        export { inspectInstance, updateComponentProps } from ${JSON.stringify(runtime)};
+        export { inspectInstance, componentRegistry } from ${JSON.stringify(runtime)};
         export const ready = startBrowserComponents().then(value => { window.stopComponents = value.stop; });`,
       static: `import { registerComponentDefinitions, observeDocument, getComponentHost } from ${JSON.stringify(runtime)};
         import * as controller from ${JSON.stringify(controllerFile)};
-        export { inspectInstance, updateComponentProps } from ${JSON.stringify(runtime)};
+        export { inspectInstance, componentRegistry } from ${JSON.stringify(runtime)};
         registerComponentDefinitions(${JSON.stringify([definition])});
         const initialized = new WeakSet();
         window.stopComponents = observeDocument(document, { onConnect(element) {
@@ -218,8 +218,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== '1')('Node output continue
           assert.equal(await hydrated.locator('b').textContent(), '18');
           for (const page of [hydrated, fresh]) {
             await page.evaluate(() => {
-              const context = window as unknown as { Continuation: { updateComponentProps(element: Element, props: Record<string, unknown>): void } };
-              context.Continuation.updateComponentProps(document.querySelector('#subject')!, { step: 3 });
+              const context = window as unknown as { Continuation: { componentRegistry: { update(element: Element, props: Record<string, unknown>): void }; } };
+              context.Continuation.componentRegistry.update(document.querySelector('#subject')!, { step: 3 });
             });
             await page.waitForFunction(() => document.querySelector('#subject b')?.textContent === '27');
             await page.locator('button').click();

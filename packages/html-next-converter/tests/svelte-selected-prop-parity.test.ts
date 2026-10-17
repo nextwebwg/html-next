@@ -90,8 +90,8 @@ let selected = $state<{ kind: string; value: unknown }>({ kind: "number", value:
           for (const [index, [kind, value]] of changes.entries()) {
             if (index > 0) {
               await live.evaluate(([nextKind, nextValue]: readonly [string, unknown]) => (window as unknown as { HtmlRuntime: {
-                updateComponentProps(root: Element, props: Record<string, unknown>): void;
-              } }).HtmlRuntime.updateComponentProps(document.querySelector("#case")!, { kind: nextKind, value: nextValue }), [kind, value] as const);
+                componentRegistry: { update(root: Element, props: Record<string, unknown>): void };
+              } }).HtmlRuntime.componentRegistry.update(document.querySelector("#case")!, { kind: nextKind, value: nextValue }), [kind, value] as const);
               await svelte.evaluate(([nextKind, nextValue]: readonly [string, unknown]) => (window as unknown as {
                 svelteSetSelected(kind: string, value: unknown): void;
               }).svelteSetSelected(nextKind, nextValue), [kind, value] as const);

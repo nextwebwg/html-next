@@ -2802,7 +2802,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     await writeFile(
       entryPath,
       `export { createDemoProps } from "./vanilla/DemoProps.js";\n` +
-      `export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";\n`,
+      `export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";\n`,
     );
     await build({
       entryPoints: [entryPath],
@@ -2830,7 +2830,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     await writeFile(
       singleEntryPath,
       `export { createSingleProp } from "./vanilla/SingleProp.js";\n` +
-      `export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";\n`,
+      `export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";\n`,
     );
     await build({
       entryPoints: [singleEntryPath],
@@ -2884,10 +2884,10 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         await page.setContent("<main></main>");
         await page.addScriptTag({ path: singleBundlePath });
         const result = await page.evaluate(async () => {
-          const { createSingleProp: create, updateGeneratedProps: update } = (window as unknown as {
+          const { createSingleProp: create, componentRegistry: { update } } = (window as unknown as {
             SingleProp: {
               createSingleProp(options?: Record<string, unknown>): HTMLInputElement;
-              updateGeneratedProps(element: Element, props: Record<string, unknown>): void;
+              componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
             };
           }).SingleProp;
           const root = create();
@@ -2945,10 +2945,10 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(async () => {
           (window as unknown as { observedTargets: string[] }).observedTargets = [];
-          const { createDemoProps: create, updateGeneratedProps: update } = (window as unknown as {
+          const { createDemoProps: create, componentRegistry: { update } } = (window as unknown as {
             DemoProps: {
               createDemoProps(options?: Record<string, unknown>): Element;
-              updateGeneratedProps(element: Element, props: Record<string, unknown>): void;
+              componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
             };
           }).DemoProps;
           const projected = document.createElement("em");
@@ -3110,7 +3110,7 @@ describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
     assert.deepEqual(parsed.errors, []);
     await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);
     const entries: Record<string, string> = {
-      vanilla: `import { updateComponentProps } from "@nextwebwg/html-next/runtime";
+      vanilla: `import { componentRegistry } from "@nextwebwg/html-next/runtime";
 import { createXAction } from "./vanilla/XAction.js";
 const save = createXAction({ children: ["Save"] });
 document.querySelector("main").append(
@@ -3118,8 +3118,8 @@ document.querySelector("main").append(
   createXAction({ as: "a", href: "/next", children: ["Next"] }),
   createXAction({ as: "a", href: "/next", disabled: true, children: ["Off"] }),
 );
-window.switchSave = () => updateComponentProps(save, { as: "a", href: "/save" });
-window.switchSaveBack = () => updateComponentProps(save, { as: "button" });`,
+window.switchSave = () => componentRegistry.update(save, { as: "a", href: "/save" });
+window.switchSaveBack = () => componentRegistry.update(save, { as: "button" });`,
       vue: `import { createApp, h } from "vue";
 import XAction from "./vue/XAction";
 createApp({ render: () => [

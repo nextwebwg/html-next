@@ -112,8 +112,8 @@ target.reactSetCase = (props: Record<string, unknown>) => root.render(<XRequired
           assert.deepEqual(convertedInitial.behavior, nativeInitial.behavior);
           await assertPixelsEqual(react, convertedInitial.pixels, nativeInitial.pixels, "initial prop pixels differ", live);
           const liveCode = await live.evaluate(() => {
-            try { (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void })
-              .updateComponentProps(document.querySelector("#case")!, { n: "bad" }); return null; }
+            try { (window.HtmlRuntime as typeof window.HtmlRuntime & { componentRegistry: { update(element: Element, props: Record<string, unknown>): void }; })
+              .componentRegistry.update(document.querySelector("#case")!, { n: "bad" }); return null; }
             catch (error) { return (error as { diagnostic?: { code: string } }).diagnostic?.code ?? "THROWN"; }
           });
           await react.evaluate(() => window.reactSetCase({ n: "bad" }));
@@ -123,8 +123,8 @@ target.reactSetCase = (props: Record<string, unknown>) => root.render(<XRequired
           assert.deepEqual(convertedInvalid.behavior, nativeInvalid.behavior, "invalid prop update diverged");
           assert.equal(nativeInvalid.behavior.badInput, true);
           await assertPixelsEqual(react, convertedInvalid.pixels, nativeInvalid.pixels, "invalid prop pixels differ", live);
-          await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void })
-            .updateComponentProps(document.querySelector("#case")!, { n: 43 }));
+          await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { componentRegistry: { update(element: Element, props: Record<string, unknown>): void }; })
+            .componentRegistry.update(document.querySelector("#case")!, { n: 43 }));
           await react.evaluate(() => window.reactSetCase({ n: 43 }));
           await react.waitForFunction(() => document.querySelector("#case")?.textContent === "44", undefined, { timeout: 5_000 });
           const [nativeRecovered, convertedRecovered] = await Promise.all([observe(live), observe(react)]);

@@ -106,6 +106,8 @@ interface CompiledGraph {
   readonly entry: string;
   readonly packages: ReadonlyMap<string, string>;
   readonly components: ReadonlyMap<string, string>;
+  /** Component modules whose package declares them free of side effects. */
+  readonly sideEffectFree: ReadonlySet<string>;
   readonly publicComponents: ReadonlyMap<string, string>;
   readonly styles: ReadonlyMap<string, string>;
   readonly support: string;
@@ -304,6 +306,11 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     stylesheetAssetURL: url => url.startsWith("file:") ? `/@fs/${fileURLToPath(url).split(sep).join("/")}${new URL(url).search}${new URL(url).hash}` : url,
   });
   const components = new Map<string, string>();
+  // A component module defines its component when evaluated; a package that declares its modules
+  // free of side effects lets the bundler drop those nothing imports a name from.
+  const sideEffectFreeRoots = installed.filter((library) => library.sideEffectFree)
+    .map((library) => pathToFileURL(`${library.directory}${sep}`).href);
+  const sideEffectFree = new Set<string>();
   const publicComponents = new Map<string, string>();
   const styles = new Map<string, string>();
   const manifestComponents: HtmlNextBuildManifest["components"][number][] = [];
@@ -385,6 +392,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       );
       module = routeSupportImports(module, supportImports);
       components.set(resolvedComponentId(node.id), module);
+      if (sideEffectFreeRoots.some((prefix) => node.url.startsWith(prefix))) sideEffectFree.add(resolvedComponentId(node.id));
       styles.set(`${resolvedStylePrefix}${encodedURL}.css`, artifacts.find((candidate) => candidate.path === `styles/${definition.contract.tag}.css`)!.content);
       const capabilities = componentCapabilities(definition);
       for (const capability of capabilities) allCapabilities.add(capability);
@@ -447,6 +455,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     entry,
     packages,
     components,
+    sideEffectFree,
     publicComponents,
     styles,
     support: supportSource(supportImports),
@@ -586,7 +595,9 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
           }
           return publicComponent;
         }
-        return current.components.get(id) ?? current.styles.get(id) ?? null;
+        const component = current.components.get(id);
+        if (component !== undefined) return { code: component, moduleSideEffects: !current.sideEffectFree.has(id) };
+        return current.styles.get(id) ?? null;
       });
     },
     async generateBundle() {

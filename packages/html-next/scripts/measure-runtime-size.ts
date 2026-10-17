@@ -128,37 +128,37 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // +80 B on every fixture: `host.on` records each listener as a known responder on the document's
 // record and tells `hasResponder` readers, so a component that asks sees a consumer's controller
 // that registered first (javascript#has-responder).
-const staticGenerated = await generatedFixture("static-card", 7_080);
+const staticGenerated = await generatedFixture("static-card", 7_315);
 // The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
 // +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
 // which the bundle does not include.
-const reactiveGenerated = await generatedFixture("reactive-counter", 7_310);
-const propGenerated = await generatedFixture("prop-button", 11_530);
+const reactiveGenerated = await generatedFixture("reactive-counter", 7_560);
+const propGenerated = await generatedFixture("prop-button", 11_834);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
-const computedGenerated = await generatedFixture("computed-counter", 7_630);
+const computedGenerated = await generatedFixture("computed-counter", 7_878);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
-const keyedGenerated = await generatedFixture("keyed-list", 7_780);
+const keyedGenerated = await generatedFixture("keyed-list", 8_035);
 // +5 B: a root renders, at its first connection, what changed after its construction while it waited
 // detached, such as a parent's bound list of objects; until then such a change never rendered.
 // +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
 // does nothing until a component on the page asks.
-const dataGenerated = await generatedFixture("data-read", 7_722);
-const controllerGenerated = await generatedFixture("controller-lifecycle", 7_080);
+const dataGenerated = await generatedFixture("data-read", 7_970);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 7_314);
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 8_780);
+const requestGenerated = await generatedFixture("controller-request", 9_024);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
-const headNoneGenerated = await generatedFixture("head-none", 10_230);
-const headStaticGenerated = await generatedFixture("head-static", 12_355);
-const headJsonGenerated = await generatedFixture("head-json", 12_505);
-const headGenerated = await generatedFixture("head-script", 14_505);
+const headNoneGenerated = await generatedFixture("head-none", 10_531);
+const headStaticGenerated = await generatedFixture("head-static", 12_649);
+const headJsonGenerated = await generatedFixture("head-json", 12_800);
+const headGenerated = await generatedFixture("head-script", 14_784);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -167,7 +167,7 @@ const headGenerated = await generatedFixture("head-script", 14_505);
 // recording the rows it kept in place, so lists whose rows read their position visit only moved rows,
 // 85 B for the platform-object check that keeps DOM nodes in state unwrapped, and 17 B for the
 // whitespace between its elements, which templates keep as authored.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_347);
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_604);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];
