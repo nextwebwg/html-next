@@ -62,6 +62,14 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
     </script>`;
     files["/lists.html"] = `<!doctype html><head><link rel="component" href="/list.html"></head><body><main></main>
       <x-list id="authored"><template slot="row"><b>{$item}</b></template><template slot="plain"><i>static</i></template>dropped</x-list>${listScript}</body>`;
+    // A definition code registers whose styles import a stylesheet, and an authored instance waiting for it.
+    files["/styles/defaults.css"] = "p { color: rgb(1, 2, 3); } :host(:state(open)) p { background-color: rgb(4, 5, 6); }";
+    files["/styles/define.html"] = `<!doctype html><body><main><x-styled id="authored"></x-styled></main>
+      <script type="module">
+        import { ready, componentRegistry } from "/browser.js";
+        await ready;
+        window.registry = componentRegistry;
+      </script></body>`;
     files["/compiled-lists.html"] = `<!doctype html><body><main></main>${listScript}</body>`;
     files["/"] = `<!doctype html><head><link rel="component" href="/callout.html"></head><body><main></main><script type="module">
       import * as live from "/browser.js";
@@ -188,6 +196,45 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
         assert.deepEqual(await run("/compiled-lists.html", ["x-clist"], "<b>row</b>"),
           { "x-clist": { before: ["row", "row", "static"], connected: ["row", "row", "static"], updated: ["row", "row", "row", "static"] } });
         assert.match(String((await run("/compiled-lists.html", ["x-clist"], "<b>{$item}</b>"))["x-clist"]), /^HR007/);
+        assert.deepEqual(errors, []);
+        await page.close();
+      });
+
+      it("defines a carrier whose styles import a stylesheet, registering at once and styling once the import loads", async () => {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+        await page.route("https://registry.example/**", async (route) => {
+          const path = new URL(route.request().url()).pathname;
+          // The import arrives after define returns.
+          if (path.endsWith(".css")) await new Promise((resolve) => setTimeout(resolve, 100));
+          return route.fulfill({ contentType: path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css" : "text/html", body: files[path]! });
+        });
+        await page.goto("https://registry.example/styles/define.html");
+        await page.waitForFunction(() => "registry" in window);
+        const result = await page.evaluate(async () => {
+          type Registry = typeof import("../src/component-registry.js").componentRegistry;
+          const registry = (window as unknown as { registry: Registry }).registry;
+          const host = document.createElement("div");
+          host.innerHTML = `<template component="x-styled"><defs><state name="open" type="boolean" value="true"></state></defs>
+            <section><p>Styled</p></section><style>@import "./defaults.css"; p { margin: 7px; }</style></template>`;
+          registry.define(host.firstElementChild as HTMLTemplateElement);
+          const waited = await Promise.race([registry.whenDefined("x-styled").then(() => "defined"), new Promise((resolve) => setTimeout(() => resolve("waiting"), 0))]);
+          const authored = document.querySelector("#authored") ?? document.querySelector("main > section")!;
+          const created = registry.create("x-styled");
+          document.querySelector("main")!.append(created);
+          const style = (root: Element) => {
+            const computed = getComputedStyle(root.querySelector("p")!);
+            return [computed.color, computed.backgroundColor, computed.marginTop];
+          };
+          const lowered = authored.localName;
+          for (let tries = 0; tries < 200 && style(created)[0] !== "rgb(1, 2, 3)"; tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return { waited, lowered, authored: style(authored), created: style(created) };
+        });
+        const styled = ["rgb(1, 2, 3)", "rgb(4, 5, 6)", "7px"];
+        assert.deepEqual(result, { waited: "defined", lowered: "section", authored: styled, created: styled });
         assert.deepEqual(errors, []);
         await page.close();
       });

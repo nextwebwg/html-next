@@ -54,6 +54,7 @@ import {
   COMPONENT_ATTRIBUTE,
   compileComponentStyles,
   COMPONENT_STYLE_BOUNDARIES,
+  hasUnresolvedImports,
   type CompiledComponentStyles,
   type ComponentStyleGraph,
   markProjectedRoot,
@@ -563,7 +564,24 @@ function defineCarrier(root: Document, carrier: HTMLTemplateElement): void {
     JSON.stringify(registry.definitions.get(tag)?.definition) === JSON.stringify(definition))) return;
   const style = Array.from(carrier.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style");
-  registerDefinition(root, registry, tag, { wrapper: carrier, style: installComponentStyles(definition, root, style, undefined, styleGraph(registry, [definition])), definition });
+  // Stylesheet imports load asynchronously, as a document's own do: the definition registers and lowers
+  // now, and its styles apply once its imports are in.
+  const deferred = definitionPreparer !== undefined && hasUnresolvedImports(definition.css);
+  registerDefinition(root, registry, tag, { wrapper: carrier,
+    style: deferred ? undefined : installComponentStyles(definition, root, style, undefined, styleGraph(registry, [definition])), definition });
+  if (deferred) {
+    void definitionPreparer!(carrier).then((ready) => {
+      const live = registry.definitions.get(tag);
+      if (ready === undefined || live?.definition !== definition) return;
+      const installed = installComponentStyles(ready, root, style, undefined, styleGraph(registry, [ready]));
+      const names = stateNamesByDefinition.get(ready) ?? [];
+      stateNamesByDefinition.set(definition, names);
+      registry.definitions.set(tag, { ...live, definition: ready, style: installed });
+      // Roots in the document start writing the states these styles test. ponytail: a root created
+      // and not yet inserted while the imports loaded writes none; re-create it if its styles test state.
+      recordTestedStates(root, { [tag]: names });
+    });
+  }
   carrier.remove();
   const state = documentState(root);
   if (state.rescan === undefined) lowerScopes(root, [root]);
@@ -661,6 +679,14 @@ export type ProjectedSlotParser = (
 ) => readonly TemplateNode[];
 
 let inlineDefinitionParser: InlineDefinitionParser | undefined;
+/** Resolves an inline definition's stylesheet imports; the live loader installs it and reports its failures. */
+export type DefinitionPreparer = (carrier: HTMLTemplateElement) => Promise<ComponentDefinition | undefined>;
+let definitionPreparer: DefinitionPreparer | undefined;
+
+/** Lets the live loader resolve the stylesheet imports of a definition `componentRegistry.define` registers. */
+export function installDefinitionPreparer(prepare: DefinitionPreparer): void {
+  definitionPreparer = prepare;
+}
 let projectedSlotParser: ProjectedSlotParser | undefined;
 
 /** Lets the live delivery teach this runtime to read definitions authored in the document. */

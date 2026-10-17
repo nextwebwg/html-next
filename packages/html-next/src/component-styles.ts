@@ -105,10 +105,14 @@ export function authoredSelector(selector: string): string {
   return restoreStatePseudoClasses(selector.replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, ":slotted("));
 }
 
+/** Whether CSS still holds an `@import` rule, outside comments and strings. */
+export function hasUnresolvedImports(css: string): boolean {
+  return /@import\b/i.test(css.replace(/\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, ""));
+}
+
 /** Constructed sheets discard imports, so synchronous compilation must diagnose them first. */
 export function assertResolvedStylesheet(css: string, source?: string): void {
-  const rules = css.replace(/\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, "");
-  if (/@import\b/i.test(rules)) {
+  if (hasUnresolvedImports(css)) {
     fail("HY004", "Resolve component stylesheet imports with loadNodeComponents() or startBrowserComponents() before synchronous style compilation.", source);
   }
 }
