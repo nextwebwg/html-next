@@ -57,6 +57,11 @@ export interface HtmlNextNativePluginOptions {
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
   /** Optional language extensions to build, such as `"transitions"`. Each is off until listed. */
   readonly extensions?: readonly string[];
+  /**
+   * Publish every state to `<context>` readers, including readers outside this build. Without it,
+   * a component publishes its state only when a component in the build reads it.
+   */
+  readonly publicState?: boolean;
 }
 
 export type HtmlNextPluginOptions = HtmlNextNativePluginOptions | FrameworkPluginOptions;
@@ -352,7 +357,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         ? node.definition
         : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
-        noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
+        noContextReaders: options.publicState !== true && dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
         definitions: definitionsByTag,
         ...options.extensions === undefined ? {} : { extensions: options.extensions },
         // Each component the template invokes, by the module exporting its factory.

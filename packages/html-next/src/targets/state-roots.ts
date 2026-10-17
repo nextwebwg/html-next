@@ -91,3 +91,17 @@ export function conformingScalarStates(definition: ComponentDefinition): Readonl
   }
   return scalars;
 }
+
+/**
+ * The states of `definition` a build publishes to `<context>` readers: those a component in `graph`
+ * reads. Every state can be read, so a build whose readers may lie outside it publishes them all.
+ */
+export function publishedStates(definition: ComponentDefinition, graph: Iterable<ComponentDefinition>): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const reader of graph) {
+    for (const declaration of reader.declarations ?? []) {
+      if (declaration.kind === "context" && declaration.from === definition.contract.tag) names.add(declaration.name);
+    }
+  }
+  return names;
+}

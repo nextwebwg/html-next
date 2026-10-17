@@ -43,8 +43,9 @@ describe.skipIf(!enabled)("Svelte projected context parity", () => {
       const outDirectory = join(directory, mode);
       let appSource: string;
       if (mode === "libraries") {
+        // The reader is another library's component, so the provider's state is public.
         const provider = await convertComponents({ mode: "library", target: "svelte", root: directory,
-          outDirectory: join(outDirectory, "provider"), entries: ["components/steps.html"] });
+          outDirectory: join(outDirectory, "provider"), entries: ["components/steps.html"], publicState: true });
         const reader = await convertComponents({ mode: "library", target: "svelte", root: directory,
           outDirectory: join(outDirectory, "reader"), entries: ["components/step.html"] });
         appSource = `<script>import XSteps from "./provider/${provider.components[0]!.artifact}";

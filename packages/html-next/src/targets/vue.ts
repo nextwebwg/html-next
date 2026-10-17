@@ -876,10 +876,12 @@ export interface VueConversionOptions {
   readonly importSpecifier?: (tag: string) => string;
   readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests" | "head") => string;
   /**
-   * The linked graph's definitions, by tag. A \`:state()\` condition on another component resolves
+   * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
    */
   readonly componentGraph?: ReadonlyMap<string, ComponentDefinition>;
+  /** The states a `<context>` reader can read, from `publishedStates`; without it, every state is published. */
+  readonly publishedStates?: ReadonlySet<string> | undefined;
 }
 
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
@@ -1228,7 +1230,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...computedValues.map(stateSource),
     ...(rootWith === undefined ? [] : [`const ${rootWithName} = computed(() => ${lowering.value(rootWithValue!, names.script)});`]),
     ...context.guarded,
-    ...states.map((state) =>
+    ...states.filter((state) => options.publishedStates?.has(state.name) ?? true).map((state) =>
       `provide(${quote(`html-next:${contract.tag}:${state.name}`)}, ${stateNames.get(state)!});`),
     ...contexts.flatMap((declaration) => {
       const name = contextNames.get(declaration)!;

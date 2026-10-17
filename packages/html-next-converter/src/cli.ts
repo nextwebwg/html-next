@@ -3,10 +3,12 @@
 import { convertComponents, type ConversionGraph, type FrameworkTarget } from "./index.js";
 
 function usage(): string {
-  return "Usage: html-next-convert <vue|react|svelte> <component.html|directory|glob>... --mode <application|library> --out-dir <directory> [--public-root-url <url>]";
+  return "Usage: html-next-convert <vue|react|svelte> <component.html|directory|glob>... --mode <application|library> --out-dir <directory> [--public-root-url <url>] [--public-state]";
 }
 
-async function main(argv: readonly string[]): Promise<void> {
+async function main(input: readonly string[]): Promise<void> {
+  const publicState = input.includes("--public-state");
+  const argv = input.filter((argument) => argument !== "--public-state");
   const target = argv[0] as FrameworkTarget | undefined;
   const modeIndex = argv.indexOf("--mode");
   const mode = argv[modeIndex + 1] as ConversionGraph | undefined;
@@ -20,7 +22,7 @@ async function main(argv: readonly string[]): Promise<void> {
     modeIndex < 2 || outIndex !== modeIndex + 2 || outDirectory === undefined ||
     (publicRootIndex < 0 ? outIndex !== argv.length - 2 : publicRootIndex !== outIndex + 2 || publicRootIndex !== argv.length - 2 || publicRootURL === undefined)
   ) throw new Error(usage());
-  await convertComponents({ mode, entries: argv.slice(1, modeIndex), target, outDirectory, hostTypes: true, ...(publicRootURL === undefined ? {} : { publicRootURL }) });
+  await convertComponents({ mode, entries: argv.slice(1, modeIndex), target, outDirectory, publicState, hostTypes: true, ...(publicRootURL === undefined ? {} : { publicRootURL }) });
 }
 
 if (import.meta.main) {

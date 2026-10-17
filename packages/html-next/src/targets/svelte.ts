@@ -32,7 +32,7 @@ function unknownValueScope(name: string): Scope {
 
 export interface SvelteConversionOptions {
   /**
-   * The linked graph's definitions, by tag. A \`:state()\` condition on another component resolves
+   * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
    */
   readonly componentGraph?: ReadonlyMap<string, ComponentDefinition>;
@@ -52,6 +52,8 @@ export interface SvelteConversionOptions {
   readonly hostSpecifier?: string;
   readonly connectionSpecifier?: string;
   readonly renderSpecifier?: string;
+  /** The states a `<context>` reader can read, from `publishedStates`; without it, every state is published. */
+  readonly publishedStates?: ReadonlySet<string> | undefined;
   /** The request steps, which a component that declares requests imports. */
   readonly requestsSpecifier?: string;
   readonly headSpecifier?: string;
@@ -1037,7 +1039,7 @@ function svelteImport(names: readonly string[]): string[] {
   return [names.length === 0 ? 'import type { Snippet } from "svelte";' : `import { ${[...names, "type Snippet"].join(", ")} } from "svelte";`];
 }
 
-/** The options \`rootAttributes\` takes, only those that differ from its defaults. */
+/** The options `rootAttributes` takes, only those that differ from its defaults. */
 function rootAttributeOptions(scope: string | undefined, nativeRoot: boolean, omit: readonly string[], clientOmit: readonly string[], server: string | undefined): string {
   const options = [
     ...(scope === undefined ? [] : [`scope: ${quote(scope)}`]),
@@ -1104,7 +1106,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
@@ -1311,7 +1313,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     if (destinationCheck === undefined && !read.invalid) {
       return `  ${guard}${(proven ? increment(step, definition, destination) : undefined) ?? writeTo(nested || sameKind || declared === undefined ? read.source : `${read.source} as typeof ${destination}`)};`;
     }
-    // A \`$state\` variable is written through a setter; a path below it, through \`writePath\`.
+    // A `$state` variable is written through a setter; a path below it, through `writePath`.
     return `  ${guard}${lowering.use("write")}((next) => ${nested ? writeTo("next") : `(${writeTo("next")})`}, ${read.source}${writeCheck(destinationCheck, definition, handler, step)});`;
   }).join("\n")}\n}`)
     // A handler that never reads its event takes no parameter.
@@ -1357,8 +1359,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   let script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     `import type { HTMLAttributes${nativeAttributes === "HTMLAttributes" ? "" : ` as ${nativeAttributes}`} } from "svelte/elements";`,
-    ...svelteImport([...(nestedDepthLimit !== undefined || contexts.length > 0 || context.imports.size > 0) ? ["getContext"] : [],
-      ...(nestedDepthLimit !== undefined || states.length > 0 || context.imports.size > 0) ? ["setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
+    ...svelteImport([...(nestedDepthLimit !== undefined || context.imports.size > 0) ? ["getContext", "setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
     RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(requestProps.length === 0 ? [] : [
@@ -1508,15 +1509,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ] : []),
     ...contexts.flatMap((declaration) => {
       const variable = contextNames.get(declaration)!;
-      const key = `html-next:context:${declaration.from}\u0000${declaration.name}`;
-      const message = `<${definition.contract.tag}> requires context \`${declaration.name}\` from <${declaration.from}>.`;
-      return [
-        `const ${variable} = getContext<{ readonly value: unknown }>(${quote(key)});`,
-        `if (${variable} === undefined) throw Object.assign(new Error(${quote(`HR009: ${message}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message: ${quote(message)} }) });`,
-      ];
+      return [`const ${variable} = injectContext(${quote(definition.contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
     ...stateSources,
-    ...states.map((state) => `setContext(${quote(`html-next:context:${definition.contract.tag}\u0000${state.name}`)}, { get value() { return ${code.get(state.name)}; } });`),
+    ...states.filter((state) => options.publishedStates?.has(state.name) ?? true).map((state) => `publishState(${quote(definition.contract.tag)}, ${quote(state.name)}, () => ${code.get(state.name)});`),
     ...dataSources,
     ...computedSources,
     ...(scope.preservesRootFocus ? [

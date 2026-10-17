@@ -52,7 +52,7 @@ If a component uses `$html` to render an HTML string, its generated code needs t
 | `--mode application` | `<target>/application.ts`, exporting the application entry components |
 | `--mode library` | `<target>/index.ts`, with independently consumable named exports |
 
-Both modes write `html-next.conversion.json` with the inputs, entry, artifacts, target version, and required package dependencies and peers. Merge its `package` fields into your published manifest. Entries export components for the consumer to mount or hydrate with its framework. If a `<data src>` URL is component-relative, pass `--public-root-url /app/` when the conversion root is served at `/app/`.
+Both modes write `html-next.conversion.json` with the inputs, entry, artifacts, target version, and required package dependencies and peers. Merge its `package` fields into your published manifest. Entries export components for the consumer to mount or hydrate with its framework. If a `<data src>` URL is component-relative, pass `--public-root-url /app/` when the conversion root is served at `/app/`. A component publishes a state to `<context>` readers only when a converted component reads it; pass `--public-state` when another library's components read your components' state.
 
 ## Package the results
 

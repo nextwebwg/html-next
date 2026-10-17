@@ -8,16 +8,19 @@ import { fileURLToPath } from "node:url";
 
 import { generateReactConversion, generateSvelteConversion, generateVueComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { publishedStates } from "../src/targets/state-roots.js";
 
 const page = fileURLToPath(new URL("../../../docs/guide/quick-start.md", import.meta.url));
 const markdown = await readFile(page, "utf8");
 const source = /```html title="counter\.html"\n([\s\S]*?)\n```/.exec(markdown)?.[1];
 if (source === undefined) throw new Error("docs/guide/quick-start.md has no counter.html block.");
 const definition = parseComponent(source, "counter.html");
+// A Vite build publishes only the state its components read; the counter alone reads none.
+const options = { publishedStates: publishedStates(definition, [definition]) };
 const outputs = [
-  { framework: "vue", fence: 'vue title="XCounter.vue"', code: generateVueComponent(definition) },
-  { framework: "react", fence: 'tsx title="XCounter.tsx"', code: generateReactConversion(definition).component },
-  { framework: "svelte", fence: 'svelte title="XCounter.svelte"', code: generateSvelteConversion(definition).component },
+  { framework: "vue", fence: 'vue title="XCounter.vue"', code: generateVueComponent(definition, options) },
+  { framework: "react", fence: 'tsx title="XCounter.tsx"', code: generateReactConversion(definition, options).component },
+  { framework: "svelte", fence: 'svelte title="XCounter.svelte"', code: generateSvelteConversion(definition, options).component },
 ];
 
 let updated = markdown;
