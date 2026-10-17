@@ -14,10 +14,16 @@ or `server`. This is a tooling implementation design, not a component-language s
 - `renderRoute` runs a route's loaders, outermost first, serializes their props into standard
   component invocations, merges head metadata, and renders through HTML Next's `renderComponents`.
   Without a request it builds the prerender context, whose `request`, `cookies`, and `response`
-  throw a diagnostic; with one it builds the request context.
+  throw a diagnostic; with one it builds the request context. For a POST it first runs the page's
+  action with the page layer's context: nothing returned redirects 303 to the page's URL without
+  the `?/name` key, and an object becomes page props over the page loader's.
+- `pageAction` finds the action a POST names, `?/name` or `default`, or answers 405 for a page
+  without `actions` and 404 for an unknown name. Each application calls it before rendering.
 - `respond` answers a `Request`: a page payload URL becomes its page's URL, middleware runs, then
-  the redirects table, endpoints (paths without a trailing slash), and pages (GET and HEAD, 308 to
-  the trailing slash).
+  the redirects table, endpoints (paths without a trailing slash), and pages (GET, HEAD, and POST,
+  308 to the trailing slash). A POST from another site gets 403 first: `Sec-Fetch-Site` must be
+  `same-origin` or `none`, or without it, `Origin`'s host must be the request's, as Go's
+  `CrossOriginProtection` decides. A request with neither header is no browser's form.
 - `createNavigation` answers `navigation()`, `navigationTree()`, `breadcrumbs()`, and `pager()` from
   routes and the concrete page URLs.
 
@@ -28,7 +34,7 @@ Request
   -> payload URL to page URL -> middleware(request, next)
   -> redirects -> endpoint (exported method, or 405 with Allow)
   -> page match -> prerendered: application.render / the build's file
-                -> server: renderRoute with the request
+                -> server: renderRoute with the request (POST: same-origin check, action, then loaders)
   -> Response (status, headers, Set-Cookie, body)
 ```
 
@@ -79,20 +85,20 @@ of one tag and conflicting state, concurrently and in sequence, on one worker an
 that fails or exits rejects the render it was doing, which a server answers with its error page, and
 the next render starts a new worker. An idle worker doesn't keep the process alive.
 
-Each page is one render: the layers' invocations, then each layer's head bindings as a component of
-its own (`hk-head-<layer>`) with that layer's props, in a container after the page. HTMLKit keeps the
-page's markup exactly as rendered and merges each head carrier's metadata in layer order
-(`head.ts`'s `headCarrier` and `mergeHead`).
+Each page is one render of the layers' invocations, with the application document's own head
+(`renderComponents`' `head` option: the viewport meta, and an alias page's canonical link). HTML
+Next reconciles every rendered component's head declarations into it, deepest first, and returns the
+head HTML that the document assembler writes after the charset and head scripts. HTMLKit's `hk:`
+settings are left out of the definitions before they render or compile.
 
 Loaders, endpoints, and middleware are trusted application code that runs in the server's process,
 as in Nuxt and Next.js: a module loads once, so a value it keeps in a module variable is shared by
 every request. The guide says so beside the request API.
 
 `data` is private to the loader chain. Only explicit `props` and `state` become public, through
-HTML Next type validation, attribute serialization, and rendered continuation records. Titles,
-descriptions, and native metadata attributes are escaped by the document assembler. Head bindings
-reuse HTML Next's parser and renderer through inert binding carriers, since head elements are
-forbidden in component bodies. Browser entries import the page's compiled components and their
+HTML Next type validation, attribute serialization, and rendered continuation records. Head
+declarations bind through HTML Next's parser and renderer like any other binding, and the server
+renderer serializes and escapes the elements it writes. Browser entries import the page's compiled components and their
 controllers, never server loaders or their imports.
 
 ## Cost

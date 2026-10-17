@@ -206,14 +206,13 @@ parsed as inert data and cannot add import maps, scripts, base URLs, or policy m
 Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern their
 module graph, but ESM is not a sandbox.
 
-Component resources may also contain titles, non-policy-changing metadata, and ordinary metadata
-links outside their component carriers. The Node and browser graph loaders accept and ignore these
-nodes: they do not change the consuming document's head, evaluate metadata bindings, or fetch linked
-stylesheets and other assets. Application tooling may interpret them separately. This allowance
-does not admit arbitrary resource-level nodes: `<style>`, every `<script>` type, `<base>`,
-`http-equiv` metadata, HTML Imports, body elements, plain non-component templates, and
-non-whitespace text remain rejected, as do executable event-handler attributes. Scoped `<style>`
-inside a component carrier and its declared controller module keep their existing behavior.
+A component resource's top level holds component carriers, component links, and build metadata: a
+`<meta name content>` whose name has a colon, such as `app:page`, which the Node and browser graph
+loaders ignore and never add to the document. A component's head content is its head declarations
+in its `<defs>`. A `<title>`, `<meta>`, or `<link>` elsewhere at the top level or placed directly in a
+carrier is rejected, as are `<style>`, every `<script>` type, `<base>`, HTML Imports, body elements,
+plain non-component templates, and non-whitespace text at the top level. Scoped `<style>` inside a
+component carrier and its declared controller module keep their existing behavior.
 
 The runnable [live graph example](./packages/html-next/examples/poc/README.md) uses this entry.
 
@@ -263,6 +262,8 @@ When working from this repository, substitute
 `inspect` reports component, controller, and transitive module edges. `build`
 follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
 which is a build inventory—not a second component contract.
+`build` also writes `<tag>.host.d.ts` beside each definition that declares a controller: the
+typed host that controller receives.
 
 Generated targets preserve the definition's native root; they do not add a component
 wrapper. The checked-in [button output](./packages/html-next/examples/generated)

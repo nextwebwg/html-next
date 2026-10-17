@@ -11,22 +11,22 @@ export async function write(root: string, file: string, contents: string): Promi
 export async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-app-"));
   await write(root, "package.json", '{"name":"htmlkit-fixture","private":true,"type":"module"}');
-  await write(root, "app/layouts/default.html", `<template component="app-layout"><title>Application default</title><meta name="description" from:content="$brand"><defs>
-    <prop name="brand" type="string" required>Brand</prop></defs>
+  await write(root, "app/layouts/default.html", `<template component="app-layout"><defs>
+    <prop name="brand" type="string" required>Brand</prop><title>Application</title><meta name="description" from:content="$brand"></defs>
     <main><header>{$brand}</header><slot name="page"></slot></main>
     <style>:host { color: rgb(20, 30, 40); background-image: url('./texture.svg'); }</style></template>`);
   await write(root, "app/layouts/texture.svg", '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><!--' + 'asset'.repeat(1000) + '--><rect width="1" height="1" fill="white"/></svg>');
   await write(root, "app/layouts/default.server.ts", `export function load() {
-    return { props: { brand: 'HTMLKit' }, data: { owner: 'kit' }, head: { title: 'Application' } };
+    return { props: { brand: 'HTMLKit' }, data: { owner: 'kit' } };
   }`);
   await write(root, "app/pages/index.html", `<meta name="hk:page" content="home-page">
     <template component="home-button"><defs><prop name="count" type="number" default="0">Count</prop></defs><button type="button"><slot></slot><span>{$count}</span></button></template>
     <template component="home-label"><strong>Shared-file helper</strong><style>:host { color: rgb(90, 80, 70); }</style></template>
-    <template component="home-page" controller="./home.js"><meta name="description" from:content="$asset"><defs>
+    <template component="home-page" controller="./home.js"><defs>
     <prop name="asset" type="string" required>Asset URL</prop>
     <state name="count" type="number" value="0"></state>
     <state name="text" type="string" value="initial"></state>
-    <data name="result" src="./data.json"></data></defs>
+    <data name="result" src="./data.json"></data><title>Home &amp; kit</title><meta name="description" from:content="$asset"></defs>
     <section><h1>Home</h1><home-label></home-label><img from:src="$asset" alt="Mark"><home-button $ref="button" from:count="$count" from:aria-expanded="$count > 4" class:active="$count > 4" style:opacity="$count > 4 ? '0.5' : '1'">Next</home-button>
       <output>{$count}</output><input bind:value="text"><p $if="$result.pending">Loading data</p>
       <p $if="$result.ok">{$result.value.label}</p></section><style>:host { border-color: rgb(10, 20, 30); }</style></template>`);
@@ -43,21 +43,26 @@ export async function fixture(): Promise<string> {
       });
     }`);
   await write(root, "app/pages/index.server.ts", `export function load({ base }) {
-    return { props: { asset: base + 'mark.svg' }, state: { count: 4 }, head: { title: 'Home & kit' } };
+    return { props: { asset: base + 'mark.svg' }, state: { count: 4 } };
   }`);
   await write(root, "app/layouts/items.html", `<template component="items-layout"><defs><prop name="brand" type="string" required>Brand</prop></defs><main><header>{$brand}</header><article><h2>Items</h2><slot name="page"></slot></article></main><style>:host { color: rgb(20, 30, 40); }</style></template>`);
   await write(root, "app/layouts/items.server.ts", `export const load = () => ({ props: { brand: "HTMLKit" }, data: { owner: "kit" } });`);
-  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><meta name="hk:layout" content="items"><defs>
+  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><defs>
     <prop name="label" type="string" required>Label</prop>
-    <prop name="tags" type="list(string)" required>Tags</prop></defs>
+    <prop name="tags" type="list(string)" required>Tags</prop>
+    <prop name="slug" type="string" required>Slug</prop><title>{$slug}</title><meta name="hk:layout" content="items"></defs>
     <section><h1>{$label}</h1><p $each="tag of $tags">{$tag}</p></section></template>`);
   await write(root, "app/pages/items/[slug].server.ts", `export const entries = () => [{ slug: 'one' }, { slug: 'two' }];
     export function load({ params, parent }) {
-      return { props: { label: parent.owner + ': ' + params.slug, tags: ['a < b', 'quote " here'] },
-        head: { title: params.slug } };
+      return { props: { label: parent.owner + ': ' + params.slug, tags: ['a < b', 'quote " here'], slug: params.slug } };
     }`);
   // Runs during head parsing, before the body exists or anything paints.
   await write(root, "app/head.js", "document.documentElement.dataset.prepaint = String(document.body === null);");
   await write(root, "public/mark.svg", '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="blue"/></svg>');
   return root;
+}
+
+/** A rendered head's title text, as HTML. */
+export function titleOf(page: { readonly head: { readonly html: string } }): string | undefined {
+  return /<title[^>]*>([^<]*)<\/title>/.exec(page.head.html)?.[1];
 }

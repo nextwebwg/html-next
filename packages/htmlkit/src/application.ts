@@ -8,11 +8,12 @@ import { loadNodeComponents } from "@nextwebwg/html-next/node-loader";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
 import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
-import { documentHTML, redirectPage, type PageAssets } from "./document.js";
+import { sitePolicy } from "./csp.js";
+import { authoredHead, documentHTML, redirectPage, type PageAssets } from "./document.js";
 import { breadth, discover, discoverServerFiles, matchRoute, parameter, redirectTable, validSegment } from "./routes.js";
-import { applicationResource, pageDefinition } from "./resource.js";
-import { createNavigation, failurePage, pageResponse, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
-import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
+import { applicationResource, pageDefinition, withoutSettings } from "./resource.js";
+import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
+import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
 
 // Built-in components need no link: a resource that uses one gets it added after its content, so
@@ -48,8 +49,8 @@ export async function headScripts(options: ApplicationOptions, root: string): Pr
 }
 
 // Every page gets the head scripts, the not-found page included, so it cannot flash either.
-export function notFoundPage(scripts: readonly string[]) {
-  const head: RenderedHead = { title: "Page not found", scripts };
+export function notFoundPage(scripts: readonly string[], policy?: RenderedPolicy) {
+  const head: RenderedHead = { html: authoredHead + "<title>Page not found</title>", scripts, ...(policy === undefined ? {} : { csp: policy }) };
   const body = "<main><h1>Page not found</h1></main>";
   return { head, body, html: documentHTML(body, head) };
 }
@@ -63,7 +64,7 @@ export interface RouteGraph {
 
 /** The application, plus what a build reads from it: each route's component graph and the concrete page URLs. */
 export async function createApplicationInternals(input: ApplicationOptions = {}, moduleServer?: ViteDevServer,
-  assets?: (page: RenderedPage) => PageAssets) {
+  assets?: (page: RenderedPage) => PageAssets, policy?: ContentSecurityPolicyOptions | false) {
   const options = await withPlugins(input);
   const config = configure(options);
   const redirects = redirectTable(config.base, options.redirects);
@@ -75,6 +76,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   const shadowed = routes.find(route => route.params.length === 0 && redirects.has(config.base + route.pattern.slice(1)));
   if (shadowed !== undefined) throw new HtmlKitError(`The redirects option also redirects ${shadowed.pattern}, which is this page's URL.`, shadowed.component);
   const scripts = await headScripts(options, config.root);
+  const csp = policy ?? config.csp;
   const ownsServer = moduleServer === undefined;
   const map = importMap(config.root);
   const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom", resolve: { alias: rootAlias(config.root) },
@@ -97,6 +99,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const paths = new Map<string, ApplicationRoute>();
     for (const route of routes) {
       const loaded = await module(route);
+      if (loaded.actions !== undefined && route.render !== "server") throw prerenderedActions(route.pattern, origin(route));
       // A server-rendered dynamic page renders whatever its URL names, so it needs no entries().
       if (route.params.length > 0 && typeof loaded.entries !== "function") {
         if (route.render !== "server") unenumerated.push(route);
@@ -177,7 +180,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       if (layer === route) return pageDefinition(resources.get(pathToFileURL(layer.component).href)!, layer.component);
       const roots = loaded.roots.filter(id => loaded.nodes.get(id)!.url === pathToFileURL(layer.component).href);
       if (roots.length !== 1) throw new HtmlKitError("A page or layout must declare exactly one root component.", layer.component);
-      return loaded.nodes.get(roots[0]!)!.definition;
+      return withoutSettings(loaded.nodes.get(roots[0]!)!.definition);
     });
     if (definitions.at(-1)!.contract.tag !== route.pageName) {
       throw new HtmlKitError("Page component name changed; rediscover routes before rendering.", route.component);
@@ -185,28 +188,45 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     for (const definition of definitions.slice(0, -1)) {
       if (!definition.slots?.some(slot => slot.name === "page")) throw new HtmlKitError('Layout requires a slot named "page".', definition.source.file);
     }
-    const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: node.definition,
+    const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: withoutSettings(node.definition),
       styles: compileComponentStylesForBuild(node.definition.css, node.definition),
       ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }) }));
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
-      metadata: resources.get(pathToFileURL(layer.component).href)!.components.get(definitions[i]!.contract.tag)!, module: () => module(layer), origin: origin(layer) })) };
+      module: () => module(layer), origin: origin(layer) })) };
   };
 
+  // One policy for the whole site, from every component a page, layout, the not-found page, or the error page uses.
+  // ponytail: built from every route's graph once per application; the development server rebuilds the application on a change.
+  let computed: Promise<RenderedPolicy | undefined> | undefined;
+  const site = () => computed ??= (async () => {
+    if (csp === false) return undefined;
+    const seen = new Set<string>();
+    const definitions: ComponentDefinition[] = [];
+    for (const route of [...routes, ...notFoundRoute === undefined ? [] : [notFoundRoute], ...errorRoute === undefined ? [] : [errorRoute]]) {
+      const key = [...route.layouts, route].map(layer => layer.component).join("\0");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      definitions.push(...(await graph(route)).definitions);
+    }
+    return sitePolicy(csp, definitions, scripts);
+  })();
+
   type Page = RenderedPage & { readonly headers?: Headers };
-  const builtinNotFound = (pathname: string): Page => ({ status: 404, pathname, ...notFoundPage(scripts), css: "", components: [], layers: [] });
-  const redirected = (pathname: string, location: string, status: RedirectStatus, headers?: Headers): Page =>
-    ({ status, pathname, location, ...redirectPage(location), css: "", components: [], layers: [], ...(headers === undefined ? {} : { headers }) });
-  const builtinFailure = (pathname: string): Page => ({ pathname, ...failurePage(serverFailure, scripts), css: "", components: [], layers: [] });
+  const builtinNotFound = async (pathname: string): Promise<Page> => ({ status: 404, pathname, ...notFoundPage(scripts, await site()), css: "", components: [], layers: [] });
+  const redirected = async (pathname: string, location: string, status: RedirectStatus, headers?: Headers): Promise<Page> =>
+    ({ status, pathname, location, ...redirectPage(location, await site()), css: "", components: [], layers: [], ...(headers === undefined ? {} : { headers }) });
+  const builtinFailure = async (pathname: string): Promise<Page> => ({ pathname, ...failurePage(serverFailure, scripts, await site()), css: "", components: [], layers: [] });
   // A matched route; without one, the not-found page, or for a failure the error page, through its layouts.
   // request makes it a request-time render.
   const renderPage = async (matched: { route: ApplicationRoute; params: Readonly<Record<string, RouteParam>> } | undefined, url: URL,
-    request: Request | undefined, signal: AbortSignal, failure?: Failure): Promise<Page> => {
+    request: Request | undefined, signal: AbortSignal, failure?: Failure, action?: PageAction): Promise<Page> => {
     const fallback = failure === undefined ? notFoundRoute : errorRoute;
     if (matched === undefined && fallback === undefined) return failure === undefined ? builtinNotFound(url.pathname) : builtinFailure(url.pathname);
     const { route, params } = matched ?? { route: fallback!, params: {} };
     const { layers, definitions, components } = await graph(route);
     const rendered = await renderRoute({ base: config.base, canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, layers,
-      definitions, scripts, navigation, ...(failure === undefined ? {} : { failure }) });
+      definitions, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
+      ...(action === undefined ? {} : { action }) });
     if (rendered.kind === "redirect") return redirected(url.pathname, rendered.location, rendered.status, rendered.headers);
     if (rendered.kind === "notFound") {
       // The not-found and error pages' own notFound() falls back to the built-in page.
@@ -227,8 +247,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     // A failed page has no payload, so the browser loads its document, the error page.
     if (pathname.startsWith(config.base + "_htmlkit/pages/")) return new Response(null, { status: 500 });
     // The error page shares the site's layouts, so a failing layout fails it too; the built-in page answers then.
-    const page = pathname.startsWith("//") ? builtinFailure(pathname) : await renderPage(undefined, new URL(pathname, config.origin), undefined, request.signal, serverFailure)
-      .catch((again: unknown) => { report(again); return builtinFailure(pathname); });
+    const page = await (pathname.startsWith("//") ? builtinFailure(pathname) : renderPage(undefined, new URL(pathname, config.origin), undefined, request.signal, serverFailure)
+      .catch((again: unknown) => { report(again); return builtinFailure(pathname); }));
     return pageResponse(page, request, false, assets?.(page));
   };
   const pipeline: Pipeline<ApplicationRoute> = {
@@ -244,13 +264,22 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       const url = new URL(request.url);
       // A prerendered page renders as the build renders it: at its canonical URL, without the request.
       const server = route.render === "server";
-      const page = await renderPage({ route, params }, server ? url : new URL(url.pathname, config.origin), server ? request : undefined, request.signal);
+      let action: PageAction | undefined;
+      if (request.method === "POST") {
+        const loaded = await module(route);
+        // As the build does, so development names the page too.
+        if (loaded.actions !== undefined && !server) throw prerenderedActions(route.pattern, origin(route));
+        const found = pageAction(loaded, url);
+        if (found instanceof Response) return found;
+        action = found;
+      }
+      const page = await renderPage({ route, params }, server ? url : new URL(url.pathname, config.origin), server ? request : undefined, request.signal, undefined, action);
       return pageResponse(page, request, payload, assets?.(page));
     },
     async notFound(request, payload) {
       const { pathname } = new URL(request.url);
       if (payload) return new Response(null, { status: 404 });
-      const page = pathname.startsWith("//") ? builtinNotFound(pathname) : await renderPage(undefined, new URL(pathname, config.origin), undefined, request.signal);
+      const page = await (pathname.startsWith("//") ? builtinNotFound(pathname) : renderPage(undefined, new URL(pathname, config.origin), undefined, request.signal));
       return pageResponse(page, request, false, assets?.(page));
     },
   };
@@ -280,11 +309,14 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     fetch: request => respond(pipeline, request).catch((error: unknown) => failed(error, request)),
     async close() { if (ownsServer) await server.close(); },
   };
-  return { application, graph, catalog: concreteRoutes };
+  return { application, graph, catalog: concreteRoutes, policy: site };
 }
 
-/** assets supplies a serving adapter's browser modules and stylesheets for fetch(). */
+/**
+ * assets supplies a serving adapter's browser modules and stylesheets for fetch(), and policy the csp
+ * option it applies in place of the configured one, as the development server adds what Vite needs.
+ */
 export async function createApplication(input: ApplicationOptions = {}, moduleServer?: ViteDevServer,
-  assets?: (page: RenderedPage) => PageAssets): Promise<Application> {
-  return (await createApplicationInternals(input, moduleServer, assets)).application;
+  assets?: (page: RenderedPage) => PageAssets, policy?: ContentSecurityPolicyOptions | false): Promise<Application> {
+  return (await createApplicationInternals(input, moduleServer, assets, policy)).application;
 }

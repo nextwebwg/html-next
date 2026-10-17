@@ -33,13 +33,16 @@ A few rules cover the rest:
 
 ## A page
 
-A page is an HTML Next component. Its `<title>` and `<meta>` tags go in the page's `<head>`:
+A page is an HTML Next component. Its `<title>` and `<meta>` tags go in its `<defs>`, and HTML Next
+adds them to the document head ([The page head](#the-page-head)):
 
 ```html
 <!-- app/pages/about.html -->
 <template component="page-about">
-  <title>About us</title>
-  <meta name="description" content="Who we are.">
+  <defs>
+    <title>About us</title>
+    <meta name="description" content="Who we are.">
+  </defs>
   <main>
     <h1>About us</h1>
   </main>
@@ -135,7 +138,7 @@ where the layout puts `<slot name="page">`:
 ```html
 <!-- app/layouts/default.html -->
 <template component="site-shell">
-  <title>My site</title>
+  <defs><title>My site</title></defs>
   <header>My site</header>
   <main><slot name="page"></slot></main>
 </template>
@@ -145,7 +148,7 @@ To use another layout for one page, name it; `content="none"` uses no layout:
 
 ```html
 <template component="page-dashboard">
-  <meta name="hk:layout" content="admin">   <!-- app/layouts/admin.html -->
+  <defs><meta name="hk:layout" content="admin"></defs>   <!-- app/layouts/admin.html -->
   <h1>Dashboard</h1>
 </template>
 ```
@@ -206,7 +209,7 @@ paths.
 
 ```html
 <template component="page-not-found">
-  <title>Page not found</title>
+  <defs><title>Page not found</title></defs>
   <h1>This page doesn't exist</h1>
   <p><a href="/">Go to the home page</a></p>
 </template>
@@ -223,10 +226,10 @@ itself goes to the server's console, so its message and stack stay out of the pa
 ```html
 <!-- app/error.html -->
 <template component="page-error">
-  <title>Something went wrong</title>
   <defs>
     <prop name="status" type="number" required>Status</prop>
     <prop name="message" type="string" required>Reason</prop>
+    <title>Something went wrong</title>
   </defs>
   <main>
     <h1>{$status}: {$message}</h1>
@@ -282,31 +285,76 @@ checking data, use [`redirect()`](/htmlkit/loaders#redirecting).
 
 ## The page head
 
-`<title>`, `<meta>`, and `<link>` tags directly inside a page or layout component go in the document
-head. A page's tag replaces a layout's tag with the same identity: the `<title>`, a `<meta>` with the
-same `name` or `property`, the canonical `<link>`, and an alternate `<link>` with the same `hreflang`.
-A page's `og:image` tags replace the layout's as a set. Every other `<link>`, such as a stylesheet, is
-kept from both. Only `<title>`, `<meta>`, and `<link>` may go in the head. They can use the page's props:
+A page or layout declares what it adds to the document head in its `<defs>`, as every HTML Next
+component does with [head declarations](https://nextwebwg.org/declarative-components/components#head-declarations):
+a `<title>`, `<meta>` entries, `<link>` resource hints and metadata links, JSON-LD blocks, and the
+external scripts it needs. They read the component's props, state, and data:
 
 ```html
 <template component="page-post">
-  <title>{$title}</title>
-  <meta name="description" from:content="$summary">
   <defs>
     <prop name="title" type="string" required>Post title</prop>
     <prop name="summary" type="string" required>Post summary</prop>
+    <prop name="schema" type="object" required>Structured data</prop>
+    <title>{$title} · My blog</title>
+    <meta name="description" from:content="$summary">
+    <meta property="og:title" from:content="$title">
+    <script type="application/ld+json" from:value="$schema"></script>
   </defs>
   <article><h1>{$title}</h1></article>
 </template>
 ```
 
-A loader can also set `head: { title, description, lang }`.
+- **The page wins.** A `<title>`, a canonical link, and each `<meta>` name or property come from the
+  deepest component that declares them, so a page's replace its layout's. Any component on the page,
+  such as a product card, may declare head content too.
+- **Everything else is kept.** Other links, such as a preconnect, and JSON-LD blocks stay while any
+  component on the page declares them.
+- **Stylesheets are styles.** A page's stylesheet is an `@import` in its `<style>`, such as
+  `<style>@import "./page.css";</style>`. `<link rel="stylesheet">` is not a head declaration.
+- **Head content goes in `<defs>`.** A `<title>`, `<meta>`, or `<link>` placed directly in a
+  `<template component>` is an error that names the component.
+- **Packages don't set the page's identity.** A component reached by a bare name, such as
+  `@acme/ui/card.html` or `@/components/card.html`, is an imported component. Its page-wide entries,
+  which are the canonical, `alternate`, `icon`, and `manifest` links, the `robots`, `referrer`,
+  `viewport`, `color-scheme`, and `theme-color` metas, and `og:url`, are left out with an `HL011`
+  warning. Pages, layouts, and components linked by a relative path set them.
+- **Navigation changes the head once.** When [client navigation](/htmlkit/client-navigation)
+  replaces a page, HTML Next updates the head in one step, so no layout title shows between two page
+  titles.
 
-Settings that start with `hk:` configure HTMLKit and never reach the page:
+Every document starts from `<meta charset="utf-8">` and `<meta name="viewport"
+content="width=device-width, initial-scale=1">`, which a page's own viewport meta replaces. A
+loader sets the document's language with `head: { lang }`; a loader's other values reach the head
+as props.
+
+### Declared scripts
+
+A component that needs a third-party script, such as a payment form that needs Stripe.js, declares
+it:
+
+```html
+<defs>
+  <link rel="preconnect" href="https://js.stripe.com">
+  <script name="stripe" src="https://js.stripe.com/v3/" loading="lazy"></script>
+</defs>
+```
+
+HTML Next inserts one `<script>` for each URL, once per document, when a component that declares
+it connects (`eager`, the default), comes near the viewport (`lazy`), or calls `load()` from its
+controller (`manual`). A server-rendered or prerendered page carries a `<link rel="preload">` for
+each eager script, and client navigation never runs a script twice. A declared script's `src` is an
+absolute URL, a root-relative path to a file in `public/`, or a bare name the application's import
+map resolves. `$stripe.pending`, `$stripe.ok`, and `$stripe.error` read its status, and the
+controller waits for `host.scripts.stripe.ready`
+([declared scripts](https://nextwebwg.org/declarative-components/components#declared-scripts)).
+
+Settings that start with `hk:` configure HTMLKit. They are `<meta>` entries in the component's
+`<defs>`, and HTMLKit leaves them out of the document head:
 
 | Metadata | Does |
 | --- | --- |
-| `hk:page` | Chooses the page component in a file with several components. Goes outside the components. |
+| `hk:page` | Chooses the page component in a file with several components. It describes the file, so it goes outside the components. |
 | `hk:layout` | Chooses a layout, or `none`. |
 | `hk:label` | Sets the page's label in [navigation](/htmlkit/navigation). |
 | `hk:order` | Sets the page's place in [navigation](/htmlkit/navigation#ordering-pages), in place of its file name's number. |

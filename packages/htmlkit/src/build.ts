@@ -1,6 +1,7 @@
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile, copyFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Manifest, ManifestChunk } from "vite";
+import { parseFragment } from "parse5";
 
 import { createApplicationInternals, headScripts, notFoundPage, type RouteGraph } from "./application.js";
 import { browserSources, stylesheetSources } from "./browser.js";
@@ -10,7 +11,7 @@ import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type 
 import { checkLinks } from "./links.js";
 import { matchRoute, redirectTable } from "./routes.js";
 import type { ServerData, ServerPage } from "./server.js";
-import type { ApplicationOptions, ApplicationRoute, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
+import type { ApplicationOptions, ApplicationRoute, RenderedPolicy, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -52,7 +53,8 @@ export async function readManifest(outDir: string): Promise<BuildManifest> {
  * Write _htmlkit/server: entry.js, whose default export answers requests, and the loaders, endpoints,
  * and middleware it imports. Prerendered pages need none of their code there; their files serve them.
  */
-async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, internals, serverGraphs }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, policy, internals, serverGraphs }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+  readonly policy: RenderedPolicy | undefined;
   readonly stage: string; readonly redirects: readonly ManifestRedirect[]; readonly scripts: readonly string[];
   readonly internals: Awaited<ReturnType<typeof createApplicationInternals>>;
   readonly serverGraphs: readonly { readonly route: ApplicationRoute; readonly graph: RouteGraph; readonly assets: PageAssets }[] }): Promise<void> {
@@ -74,14 +76,13 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
     const page: ServerPage = { definitions: graph.definitions, assets, layers: graph.layers.map((layer, i) => {
       const loader = layers[i]!.server;
       if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
-      return { definition: layer.definition, metadata: { head: layer.metadata.head, propDeclarations: layer.metadata.propDeclarations },
-        ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
+      return { definition: layer.definition, ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
     }) };
     if (route === application.error) error = { ...page, route: path(route) };
     else pages[application.routes.indexOf(route)] = page;
   }
   const catalog = await internals.catalog();
-  const data: ServerData = { version: 1, base, canonicalOrigin, redirects, scripts, pages, ...(error === undefined ? {} : { error }),
+  const data: ServerData = { version: 2, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
     routes: application.routes.map(path),
     catalog: [...catalog].map(([path, route]) => [path, application.routes.indexOf(route)] as const),
     endpoints: application.endpoints.map(endpoint => ({ ...endpoint, file: source(endpoint.file), module: module(endpoint.file, "api") })),
@@ -187,7 +188,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     // sitemap.xml lists each page at its own URL: no alias, redirect, not-found page, or page marked noindex.
     const indexed: string[] = [];
     const scripts = await headScripts(options, config.root);
-    let notFoundHTML = notFoundPage(scripts).html;
+    const policy = await internals.policy();
+    let notFoundHTML = notFoundPage(scripts, policy).html;
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]!;
       const path = join(stage, decodeURIComponent(page.pathname.slice(config.base.length)), "index.html");
@@ -197,8 +199,9 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       // Served at any missing path, so it has no route, manifest entry, or payload; its asset URLs are absolute.
       if (i === notFoundIndex) { notFoundHTML = documentHTML(page.body, page.head, assets); continue; }
       delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file, chunks });
-      if (route.canonical === undefined && !page.head.elements?.some(element => element.tag === "meta" && element.attributes.name?.toLowerCase() === "robots" &&
-        /\b(?:noindex|none)\b/i.test(element.attributes.content ?? ""))) indexed.push(page.pathname);
+      if (route.canonical === undefined && route.aliasOf === undefined && !parseFragment(page.head.html).childNodes.some(node => "tagName" in node && node.tagName === "meta" &&
+        node.attrs.some(({ name, value }) => name === "name" && value.toLowerCase() === "robots") &&
+        node.attrs.some(({ name, value }) => name === "content" && /\b(?:noindex|none)\b/i.test(value)))) indexed.push(page.pathname);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, documentHTML(page.body, page.head, assets));
       const payload = pagePayload(page, assets);
@@ -216,7 +219,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const path = join(stage, decodeURIComponent(from.slice(config.base.length)), "index.html");
       if (await exists(path)) throw new HtmlKitError(`Redirect collision at ${from}: a public asset or page is already there.`, path);
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, redirectPage(to).html);
+      await writeFile(path, redirectPage(to, policy).html);
     }
     // A public sitemap.xml is the site's own and stays as it is.
     if (options.origin !== undefined && !await exists(join(stage, "sitemap.xml"))) {
@@ -228,7 +231,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
       await writeFile(join(stage, "robots.txt"), rules + sitemap);
     }
-    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, internals, serverGraphs: serverGraphs.map(({ route, graph }, i) =>
+    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, policy, internals, serverGraphs: serverGraphs.map(({ route, graph }, i) =>
       ({ route, graph, assets: bundled(pages.length + i, route.pattern).assets })) });
     const routes = delivery.map(page => page.pathname);
     const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };

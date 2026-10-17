@@ -27,7 +27,7 @@ npx html-next-convert react 'components/**' --mode library --out-dir generated/r
 npx html-next-convert svelte 'components/**' --mode library --out-dir generated/svelte-target
 ```
 
-A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
+Each component that declares a controller also gets its [typed host](/html-next/usage#typed-host), `<tag>.host.d.ts`, beside its definition. A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
 
 | Target | Component output | Styles |
 | --- | --- | --- |

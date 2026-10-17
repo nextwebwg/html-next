@@ -143,19 +143,20 @@ class FrameworkCompiler {
     }
   }
 
-  async resource(source: string, packageRoot: string, cache: string): Promise<string> {
+  /** `hostTypes` writes the typed controller hosts of an application's own components. */
+  async resource(source: string, packageRoot: string, cache: string, hostTypes = false): Promise<string> {
     const key = `${cache}:${source}`;
     const known = this.conversions.get(key);
     if (known !== undefined) return known;
-    const conversion = this.convertResource(source, packageRoot, cache);
+    const conversion = this.convertResource(source, packageRoot, cache, hostTypes);
     this.conversions.set(key, conversion);
     return conversion;
   }
-  private async convertResource(source: string, packageRoot: string, cache: string): Promise<string> {
+  private async convertResource(source: string, packageRoot: string, cache: string, hostTypes: boolean): Promise<string> {
     await this.linkDependencies(cache, packageRoot);
     const output = resolve(cache, "resources", identity(source));
     await rm(output, { recursive: true, force: true });
-    const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [source], outDirectory: output });
+    const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [source], outDirectory: output, hostTypes });
     for (const path of manifest.sourceFiles) this.sources.add(resolve(packageRoot, path));
     return resolve(output, manifest.output.entry);
   }
@@ -205,14 +206,14 @@ class FrameworkCompiler {
   }
 
   /** One package graph emits shared linked components once, even when several entry points export them. */
-  private async packageResources(entries: readonly string[], packageRoot: string, cache: string): Promise<void> {
+  private async packageResources(entries: readonly string[], packageRoot: string, cache: string, hostTypes = false): Promise<void> {
     const html = new Set<string>();
     const visited = new Set<string>();
     for (const entry of entries) await this.collectResources(entry, packageRoot, html, visited);
     if (html.size === 0) throw new Error(`HTML Next source package contains no component resources: ${packageRoot}.`);
     const output = resolve(cache, "resources");
     await rm(output, { recursive: true, force: true });
-    const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [...html], outDirectory: output });
+    const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [...html], outDirectory: output, hostTypes });
     for (const path of manifest.sourceFiles) this.sources.add(resolve(packageRoot, path));
     await rm(resolve(cache, "resource-entries"), { recursive: true, force: true });
     const names = new Map(manifest.components.map((item) => [item.tag, item.name]));
@@ -358,7 +359,7 @@ class FrameworkCompiler {
     for (const source of await appComponentSources(this.root, resolve(this.root, this.outDir))) this.appSources.add(source);
     if (this.appSources.size > 0) {
       await this.linkDependencies(this.appCache, this.root);
-      await this.packageResources([...this.appSources], this.root, this.appCache);
+      await this.packageResources([...this.appSources], this.root, this.appCache, true);
     }
     for (const input of this.options.entries ?? []) await this.localResource(resolve(this.root, input));
     await writeGenerated(this.declarationsFile, header + this.modules.join("\n\n") + "\n");
@@ -376,7 +377,7 @@ class FrameworkCompiler {
 
   private async convertLocalResource(source: string): Promise<string> {
     const cache = this.appSources.has(source) ? this.appCache : resolve(this.root, "node_modules", ".html-next", this.options.target, identity(source));
-    const entry = await this.resource(source, this.root, cache);
+    const entry = await this.resource(source, this.root, cache, true);
     // The app's resources share one cache, which one declaration pass at a time may rewrite.
     const declaring = this.declaring.then(() => this.declarations(entry, cache));
     this.declaring = declaring.catch(() => {});

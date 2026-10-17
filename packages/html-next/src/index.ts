@@ -3,6 +3,7 @@ export { add, divide, multiply, subtract } from "./decimal.js";
 export { getDiagnosticLocation, HtmlDiagnosticAggregateError, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type DiagnosticLocation, type HtmlDiagnostic } from "./diagnostics.js";
 export {
   generateComponent,
+  generateHostTypes,
   generateVueComponent,
   generateReactComponent,
   generateReactConversion,
@@ -45,6 +46,7 @@ export {
 export { LANGUAGE_EXTENSIONS, TRANSITIONS_EXTENSION, transitionElements } from "./transition-syntax.js";
 export { publishedStates } from "./targets/state-roots.js";
 export { addControllerGraph } from "./controller-files.js";
+export { writeHostDeclarations } from "./host-declarations.js";
 export { parseComponent } from "./source-parser.js";
 export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";

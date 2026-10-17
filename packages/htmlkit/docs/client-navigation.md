@@ -19,7 +19,11 @@ in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functio
 | Need | Native mechanism | Support, October 2026 |
 | --- | --- | --- |
 | Intercept same-document navigations of every kind (links, `location`, back and forward) | Navigation API: `navigate` event, `event.intercept()` | Chrome 102 (intercept 105), Firefox 147, Safari 26.2. Baseline since January 2026 |
-| Skip what should stay native | `canIntercept` (other origins), `downloadRequest`, `formData`, `destination.sameDocument` (fragments, `history.pushState`), `navigationType` | Same as above |
+| Skip what should stay native | `canIntercept` (other origins), `downloadRequest`, `destination.sameDocument` (fragments, `history.pushState`), `navigationType` | Same as above |
+| Submit a form as the browser would: its action URL, `formaction`, method, encoding, and constraint validation | The `navigate` event's destination and `formData`, after validation; `sourceElement` is the submitter | Same as Navigation API |
+| Focus after a submission | The intercept's focus reset, which focuses the autofocus delegate, else the body | Same as Navigation API |
+| Pending state for scripts | `navigation.transition`, `navigatesuccess`, `navigateerror` | Same as Navigation API |
+| Pending state for CSS | None: no pseudo-class matches a document or form during a navigation. HTMLKit sets `data-hk-navigating`, and `data-hk-submitting` with `aria-busy` on the form | |
 | Per-link opt-out | `NavigateEvent.sourceElement` | Chrome 135, Firefox 147, Safari 26.2 |
 | Modified clicks, `target`, middle clicks | They open another browsing context, so this document gets no `navigate` event | All |
 | Cancel a superseded navigation | `event.signal` (an `AbortSignal`), passed to `fetch` | Same as Navigation API |
@@ -82,11 +86,17 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    rendered again would bring the old page back. The parity tests found this.
    `replaceProjectedNode(current, next)` puts the new node in the old one's place in the projection
    too, as the live runtime's function of that name does.
-4. **Head metadata.** `meta` and `link` elements that came from server documents are diffed with
-   `isEqualNode`: shared ones stay, others are removed and added. Elements scripts add are left alone.
-   New stylesheets load before the swap; component styles are scoped, so only the next page's global
-   rules apply early.
+4. **Head content.** HTML Next owns the head declarations, the elements marked
+   `data-component-head`: the swap disconnects the old page and connects the new one, and its head
+   manager reconciles them once, in the microtasks after the swap, which a view transition's update
+   includes. HTMLKit diffs only its own unmarked links, stylesheets and an alias page's canonical
+   link, with `isEqualNode`: shared ones stay, others are removed and added. Elements scripts add
+   are left alone. New stylesheets load before the swap; component styles are scoped, so only the
+   next page's global rules apply early.
 5. **Route announcement** and **back and forward positions** in WebKit, above.
+6. **Content Security Policy.** A policy belongs to its document, so client navigation keeps the
+   current one, and HTMLKit gives every page of the site the same policy. The render document has no
+   `<base>`, which `base-uri 'none'` forbids: the next page's module URLs resolve against its URL.
 
 ## Chosen approach: payloads, with the HTML as the fallback
 
@@ -111,7 +121,7 @@ cannot contain a dot, so `payload.json` never collides with a page's own directo
 ```json
 {
   "version": 1,
-  "head": { "lang": "en", "title": "Install", "description": "…", "elements": [{ "tag": "meta", "attributes": { "charset": "utf-8" } }] },
+  "head": { "lang": "en" },
   "styles": ["/kit/_htmlkit/page-3-….css"],
   "modules": ["/kit/_htmlkit/page-3-….js"],
   "layers": [
@@ -121,8 +131,9 @@ cannot contain a dot, so `payload.json` never collides with a page's own directo
 }
 ```
 
-- `head` is the document head the server renders: language, title, description, and metadata
-  elements. `app/head.js` is not in it; it runs once per document load.
+- `head` is what the page's document carries beyond its components: its language, and an alias
+  page's `canonical` URL. The components' head declarations come from their compiled modules.
+  `app/head.js` is not in it; it runs once per document load.
 - `styles` and `modules` are what the page's document links.
 - Each layer has its component, its invocation's prop attributes in their HTML form (defaults
   included, exactly as the server writes them), and its loader's state. Loader `data` stays private,
@@ -258,6 +269,10 @@ navigation here.
 - Development keeps component styles Vite injected for earlier pages; builds remove stylesheets the
   next page does not link.
 - `app/head.js` runs once per document load.
-- `GET` forms that submit to an application page render in place; `POST` forms stay native.
+- `GET` forms that submit to an application page render in place. `POST` forms submit with `fetch`,
+  as the browser would send them, and render the answer from its HTML. A redirect's page renders from
+  the same response, in a `replace` navigation to its URL, which aborts the submission's; that
+  navigation reads the body first, since the abort ends it. A response that can't render in place
+  reloads the submission's URL with `GET`, so a form is never sent twice.
 - Links that controllers add after a navigation are not watched for visibility; they still prefetch
   on interaction.

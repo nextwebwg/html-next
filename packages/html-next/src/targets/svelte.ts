@@ -544,10 +544,18 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       };
       const firstHtml = context.htmlSites;
       const firstRetention = context.retentions.size;
-      const markup = (scoped ? carrier!.children : children.map(projectedNode)).map((child) => renderNode(child, false, projectedScope, lowering, context)).join("");
+      // A slot's first `<template slot>` is its whole content, as in the live runtime.
+      const content = scoped ? carrier!.children : (carrier === undefined ? children : [carrier]).map(projectedNode);
+      const markup = content.map((child) => renderNode(child, false, projectedScope, lowering, context)).join("");
       const ownership = localOwnership(context, firstHtml, firstRetention);
       snippetDeclarations += `{#snippet ${snippet}(${alias}: Record<string, any>)}${ownership}${markup}{/snippet}`;
-      slotBindings.push(`${objectKey(slot)}: ${snippet}`);
+      // A snippet that renders nothing still fills its slot, so a slot of only `$if` elements passes
+      // its snippet while one renders, and the receiving slot shows its fallback otherwise.
+      const conditions = carrier !== undefined ? [] : children.map((child) => child.kind === "element" && child.flow?.kind === "if" && child.flow.testPlan !== undefined
+        ? conformingCondition(child.flow.testPlan, scope, lowering, context) : undefined);
+      const present = conditions.length > 0 && conditions.every((condition) => condition !== undefined && !condition.invalid)
+        ? conditions.map((condition) => `(${condition!.source})`).join(" || ") : undefined;
+      slotBindings.push(`${objectKey(slot)}: ${present === undefined ? snippet : `${present} ? ${snippet} : undefined`}`);
     }
   }
   const decorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style"));
@@ -701,7 +709,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const declared = childProp(attribute.name);
       if (declared !== undefined && declared[1].select === undefined && node.attributes.some((entry) =>
         entry.kind === "attribute" && entry.target === undefined && childProp(entry.name)?.[0] === declared[0])) continue;
-      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
+      // Svelte rejects a static `slot` on an element inside `{#if}` or `{#each}`, so projected
+      // content, which may be conditional or repeated, spreads it.
+      if (declared === undefined && attribute.name === "slot" && !component &&
+        node.attributes.some((entry) => entry.kind === "literal" && entry.name === "data-slotted")) literals.push(`{...{ slot: ${quote(attribute.value)} }}`);
+      else if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
         literals.push(componentPropAttribute(prop, literalPropValue(attribute.value, contract)));

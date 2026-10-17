@@ -1,6 +1,6 @@
 ---
 title: Deployment
-order: 6
+order: 7
 blurb: static hosts · htmlkit start · Deno · Bun · prerendered and server pages
 eyebrow: HTMLKit
 ---
@@ -21,7 +21,7 @@ loader can read the [request](/htmlkit/loaders#rendering-on-each-request):
 ```html
 <!-- app/pages/account.html -->
 <template component="page-account">
-  <meta name="hk:render" content="server">
+  <defs><meta name="hk:render" content="server"></defs>
   …
 </template>
 ```
@@ -50,6 +50,10 @@ host, such as GitHub Pages, Netlify, or an S3 bucket:
 - Page URLs end in a slash. Most hosts serve `/about/` from `about/index.html` and redirect `/about`
   to it; check your host's trailing-slash setting.
 - Redirects are pages that send readers on; see [redirects](/htmlkit/routes#redirects).
+
+Each page's [Content Security Policy](/htmlkit/configuration#content-security-policy) is a
+`<meta http-equiv>` in its head, which static hosts serve as written. For `frame-ancestors`,
+`report-uri`, or a report-only policy, which only a header carries, configure the host's headers.
 
 `htmlkit preview` serves `dist/` the way a static host does, to check a build first.
 
@@ -83,6 +87,8 @@ PORT=8080 HOST=0.0.0.0 npm start
   [`app/error.html`](/htmlkit/routes#the-error-page) with status 500, and the next request
   renders on a new worker.
 - Hashed bundles in `_htmlkit/` are served with `Cache-Control: public, max-age=31536000, immutable`.
+- Every page is served with its [Content Security Policy](/htmlkit/configuration#content-security-policy)
+  header, as the build generated it, including directives a `<meta>` can't carry.
 - `dist/_htmlkit/server/` holds the server's code; it is never served.
 - The server imports `@nextwebwg/htmlkit` and your loaders' packages from `node_modules`, so deploy
   `dist/` with `package.json` and the installed production dependencies, as for any Node application:

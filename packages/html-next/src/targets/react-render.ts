@@ -175,7 +175,11 @@ export function renderScopedSlot<T extends Record<string, unknown>>(slot: ReactN
 export function markProjected(value: ReactNode): ReactNode {
   if (Array.isArray(value)) return value.map(markProjected);
   if (!React.isValidElement(value)) return value;
-  if (value.type === React.Fragment) return React.cloneElement(value, {}, markProjected((value.props as { children?: ReactNode }).children));
+  if (value.type === React.Fragment) {
+    // A fragment's children keep their places as arguments; one array argument would be a list needing keys.
+    const children = markProjected((value.props as { children?: ReactNode }).children);
+    return Array.isArray(children) ? React.cloneElement(value, {}, ...children) : React.cloneElement(value, {}, children);
+  }
   return React.cloneElement(value as React.ReactElement<Record<string, unknown>>, { "data-slotted": "" });
 }
 

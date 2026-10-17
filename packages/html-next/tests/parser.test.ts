@@ -13,29 +13,27 @@ import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeSc
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
-describe("component-owned application metadata", () => {
-  it("ignores direct carrier metadata without binding it or changing the markup, declarations, or styles", () => {
+describe("head content outside <defs>", () => {
+  it("rejects a head element placed directly in a carrier", () => {
     const source = '<template component="page-products"><defs><prop name="label" type="string">Label</prop></defs>' +
       '<section $value="$label"></section><style>:host { color: red; }</style></template>';
-    const metadata = '<meta name="example:layout" content="admin"><title $value="$missing">Ignored title</title>' +
-      '<meta name="description" from:content="$missing"><link rel="stylesheet" href="./ignored.css">';
-    const expected = parseComponent(source, "products.html");
-    for (const position of ['<defs>', '<section ', '<style>', '</template>']) {
-      const actual = parseComponent(source.replace(position, metadata + position), "products.html");
-      assert.deepEqual(actual, expected);
+    for (const element of ['<meta name="example:layout" content="admin">', "<title>Products</title>",
+      '<meta name="description" content="Products">', '<link rel="canonical" href="/products/">']) {
+      for (const position of ["<defs>", "<section ", "<style>", "</template>"]) {
+        assert.throws(() => parseComponent(source.replace(position, element + position), "products.html"),
+          (error: unknown) => error instanceof HtmlDiagnosticError && error.diagnostic.code === "HS002", `${element} before ${position}`);
+      }
     }
   });
 
-  it("keeps the one-root rule and rejects active metadata or metadata inside rendered markup", () => {
+  it("rejects active metadata and metadata inside rendered markup", () => {
     for (const content of [
-      '<title>Only metadata</title>',
       '<meta http-equiv="refresh" content="0"><section></section>',
       '<meta name="description" onload="run()"><section></section>',
       '<link rel="import" href="./other.html"><section></section>',
       '<link rel="component" href="./other.html"><section></section>',
       '<script>run()</script><section></section>',
       '<section><meta name="description" content="Nested"></section>',
-      '<title>Metadata</title><section></section><article></article>',
     ]) assert.throws(() => parseComponent(`<template component="page-invalid">${content}</template>`), HtmlDiagnosticError);
   });
 });

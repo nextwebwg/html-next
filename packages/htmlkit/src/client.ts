@@ -30,8 +30,7 @@ export type Component = readonly [factory: (options: object, html?: Record<strin
 /** The JSON that document.ts's pagePayload writes. */
 interface Payload {
   readonly version: 1;
-  readonly head: { readonly lang: string; readonly title: string; readonly description?: string;
-    readonly elements: readonly { readonly tag: string; readonly attributes: Readonly<Record<string, string>> }[] };
+  readonly head: { readonly lang: string; readonly canonical?: string };
   readonly styles: readonly string[];
   readonly modules: readonly string[];
   readonly layers: readonly { readonly component: string; readonly attributes: Readonly<Record<string, string>>;
@@ -87,7 +86,7 @@ interface Rendered { readonly next: Document; readonly layers: readonly Element[
  * component's factory, each page nested in its layout's `page` slot, with each loader's state. Every
  * layer renders, kept layouts included, so a kept layout gets its new props from its rendering.
  */
-async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Rendered> {
+async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
   if (payload.version !== 1 || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
   const next = document.implementation.createHTMLDocument("");
   const append = (parent: Element, tag: string, attributes: Readonly<Record<string, string>>) => {
@@ -95,12 +94,9 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
     for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
     return element;
   };
-  append(next.head, "base", { href: url.href });
-  for (const element of payload.head.elements) append(next.head, element.tag, element.attributes);
-  if (payload.head.description !== undefined) append(next.head, "meta", { name: "description", content: payload.head.description });
+  if (payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
-  next.title = payload.head.title;
   next.documentElement.lang = payload.head.lang;
   // Innermost first: each layer is projected into its layout's `page` slot, as its invocation is on the server.
   const layers: Element[] = [];
@@ -130,8 +126,12 @@ async function render(runtime: Runtime, payload: Payload, url: URL): Promise<Ren
 function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: ClientOptions): void {
   /** The path and query whose layers the document shows. A navigation's URL commits before its layers arrive. */
   let rendered = location.pathname + location.search;
-  /** Head metadata from server documents. Elements that scripts add are never removed. */
-  let owned: Element[] = [...document.head.querySelectorAll("meta, link")];
+  /**
+   * The links HTMLKit's documents carry: stylesheets and an alias page's canonical link. HTML Next
+   * manages head declarations, marked data-component-head; elements that scripts add are never removed.
+   */
+  const shell = (head: HTMLHeadElement) => [...head.querySelectorAll("link:not([data-component-head])")];
+  let owned: Element[] = shell(document.head);
   const announcer = document.createElement("div");
   announcer.id = "hk-announcer";
   announcer.setAttribute("aria-live", "polite");
@@ -216,13 +216,35 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   const watch = () => { for (const anchor of document.querySelectorAll("a[href]")) visible.observe(anchor); };
   watch();
 
-  const html = async (url: URL, signal: AbortSignal) => {
-    const response = await loaded(url.pathname + url.search, signal);
+  /** A page's document, whose server markup the components adopt. */
+  const parse = async (response: Response, url: URL): Promise<Rendered> => {
     if (!response.headers.get("content-type")?.startsWith("text/html")) throw new Error(`HTMLKit cannot render ${url.href} in place.`);
     const next = new DOMParser().parseFromString(await response.text(), "text/html");
     const layers: Element[] = [];
     for (let index = 0, root = layer(next, 0); root !== null; root = layer(next, ++index)) layers.push(root);
     return { next, layers, adopt: true };
+  };
+  const html = async (url: URL, signal: AbortSignal) => parse(await loaded(url.pathname + url.search, signal), url);
+  /** A submission's redirect, for the navigation to its URL. */
+  let redirected: { readonly url: string; readonly page: Rendered | undefined } | undefined;
+  /**
+   * A form's POST, as the browser would send it: its action's page, or for a redirect, the page it
+   * redirects to, which replaces the submission's history entry as a document's POST/redirect/GET does.
+   */
+  const submit = async (url: URL, form: HTMLFormElement | undefined, submitter: Element | null, body: FormData, signal: AbortSignal): Promise<Rendered> => {
+    const enctype = submitter?.hasAttribute("formenctype") ? (submitter as HTMLButtonElement).formEnctype : form?.enctype;
+    // An urlencoded form names each file by its name, as the browser does.
+    const fields = enctype === "multipart/form-data" ? body : new URLSearchParams([...body].map(([name, value]) => [name, typeof value === "string" ? value : value.name]));
+    const response = await fetch(url, { method: "POST", body: fields, signal });
+    if (response.redirected) {
+      // The redirect's navigation, which aborts this one, renders its page from this response, read
+      // first, since the abort ends its body. A page it can't render loads as any visit does.
+      redirected = { url: response.url, page: await parse(response, new URL(response.url)).catch(() => undefined) };
+      void navigation.navigate(response.url, { history: "replace" });
+      signal.throwIfAborted();
+    }
+    // A validation error renders the page with its status, such as 422, as a document shows it.
+    return parse(response, url);
   };
   const payload = async (url: URL, signal: AbortSignal) => {
     const cached = prefetched.get(url.pathname + url.search);
@@ -232,26 +254,29 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     // module's identity everywhere: Vite's development server adds ?import to a path, a second URL.
     await Promise.all(data.modules.map(src => import(/* @vite-ignore */ new URL(src, location.href).href)));
     signal.throwIfAborted();
-    return render(runtime, data, url);
+    return render(runtime, data);
   };
 
-  const visit = async (url: URL, event: NavigateEvent): Promise<void> => {
+  const visit = async (url: URL, event: NavigateEvent, form?: HTMLFormElement): Promise<void> => {
     const { signal } = event;
     const sheets: HTMLLinkElement[] = [];
     let committed = false;
     clearTimeout(intended);
+    const handed = redirected?.url === url.href ? redirected.page : undefined;
+    redirected = undefined;
     try {
       // The payload carries data, not markup; a page it cannot render loads from its HTML.
-      const { next, layers, adopt: hydrate } = await payload(url, signal).catch(error => {
+      const { next, layers, adopt: hydrate } = await (handed !== undefined ? handed :
+        event.formData !== null ? submit(url, form, event.sourceElement, event.formData, signal) : payload(url, signal).catch(error => {
         if (signal.aborted) throw error;
         console.warn("HTMLKit renders this page from its HTML:", error);
         return html(url, signal);
-      });
+      }));
       if (layers.length === 0 || layer(document, 0) === null) throw new Error(`HTMLKit cannot render ${url.href} in place: it has no layers.`);
-      // Head metadata both documents share stays; the rest is removed or added at the swap.
+      // Links both documents share stay; the rest are removed or added at the swap.
       const kept = new Set<Element>();
       const added: Element[] = [];
-      for (const element of next.head.querySelectorAll("meta, link")) {
+      for (const element of shell(next.head)) {
         const same = owned.find(candidate => !kept.has(candidate) && candidate.isEqualNode(element));
         if (same === undefined) added.push(element); else kept.add(same);
       }
@@ -261,7 +286,8 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       const loading = sheets.map(sheet => new Promise(done => { sheet.addEventListener("load", done); sheet.addEventListener("error", done); }));
       document.head.append(...sheets);
       // The next page's components register before its DOM arrives; a conflicting one falls back below.
-      const modules = [...next.head.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')].map(script => import(/* @vite-ignore */ script.src));
+      // Resolved against the page's URL: the next document has no <base>, which base-uri 'none' forbids.
+      const modules = [...next.head.querySelectorAll('script[type="module"][src]')].map(script => import(/* @vite-ignore */ new URL(script.getAttribute("src")!, url).href));
       await Promise.all([...loading, ...modules]);
       const commit = () => {
         signal.throwIfAborted();
@@ -269,7 +295,6 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         for (const element of owned) if (!kept.has(element)) element.remove();
         document.head.append(...added.filter(element => !sheets.includes(element as HTMLLinkElement)));
         owned = [...kept, ...added];
-        document.title = next.title;
         document.documentElement.lang = next.documentElement.lang;
         // Layouts persist while each depth renders the same component: they keep their DOM, state,
         // and controllers, and take the new rendering's props. The page layer is always replaced.
@@ -283,18 +308,23 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         // Server markup from the fallback is adopted in place, as the first page was.
         if (hydrate) adopt(layers[index]!);
         rendered = url.pathname + url.search;
-        announcer.textContent = document.title;
         watch();
       };
       signal.throwIfAborted();
+      // The swap disconnects the old page and connects the new one, and HTML Next reconciles the head
+      // once in the microtasks after it, which a view transition's update includes.
       if (typeof document.startViewTransition !== "function" || !transitions(document.styleSheets)) commit();
       else await document.startViewTransition(commit).updateCallbackDone;
       const saved = event.navigationType === "traverse" ? positions.get(event.destination.key) : undefined;
       if (saved === undefined) event.scroll(); else scrollTo(...saved);
+      // The next task, when the head holds the new page's title, announces it.
+      await new Promise(done => setTimeout(done));
+      announcer.textContent = document.title;
     } catch (error) {
       if (!committed) for (const sheet of sheets) sheet.remove();
       if (signal.aborted) return;
-      // Anything this document cannot render in place loads as a document instead.
+      // Anything this document cannot render in place loads as a document instead. A submission's
+      // URL loads with GET, so a failed render never sends its form twice.
       console.error(error);
       location.reload();
     }
@@ -303,16 +333,33 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   // ponytail: WebKit 26.6 sometimes restores no position for an intercepted back or forward
   // navigation, so HTMLKit records where each entry was left. Other scrolling stays native.
   const positions = new Map<string, readonly [x: number, y: number]>();
+  // While a navigation renders in place: data-hk-navigating on <html>, and on a submitting form,
+  // data-hk-submitting and aria-busy. Only the latest navigation clears <html>'s.
+  let latest = 0;
   navigation.addEventListener("navigate", event => {
     if (navigation.currentEntry !== null) positions.set(navigation.currentEntry.key, [scrollX, scrollY]);
     const url = new URL(event.destination.url);
-    // Reloads, downloads, form posts, fragment and history.pushState changes, and other documents
-    // stay native. Modified clicks and link targets open other browsing contexts without this event.
-    if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null || event.formData !== null ||
-      !local(url, event.sourceElement) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname + url.search === rendered)) return;
+    const source = event.sourceElement;
+    // A submission's source is its submitter, or the form itself without one.
+    const form = event.formData === null ? undefined : source instanceof HTMLFormElement ? source : (source as HTMLButtonElement | null)?.form ?? undefined;
+    // Reloads, downloads, fragment and history.pushState changes, and other documents stay native.
+    // Modified clicks and link and form targets open other browsing contexts without this event.
+    if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null ||
+      !local(url, form ?? source) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname + url.search === rendered)) return;
     // After the swap, a new entry scrolls to its fragment or the top, back and forward return to
     // where the entry was left, and focus resets as after a document load.
-    event.intercept({ scroll: "manual", handler: () => visit(url, event) });
+    event.intercept({ scroll: "manual", async handler() {
+      const id = ++latest;
+      document.documentElement.setAttribute("data-hk-navigating", "");
+      form?.setAttribute("data-hk-submitting", "");
+      form?.setAttribute("aria-busy", "true");
+      try { await visit(url, event, form); }
+      finally {
+        form?.removeAttribute("data-hk-submitting");
+        form?.removeAttribute("aria-busy");
+        if (id === latest) document.documentElement.removeAttribute("data-hk-navigating");
+      }
+    } });
   });
 }
 

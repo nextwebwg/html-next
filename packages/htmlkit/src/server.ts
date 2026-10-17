@@ -11,12 +11,11 @@ import { serializePropTarget, serializeTypedValue, type ComponentDefinition } fr
 import { renderComponents, setRenderWorkers } from "@nextwebwg/html-next/server";
 
 import { HtmlKitError, within } from "./config.js";
-import { documentHTML, escapeHTML, pagePayload, redirectPage, type PageAssets } from "./document.js";
-import { headCarrier, mergeHead, type HeadSource } from "./head.js";
-import { parseFragment, type DefaultTreeAdapterMap } from "parse5";
+import { policyHeader } from "./csp.js";
+import { authoredHead, documentHTML, escapeHTML, pagePayload, redirectPage, type PageAssets } from "./document.js";
 import { matchRoute, parameter, redirectLocation, redirectStatuses } from "./routes.js";
 import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestRedirect, Middleware, NavigationItem,
-  NavigationNode, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions } from "./types.js";
+  NavigationNode, NavigationQuery, PageAction, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
 
 export { setRenderWorkers } from "@nextwebwg/html-next/server";
 export type { ApplicationServer, EndpointContext, EndpointHandler, EndpointModule, Middleware, ServerApplication, StartOptions } from "./types.js";
@@ -184,10 +183,9 @@ function parseCookies(header: string | null): ReadonlyMap<string, string> {
   return cookies;
 }
 
-/** A page or layout, ready to render: its component, head metadata, and loader. */
+/** A page or layout, ready to render: its component and loader. */
 export interface RenderLayer {
   readonly definition: ComponentDefinition;
-  readonly metadata: HeadSource;
   readonly module: () => Promise<ServerModule>;
   /** What diagnostics name: the loader file, or the component when a plugin supplies the loader module. */
   readonly origin: string;
@@ -204,18 +202,22 @@ export interface RenderInput {
   /** Every component the layers use, for HTML Next's renderer. */
   readonly definitions: readonly ComponentDefinition[];
   readonly scripts: readonly string[];
+  /** The site's Content Security Policy, unless csp is false. */
+  readonly policy?: RenderedPolicy;
   readonly navigation: Navigation;
   /** What starts an alias page's canonical link: the configured origin, or "" without one. */
   readonly canonicalOrigin: string;
   /** For the error page: the failure, whose fields it takes as the props it declares. */
   readonly failure?: Failure;
+  /** For a POST, the page's action that pageAction() found, which runs before the loaders. */
+  readonly action?: PageAction;
 }
 /** What app/error.html receives: the status and its standard reason phrase, never the error itself. */
 export interface Failure { readonly status: 500; readonly message: string }
 export const serverFailure: Failure = Object.freeze({ status: 500, message: "Internal Server Error" });
 /** The page for a failure without app/error.html, or when it fails too. */
-export function failurePage({ status, message }: Failure, scripts: readonly string[]) {
-  const head: RenderedHead = { title: message, scripts };
+export function failurePage({ status, message }: Failure, scripts: readonly string[], policy?: RenderedPolicy) {
+  const head: RenderedHead = { html: authoredHead + `<title>${escapeHTML(message)}</title>`, scripts, ...(policy === undefined ? {} : { csp: policy }) };
   const body = `<main><h1>${escapeHTML(message)}</h1></main>`;
   return { status, head, body, html: documentHTML(body, head) };
 }
@@ -232,19 +234,19 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const results: LoaderResult[] = [];
   const attributes: Record<string, string>[] = [];
   let parent: Readonly<Record<string, unknown>> = Object.freeze({});
-  let head: RenderedHead = {};
-  // An alias marks its page's own URL current, with the alias's parameters.
-  const current = route.canonical === undefined ? url.pathname : base + route.canonical.slice(1).split("/").filter(Boolean).map(segment => {
+  let lang: string | undefined;
+  // A pattern's URL with this request's parameters.
+  const at = (pattern: string) => base + pattern.slice(1).split("/").filter(Boolean).map(segment => {
     const value = params[parameter(segment) ?? ""];
     return (value === undefined ? [segment] : [value].flat().map(encodeURIComponent)).map(part => part + "/").join("");
   }).join("");
-  for (const layer of layers) {
-    signal.throwIfAborted();
-    const loaded = await layer.module();
+  // An alias marks its page's own URL current, with the alias's parameters.
+  const current = route.canonical === undefined ? url.pathname : at(route.canonical);
+  const contextOf = (layer: RenderLayer): LoadContext => {
     const prerendering = (name: string): never => {
       throw new HtmlKitError(`${name} is unavailable while prerendering; <meta name="hk:render" content="server"> renders the page on each request.`, layer.origin);
     };
-    const context: LoadContext = { phase: request === undefined ? "prerender" : "request", url: new URL(url), base, params, parent,
+    return { phase: request === undefined ? "prerender" : "request", url: new URL(url), base, params, parent,
       propNames: Object.freeze(Object.keys(layer.definition.contract.props)),
       fetch: globalThis.fetch, signal,
       navigation: query => navigation.navigation({ current, ...query }),
@@ -259,20 +261,53 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
       get request() { return request ?? prerendering("request"); },
       get cookies() { return request === undefined ? prerendering("cookies") : cookies ??= parseCookies(request.headers.get("cookie")); },
       get response() { return request === undefined ? prerendering("response") : response; } };
+  };
+  // What a loader's or action's redirect() and notFound() answer with.
+  const stopped = (error: unknown): Rendered => {
+    if (error instanceof Redirect) return { kind: "redirect", location: error.location, status: error.status, headers: response.headers };
+    if (error instanceof NotFound) return { kind: "notFound", headers: response.headers };
+    throw error;
+  };
+  // The action runs first, so every loader sees what it changed.
+  let submitted: Readonly<Record<string, unknown>> | undefined;
+  if (input.action !== undefined) {
+    const page = layers.at(-1)!;
+    let result: unknown;
+    try { result = await input.action(contextOf(page)); }
+    catch (error) { return stopped(error); }
+    if (result === undefined) {
+      // POST/redirect/GET: the page's own URL, without the action's name.
+      const location = new URL(url);
+      location.search = new URLSearchParams([...location.searchParams].filter(([key]) => !key.startsWith("/"))).toString();
+      return { kind: "redirect", location: location.pathname + location.search, status: 303, headers: response.headers };
+    }
+    if (result === null || typeof result !== "object" || Array.isArray(result)) {
+      throw new HtmlKitError("An action returns nothing, which redirects to its page, or an object of the page's props.", page.origin);
+    }
+    submitted = result as Readonly<Record<string, unknown>>;
+  }
+  for (const layer of layers) {
+    signal.throwIfAborted();
+    const loaded = await layer.module();
+    const context = contextOf(layer);
     let result: LoaderResult;
     // app/error.html takes the failure's status and message as the props it declares.
     const supplied = input.failure === undefined || layer !== layers.at(-1) ? {} : { props: Object.fromEntries(Object.entries(input.failure)
       .filter(([name]) => Object.hasOwn(layer.definition.contract.props, name))) };
     try { result = loaded.load === undefined ? supplied : await loaded.load(context); }
-    catch (error) {
-      if (error instanceof Redirect) return { kind: "redirect", location: error.location, status: error.status, headers: response.headers };
-      if (error instanceof NotFound) return { kind: "notFound", headers: response.headers };
-      throw error;
-    }
+    catch (error) { return stopped(error); }
     if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", layer.origin);
+    if (result.head !== undefined) {
+      if (Object.keys(result.head).some(name => name !== "lang")) {
+        throw new HtmlKitError("A loader's head sets only lang; a page or layout declares its <title> and <meta> in <defs>, bound to props its loader returns.", layer.origin);
+      }
+      lang = result.head.lang ?? lang;
+    }
+    // An action's props are the page's, over its loader's.
+    if (submitted !== undefined && layer === layers.at(-1)) result = { ...result, props: { ...result.props, ...submitted } };
     results.push(result);
     parent = Object.freeze({ ...parent, ...result.data });
-    // Checked against the layer's own component, which a prop's diagnostic names; its head reuses them.
+    // Checked against the layer's own component, which a prop's diagnostic names.
     attributes.push(invocationAttributes(layer.definition, result));
   }
   const state: Record<string, Readonly<Record<string, unknown>>> = {};
@@ -285,36 +320,19 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     if (layer.state !== undefined) state[`#${id}`] = layer.state;
     body = invocation(layer.component, layer.attributes, id, body, i > 0);
   }
-  // One render for the page and every layer's head: each head is a component after the page, with its layer's props.
-  const carriers = layers.map((layer, i) => headCarrier(layer.metadata, layer.definition, `hk-head-${i}`));
-  const heads = carriers.flatMap((carrier, i) => carrier === undefined ? [] : [invocation(carrier.contract.tag, attributes[i]!, `hk-head-${i}`, "", false)]);
-  const output = await renderComponents(heads.length === 0 ? body : `${body}<div data-hk-heads>${heads.join("")}</div>`,
-    { definitions: [...input.definitions, ...carriers.filter(carrier => carrier !== undefined)], url: url.href, state });
+  // An alias names its page's own URL canonical, and a page in an alias page directory the same page
+  // under its directory's own prefix, unless a component on the page declares one.
+  const own = route.aliasOf === undefined ? route.canonical === undefined ? undefined : current : at(route.aliasOf);
+  const canonical = own !== undefined && !own.includes("[") && !input.definitions.some(definition => definition.head?.some(declaration =>
+    declaration.kind === "link" && declaration.attributes.some(attribute => attribute.kind === "literal" && attribute.name === "rel" && attribute.value.trim().toLowerCase() === "canonical")))
+    ? input.canonicalOrigin + own : undefined;
+  const output = await renderComponents(body, { definitions: input.definitions, url: url.href, state,
+    head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
   signal.throwIfAborted();
-  const { page, roots } = splitHeads(output.html, heads.length > 0);
-  for (const [i, layer] of layers.entries()) head = mergeHead(roots.get(`hk-head-${i}`), layer.definition, results[i]!, head);
-  if (input.scripts.length > 0) head = { ...head, scripts: input.scripts };
-  // An alias names its page's own URL canonical, unless the page names one.
-  const elements = head.elements ?? [];
-  if (route.canonical !== undefined && !current.includes("[") && !elements.some(element => element.tag === "link" && element.attributes.rel?.toLowerCase().split(/\s+/).includes("canonical"))) {
-    head = { ...head, elements: [...elements, { tag: "link", attributes: { rel: "canonical", href: input.canonicalOrigin + current } }] };
-  }
-  return { kind: "page", status: response.status, headers: response.headers, body: page, css: output.css, head, layers: rendered };
-}
-
-/** A render's page markup, exactly as rendered, and its head carriers' roots by id. */
-function splitHeads(html: string, carried: boolean) {
-  const roots = new Map<string, DefaultTreeAdapterMap["element"]>();
-  if (!carried) return { page: html, roots };
-  const container = parseFragment(html, { sourceCodeLocationInfo: true }).childNodes.findLast(node => "tagName" in node);
-  if (container === undefined || !("tagName" in container) || !container.attrs.some(attribute => attribute.name === "data-hk-heads")) {
-    throw new HtmlKitError("Head rendering produced no head carriers.");
-  }
-  for (const node of container.childNodes) {
-    const id = "tagName" in node ? node.attrs.find(attribute => attribute.name === "id")?.value : undefined;
-    if (id !== undefined) roots.set(id, node as DefaultTreeAdapterMap["element"]);
-  }
-  return { page: html.slice(0, container.sourceCodeLocation!.startOffset), roots };
+  const { policy } = input;
+  const head: RenderedHead = { html: output.head, ...(lang === undefined ? {} : { lang }), ...(canonical === undefined ? {} : { canonical }),
+    ...(input.scripts.length === 0 ? {} : { scripts: input.scripts }), ...(policy === undefined ? {} : { csp: policy }) };
+  return { kind: "page", status: response.status, headers: response.headers, body: output.html, css: output.css, head, layers: rendered };
 }
 
 /** A page's answer: a redirect with its redirect page, its document, or for a payload request its payload (404 when it has none). */
@@ -329,6 +347,7 @@ export function pageResponse(page: { readonly status: number; readonly location?
     return new Response(data === undefined || bodyless ? null : JSON.stringify(data), { status: data === undefined ? 404 : 200, headers });
   }
   headers.set("content-type", "text/html; charset=utf-8");
+  if (page.head.csp !== undefined) headers.set(policyHeader(page.head.csp), page.head.csp.header);
   if (page.location !== undefined) {
     headers.set("location", page.location);
     return new Response(bodyless ? null : redirectPage(page.location).html, { status: page.status, headers });
@@ -385,7 +404,7 @@ async function route<Route extends NavigationRoute>(app: Pipeline<Route>, reques
   if (!pathname.startsWith(app.base) || pathname.startsWith("//")) return app.notFound(request, payload);
   // The redirects option precedes pages, with or without the trailing slash.
   const redirect = app.redirects.get(pathname.endsWith("/") ? pathname : pathname + "/");
-  if (redirect !== undefined) return pageResponse({ ...redirect, body: "", head: {}, layers: [] }, request, payload);
+  if (redirect !== undefined) return pageResponse({ ...redirect, body: "", head: { html: "" }, layers: [] }, request, payload);
   // Endpoints answer paths without a trailing slash, which pages redirect from.
   if (!payload && !pathname.endsWith("/")) {
     const endpoint = matchRoute(app.endpoints, pathname, app.base);
@@ -393,9 +412,38 @@ async function route<Route extends NavigationRoute>(app: Pipeline<Route>, reques
   }
   const matched = matchRoute(app.routes, pathname, app.base);
   if (matched === undefined) return app.notFound(request, payload);
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  // A POST is a form submission, which a page's actions answer.
+  if (!["GET", "HEAD", "POST"].includes(request.method)) return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
   if (!pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" + url.search } });
+  if (request.method === "POST" && !sameOrigin(request)) return new Response("Cross-origin form submissions are refused.", { status: 403 });
   return app.page(matched.route, matched.params, request, payload);
+}
+
+/**
+ * Whether a request comes from a page of this site, as Go's CrossOriginProtection decides: by
+ * Sec-Fetch-Site, or by Origin from browsers that don't send it. A request with neither isn't a
+ * browser's cross-site form, such as one from curl.
+ */
+function sameOrigin(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin" || site === "none";
+  const origin = request.headers.get("origin");
+  // Hosts, not origins: behind a TLS proxy the request's own URL is http.
+  return origin === null || URL.parse(origin)?.host === new URL(request.url).host;
+}
+
+/** The action a page's POST names, `?/name` or `default`, or the answer that refuses it: 405 for a page without actions, 404 for an unknown name. */
+export function pageAction(module: ServerModule, url: URL): PageAction | Response {
+  const { actions } = module;
+  if (actions === undefined) return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  const name = [...url.searchParams.keys()].find(key => key.startsWith("/"))?.slice(1) ?? "default";
+  const action = Object.hasOwn(actions, name) ? actions[name] : undefined;
+  return typeof action === "function" ? action : new Response(null, { status: 404 });
+}
+
+/** The build error for actions on a page that prerenders. */
+export function prerenderedActions(pattern: string, origin: string): HtmlKitError {
+  return new HtmlKitError(`The page ${pattern} has actions, which answer requests; <meta name="hk:render" content="server"> renders it on each request.`, origin);
 }
 
 async function answerEndpoint<Route extends NavigationRoute>(app: Pipeline<Route>, endpoint: EndpointRoute, params: Params, request: Request): Promise<Response> {
@@ -414,13 +462,15 @@ async function answerEndpoint<Route extends NavigationRoute>(app: Pipeline<Route
 
 /** A build's request server data, which the build writes into _htmlkit/server/entry.js. */
 export interface ServerData {
-  readonly version: 1;
+  readonly version: 2;
   readonly base: string;
   readonly redirects: readonly ManifestRedirect[];
   readonly routes: readonly NavigationRoute[];
   /** Each concrete page URL and its route's index, for navigation. */
   readonly catalog: readonly (readonly [string, number])[];
   readonly scripts: readonly string[];
+  /** The site's Content Security Policy, unless csp is false. */
+  readonly policy?: RenderedPolicy;
   /** What starts an alias page's canonical link: the configured origin, or "" without one. */
   readonly canonicalOrigin: string;
   /** Each server-rendered route, by its index in routes. */
@@ -430,9 +480,9 @@ export interface ServerData {
   readonly endpoints: readonly (EndpointRoute & { readonly module: string })[];
   readonly middleware?: string;
 }
-/** A route the server renders: each layer's component, head metadata, and loader module, every component they use, and their browser delivery. */
+/** A route the server renders: each layer's component and loader module, every component they use, and their browser delivery. */
 export interface ServerPage {
-  readonly layers: readonly { readonly definition: ComponentDefinition; readonly metadata: HeadSource; readonly module?: string; readonly origin: string }[];
+  readonly layers: readonly { readonly definition: ComponentDefinition; readonly module?: string; readonly origin: string }[];
   readonly definitions: readonly ComponentDefinition[];
   readonly assets: PageAssets;
 }
@@ -475,7 +525,7 @@ export async function outputPath(output: string, base: string, pathname: string)
  * output directory two levels above the entry. Prerendered pages and assets come from the output's files.
  */
 export async function serverApplication(entry: string, data: ServerData, modules: Readonly<Record<string, () => Promise<unknown>>>): Promise<ServerApplication> {
-  if (data.version !== 1) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
+  if (data.version !== 2) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
   const output = await realpath(fileURLToPath(new URL("../../", entry)));
   const { base, routes } = data;
   const load = async <Module>(id: string) => await modules[id]!() as Module;
@@ -483,26 +533,27 @@ export async function serverApplication(entry: string, data: ServerData, modules
   const navigation = createNavigation(base, routes, () => Promise.resolve(catalog));
   // Files that are never served: the server's own code, and payloads, which answer through their pages.
   const reserved = [join(output, "_htmlkit/server"), join(output, "_htmlkit/pages")];
-  const file = async (path: string, request: Request, status = 200, init?: Headers) => {
+  // A prerendered page's file carries the site's policy as a header too, which may hold header-only directives.
+  const file = async (path: string, request: Request, status = 200, init?: Headers, page = false) => {
     const headers = new Headers(init);
     headers.set("content-type", mime[extname(path)] ?? "application/octet-stream");
+    if (page && data.policy !== undefined) headers.set(policyHeader(data.policy), data.policy.header);
     // Hashed bundles beside the manifest never change.
     if (/^_htmlkit\/[^/]+$/.test(path.slice(output.length + 1).replaceAll("\\", "/")) && !path.endsWith("manifest.json")) headers.set("cache-control", "public, max-age=31536000, immutable");
     return new Response(request.method === "HEAD" ? null : await readFile(path), { status, headers });
   };
-  const missing = (request: Request, headers?: Headers) => file(join(output, "404.html"), request, 404, headers);
-  const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure) =>
+  const missing = (request: Request, headers?: Headers) => file(join(output, "404.html"), request, 404, headers, true);
+  const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure, action?: PageAction) =>
     renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions,
-      scripts: data.scripts, navigation, ...(failure === undefined ? {} : { failure }),
+      scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }), ...(action === undefined ? {} : { action }),
       layers: page.layers.map(layer => ({ ...layer, module: () => layer.module === undefined ? Promise.resolve({}) : load<ServerModule>(layer.module) })) });
-  const html = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
   // A failure answers with app/error.html, rendered as the build would render it, and a safe message; the error goes to the console.
   const failed = async (error: unknown, request: Request): Promise<Response> => {
     if (!request.signal.aborted) console.error(error);
     const { pathname } = new URL(request.url);
     // A failed page has no payload, so the browser loads its document, the error page.
     if (pathname.startsWith(base + "_htmlkit/pages/")) return new Response(null, { status: 500 });
-    const builtin = () => html(request.method === "HEAD" ? "" : failurePage(serverFailure, data.scripts).html, 500);
+    const builtin = () => pageResponse({ ...failurePage(serverFailure, data.scripts, data.policy), layers: [] }, request, false);
     if (data.error === undefined || pathname.startsWith("//")) return builtin();
     try {
       const rendered = await render(data.error, data.error.route, {}, new URL(pathname, request.url), undefined, request.signal, serverFailure);
@@ -521,15 +572,23 @@ export async function serverApplication(entry: string, data: ServerData, modules
     async page(route, params, request, payload) {
       const server = data.pages[routes.indexOf(route)];
       const url = new URL(request.url);
+      // The build refuses actions on a prerendered page.
+      let action: PageAction | undefined;
+      if (request.method === "POST") {
+        const module = server?.layers.at(-1)!.module;
+        const found = pageAction(module === undefined ? {} : await load<ServerModule>(module), url);
+        if (found instanceof Response) return found;
+        action = found;
+      }
       if (server === undefined) {
         // A prerendered page: its document or payload, if the build wrote one for this URL.
         const found = await outputPath(output, base, payload ? `${base}_htmlkit/pages/${url.pathname.slice(base.length)}payload.json` : url.pathname);
-        if (typeof found === "object") return file(found.file, request);
+        if (typeof found === "object") return file(found.file, request, 200, undefined, !payload);
         return payload ? new Response(null, { status: 404 }) : missing(request);
       }
-      const rendered = await render(server, route, params, url, request, request.signal);
+      const rendered = await render(server, route, params, url, request, request.signal, undefined, action);
       if (rendered.kind === "notFound") return payload ? new Response(null, { status: 404, headers: rendered.headers }) : missing(request, rendered.headers);
-      return pageResponse(rendered.kind === "page" ? rendered : { ...rendered, body: "", head: {}, layers: [] }, request, payload, server.assets);
+      return pageResponse(rendered.kind === "page" ? rendered : { ...rendered, body: "", head: { html: "" }, layers: [] }, request, payload, server.assets);
     },
     async notFound(request, payload) {
       if (payload) return new Response(null, { status: 404 });

@@ -740,6 +740,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     }
     componentChildren = defaults;
     if (slots.size > 0) bindings.push(`slots={{ ${[...slots].map(([name, children]) => {
+      const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
       const contracts = state.slotsByTag?.get(node.name);
       const contract = contracts?.find((slot) => !slot.dynamic && slot.name === name)
         ?? contracts?.find((slot) => slot.dynamic && (slot.props?.length ?? 0) > 0);
@@ -750,10 +751,11 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           types: new Map([...scope.types, ...contract!.props!.map((prop) => [prop, UNKNOWN] as const)]),
           local: true,
         };
-        const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
         if (carrier !== undefined) return `${quote(name)}: (${alias}: Record<string, any>) => <>${carrier.children.map((child) => renderNode(child, projectedScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
       }
-      return `${quote(name)}: ${children.length === 0 ? "undefined" : `<>${children.map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`}`;
+      // A slot's first `<template slot>` is its whole content, as in the live runtime.
+      const content = carrier === undefined ? children : [carrier];
+      return `${quote(name)}: ${content.length === 0 ? "undefined" : `<>${content.map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`}`;
     }).join(", ")} }}`);
   }
   if (classes.length > 0) bindings.push(`className={[${classes.join(", ")}${rootTag === undefined ? "" : ", nativeAttrs.className"}].filter(Boolean).join(" ")}`);

@@ -46,7 +46,7 @@ For a native project, a CI script can run:
 {
   "scripts": {
     "check:html": "html-next-check --target native src/components/app.html",
-    "typecheck": "pnpm check:html && tsc --noEmit",
+    "typecheck": "pnpm check:html && html-next-sync && tsc --noEmit",
     "ci": "pnpm typecheck && vite build"
   }
 }
@@ -70,6 +70,9 @@ frameworks. Configure local HTML entries in the Vite adapter so `html-next-sync`
 types. Include the generated declarations in the consumer project; local `.html` imports also
 need [`allowArbitraryExtensions`](https://www.typescriptlang.org/tsconfig/allowArbitraryExtensions.html).
 `html-next-sync` writes the files those typecheckers need; `html-next-check` itself writes none.
+For each local component that declares a controller, the plugin and `html-next-sync` also write
+`<tag>.host.d.ts` beside its definition, the typed host its controller imports as
+`import type { Host } from "./<tag>.host.js"` ([Type a controller](https://nextwebwg.org/html-next/usage#typed-host)).
 For preconverted output, run the converter before the framework typechecker instead of syncing.
 Neither the check command nor declaration preparation provides general TypeScript-style inference
 for every HTML binding expression. Runtime behavior and bundler failures still need tests/builds.

@@ -99,6 +99,19 @@ export const definitions = [
       <em>b</em><template $if="true"> <i>c</i></template></p>
     <p style="white-space: pre"><b>1</b>  <b>2</b>
     <template $each="row of $rows" $key="$row"><i $value="$row"></i> </template></p></section></template>`,
+  `<template component="ssr-phrasing"><defs>
+    <state name="open" type="boolean" value="false"></state>
+    <state name="label" type="string" value="'a'"></state>
+    <state name="rows" type="list(string)" value="['r']"></state>
+    <handler name="toggle"><set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set>
+    <set name="rows" expr:value="['s', 'r']"></set></handler>
+    </defs><section><button type="button" on:click="toggle">Toggle <template $if="$open"><i>open</i></template></button>
+    <p>If <template $if="$open"><i>if</i> <b>p</b></template> end</p>
+    <span>Arm <template $match><template $when="$open"><i>match</i> <b>span</b></template><template $else><s>closed</s></template></template> end</span>
+    <a href="#kept">With <template $with="$label as shown"><i>{$shown}</i> <b>a</b></template> end</a>
+    <label>Rows <template $each="row of $rows" $key="$row"><i>{$row}</i> <b>label</b></template> end</label>
+    <p>Plain <template><i>plain</i> <b>p</b></template> end</p>
+    <span><template $if="$open"><template $if="$open"><i>nested</i></template></template></span></section></template>`,
 ].map((source) => parseComponent(source));
 
 export const cases = [
@@ -123,6 +136,7 @@ export const cases = [
     state: { items: [{ label: "link", href: "/a/", tags: ["x", "y"] }, { label: "group", href: "", tags: ["z"] }] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
   { name: "whitespace between inline content, in rows and under white-space: pre", html: '<ssr-whitespace id="subject"></ssr-whitespace>', state: {} },
+  { name: "fragment bodies of $if, $match, $with, $each and plain templates in phrasing content", html: '<ssr-phrasing id="subject"></ssr-phrasing>', state: { open: true } },
 ] as const;
 
 /**

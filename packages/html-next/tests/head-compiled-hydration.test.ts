@@ -31,18 +31,30 @@ const source = `<template component="docs-layout"><defs>
 <template component="page-b"><defs>
   <title>Configure · Docs</title><link rel="preconnect" href="https://search.acme.example">
 </defs><article>B</article></template>
-<template component="x-note"><defs><title>Note</title></defs><aside></aside></template>`;
+<template component="x-note"><defs><title>Note</title></defs><aside></aside></template>
+<template component="x-product"><defs>
+  <prop name="section" type="string" default="Install">The section.</prop>
+  <script type="application/ld+json" from:value="{ name: $section }"></script>
+</defs><section></section></template>`;
 const definitions = parseComponentResource(source, "https://app.example/app.html").definitions;
+// A build reads its components from files, as HTMLKit does.
+const widget = parseComponentResource(`<template component="x-widget"><defs>
+  <script name="widget" src="/kit/widget.js"></script>
+</defs><div from:data-ok="$widget.ok"></div></template>`, "file:///app/widget.html").definitions;
 const authoredHead = '<meta charset="utf-8"><title>Acme</title><meta name="description" content="Site">';
 
 describe.skipIf(!enabled)("head declarations through compiled hydration, in every engine", () => {
   let compiled = "";
   let page = "";
+  /** Rendered at HTMLKit's default origin, to be served from another. */
+  let elsewhere = "";
 
   beforeAll(async () => {
-    compiled = await compiledFixtures("iife", 'export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";', definitions);
-    const rendered = await renderComponents('<docs-layout><page-a id="page"></page-a></docs-layout>', { definitions, head: authoredHead, url: "https://app.example/" });
+    compiled = await compiledFixtures("iife", 'export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";', [...definitions, ...widget]);
+    const rendered = await renderComponents('<docs-layout><page-a id="page"></page-a></docs-layout><x-product></x-product>', { definitions, head: authoredHead, url: "https://app.example/" });
     page = `<!doctype html><head>${rendered.head}</head><body><main id="mount">${rendered.html}</main></body>`;
+    const widgetPage = await renderComponents("<x-widget></x-widget>", { definitions: widget, head: '<meta charset="utf-8">', url: "http://localhost/" });
+    elsewhere = `<!doctype html><head>${widgetPage.head}</head><body><main id="mount">${widgetPage.html}</main></body>`;
   });
   afterAll(() => {});
 
@@ -51,7 +63,8 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
       // The server wrote the reconciled head with a preload, never a script.
       assert.match(page, /<title data-component-head="">Install · Docs<\/title><template data-component-head="set-aside"><title>Acme<\/title><\/template>/);
       assert.match(page, /<link rel="preload" as="script" href="https:\/\/js\.example\/sdk\.js" crossorigin="anonymous" data-component-head="">/);
-      assert.match(page, /<script type="application\/ld\+json" data-component-head="">\{"name":"Install"\}<\/script>/);
+      // Two instances with identical JSON-LD write two blocks.
+      assert.match(page, /(<script type="application\/ld\+json" data-component-head="">\{"name":"Install"\}<\/script>){2}/);
       assert.doesNotMatch(page, /<script src/);
       const browser = await browserType.launch({ headless: true });
       const errors: string[] = [];
@@ -82,6 +95,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
           const { factories } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options: object, html: undefined, root: Element) => Element> } }).HtmlCompiled;
           factories["page-a"]!({}, undefined, document.querySelector('[data-component~="page-a"]')!);
           factories["docs-layout"]!({}, undefined, document.querySelector('[data-component~="docs-layout"]')!);
+          factories["x-product"]!({}, undefined, document.querySelector('[data-component~="x-product"]')!);
         });
         await tab.waitForFunction(() => document.querySelector('[data-component~="page-a"]')?.getAttribute("data-loads") === "1");
         const read = () => tab.evaluate(() => {
@@ -100,11 +114,11 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
           title: "Install · Docs",
           head: ["<title *>Install · Docs</title>", '<meta name="description" content="Acme documentation" *>',
             '<link rel="preconnect" href="https://search.acme.example" *>', '<link rel="canonical" href="https://acme.example/install" *>',
-            '<script type="application/ld+json" *>{"name":"Install"}</script>',
+            '<script type="application/ld+json" *>{"name":"Install"}</script>', '<script type="application/ld+json" *>{"name":"Install"}</script>',
             '<link rel="preload" as="script" href="https://js.example/sdk.js" crossorigin="anonymous" *>',
             '<script src="https://js.example/sdk.js" crossorigin="anonymous" *></script>'],
           // Every element the server wrote is the same node, and the template is gone.
-          adopted: 6, runs: 1, loads: "1",
+          adopted: 7, runs: 1, loads: "1",
         });
 
         // A deeper component takes the title, and gives it back; a binding change updates the same JSON-LD block.
@@ -112,7 +126,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
           const { factories, updateGeneratedProps } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options?: object) => Element>; updateGeneratedProps(element: Element, props: object): void } }).HtmlCompiled;
           const settle = () => new Promise((done) => setTimeout(done, 20));
           const pageRoot = document.querySelector('[data-component~="page-a"]')!;
-          const block = document.querySelector('script[type="application/ld+json"]');
+          const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
           const note = factories["x-note"]!();
           pageRoot.append(note);
           await settle();
@@ -122,11 +136,12 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
           const back = document.title;
           updateGeneratedProps(pageRoot, { section: "Upgrade" });
           await settle();
-          return { deeper, back, title: document.title, json: document.querySelector('script[type="application/ld+json"]')!.textContent,
-            // A JSON-LD block is keyed by its text, so new text is a new key: one block, in a new element.
-            blocks: document.querySelectorAll('script[type="application/ld+json"]').length, oldGone: !block!.isConnected };
+          const after = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+          // Each instance's block is its own: the page's changes in place, as the same node; the product's stays.
+          return { deeper, back, title: document.title, json: after.map((block) => block.textContent),
+            same: after.length === blocks.length && after.every((block, index) => block === blocks[index]) };
         });
-        assert.deepEqual(updated, { deeper: "Note", back: "Install · Docs", title: "Upgrade · Docs", json: '{"name":"Upgrade"}', blocks: 1, oldGone: true });
+        assert.deepEqual(updated, { deeper: "Note", back: "Install · Docs", title: "Upgrade · Docs", json: ['{"name":"Upgrade"}', '{"name":"Install"}'], same: true });
 
         // A client navigation is one reconciliation: no intermediate title, and the shared preconnect stays.
         const navigation = await tab.evaluate(async () => {
@@ -155,6 +170,54 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
         });
         assert.deepEqual(restored, { same: true, title: "Acme", description: "Site", scripts: 1 });
         assert.deepEqual(requested, ["/sdk.js"]);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} preloads a same-origin script by its path, wherever the page is served`, async () => {
+      // Rendered at http://localhost, the preload names no origin.
+      assert.match(elsewhere, /<link rel="preload" as="script" href="\/kit\/widget\.js" data-component-head="">/);
+      const browser = await browserType.launch({ headless: true });
+      const errors: string[] = [];
+      try {
+        const tab = await browser.newPage();
+        tab.setDefaultTimeout(10_000);
+        tab.on("pageerror", (error) => errors.push(error.message));
+        const requested: string[] = [];
+        await tab.route(/^https:\/\/app\.example\//, (route) => {
+          const url = new URL(route.request().url());
+          if (url.pathname === "/kit/widget.js") {
+            requested.push(url.pathname);
+            return route.fulfill({ contentType: "text/javascript", body: "globalThis.widgetRuns = (globalThis.widgetRuns ?? 0) + 1;" });
+          }
+          // A same-origin script policy, which blocks a preload or script from any other origin.
+          return route.fulfill({ contentType: "text/html; charset=utf-8", body: elsewhere,
+            headers: { "content-security-policy": "script-src 'self' 'unsafe-inline'" } });
+        });
+        await tab.goto("https://app.example/");
+        await tab.evaluate(() => {
+          const kept = globalThis as unknown as Record<string, unknown>;
+          kept.blocked = [];
+          document.addEventListener("securitypolicyviolation", (event) => (kept.blocked as string[]).push(event.blockedURI));
+          kept.preload = document.querySelector('link[rel="preload"]');
+        });
+        await tab.addScriptTag({ content: compiled });
+        await tab.evaluate(() => {
+          const { factories } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options: object, html: undefined, root: Element) => Element> } }).HtmlCompiled;
+          factories["x-widget"]!({}, undefined, document.querySelector('[data-component~="x-widget"]')!);
+        });
+        await tab.waitForFunction(() => document.querySelector('[data-component~="x-widget"]')?.hasAttribute("data-ok") === true);
+        const result = await tab.evaluate(() => {
+          const kept = globalThis as unknown as Record<string, unknown>;
+          return { preload: (kept.preload as HTMLLinkElement).href, kept: kept.preload === document.querySelector('link[rel="preload"]'),
+            scripts: Array.from(document.querySelectorAll("script[src]"), (script) => (script as HTMLScriptElement).src),
+            runs: (globalThis as unknown as { widgetRuns?: number }).widgetRuns ?? 0, blocked: kept.blocked };
+        });
+        // The inserted script and its preload are the served origin's, so the script entry owns the preload.
+        assert.deepEqual(result, { preload: "https://app.example/kit/widget.js", kept: true, scripts: ["https://app.example/kit/widget.js"], runs: 1, blocked: [] });
+        assert.deepEqual(requested, ["/kit/widget.js"]);
         assert.deepEqual(errors, []);
       } finally {
         await browser.close();

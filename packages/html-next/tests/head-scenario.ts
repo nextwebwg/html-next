@@ -192,13 +192,21 @@ export async function runHeadScenario(page: Page): Promise<Steps> {
   steps.titles = titles;
   steps.sameTitle = await page.evaluate(() => (globalThis as unknown as Record<string, unknown>).managedTitle === document.querySelector("title"));
 
-  // JSON-LD: a bound value is JSON with every < escaped; null omits it.
+  // JSON-LD: a bound value is JSON with every < escaped; a change updates the same block; null omits it.
   await page.evaluate(() => app.schema({ "@type": "Product", name: "</script><script>alert(1)</script><!--" }));
   await settle();
   steps.schema = await page.evaluate(() => {
-    const blocks = document.querySelectorAll("script[type='application/ld+json']");
-    const bound = blocks[1]?.textContent ?? "";
+    const blocks = Array.from(document.querySelectorAll("script[type='application/ld+json']"));
+    const block = blocks.find((candidate) => candidate.textContent!.startsWith('{"@type":"Product"'));
+    (globalThis as unknown as Record<string, unknown>).boundBlock = block;
+    const bound = block?.textContent ?? "";
     return { count: blocks.length, bound, parsed: JSON.parse(bound) as unknown, alerted: (globalThis as unknown as { alerted?: boolean }).alerted === true };
+  });
+  await page.evaluate(() => app.schema({ "@type": "Product", name: "Anvil" }));
+  await settle();
+  steps.schemaChanged = await page.evaluate(() => {
+    const block = (globalThis as unknown as { boundBlock: Element }).boundBlock;
+    return { same: block.isConnected, text: block.textContent, count: document.querySelectorAll("script[type='application/ld+json']").length };
   });
   await page.evaluate(() => app.schema(null));
   await settle();
@@ -252,6 +260,8 @@ export function expectedHead(listed: boolean): Steps {
       '<link rel="canonical" href="https://acme.example/install" *>', '<meta name="robots" content="noindex" *>',
       '<link rel="dns-prefetch" href="https://cdn.acme.example" *>',
       '<script type="application/ld+json" *>{"@type": "Organization", "name": "{Acme}"}</script>',
+      // Each instance's JSON-LD is its own block, identical text included.
+      '<script type="application/ld+json" *>{"@type": "Organization", "name": "{Acme}"}</script>',
       '<link rel="preconnect" href="https://vendor.example" *>',
       ...(listed ? ['<meta name="theme-color" content="green" *>'] : []),
       '<link rel="preconnect" href="https://cdn.acme.example" *>',
@@ -264,9 +274,10 @@ export function expectedHead(listed: boolean): Steps {
     authoredKept: true,
     titles: ["Upgrade · Docs", "Note", "Upgrade · Docs"],
     sameTitle: true,
-    schema: { count: 2, bound: '{"@type":"Product","name":"\\u003c/script>\\u003cscript>alert(1)\\u003c/script>\\u003c!--"}',
+    schema: { count: 3, bound: '{"@type":"Product","name":"\\u003c/script>\\u003cscript>alert(1)\\u003c/script>\\u003c!--"}',
       parsed: { "@type": "Product", name: "</script><script>alert(1)</script><!--" }, alerted: false },
-    schemaRemoved: 1,
+    schemaChanged: { same: true, text: '{"@type":"Product","name":"Anvil"}', count: 3 },
+    schemaRemoved: 2,
     navigation: { seen: ["Configure · Docs"], inUpdate: "Configure · Docs", preconnectKept: true },
     navigated: [
       "<title *>Configure · Docs</title>", '<meta name="description" content="Acme documentation" *>', '<link rel="preconnect" href="https://img.acme.example">',
@@ -274,6 +285,7 @@ export function expectedHead(listed: boolean): Steps {
       '<link rel="preconnect" href="https://search.acme.example" *>',
       // page-b's og:image:width has no og:image of its own, so the layout's list wins the family.
       '<meta property="og:image" content="/layout.png" *>', '<meta property="og:image:alt" content="Acme" *>',
+      '<script type="application/ld+json" *>{"@type": "Organization", "name": "{Acme}"}</script>',
       '<script type="application/ld+json" *>{"@type": "Organization", "name": "{Acme}"}</script>',
       '<link rel="preconnect" href="https://vendor.example" *>',
       ...(listed ? ['<meta name="theme-color" content="green" *>'] : []),

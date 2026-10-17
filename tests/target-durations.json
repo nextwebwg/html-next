@@ -87,5 +87,6 @@
   "packages/html-next/tests/target-runtime.test.ts": 114,
   "packages/html-next/tests/target-transitions.test.ts": 15,
   "packages/html-next/tests/targets.test.ts": 5,
-  "packages/html-next/tests/vue-parity.test.ts": 158
+  "packages/html-next/tests/vue-parity.test.ts": 158,
+  "packages/html-next-converter/tests/named-slot-parity.test.ts": 15
 }

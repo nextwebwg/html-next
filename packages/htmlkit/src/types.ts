@@ -52,6 +52,33 @@ export interface ApplicationOptions {
    * (default) fails the build, and "warn" reports the links and builds.
    */
   readonly linkCheck?: "error" | "warn";
+  /**
+   * The site's Content Security Policy, which every page carries, generated from what its components declare.
+   * Sources here are added to each directive, never replacing the generated ones; false turns it off.
+   */
+  readonly csp?: ContentSecurityPolicyOptions | false;
+}
+
+/**
+ * Sources to add to the generated policy, per directive, in CSP's own grammar, such as
+ * { "script-src": ["https://cdn.example/"], "connect-src": ["https://api.example"] }.
+ */
+export interface ContentSecurityPolicyOptions {
+  /**
+   * Send Content-Security-Policy-Report-Only, which reports violations and blocks nothing. Only a
+   * header can report only, so static pages then carry no policy.
+   */
+  readonly reportOnly?: boolean;
+  readonly [directive: string]: readonly string[] | boolean | undefined;
+}
+
+/** The site's Content Security Policy. */
+export interface RenderedPolicy {
+  /** The policy as the header sends it. */
+  readonly header: string;
+  readonly reportOnly: boolean;
+  /** The policy as the page's `<meta http-equiv>` carries it, without header-only directives; absent when it only reports. */
+  readonly meta?: string;
 }
 
 export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
@@ -67,6 +94,11 @@ export interface PageDirectory {
   readonly layout?: string | false | RouteLayer;
   /** Skip the directory when it doesn't exist, as the default app/pages is. */
   readonly optional?: boolean;
+  /**
+   * A further mount of a directory another entry also serves: its pages are served and navigable here,
+   * left out of sitemap.xml, and name the same page under the other entry's prefix as canonical.
+   */
+  readonly alias?: boolean;
 }
 
 export interface HtmlKitPlugin {
@@ -148,22 +180,23 @@ export interface PageContext {
   watch(file: string): void;
 }
 
+/** What a loader sets on the document: its language, the `<html lang>`. */
 export interface PageHead {
-  readonly title?: string;
-  readonly description?: string;
   readonly lang?: string;
 }
 
 export interface RenderedHead extends PageHead {
-  /** Rendered native metadata, merged by identity; values are escaped on output. */
-  readonly elements?: readonly HeadElement[];
+  /**
+   * The head's elements as HTML: the application's own, with the page's head declarations reconciled
+   * into them by HTML Next, each marked `data-component-head`.
+   */
+  readonly html: string;
+  /** An alias page's canonical link to its page's own URL, which the application document carries. */
+  readonly canonical?: string;
   /** A plugin's headScript, then app/head.js, each inlined after the charset so they run before first paint. */
   readonly scripts?: readonly string[];
-}
-
-export interface HeadElement {
-  readonly tag: "meta" | "link";
-  readonly attributes: Readonly<Record<string, string>>;
+  /** The site's Content Security Policy, unless csp is false. */
+  readonly csp?: RenderedPolicy;
 }
 
 export interface LoaderResult {
@@ -218,9 +251,21 @@ export interface LoadContext {
 
 export interface ServerModule {
   readonly load?: (context: LoadContext) => LoaderResult | Promise<LoaderResult>;
+  /**
+   * A server-rendered page's form actions by name. A `<form method="post">` runs `default`, and one whose
+   * `action` or a button's `formaction` is `?/name` runs `name`. Layouts' loader files have none.
+   */
+  readonly actions?: Readonly<Record<string, PageAction>>;
   readonly entries?: () => readonly Readonly<Record<string, RouteParam>>[] | Promise<readonly Readonly<Record<string, RouteParam>>[]>;
 }
 export type RouteParam = string | readonly string[];
+/**
+ * A form action. It runs before every loader, with the page loader's context and the POST request, and
+ * returns nothing to redirect to the page with 303 (POST/redirect/GET), or the page's props, over its
+ * loader's, to render the page with them, such as `{ errors, values }`. `response.status` sets the
+ * render's status, such as 422; `redirect()` and `notFound()` work as in a loader.
+ */
+export type PageAction = (context: LoadContext) => void | Readonly<Record<string, unknown>> | Promise<void | Readonly<Record<string, unknown>>>;
 
 /** An endpoint method: a standard Request in, a standard Response out. */
 export type EndpointHandler = (request: Request, context: EndpointContext) => Response | Promise<Response>;
@@ -274,6 +319,8 @@ export interface ApplicationRoute extends RouteLayer {
   readonly hidden?: boolean;
   /** For an hk:alias route, the pattern of the page's own route, which navigation marks current. */
   readonly canonical?: string;
+  /** For a page in an alias page directory, the pattern of the same page under its directory's own prefix, which its canonical link names. */
+  readonly aliasOf?: string;
   /** Per-segment numeric file order; independent of URLs and component identity. */
   readonly order?: readonly (string | null)[];
   /** The (group) folders the page is in, outermost first. */

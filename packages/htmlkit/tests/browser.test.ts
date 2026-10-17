@@ -1,6 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { chromium, firefox, webkit } from "playwright";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApplication, devApplication, previewApplication, type ApplicationServer } from "../src/index.js";
 import { buildDocsProof } from "../examples/docs/proof.js";
 import { mkdtemp } from "node:fs/promises";
@@ -76,7 +76,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         })).toBe(true);
         await page.locator("button").click();
         await expect.poll(() => page.locator("output").textContent()).toBe("5");
-        await page.addScriptTag({ content: runtime });
+        // Test code outside the page's policy, which allows no inline script.
+        await page.evaluate(runtime);
         expect(await page.evaluate(() => {
           const { getComponentHost } = (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): { state: { count: number }; root: Element } | undefined } }).HtmlRuntime;
           const root = document.querySelector('[data-component="home-page"]')!;
@@ -181,4 +182,41 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("page-wide stylesheet
       try { await page.goto(dev.url); await check(); } finally { await dev.close(); }
     } finally { await browser.close(); await rm(root, { recursive: true, force: true }); }
   }, 60_000);
+});
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("the development policy", () => {
+  for (const [name, type] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it(`${name} reports each violation with the config line that allows it, and keeps Vite working`, async () => {
+      const root = await fixture();
+      await write(root, "app/pages/tracker.html", '<template component="tracker-page" controller="./tracker.ts"><defs><title>Tracker</title></defs><h1>Tracker</h1></template>');
+      // A script no component declares, so the policy has no source for it.
+      await write(root, "app/pages/tracker.ts", "export default function () { const script = document.createElement('script'); script.src = 'https://elsewhere.example/tracker.js'; document.head.append(script); }");
+      const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // Restricting connect-src and style-src, which Vite's HMR socket and injected styles need in development.
+      const server = await devApplication({ root, port: 0, csp: { "connect-src": ["'self'"], "style-src": ["'self'"] } });
+      const browser = await type.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const messages: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") messages.push(message.text()); });
+        const line = 'To allow it, add to htmlkit.config.ts: csp: { "script-src": ["https://elsewhere.example"] }';
+        await page.goto(server.url + "tracker/");
+        await expect.poll(() => messages.find(message => message.includes(line)), { timeout: 10_000 })
+          .toBe(`HTMLKit: /tracker/ blocked https://elsewhere.example/tracker.js under script-src. ${line}`);
+        await expect.poll(() => warned.mock.calls.find(([message]) => String(message).includes(line))?.[0], { timeout: 10_000 })
+          .toBe(`HTMLKit: /tracker/ blocked https://elsewhere.example/tracker.js under script-src. ${line}`);
+        // Everything else works under the policy: the page's modules, a controller's imported CSS, and reloading after an edit.
+        messages.length = 0;
+        await page.goto(server.url);
+        await expect.poll(() => page.locator('[data-component="home-page"]').getAttribute("data-connections")).toBe("1");
+        await expect.poll(() => page.locator("button").first().evaluate(button => getComputedStyle(button).borderTopColor)).toBe("rgb(55, 66, 77)");
+        await page.evaluate(() => { (window as unknown as { previous: boolean }).previous = true; });
+        const source = await readFile(join(root, "app/pages/index.html"), "utf8");
+        await write(root, "app/pages/index.html", source.replace("<h1>Home</h1>", "<h1>Edited home</h1>"));
+        await page.waitForFunction(() => !(window as unknown as { previous?: boolean }).previous && document.querySelector("h1")?.textContent === "Edited home",
+          undefined, { timeout: 10_000 });
+        expect(messages.filter(message => message.startsWith("HTMLKit:"))).toEqual([]);
+      } finally { warned.mockRestore(); await browser.close(); await server.close(); await rm(root, { recursive: true, force: true }); }
+    }, 60_000);
+  }
 });

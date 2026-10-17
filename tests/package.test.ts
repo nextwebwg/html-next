@@ -317,16 +317,16 @@ describe("workspace package contracts", () => {
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "htmlkit-consumer", private: true, type: "module" }));
     execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", pack("html-next"), pack("htmlkit")], { cwd: consumer, shell: useCommandShell });
     writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/" });');
-    writeFileSync(join(consumer, "app/layouts/default.html"), '<link rel="component" href="@nextwebwg/htmlkit/components/nav.html"><template component="packed-shell"><title>Layout default</title><defs><prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs><main><hk-nav from:items="$navigation"></hk-nav><slot name="page"></slot></main></template>');
+    writeFileSync(join(consumer, "app/layouts/default.html"), '<link rel="component" href="@nextwebwg/htmlkit/components/nav.html"><template component="packed-shell"><defs><prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop><title>Layout default</title></defs><main><hk-nav from:items="$navigation"></hk-nav><slot name="page"></slot></main></template>');
     writeFileSync(join(consumer, "app/layouts/default.server.ts"), 'export const load = async ({ navigation }) => ({ props: { navigation: await navigation() } });');
-    writeFileSync(join(consumer, "app/pages/01.index.html"), '<meta name="hk:page" content="packed-page"><template component="packed-label"><title>Helper default</title><strong>Packaged helper</strong></template><template component="packed-page"><title $value="$label"></title><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="$label"></h1><packed-label></packed-label></section></template>');
+    writeFileSync(join(consumer, "app/pages/01.index.html"), '<meta name="hk:page" content="packed-page"><template component="packed-label"><strong>Packaged helper</strong></template><template component="packed-page"><defs><prop name="label" type="string" required>Label</prop><title>{$label}</title></defs><section><h1 $value="$label"></h1><packed-label></packed-label></section></template>');
     writeFileSync(join(consumer, "app/pages/01.index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
     const installed = join(consumer, "node_modules/@nextwebwg/htmlkit");
     const output = runBin(consumer, "htmlkit", ["build"]);
     expect(output).toContain("Generated 1 pages");
     const html = readFileSync(join(consumer, "dist/index.html"), "utf8");
     expect(html).toContain("Installed platform");
-    expect(html).toContain("<title>Installed platform</title>");
+    expect(html).toContain(">Installed platform</title>");
     expect(html).toContain('data-component="packed-shell"');
     expect(html).toContain("Packaged helper");
     expect(html).toContain('aria-current="page"');
@@ -339,7 +339,7 @@ describe("workspace package contracts", () => {
     execFileSync("corepack", ["pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", entry], { cwd: root, shell: useCommandShell });
 
     // The built server runs on Node from the installed packages; a resolve hook fails if anything loads Vite.
-    writeFileSync(join(consumer, "app/pages/account.html"), '<template component="packed-account"><meta name="hk:render" content="server"><defs><prop name="user" type="string" required>User</prop></defs><p>Hello {$user}</p></template>');
+    writeFileSync(join(consumer, "app/pages/account.html"), '<template component="packed-account"><defs><prop name="user" type="string" required>User</prop><meta name="hk:render" content="server"></defs><p>Hello {$user}</p></template>');
     writeFileSync(join(consumer, "app/pages/account.server.ts"), 'export const load = ({ cookies }) => ({ props: { user: cookies.get("user") ?? "guest" } });');
     mkdirSync(join(consumer, "app/api"));
     writeFileSync(join(consumer, "app/api/time.server.ts"), 'export const GET = () => Response.json({ ok: true });');

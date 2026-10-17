@@ -1,6 +1,6 @@
 ---
 title: Moving between pages
-order: 5
+order: 6
 blurb: client navigation · prefetch · opt-outs
 eyebrow: HTMLKit
 ---
@@ -24,7 +24,8 @@ pages share, and swaps in the new page. There's nothing to set up.
 | A layout both pages use | Stays, with its state and controller. An open menu stays open. |
 | That layout's props | Update from its loader. `<hk-nav>` marks the new page current. |
 | The page, and any layout only one page uses | Replaced. A fresh page starts from its loader's state. |
-| `<title>`, description, and other head metadata | Update to the new page's. |
+| `<title>`, description, and other head declarations | Update to the new page's in one step, also inside a view transition. |
+| Declared scripts | Stay loaded. A script the next page declares loads once; none runs twice. |
 | Scroll position | Top of the page, or the `#fragment` in the link. Back and forward return to where you were. |
 | Keyboard focus | Starts from the top, as after a page load. |
 
@@ -42,8 +43,10 @@ These links load normally, as they would without HTMLKit:
 | A file rather than a page | `<a href="/report.pdf">` |
 | A download, or a new tab or window | `download`, `target="_blank"`, or Ctrl, ⌘, Shift, or middle click |
 | A `#fragment` on the same page | `<a href="#install">` |
-| A form that posts | `<form method="post">` |
 | Marked with `data-hk-reload` | `<a href="/print/" data-hk-reload>` |
+
+Forms submit in place as well: a `GET` form loads its page with the form's query, and a
+[form that posts](/htmlkit/forms#submitting-in-place) runs its page's action.
 
 Put `data-hk-reload` on a link, or on an element around several links, to load those pages in full:
 
@@ -102,6 +105,25 @@ too:
 
 The default is a cross-fade. Style `::view-transition-old(root)` and `::view-transition-new(root)`
 to change it. Firefox loads pages without the animation.
+
+## Showing that a page is loading
+
+While a page loads in place, `<html>` has `data-hk-navigating`. While a
+[form submits in place](/htmlkit/forms#submitting-in-place), the form also has
+`data-hk-submitting` and `aria-busy="true"`. Both go when the next page has rendered, or when the
+navigation fails or another replaces it. Show a pending indicator with CSS:
+
+```css
+.progress { opacity: 0; }
+/* Shown after 150 ms, so a quick navigation shows nothing. */
+:root[data-hk-navigating] .progress { opacity: 1; transition: opacity 200ms 150ms; }
+form[data-hk-submitting] button { cursor: progress; opacity: 0.6; }
+```
+
+`aria-busy` tells screen readers the form is changing, and they hear the next page's title once it
+renders, so an indicator needs no announcement of its own. Scripts read the browser's own state:
+`navigation.transition` is set while a navigation is under way, and `navigatesuccess` and
+`navigateerror` fire when it ends.
 
 ## Running code after a navigation
 

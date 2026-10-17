@@ -1,6 +1,6 @@
 ---
 title: Navigation
-order: 4
+order: 5
 blurb: hk-nav · page order · labels
 eyebrow: HTMLKit
 ---
@@ -57,7 +57,7 @@ compares with its neighbours' prefixes as one, so this page sorts as `03.about.h
 
 ```html
 <template component="page-about">
-  <meta name="hk:order" content="3">
+  <defs><meta name="hk:order" content="3"></defs>
   …
 </template>
 ```
@@ -115,12 +115,12 @@ out of navigation while remaining a page:
 
 ```html
 <template component="page-install">
-  <meta name="hk:label" content="Installation">
+  <defs><meta name="hk:label" content="Installation"></defs>
   …
 </template>
 
 <template component="page-thanks">
-  <meta name="hk:navigation" content="hidden">
+  <defs><meta name="hk:navigation" content="hidden"></defs>
   …
 </template>
 ```

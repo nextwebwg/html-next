@@ -1,6 +1,7 @@
 import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
+import { generateHostDeclaration } from "./targets/host-types.js";
 import { TRANSITIONS_EXTENSION } from "./transition-syntax.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
 import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
@@ -35,7 +36,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.55";
+export const GENERATOR_VERSION = "1.0.0-alpha.57";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -107,6 +108,14 @@ export function generateComponent(
     }),
     Object.freeze({ path: `docs/${tag}.md`, content: docs }),
   ]);
+}
+
+/**
+ * The typed controller host for a component, as `<tag>.host.d.ts` content: `Host` and `Controller`,
+ * typed from its `<defs>`. `definitions` are the linked graph's components by tag.
+ */
+export function generateHostTypes(definition: ComponentDefinition, definitions?: ReadonlyMap<string, ComponentDefinition>): string {
+  return generateHostDeclaration(definition, GENERATOR_VERSION, definitions);
 }
 
 /** The one module the converted Vue components share; every package that emits Vue ships it once. */

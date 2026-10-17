@@ -17,21 +17,21 @@ afterEach(async () => {
 async function site(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-static-")); roots.push(root);
   await write(root, "package.json", '{"type":"module"}');
-  await write(root, "app/layouts/default.html", `<template component="site-shell"><title>Site</title><defs><prop name="brand" type="string" required>Brand</prop></defs>
+  await write(root, "app/layouts/default.html", `<template component="site-shell"><defs><prop name="brand" type="string" required>Brand</prop><title>Site</title></defs>
     <main><header>{$brand}</header><slot name="page"></slot></main></template>`);
   await write(root, "app/layouts/default.server.ts", `export const load = ({ url }) => {
     if (url.pathname.includes("layout-fails")) throw new Error("layout secret");
     return { props: { brand: "Kit" } };
   };`);
-  await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><h1>Home</h1></template>');
+  await write(root, "app/pages/index.html", '<template component="home-page"><defs><title>Home</title></defs><h1>Home</h1></template>');
   return root;
 }
 
 describe("the error page", () => {
   async function failing(): Promise<string> {
     const root = await site();
-    await write(root, "app/error.html", `<template component="error-page"><title>Trouble</title><defs>
-      <prop name="status" type="number" required>Status</prop><prop name="message" type="string" required>Reason</prop></defs>
+    await write(root, "app/error.html", `<template component="error-page"><defs>
+      <prop name="status" type="number" required>Status</prop><prop name="message" type="string" required>Reason</prop><title>Trouble</title></defs>
       <section><h1>{$status}</h1><p>{$message}</p></section></template>`);
     await write(root, "app/pages/broken.html", '<template component="broken-page"><h1>Broken</h1></template>');
     await write(root, "app/pages/broken.server.ts", 'export const load = () => { throw new Error("database secret"); };');
@@ -54,7 +54,7 @@ describe("the error page", () => {
       const response = await application.fetch(new Request("http://localhost/broken/"));
       expect(response.status).toBe(500);
       const html = await response.text();
-      expect(html).toContain("<title>Trouble</title>");
+      expect(html).toContain(">Trouble</title>");
       expect(html).toContain('data-component="site-shell"');
       expect(html).toContain("<h1>500</h1><p>Internal Server Error</p>");
       expect(html).not.toContain("secret");
@@ -65,7 +65,7 @@ describe("the error page", () => {
       const layout = await application.fetch(new Request("http://localhost/layout-fails/"));
       expect(layout.status).toBe(500);
       const plain = await layout.text();
-      expect(plain).toContain("<title>Internal Server Error</title>");
+      expect(plain).toContain(">Internal Server Error</title>");
       expect(plain).not.toContain("secret");
     } finally { await application.close(); }
   });
@@ -88,10 +88,17 @@ describe("the error page", () => {
     const root = await failing();
     await rm(join(root, "app/pages/broken.server.ts"));
     await rm(join(root, "app/pages/layout-fails.html"));
+    // A file whose name contains "error" and "500", as a hashed asset's can, is not an error page.
+    await write(root, "public/error-500.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
     const result = await buildApplication({ root });
     expect(result.routes).toEqual(["/", "/broken/"]);
-    const files = await readdir(result.outDir, { recursive: true });
-    expect(files.some(file => file.includes("error") || file.includes("500"))).toBe(false);
+    const files = (await readdir(result.outDir, { recursive: true })).map(file => file.replaceAll("\\", "/"));
+    expect(files).toContain("error-500.svg");
+    expect(files.filter(file => ["error.html", "500.html", "error/index.html"].includes(file))).toEqual([]);
+    // No page is rendered from app/error.html.
+    const pages = await Promise.all(files.filter(file => file.endsWith(".html")).map(file => readFile(join(result.outDir, file), "utf8")));
+    expect(pages.length).toBeGreaterThan(0);
+    expect(pages.filter(html => html.includes("error-page") || html.includes("<title>Trouble</title>"))).toEqual([]);
     await write(root, "app/pages/broken.server.ts", 'export const load = () => { throw new Error("database secret"); };');
     const server = await devApplication({ root, port: 0 });
     try {
@@ -111,12 +118,12 @@ describe("the error page", () => {
 describe("sitemap.xml and robots.txt", () => {
   async function pages(): Promise<string> {
     const root = await site();
-    await write(root, "app/pages/about.html", '<template component="about-page"><title>About</title><meta name="hk:alias" content="/old-about/"><h1>About</h1></template>');
-    await write(root, "app/pages/hidden.html", '<template component="hidden-page"><title>Hidden</title><meta name="hk:navigation" content="hidden"><h1>Hidden</h1></template>');
-    await write(root, "app/pages/private.html", '<template component="private-page"><title>Private</title><meta name="robots" content="noindex, follow"><h1>Private</h1></template>');
-    await write(root, "app/pages/posts/[slug].html", '<template component="post-page"><title>Post</title><meta name="hk:alias" content="/articles/[slug]/"><h1>Post</h1></template>');
+    await write(root, "app/pages/about.html", '<template component="about-page"><defs><title>About</title><meta name="hk:alias" content="/old-about/"></defs><h1>About</h1></template>');
+    await write(root, "app/pages/hidden.html", '<template component="hidden-page"><defs><title>Hidden</title><meta name="hk:navigation" content="hidden"></defs><h1>Hidden</h1></template>');
+    await write(root, "app/pages/private.html", '<template component="private-page"><defs><title>Private</title><meta name="robots" content="noindex, follow"></defs><h1>Private</h1></template>');
+    await write(root, "app/pages/posts/[slug].html", '<template component="post-page"><defs><title>Post</title><meta name="hk:alias" content="/articles/[slug]/"></defs><h1>Post</h1></template>');
     await write(root, "app/pages/posts/[slug].server.ts", "export const entries = () => [{ slug: 'a&b' }];");
-    await write(root, "app/pages/404.html", '<template component="missing-page"><title>Lost</title><h1>Lost</h1></template>');
+    await write(root, "app/pages/404.html", '<template component="missing-page"><defs><title>Lost</title></defs><h1>Lost</h1></template>');
     return root;
   }
 
@@ -138,14 +145,46 @@ describe("sitemap.xml and robots.txt", () => {
     expect(await readFile(join(result.outDir, "robots.txt"), "utf8")).toBe("User-agent: *\nAllow: /\nSitemap: https://example.com/docs/sitemap.xml\n");
   }, 60_000);
 
+  it("serves an alias page directory with canonical links to its own prefix, and lists only that one", async () => {
+    const root = await site();
+    await write(root, "docs/index.html", '<template component="docs-home"><defs><title>Docs</title></defs><h1>Docs</h1></template>');
+    await write(root, "docs/guide.html", '<template component="docs-guide"><defs><title>Guide</title><meta name="hk:alias" content="/start/"></defs><h1>Guide</h1></template>');
+    await write(root, "docs/posts/[slug].html", '<template component="docs-post"><defs><title>Post</title></defs><h1>Post</h1></template>');
+    await write(root, "docs/posts/[slug].server.ts", "export const entries = () => [{ slug: 'a&b' }];");
+    const pages = [{ dir: "docs", prefix: "/v/current/", alias: true }, { dir: "docs", prefix: "/docs/" }];
+    const result = await buildApplication({ root, origin: "https://example.com", fileRoutes: true, pages });
+    expect(await readFile(join(result.outDir, "sitemap.xml"), "utf8")).toBe(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.com/docs/</loc></url>
+<url><loc>https://example.com/docs/guide/</loc></url>
+<url><loc>https://example.com/docs/posts/a%26b/</loc></url>
+</urlset>
+`);
+    const canonical = async (path: string) => [...(await readFile(join(result.outDir, path, "index.html"), "utf8")).matchAll(/<link rel="canonical" href="([^"]*)"/g)].map(match => match[1]);
+    expect(await canonical("v/current")).toEqual(["https://example.com/docs/"]);
+    expect(await canonical("v/current/guide")).toEqual(["https://example.com/docs/guide/"]);
+    expect(await canonical("v/current/posts/a&b")).toEqual(["https://example.com/docs/posts/a%26b/"]);
+    expect(await canonical("v/current/start")).toEqual(["https://example.com/docs/guide/"]);
+    expect(await canonical("docs/guide")).toEqual([]);
+    // Still a site of its own to navigate.
+    const application = await createApplication({ root, pages });
+    try {
+      expect((await application.navigation({ from: "/v/current/" })).map(item => item.href)).toEqual(["/v/current/", "/v/current/guide/", "/v/current/posts/a%26b/"]);
+    } finally { await application.close(); }
+    // Two own prefixes for one directory would list each page twice.
+    await expect(buildApplication({ root, pages: [{ dir: "docs", prefix: "/v/current/" }, { dir: "docs", prefix: "/docs/" }] }))
+      .rejects.toThrow("Page directory docs is served at /v/current/ and /docs/; mark the further one alias: true");
+    await expect(buildApplication({ root, pages: [{ dir: "docs", prefix: "/v/current/", alias: true }] })).rejects.toThrow("needs an entry that serves docs itself");
+  }, 60_000);
+
   it("keeps a public sitemap, writes robots.txt from its text, and gives aliases a path canonical without origin", async () => {
     const root = await site();
-    await write(root, "app/pages/about.html", '<template component="about-page"><title>About</title><meta name="hk:alias" content="/old-about/"><h1>About</h1></template>');
+    await write(root, "app/pages/about.html", '<template component="about-page"><defs><title>About</title><meta name="hk:alias" content="/old-about/"></defs><h1>About</h1></template>');
     // An alias's own canonical link stays.
-    await write(root, "app/pages/hidden.html", '<template component="hidden-page"><title>Hidden</title><link rel="canonical" href="https://elsewhere.example/"><meta name="hk:alias" content="/also-hidden/"><h1>Hidden</h1></template>');
+    await write(root, "app/pages/hidden.html", '<template component="hidden-page"><defs><title>Hidden</title><link rel="canonical" href="https://elsewhere.example/"><meta name="hk:alias" content="/also-hidden/"></defs><h1>Hidden</h1></template>');
     const application = await createApplication({ root });
     try {
-      const canonical = async (path: string) => (await application.render(path)).head.elements?.filter(element => element.attributes.rel === "canonical").map(element => element.attributes.href);
+      const canonical = async (path: string) => [...(await application.render(path)).head.html.matchAll(/<link rel="canonical" href="([^"]*)"/g)].map(match => match[1]);
       expect(await canonical("/old-about/")).toEqual(["/about/"]);
       expect(await canonical("/also-hidden/")).toEqual(["https://elsewhere.example/"]);
     } finally { await application.close(); }
@@ -163,12 +202,12 @@ describe("sitemap.xml and robots.txt", () => {
 describe("the internal link check", () => {
   async function linked(): Promise<string> {
     const root = await site();
-    await write(root, "app/pages/index.html", `<template component="home-page"><title>Home</title><article>
+    await write(root, "app/pages/index.html", `<template component="home-page"><defs><title>Home</title></defs><article>
       <a href="/docs/guide/">Guide</a> <a href="guide/#install">Install</a> <a href="/docs/guide/#named">Named</a> <a href="#top">Top</a> <a href="#">Empty</a>
       <a href="/docs/guide/#:~:text=Install">Text fragment</a> <a href="/docs/file.pdf">File</a> <a href="/docs/start/">Redirected</a> <a href="/docs/guide">No slash</a>
       <a href="/docs/search.json">Plugin file</a> <a href="/elsewhere/">Outside base</a> <a href="https://example.com/x/">External</a> <a href="mailto:a@example.com">Mail</a>
       <a href="/docs/?q=1#home">Query</a> <h1 id="home">Home</h1></article></template>`);
-    await write(root, "app/pages/guide.html", '<template component="guide-page"><title>Guide</title><article><h2 id="install">Install</h2><a name="named">Named</a></article></template>');
+    await write(root, "app/pages/guide.html", '<template component="guide-page"><defs><title>Guide</title></defs><article><h2 id="install">Install</h2><a name="named">Named</a></article></template>');
     await write(root, "public/file.pdf", "%PDF");
     return root;
   }
@@ -185,7 +224,7 @@ describe("the internal link check", () => {
 
   it("fails on a missing page, file, or anchor, naming the page and the link, or warns", async () => {
     const root = await linked();
-    await write(root, "app/pages/guide.html", `<template component="guide-page"><title>Guide</title><article><h2 id="install">Install</h2><a name="named">Named</a>
+    await write(root, "app/pages/guide.html", `<template component="guide-page"><defs><title>Guide</title></defs><article><h2 id="install">Install</h2><a name="named">Named</a>
       <a href="/docs/missing/">Missing</a> <a href="#nowhere">Nowhere</a> <a href="/docs/#gone">Gone</a> <a href="../file.txt">File</a></article></template>`);
     const broken = [
       "Broken internal links:",

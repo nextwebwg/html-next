@@ -1,11 +1,13 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, posix, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import ts from "typescript-compiler";
 
 import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, importsVueHead, headHelperArtifact, requestsHelperArtifact, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
+import { writeHostFiles } from "./host-declarations.js";
 import { parseComponentResource } from "./source-graph.js";
 import type { ComponentDefinition } from "./template.js";
 
@@ -146,6 +148,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   const root = resolve(config.outDirectory);
   const files = new Map<string, string | { readonly copy: string }>();
   const definitions: ComponentDefinition[] = [];
+  const sourceDefinitions: { url: string; definition: ComponentDefinition }[] = [];
   const controllers = new Map<string, string>();
   const moduleSources = new Map<string, string>();
   const moduleDependencies = new Map<string, readonly string[]>();
@@ -161,6 +164,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const parsedResource = parseComponentResource(await readFile(sourcePath, "utf8"), sourcePath);
     const source = componentPath(sourcePath);
     for (const parsed of parsedResource.definitions) {
+      sourceDefinitions.push({ url: pathToFileURL(sourcePath).href, definition: parsed });
       const definition = Object.freeze({ ...parsed, source: Object.freeze({ file: `./${source}` }) });
       if (names.has(definition.contract.tag)) throw new Error(`Duplicate package component <${definition.contract.tag}>.`);
       names.add(definition.contract.tag);
@@ -183,6 +187,9 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   }
   // Every definition is read first, so each component's invocations are typed by the contracts it invokes.
   const byTag = new Map(definitions.map((definition) => [definition.contract.tag, definition] as const));
+  if (config.hostTypes === true) {
+    await writeHostFiles(sourceDefinitions, new Map(sourceDefinitions.map(({ definition }) => [definition.contract.tag, definition] as const)));
+  }
   for (const definition of config.sourceOnly ? [] : definitions) {
     const controller = controllers.get(definition.contract.tag);
     for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag })) {

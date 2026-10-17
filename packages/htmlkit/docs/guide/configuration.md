@@ -1,6 +1,6 @@
 ---
 title: Configuration
-order: 7
+order: 8
 blurb: htmlkit.config.ts · plugins · build hooks · build manifest · command line · using HTMLKit from code
 eyebrow: HTMLKit
 ---
@@ -37,6 +37,7 @@ export default defineConfig({
 | `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
 | `robots` | none | `true`, or the text of `robots.txt`, for the build to write ([search engines](#search-engines)). |
 | `linkCheck` | `error` | What `build` does with a [broken internal link](#link-check): `error` fails the build, and `warn` reports it. |
+| `csp` | generated | Sources to add to each page's [Content Security Policy](#content-security-policy), `reportOnly`, or `false` for none. |
 
 A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`. Each selects the outermost
 layout; a folder's `_layout.html` nests inside it ([nested layouts](/htmlkit/routes#nested-layouts)).
@@ -90,6 +91,23 @@ export default defineConfig({
 
 A page's own `hk:layout` wins over its folder's layout, which wins over `layoutDefaults` and `layout`.
 
+A folder served at a second prefix, such as the current version of the docs at both `/` and
+`/v/current/`, marks that entry `alias: true`. Its pages are served and navigable there, are left
+out of [`sitemap.xml`](#search-engines), and each has a `<link rel="canonical">` to the same page
+under the folder's own prefix, unless the page sets one:
+
+```ts
+export default defineConfig({
+  pages: [
+    { dir: 'docs' },
+    { dir: 'docs', prefix: '/v/current/', alias: true },
+  ],
+});
+```
+
+A folder at two prefixes without `alias: true` on one of them is an error that names both, as is an
+alias entry without an entry for the folder itself.
+
 ## Plugins
 
 A plugin can add a page format and adjust options. This one makes `.note` files into pages:
@@ -105,7 +123,7 @@ const notes: HtmlKitPlugin = {
     compile(source, page) {
       // Each page needs its own valid component name; a hash of its path is both.
       const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
-      return `<template component="note-${name}"><article>${source}</article></template>`;
+      return `<template component="note-${name}"><defs><title>Note</title></defs><article>${source}</article></template>`;
     },
   },
 };
@@ -114,7 +132,8 @@ export default defineConfig({ plugins: [notes] });
 ```
 
 HTMLKit routes, orders, watches, renders, and builds `.note` files like `.html` pages, and errors
-name the `.note` file. While compiling, a plugin can call:
+name the `.note` file. A compiled page is an HTML Next component, so its head content and `hk:`
+settings go in its `<defs>`. While compiling, a plugin can call:
 
 - `page.href(file)` for another page's URL;
 - `page.asset(file)` to serve a file the page references, such as an image, and get its URL;
@@ -240,7 +259,7 @@ export default defineConfig({ origin: 'https://example.com', base: '/docs/', rob
 ```
 
 It lists every page in the [manifest](#build-manifest)'s `routes` except an
-[`hk:alias`](/htmlkit/routes#the-page-head) URL, whose page names its own URL as canonical, and a page
+[`hk:alias`](/htmlkit/routes#the-page-head) URL or [alias page folder](#page-folders) page, whose page names its own URL as canonical, and a page
 with `<meta name="robots" content="noindex">` (or `none`). Redirects and the not-found page are
 outside `routes`. A page with `hk:navigation="hidden"` is listed: that setting concerns navigation,
 and `noindex` takes a page out of search results. A `sitemap.xml` in `public/` is the site's own,
@@ -275,6 +294,62 @@ Links to other sites and to paths outside `base` pass as written, as do `#`, `#t
 fragments (`#:~:text=`). A link without its trailing slash, such as `/docs/guide`, finds the page at
 `/docs/guide/`. The check reads the built HTML, so it covers the links and ids the server rendered.
 `linkCheck: 'warn'` reports the same links as a warning and finishes the build.
+
+## Content Security Policy
+
+Every page carries the site's Content Security Policy, which HTMLKit generates from what the site's
+components declare. It allows the scripts the site needs and nothing else:
+
+```text
+script-src 'self' https://js.stripe.com 'sha256-…'; object-src 'none'; base-uri 'none'
+```
+
+- `'self'` for HTMLKit's own modules, the page's controllers, and same-origin declared scripts.
+- The origin of each [declared script](/htmlkit/routes#declared-scripts) any page, layout, or
+  component of the site names, such as `https://js.stripe.com` for a checkout page that declares
+  Stripe.js.
+- A `sha256` hash of each inline head script: a plugin's `headScript` and `app/head.js`.
+- `object-src 'none'` and `base-uri 'none'`, since pages use neither plugins nor `<base>`.
+
+The `csp` option adds sources to any directive, in CSP's own grammar. They join the generated ones
+and never replace them:
+
+```ts
+// htmlkit.config.ts
+export default defineConfig({
+  csp: {
+    'script-src': ['https://cdn.example/'],
+    'connect-src': ["'self'", 'https://api.example'],
+    'frame-src': ['https://js.stripe.com', 'https://hooks.stripe.com'],
+  },
+});
+```
+
+| Where | Delivery |
+| --- | --- |
+| `htmlkit build` | Each page's `<meta http-equiv="Content-Security-Policy">`, first in its head, so static hosts enforce it. A meta element ignores `frame-ancestors`, `report-uri`, and `sandbox`, so the page's meta leaves them out. |
+| `htmlkit start` and `application.fetch` | The `Content-Security-Policy` header, with every directive, beside the page's meta. |
+| `htmlkit dev` | The same header and meta, plus what Vite needs (below). |
+
+`reportOnly: true` sends `Content-Security-Policy-Report-Only` instead, which reports violations and
+blocks nothing. Only a header can report only, so built pages then carry no meta, and a static host
+needs its own header configuration to report. `csp: false` turns the policy off.
+
+The policy is site-wide. A document keeps the policy it loaded with, and
+[client navigation](/htmlkit/client-navigation) moves between pages in place, so one policy covers
+every page a visitor can reach. A policy per page would need a full page load whenever it changes.
+
+In development, `htmlkit dev` reports each violation in the terminal and the browser console, with the
+page, what was blocked, the directive, and the line that would allow it:
+
+```text
+HTMLKit: /checkout/ blocked https://m.stripe.network/inner.html under frame-src. To allow it, add to htmlkit.config.ts: csp: { "frame-src": ["https://m.stripe.network"] }
+```
+
+Vite's client and modules load from the development server, which `'self'` allows. Where the
+policy restricts `connect-src` (or `default-src`), development adds `ws:` for Vite's HMR socket, and
+where it restricts `style-src`, `'unsafe-inline'` for the styles Vite injects for CSS a module
+imports. Builds have neither.
 
 ## Build manifest
 

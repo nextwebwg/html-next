@@ -22,7 +22,7 @@ async function main(input: readonly string[]): Promise<void> {
     modeIndex < 2 || outIndex !== modeIndex + 2 || outDirectory === undefined ||
     (publicRootIndex < 0 ? outIndex !== argv.length - 2 : publicRootIndex !== outIndex + 2 || publicRootIndex !== argv.length - 2 || publicRootURL === undefined)
   ) throw new Error(usage());
-  await convertComponents({ mode, entries: argv.slice(1, modeIndex), target, outDirectory, publicState, ...(publicRootURL === undefined ? {} : { publicRootURL }) });
+  await convertComponents({ mode, entries: argv.slice(1, modeIndex), target, outDirectory, publicState, hostTypes: true, ...(publicRootURL === undefined ? {} : { publicRootURL }) });
 }
 
 if (import.meta.main) {

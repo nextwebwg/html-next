@@ -58,7 +58,7 @@ globalThis.app = {
     pageA = createPageA({});
     cards = [createImgCard(), createImgCard()];
     product = createXProduct();
-    mount().append(createDocsLayout({ children: [pageA] }), ...cards, product, createVendorWidget(), createCdnBadge());
+    mount().append(createDocsLayout({ children: [pageA] }), ...cards, product, createXProduct(), createVendorWidget(), createCdnBadge());
   },
   section(text) { updateGeneratedProps(pageA, { section: text }); },
   note(shown) { if (shown) pageA.append(note = createXNote()); else note.remove(); },
@@ -82,7 +82,7 @@ ${tags.map((tag) => `import ${pascal(tag)} from "./${artifact(tag)}";`).join("\n
 const s = reactive({ view: "", page: "a", section: "Install", note: false, cards: 2, schema: null as unknown });
 createApp({ render: () => s.view === "head" ? [
   h(DocsLayout as any, null, { default: () => s.page === "a" ? h(PageA as any, { section: s.section }, { default: () => s.note ? h(XNote as any) : null }) : h(PageB as any) }),
-  ...Array.from({ length: s.cards }, (_, index) => h(ImgCard as any, { key: index })), h(XProduct as any, { schema: s.schema }), h(VendorWidget as any), h(CdnBadge as any),
+  ...Array.from({ length: s.cards }, (_, index) => h(ImgCard as any, { key: index })), h(XProduct as any, { schema: s.schema }), h(XProduct as any), h(VendorWidget as any), h(CdnBadge as any),
 ] : s.view === "scripts" ? [h(SavedCards as any, { id: "a" }), h(SavedCards as any, { id: "b" }), h(PayBadge as any), h("div", { style: "height: 6000px" }),
   h(CheckoutForm as any, { id: "lazy" }), h(MapView as any, { id: "maps" })] : null }).mount("#mount");
 const set = (next: Partial<typeof s>) => { Object.assign(s, next); return nextTick(); };
@@ -101,7 +101,7 @@ const root = createRoot(document.querySelector("#mount")!);
 function App(props: typeof s) {
   if (props.view === "head") return <>
     <C.DocsLayout>{props.page === "a" ? <C.PageA section={props.section}>{props.note ? <C.XNote /> : null}</C.PageA> : <C.PageB />}</C.DocsLayout>
-    {Array.from({ length: props.cards }, (_, index) => <C.ImgCard key={index} />)}<C.XProduct schema={props.schema} /><C.VendorWidget /><C.CdnBadge />
+    {Array.from({ length: props.cards }, (_, index) => <C.ImgCard key={index} />)}<C.XProduct schema={props.schema} /><C.XProduct /><C.VendorWidget /><C.CdnBadge />
   </>;
   if (props.view === "scripts") return <><C.SavedCards id="a" /><C.SavedCards id="b" /><C.PayBadge /><div style={{ height: "6000px" }} /><C.CheckoutForm id="lazy" /><C.MapView id="maps" /></>;
   return null;
@@ -120,7 +120,7 @@ ${tags.map((tag) => `  import ${pascal(tag)} from "./${artifact(tag)}";`).join("
 </script>
 {#if s.view === "head"}
   <DocsLayout>{#if s.page === "a"}<PageA section={s.section}>{#if s.note}<XNote />{/if}</PageA>{:else}<PageB />{/if}</DocsLayout>
-  {#each Array.from({ length: s.cards }) as _, index (index)}<ImgCard />{/each}<XProduct schema={s.schema} /><VendorWidget /><CdnBadge />
+  {#each Array.from({ length: s.cards }) as _, index (index)}<ImgCard />{/each}<XProduct schema={s.schema} /><XProduct /><VendorWidget /><CdnBadge />
 {:else if s.view === "scripts"}
   <SavedCards id="a" /><SavedCards id="b" /><PayBadge /><div style="height: 6000px"></div><CheckoutForm id="lazy" /><MapView id="maps" />
 {/if}
@@ -147,7 +147,7 @@ const ssrSources = {
 ${["docs-layout", "page-a", "page-b", "x-note", "x-product", "saved-cards"].map((tag) => `import ${pascal(tag)} from "./${artifact(tag).replace(/\.vue$/, ssr ? ".ssr" : ".vue")}";`).join("\n")}
 const s = reactive({ page: "a", note: false, schema: { name: "Install" } as unknown, shown: true });
 const app = createSSRApp({ render: () => s.shown ? [h(DocsLayout as any, null, { default: () => s.page === "a" ? h(PageA as any, null, { default: () => s.note ? h(XNote as any) : null }) : h(PageB as any) }),
-  h(XProduct as any, { schema: s.schema }), h(SavedCards as any, { id: "a" })] : null });
+  h(XProduct as any, { schema: s.schema }), h(XProduct as any, { schema: { name: "Install" } }), h(SavedCards as any, { id: "a" })] : null });
 ${ssr ? `import { renderToString } from "@vue/server-renderer";
 import { createHeadCollector, writeCollectedHead, HEAD_CONTEXT } from "./vue/head";
 export async function render() { const collector = createHeadCollector(); const html = await renderToString(app, { [HEAD_CONTEXT]: collector }); return { html, write: (document: Document) => writeCollectedHead(document, collector) }; }`
@@ -159,7 +159,7 @@ const set = (next: Partial<typeof s>) => { Object.assign(s, next); return nextTi
 ${["docs-layout", "page-a", "page-b", "x-note", "x-product", "saved-cards"].map((tag) => `import ${pascal(tag)} from "./${artifact(tag)}";`).join("\n")}
 let s = { page: "a", note: false, schema: { name: "Install" } as unknown, shown: true };
 const App = (props: typeof s) => props.shown ? <><DocsLayout>{props.page === "a" ? <PageA>{props.note ? <XNote /> : null}</PageA> : <PageB />}</DocsLayout>
-  <XProduct schema={props.schema} /><SavedCards id="a" /></> : null;
+  <XProduct schema={props.schema} /><XProduct schema={{ name: "Install" }} /><SavedCards id="a" /></> : null;
 ${ssr ? `import { renderToString } from "react-dom/server";
 import { collectHead, createHeadCollector, writeCollectedHead } from "./react/head";
 export async function render() { const collector = createHeadCollector(); const html = collectHead(collector, () => renderToString(<App {...s} />)); return { html, write: (document: Document) => writeCollectedHead(document, collector) }; }`
@@ -259,7 +259,7 @@ describe.skipIf(!enabled)("head declarations in compiled output and converted fr
         await writeFile(join(out, "ssr-state.svelte.ts"), 'export const ssrState = $state({ page: "a", note: false, schema: { name: "Install" } as unknown, shown: true });\n');
         await writeFile(join(out, "Ssr.svelte"), `<script>${["docs-layout", "page-a", "page-b", "x-note", "x-product", "saved-cards"].map((tag) => `import ${pascal(tag)} from "./${artifact(tag)}";`).join(" ")}
 import { ssrState as s } from "./ssr-state.svelte.js";</script>
-{#if s.shown}<DocsLayout>{#if s.page === "a"}<PageA>{#if s.note}<XNote />{/if}</PageA>{:else}<PageB />{/if}</DocsLayout><XProduct schema={s.schema} /><SavedCards id="a" />{/if}`);
+{#if s.shown}<DocsLayout>{#if s.page === "a"}<PageA>{#if s.note}<XNote />{/if}</PageA>{:else}<PageB />{/if}</DocsLayout><XProduct schema={s.schema} /><XProduct schema={{ name: "Install" }} /><SavedCards id="a" />{/if}`);
       }
       const extension = target === "react" ? "tsx" : "ts";
       await writeFile(join(out, `ssr-server.${extension}`), ssrSources[target](artifact, true));
@@ -313,7 +313,8 @@ import { ssrState as s } from "./ssr-state.svelte.js";</script>
         // The server wrote the reconciled head, the authored title in its set-aside template, and a preload, never a script.
         assert.match(html, /<title data-component-head="">Install · Docs<\/title><template data-component-head="set-aside"><title>Acme<\/title><\/template>/);
         assert.match(html, /<link rel="preload" as="script" href="https:\/\/js\.example\/sdk\.js" crossorigin="anonymous" data-component-head="">/);
-        // JSON-LD blocks only: never an executing script.
+        // Two instances with identical JSON-LD write two blocks each; JSON-LD blocks only, never an executing script.
+        assert.equal(html.match(/<script type="application\/ld\+json" data-component-head="">\{"name":"Install"\}<\/script>/g)?.length, 2);
         assert.doesNotMatch(html.replaceAll(/<script type="application\/ld\+json"[^>]*>[^<]*<\/script>/g, ""), /<script/);
         const browser = await browserType.launch({ headless: true });
         const errors: string[] = [];
@@ -337,7 +338,7 @@ import { ssrState as s } from "./ssr-state.svelte.js";</script>
             const kept = globalThis as unknown as Record<string, unknown>;
             kept.serverTitle = document.querySelector("title");
             kept.serverDescription = document.querySelector('meta[name="description"]');
-            kept.serverJson = document.querySelectorAll('script[type="application/ld+json"]')[1];
+            kept.serverJson = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
             kept.authoredTitle = document.querySelector<HTMLTemplateElement>("template[data-component-head]")?.content.firstElementChild;
           });
           await page.addScriptTag({ path: bundle });
@@ -359,11 +360,13 @@ import { ssrState as s } from "./ssr-state.svelte.js";</script>
           });
           assert.deepEqual(await read(), { sameTitle: true, sameDescription: true, title: "Install · Docs", templates: 0, preloads: 1, scripts: 1, runs: 1, loads: "2" });
           // After hydration: a deeper component takes the title and gives it back, a bound JSON-LD value
-          // changes the block, and a page change is one reconciliation.
+          // changes its own block in place, and a page change is one reconciliation.
           const after = await page.evaluate(async () => {
             const { set } = (globalThis as unknown as { ssr: { set(next: object): Promise<void> | void } }).ssr;
             const settle = () => new Promise((done) => setTimeout(done, 20));
-            const adoptedJson = (globalThis as unknown as Record<string, unknown>).serverJson === document.querySelectorAll('script[type="application/ld+json"]')[1];
+            const serverJson = (globalThis as unknown as { serverJson: Element[] }).serverJson;
+            const sameJson = () => Array.from(document.querySelectorAll('script[type="application/ld+json"]')).every((block, index) => block === serverJson[index]);
+            const adoptedJson = sameJson();
             await set({ note: true }); await settle();
             const deeper = document.title;
             await set({ note: false }); await settle();
@@ -377,10 +380,10 @@ import { ssrState as s } from "./ssr-state.svelte.js";</script>
             observer.observe(document.head, { subtree: true, childList: true, characterData: true, attributes: true });
             await set({ page: "b" }); await settle();
             observer.disconnect();
-            return { adoptedJson, deeper, back, blocks, seen: [...new Set(seen)], kept: preconnect === document.querySelector('link[href="https://search.acme.example"]') && !removed.includes(preconnect!) };
+            return { adoptedJson, deeper, back, blocks, sameJson: blocks.length === serverJson.length && sameJson(), seen: [...new Set(seen)], kept: preconnect === document.querySelector('link[href="https://search.acme.example"]') && !removed.includes(preconnect!) };
           });
-          assert.deepEqual(after, { adoptedJson: true, deeper: "Note", back: "Install · Docs", blocks: ['{"@type": "Organization", "name": "{Acme}"}', '{"name":"Upgrade"}'],
-            seen: ["Configure · Docs"], kept: true });
+          assert.deepEqual(after, { adoptedJson: true, deeper: "Note", back: "Install · Docs", blocks: ['{"@type": "Organization", "name": "{Acme}"}', '{"name":"Upgrade"}', '{"@type": "Organization", "name": "{Acme}"}', '{"name":"Install"}'],
+            sameJson: true, seen: ["Configure · Docs"], kept: true });
           // With no component setting a title, the authored node returns: the same object.
           const restored = await page.evaluate(async () => {
             (globalThis as unknown as { ssr: { unmount(): void } }).ssr.unmount();

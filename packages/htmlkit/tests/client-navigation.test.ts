@@ -21,7 +21,7 @@ async function site(): Promise<string> {
         <a id="blank" href="/kit/guide/" target="_blank">Blank</a> <a id="reload" href="/kit/guide/" data-hk-reload>Reload</a>
         <a id="outside" href="/elsewhere/">Outside</a> <a id="hash" href="#top">Hash</a> <a id="to-deep" href="/kit/guide/install/#deep">Deep</a>
         <a id="items" href="/kit/items/one/">Items</a> <a id="broken" href="/kit/items/two/">Broken</a>
-        <a id="conflict" href="/kit/conflict/">Conflict</a> <a id="missing" href="/kit/missing/">Missing</a>
+        <a id="conflict" href="/kit/conflict/">Conflict</a> <a id="missing" href="/kit/missing/">Missing</a> <a id="pay" href="/kit/pay/">Pay</a>
         <span data-hk-prefetch="none"><a id="quiet" href="/kit/guide/install/">Quiet</a></span>
         <a id="counter" href="/kit/counter/" data-hk-prefetch="visible">Counter</a></p>
       <slot name="page"></slot></div>
@@ -36,32 +36,37 @@ async function site(): Promise<string> {
   await write(root, "app/layouts/items.html", '<template component="items-shell"><main class="items"><slot name="page"></slot></main></template>');
   await write(root, "app/pages/index.html", `<meta name="hk:page" content="home-page">
     <template component="shared-badge"><b>home badge</b></template>
-    <template component="home-page" controller="./home.ts"><title>Home</title><meta name="description" content="Home page"><meta name="hk:label" content="Home"><article><h1>Home</h1><shared-badge></shared-badge></article></template>`);
+    <template component="home-page" controller="./home.ts"><defs><title>Home</title><meta name="description" content="Home page"><meta name="hk:label" content="Home"></defs><article><h1>Home</h1><shared-badge></shared-badge></article></template>`);
   // A global rule only the home page links; leaving home must drop it, as a document load would.
   await write(root, "app/pages/home.ts", "import './home.css'; export default function(host) { host.root.dataset.ready = 'home'; }");
   await write(root, "app/pages/home.css", "body { background-color: rgb(9, 9, 9); }");
   // Shared stylesheet imports put each page's graph in one stylesheet, which client navigation loads.
   await write(root, "app/styles/heading.css", "h1 { border-bottom: 2px solid rgb(7, 8, 9); }");
-  await write(root, "app/pages/guide/index.html", `<template component="guide-page" controller="./guide.ts"><title>Guide</title><meta name="description" content="Guide page"><meta name="hk:label" content="Guide">
+  await write(root, "app/pages/guide/index.html", `<template component="guide-page" controller="./guide.ts"><defs><title>Guide</title><meta name="description" content="Guide page"><meta name="hk:label" content="Guide">
+      <script type="application/ld+json">{"@type":"WebPage","name":"Guide"}</script><script src="/kit/widget.js"></script></defs>
     <article><h1>Guide</h1></article><style>@import "@/app/styles/heading.css"; :host { color: rgb(4, 5, 6); }</style></template>`);
+  // A declared script runs once per document, however often its page connects.
+  await write(root, "public/widget.js", "window.widgetRuns = (window.widgetRuns ?? 0) + 1;");
   await write(root, "app/pages/guide/guide.ts", "export default function(host) { host.root.dataset.ready = 'guide'; }");
-  await write(root, "app/pages/guide/install.html", `<template component="install-page"><title>Install</title><meta name="hk:label" content="Install">
+  await write(root, "app/pages/guide/install.html", `<template component="install-page"><defs><title>Install</title><meta name="hk:label" content="Install"></defs>
     <article><h1>Install</h1><div class="spacer"></div><h2 id="deep">Deep</h2><div class="spacer"></div></article><style>@import "@/app/styles/heading.css"; .spacer { height: 3000px; }</style></template>`);
-  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><meta name="hk:layout" content="items"><defs><prop name="slug" type="string" required>Slug</prop></defs>
-    <title $value="$slug"></title><article><h1 $value="$slug"></h1><a id="home" href="/kit/">Home</a></article></template>`);
+  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><defs><prop name="slug" type="string" required>Slug</prop><meta name="hk:layout" content="items"><title>{$slug}</title></defs><article><h1 $value="$slug"></h1><a id="home" href="/kit/">Home</a></article></template>`);
   await write(root, "app/pages/items/[slug].server.ts", "export const entries = () => [{ slug: 'one' }, { slug: 'two' }]; export const load = ({ params }) => ({ props: { slug: params.slug } });");
+  // A page with a third-party declared script, whose origin the site's one policy allows on every page.
+  await write(root, "app/pages/pay.html", `<template component="pay-page"><defs><title>Pay</title><meta name="hk:navigation" content="hidden">
+    <script src="https://pay.example/v3/" loading="lazy"></script></defs><article><h1>Pay</h1></article></template>`);
   // Another <shared-badge> cannot join a document that already defines one (HR001).
   await write(root, "app/pages/conflict.html", `<meta name="hk:page" content="conflict-page"><template component="shared-badge"><i>conflict badge</i></template>
-    <template component="conflict-page"><title>Conflict</title><meta name="hk:navigation" content="hidden"><article><h1><shared-badge></shared-badge></h1></article></template>`);
+    <template component="conflict-page"><defs><title>Conflict</title><meta name="hk:navigation" content="hidden"></defs><article><h1><shared-badge></shared-badge></h1></article></template>`);
   // Loader state, typed props, a nested component, a form control, a declared read, and a controller.
   await write(root, "app/pages/counter.html", `<meta name="hk:page" content="counter-page">
     <template component="count-badge"><defs><prop name="count" type="number" default="0">Count</prop></defs><b from:data-count="$count">{$count}</b></template>
-    <template component="counter-page" controller="./counter.ts"><title>Counter</title><meta name="hk:navigation" content="hidden"><defs>
+    <template component="counter-page" controller="./counter.ts"><defs>
       <prop name="label" type="string" required>Label</prop>
       <prop name="tags" type="list(string)" default="[]">Tags</prop>
       <state name="count" type="number" value="0"></state>
       <state name="text" type="string" value="initial"></state>
-      <data name="result" src="./data.json"></data></defs>
+      <data name="result" src="./data.json"></data><title>Counter</title><meta name="hk:navigation" content="hidden"></defs>
       <article><h1>{$label}</h1><output>{$count}</output><count-badge from:count="$count"></count-badge><input bind:value="text">
         <p $if="$result.pending">Loading</p><p $if="$result.ok">{$result.value.label}</p>
         <ul><li $each="tag of $tags">{$tag}</li></ul><button type="button" $ref="add">Add</button></article></template>`);
@@ -82,9 +87,14 @@ const poll = <T>(read: () => T | Promise<T>) => expect.poll(read, { timeout: 15_
 async function settled(page: Page, title: string): Promise<void> {
   await page.waitForFunction(expected => document.title === expected && navigation.transition === null && document.readyState === "complete", title);
 }
+/** What HTML Next keeps in the head: one title, the page's metadata, and each declared script once. */
+const head = (page: Page) => page.evaluate(() => ({ titles: document.querySelectorAll("title").length,
+  descriptions: [...document.querySelectorAll('meta[name="description"]')].map(meta => meta.getAttribute("content")),
+  schema: [...document.querySelectorAll('script[type="application/ld+json"]')].map(script => script.textContent),
+  widgets: document.querySelectorAll('script[src$="/kit/widget.js"]').length, runs: (window as unknown as { widgetRuns?: number }).widgetRuns ?? 0 }));
 const marked = (page: Page) => page.evaluate(() => (window as unknown as { marker?: boolean }).marker === true);
 const mark = (page: Page) => page.evaluate(() => { (window as unknown as { marker: boolean }).marker = true; });
-const payloadPath = (path: string) => `/kit/_htmlkit/pages/${path}payload.json`;
+const payloadPath = (path: string, base = "/kit/") => `${base}_htmlkit/pages/${path}payload.json`;
 /** A page's own module, as its payload names it. */
 async function moduleOf(url: string, path: string): Promise<string> {
   const payload = await (await fetch(new URL(payloadPath(path), url))).json() as { modules: string[] };
@@ -100,6 +110,10 @@ async function open(context: BrowserContext) {
   const requests: { path: string; type: string }[] = [];
   page.on("request", request => requests.push({ path: new URL(request.url()).pathname, type: request.resourceType() }));
   const count = (path: string, type?: string) => requests.filter(request => request.path === path && (type === undefined || request.type === type)).length;
+  // Everything here works under the page's generated Content Security Policy.
+  await page.exposeFunction("htmlkitViolation", (violation: string) => errors.push(violation));
+  await page.addInitScript(() => addEventListener("securitypolicyviolation", event =>
+    (window as unknown as { htmlkitViolation(violation: string): void }).htmlkitViolation(`${event.effectiveDirective} blocked ${event.blockedURI}`)));
   return { page, errors, requests, count };
 }
 
@@ -116,6 +130,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await page.getByRole("button", { name: "Menu" }).click();
     await page.evaluate(() => { (window as unknown as { shell: Element }).shell = document.getElementById("hk-layer-0")!; });
     expect(await page.locator('nav a[href="/kit/"]').getAttribute("aria-current")).toBe("page");
+    expect(await head(page)).toEqual({ titles: 1, descriptions: ["Home page"], schema: [], widgets: 0, runs: 0 });
     if (built) expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(9, 9, 9)");
 
     // Links on screen prefetch shared code only (from the build's manifest), except a link marked
@@ -161,6 +176,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     })).toEqual({ kept: true, connections: "1", expanded: "true", page: "guide-page", ready: "guide", color: "rgb(4, 5, 6)", shared: "rgb(7, 8, 9)",
       current: [["/kit/", "false"], ["/kit/guide/", "page"], ["/kit/guide/install/", "false"], ["/kit/items/one/", "false"], ["/kit/items/two/", "false"]],
       description: "Guide page", announced: "Guide", focus: true, background: built ? "rgba(0, 0, 0, 0)" : "rgb(9, 9, 9)" });
+    await poll(() => head(page)).toEqual({ titles: 1, descriptions: ["Guide page"], schema: ['{"@type":"WebPage","name":"Guide"}'], widgets: 1, runs: 1 });
 
     // A touch prefetches at once.
     await page.locator("#items").evaluate(link => link.dispatchEvent(new Event("touchstart", { bubbles: true })));
@@ -174,6 +190,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await page.unroute(`**${payloadPath("guide/install/")}`);
     expect([await marked(page), count("/kit/guide/install/", "fetch")]).toEqual([true, 1]);
     expect(page.url()).toBe(url + "guide/install/#deep");
+    expect(await head(page)).toEqual({ titles: 1, descriptions: [], schema: [], widgets: 1, runs: 1 });
     expect(await page.locator("#hk-layer-1 h1").evaluate(heading => getComputedStyle(heading).borderBottomColor)).toBe("rgb(7, 8, 9)");
     await poll(() => page.evaluate(() => [Math.abs(Math.round(document.getElementById("deep")!.getBoundingClientRect().top)), scrollY > 2000])).toEqual([0, true]);
     await page.evaluate(() => scrollTo(0, 1234));
@@ -187,6 +204,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await page.goForward();
     await settled(page, "Guide");
     expect(await marked(page)).toBe(true);
+    expect(await head(page)).toEqual({ titles: 1, descriptions: ["Guide page"], schema: ['{"@type":"WebPage","name":"Guide"}'], widgets: 1, runs: 1 });
 
     // A different layout replaces the layout; returning builds a fresh one.
     await page.locator("#items").click();
@@ -228,6 +246,17 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await loads("#reload", "Guide", "/kit/guide/");
     await loads("#missing", "Page not found", "/kit/missing/");
     await loads("#conflict", "Conflict", "/kit/conflict/", "conflict badge");
+    // The site has one policy, so a page with a third-party script renders in place, and the script runs under it.
+    await context.route("https://pay.example/**", route => route.fulfill({ contentType: "text/javascript", body: "window.payRuns = (window.payRuns ?? 0) + 1;" }));
+    await mark(page);
+    await page.locator("#pay").click();
+    await settled(page, "Pay");
+    expect(await marked(page)).toBe(true);
+    await poll(() => page.evaluate(() => (window as unknown as { payRuns?: number }).payRuns)).toBe(1);
+    await page.locator('nav a[href="/kit/"]').first().click();
+    await settled(page, "Home");
+    expect(await marked(page)).toBe(true);
+    await page.goto(url);
     await page.route(`**${payloadPath("items/two/")}`, route => route.abort());
     await page.route("**/kit/items/two/", route => route.request().resourceType() === "fetch" ? route.abort() : route.continue());
     await loads("#broken", "two", "/kit/items/two/");
@@ -259,9 +288,15 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
       const start = document.startViewTransition.bind(document);
       Object.assign(window, { transitions: 0 });
       document.startViewTransition = (update => { (window as unknown as { transitions: number }).transitions++; return start(update); }) as typeof start;
+      // The title changes once: no title but the next page's ever shows.
+      const titles = [document.title];
+      new MutationObserver(() => { if (titles.at(-1) !== document.title) titles.push(document.title); })
+        .observe(document.head, { subtree: true, childList: true, characterData: true });
+      Object.assign(window, { titles });
     });
     await page.getByRole("link", { name: "Guide", exact: true }).click();
     await settled(page, "Guide");
+    expect(await page.evaluate(() => (window as unknown as { titles: string[] }).titles)).toEqual(["Home", "Guide"]);
     expect(await page.evaluate(() => (window as unknown as { transitions: number }).transitions))
       .toBe(await page.evaluate(() => typeof CSSViewTransitionRule === "function" ? 1 : 0));
     expect(errors).toEqual([]);
@@ -384,15 +419,15 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
       <prop name="tree" type="list(object({ label: string, current: string, depth: number, ... }))" required>Tree</prop></defs>
       <div class="site"><hk-nav from:items="$tree"></hk-nav><slot name="page"></slot></div></template>`);
     await write(root, "app/layouts/default.server.ts", "export const load = async ({ navigationTree }) => ({ props: { tree: await navigationTree() } });");
-    await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><article><a id="to-a" href="/docs/a/">A</a></article></template>');
+    await write(root, "app/pages/index.html", '<template component="home-page"><defs><title>Home</title></defs><article><a id="to-a" href="/docs/a/">A</a></article></template>');
     await write(root, "app/pages/docs/_layout.html", `<template component="docs-shell" controller="./shell.ts"><defs><prop name="section" type="string" required>Section</prop></defs>
       <div class="docs"><aside from:data-section="$section">Docs</aside><slot name="page"></slot></div></template>`);
     await write(root, "app/pages/docs/_layout.server.ts", "export const load = ({ url }) => ({ props: { section: url.pathname } });");
     await write(root, "app/pages/docs/shell.ts", "export default function(host) { host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1); }");
-    await write(root, "app/pages/docs/a.html", '<template component="a-page"><title>A</title><article><a id="to-b" href="/docs/b/">B</a></article></template>');
-    await write(root, "app/pages/docs/b.html", '<template component="b-page"><title>B</title><article><a id="to-deep" href="/docs/x/y/z/deep/">Deep</a></article></template>');
+    await write(root, "app/pages/docs/a.html", '<template component="a-page"><defs><title>A</title></defs><article><a id="to-b" href="/docs/b/">B</a></article></template>');
+    await write(root, "app/pages/docs/b.html", '<template component="b-page"><defs><title>B</title></defs><article><a id="to-deep" href="/docs/x/y/z/deep/">Deep</a></article></template>');
     // Below <hk-nav>'s three inline levels, in its <hk-nav-items> instances.
-    await write(root, "app/pages/docs/x/y/z/deep.html", '<template component="deep-page"><title>Deep</title><article><a id="to-home" href="/">Home</a></article></template>');
+    await write(root, "app/pages/docs/x/y/z/deep.html", '<template component="deep-page"><defs><title>Deep</title></defs><article><a id="to-home" href="/">Home</a></article></template>');
     await buildApplication({ root });
     preview = await previewApplication({ root, port: 0 });
   }, 120_000);
@@ -443,9 +478,9 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation to
     await write(root, "package.json", '{"type":"module"}');
     await write(root, "app/layouts/default.html", `<template component="list-shell"><div class="shell"><a id="home" href="/">Home</a> <a id="two" href="/list/?page=2">Two</a>
       <a id="three" href="/list/?page=3">Three</a><slot name="page"></slot></div></template>`);
-    await write(root, "app/pages/index.html", '<template component="home-page"><title>Home</title><h1>Home</h1></template>');
-    await write(root, "app/pages/list.html", `<template component="list-page"><meta name="hk:render" content="server"><title>{$title}</title><defs>
-      <prop name="title" type="string" required>Title</prop><prop name="reader" type="string" required>Reader</prop></defs><article><h1>{$title}</h1><p class="reader">{$reader}</p></article></template>`);
+    await write(root, "app/pages/index.html", '<template component="home-page"><defs><title>Home</title></defs><h1>Home</h1></template>');
+    await write(root, "app/pages/list.html", `<template component="list-page"><defs>
+      <prop name="title" type="string" required>Title</prop><prop name="reader" type="string" required>Reader</prop><meta name="hk:render" content="server"><title>{$title}</title></defs><article><h1>{$title}</h1><p class="reader">{$reader}</p></article></template>`);
     await write(root, "app/pages/list.server.ts", 'export const load = ({ url, cookies }) => ({ props: { title: "Page " + (url.searchParams.get("page") ?? "1"), reader: cookies.get("reader") ?? "nobody" } });');
     const { outDir } = await buildApplication({ root });
     server = await startApplication({ outDir, port: 0 });
@@ -475,6 +510,109 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation to
         expect([await page.locator("h1").textContent(), await page.locator(".reader").textContent()]).toEqual(["Page 2", "ada"]);
         expect(requests.some(request => request.path === "/_htmlkit/pages/list/payload.json")).toBe(true);
         expect([await marked(page), errors]).toEqual([true, []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+  }
+});
+
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("form actions", () => {
+  let root: string;
+  let server: ApplicationServer;
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "htmlkit-form-actions-"));
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "app/layouts/default.html", `<template component="form-shell"><div class="shell"><a id="slow" href="/slow/">Slow</a> <a id="todos" href="/todos/">Todos</a>
+      <slot name="page"></slot></div><style>:host { display: block; }</style></template>`);
+    await write(root, "app/pages/index.html", '<template component="home-page"><defs><title>Home</title></defs><h1>Home</h1></template>');
+    await write(root, "app/pages/slow.html", '<template component="slow-page"><defs><meta name="hk:render" content="server"><title>Slow</title></defs><h1>Slow</h1></template>');
+    await write(root, "app/pages/slow.server.ts", "export const load = async () => { await new Promise(done => setTimeout(done, 400)); return {}; };");
+    // The first invalid field takes autofocus, which a page load and a submission in place both focus.
+    await write(root, "app/pages/todos.html", `<template component="todos-page"><defs>
+      <prop name="todos" type="list(string)" required>Todos</prop>
+      <prop name="errors" type="object({ title?: string })" default="{}">Field errors</prop><prop name="values" type="object({ title?: string })" default="{}">Submitted values</prop>
+      <meta name="hk:render" content="server"><title>Todos</title></defs><section>
+      <form method="post" action="?/create"><label>Title <input name="title" from:value="$values.title" from:autofocus="$errors.title"
+        from:aria-invalid="$errors.title ? 'true' : 'false'"></label>
+        <p class="error" $if="$errors.title">{$errors.title}</p><button>Add</button></form>
+      <ul><li $each="todo of $todos">{$todo}</li></ul></section></template>`);
+    await write(root, "app/pages/todos.server.ts", `const todos = [];
+      export const load = () => ({ props: { todos } });
+      export const actions = {
+        async create({ request, response }) {
+          const title = String((await request.formData()).get("title") ?? "").trim();
+          if (title.length < 3) { response.status = 422; return { errors: { title: "Use at least 3 characters." }, values: { title } }; }
+          await new Promise(done => setTimeout(done, 300));
+          todos.push(title);
+        },
+      };`);
+    const { outDir } = await buildApplication({ root });
+    server = await startApplication({ outDir, port: 0 });
+  }, 120_000);
+  afterAll(async () => {
+    await server?.close();
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  for (const [name, type] of engines) {
+    it(`${name} submits a form in place, with pending attributes and focus on the invalid field`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const { page, errors, count } = await open(await browser.newContext());
+        await page.goto(server.url + "todos/");
+        await page.waitForFunction(() => document.querySelector('[data-component="todos-page"]') !== null && document.readyState === "complete");
+        await mark(page);
+        // Every change to the pending attributes, in order.
+        await page.evaluate(() => {
+          const log: string[] = (window as unknown as { log: string[] }).log = [];
+          new MutationObserver(records => { for (const { target, attributeName } of records) {
+            log.push(`${(target as Element).localName} ${attributeName} ${(target as Element).hasAttribute(attributeName!) ? "on" : "off"}`);
+          } }).observe(document.documentElement, { subtree: true, attributeFilter: ["data-hk-navigating", "data-hk-submitting", "aria-busy"] });
+        });
+        const log = () => page.evaluate(() => (window as unknown as { log: string[] }).log.splice(0));
+        const title = page.getByRole("textbox", { name: "Title" });
+        await title.fill("ab");
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.locator(".error").waitFor();
+        await settled(page, "Todos");
+        // A validation error renders in place at the action's URL, as a document POST would, with the field focused.
+        expect([new URL(page.url()).search, await title.inputValue(), await title.getAttribute("aria-invalid"), await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name)])
+          .toEqual(["?/create", "ab", "true", "title"]);
+        expect(await log()).toEqual(["html data-hk-navigating on", "form data-hk-submitting on", "form aria-busy on", "html data-hk-navigating off"]);
+        // Success redirects to the page, which replaces the submission's entry; the form is busy meanwhile.
+        const entries = await page.evaluate(() => navigation.entries().length);
+        await title.fill(`${name} task`);
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.waitForFunction(() => document.querySelector("form")?.getAttribute("aria-busy") === "true");
+        await page.getByText(`${name} task`).waitFor();
+        await settled(page, "Todos");
+        expect([new URL(page.url()).search, await page.locator(".error").count(), await page.evaluate(() => navigation.entries().length)]).toEqual(["", 0, entries + 1]);
+        // The redirect's navigation continues the submission's pending state, which ends once.
+        expect((await log()).filter(entry => entry.startsWith("html"))).toEqual(["html data-hk-navigating on", "html data-hk-navigating on", "html data-hk-navigating off"]);
+        // Link navigation is pending too, until the next page renders.
+        await page.locator("#slow").click();
+        await page.waitForFunction(() => document.documentElement.hasAttribute("data-hk-navigating"));
+        await settled(page, "Slow");
+        expect(await page.evaluate(() => document.documentElement.hasAttribute("data-hk-navigating"))).toBe(false);
+        // Both submissions were fetches from this document, which never reloaded, under the site's policy; the
+        // redirect's page rendered from the submission's response, the third fetch, with no payload request.
+        expect([count("/todos/", "document"), count("/todos/", "fetch"), count(payloadPath("todos/", "/")), await marked(page), errors]).toEqual([1, 3, 0, true, []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+
+    it(`${name} submits the same form as a document without JavaScript`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const page = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+        await page.goto(server.url + "todos/");
+        await page.getByRole("textbox", { name: "Title" }).fill("x");
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.waitForURL(url => url.search === "?/create");
+        expect([await page.locator(".error").textContent(), await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name)])
+          .toEqual(["Use at least 3 characters.", "title"]);
+        await page.getByRole("textbox", { name: "Title" }).fill(`${name} plain`);
+        await page.getByRole("button", { name: "Add" }).click();
+        await page.waitForURL(server.url + "todos/");
+        await page.getByText(`${name} plain`).waitFor();
       } finally { await browser.close(); }
     }, 60_000);
   }

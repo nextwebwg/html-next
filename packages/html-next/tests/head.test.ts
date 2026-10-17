@@ -179,6 +179,30 @@ describe("head declarations in the live runtime", () => {
     host.state.schema = null;
     await settle();
     assert.equal(document.querySelectorAll('script[type="application/ld+json"]').length, 1);
+    // A later value inserts it again.
+    host.state.schema = { "@type": "Product" };
+    await settle();
+    assert.equal(document.querySelectorAll('script[type="application/ld+json"]')[1]?.textContent, '{"@type":"Product"}');
+  });
+
+  it("gives each JSON-LD declaration of each instance its own block, updated in place", async () => {
+    const product = `<template component="x-product"><defs>
+      <prop name="name" type="string" default="Anvil">The name.</prop>
+      <script type="application/ld+json" from:value="{ name: $name }"></script>
+    </defs><section></section></template>`;
+    const { document, main, settle, head, runtime } = await page("", [product]);
+    main.innerHTML = "<x-product></x-product><x-product></x-product>";
+    await settle();
+    // Identical JSON-LD from two instances is two blocks.
+    assert.deepEqual(head(), ['<script type="application/ld+json" *>{"name":"Anvil"}</script>', '<script type="application/ld+json" *>{"name":"Anvil"}</script>']);
+    const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+    runtime.updateComponentProps(main.firstElementChild!, { name: "Hammer" });
+    await settle();
+    assert.deepEqual(head(), ['<script type="application/ld+json" *>{"name":"Hammer"}</script>', '<script type="application/ld+json" *>{"name":"Anvil"}</script>']);
+    assert.deepEqual(Array.from(document.querySelectorAll('script[type="application/ld+json"]')), blocks);
+    main.lastElementChild!.remove();
+    await settle();
+    assert.deepEqual(Array.from(document.querySelectorAll('script[type="application/ld+json"]')), [blocks[0]]);
   });
 
   it("orders new elements by their instances' tree order, then declared order", async () => {
@@ -213,6 +237,21 @@ describe("server output of head declarations", () => {
       '<link rel="preload" as="script" href="https://js.stripe.com/v3/" crossorigin="anonymous" integrity="sha384-abc" data-component-head="">' +
       '<link rel="modulepreload" href="https://maps.example/sdk.js" data-component-head="">');
     assert.doesNotMatch(rendered.html, /<script/);
+  });
+
+  it("writes a same-origin script's preload as a path, and another origin's as its URL", async () => {
+    const { renderComponents } = await import("../src/server.js");
+    const page = parseComponent(`<template component="x-page"><defs>
+      <script src="/kit/widget.js?v=2"></script><script src="./local.js" type="module"></script>
+      <script src="https://js.example/sdk.js"></script><link rel="preconnect" href="/api/">
+    </defs><main>Page</main></template>`, "file:///app/x-page.html");
+    for (const url of [undefined, "http://localhost/docs/"]) {
+      const rendered = await renderComponents("<x-page></x-page>", { definitions: [page], ...(url === undefined ? {} : { url }) });
+      assert.equal(rendered.head, '<link rel="preconnect" href="/api/" data-component-head="">' +
+        '<link rel="preload" as="script" href="/kit/widget.js?v=2" data-component-head="">' +
+        `<link rel="modulepreload" href="${url === undefined ? "/local.js" : "/docs/local.js"}" data-component-head="">` +
+        '<link rel="preload" as="script" href="https://js.example/sdk.js" data-component-head="">');
+    }
   });
 });
 
