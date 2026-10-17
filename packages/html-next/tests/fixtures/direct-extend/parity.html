@@ -2,7 +2,7 @@
   <defs>
     <state name="ready" type="boolean" value="false"></state>
     <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
-    <state name="selected" type="number" nullable></state>
+    <state name="selected" type="number"></state>
     <state name="title" type="string" value="Rows"></state>
   </defs>
   <section from:data-count="$rows.length" class:busy="$ready and $selected = 2">

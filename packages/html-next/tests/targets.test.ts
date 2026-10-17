@@ -374,10 +374,12 @@ describe("official target compilers", () => {
       write(count, Symbol.for("html-next.invalid-result"));
       write((value: unknown) => set.push(value), Number.POSITIVE_INFINITY, isNumber, "x.html", "overflow", "count");
       write((value: unknown) => set.push(value), Number.NaN);
+      write(count, null, isNumber, "x.html", "absent", "count");
       write(count, undefined, isNumber, "x.html", "absent", "count");
       write((value: unknown) => set.push(value), 4, isNumber, "x.html", "good", "count");
     } finally { console.warn = warn; }
-    assert.deepEqual(count, { value: undefined });
+    // Undefined means not present, as null does: written as null, with no warning.
+    assert.deepEqual(count, { value: null });
     assert.deepEqual(set, [4]);
     assert.deepEqual(warnings, [
       "x.html: HR007: State `count` does not satisfy its declared type.",

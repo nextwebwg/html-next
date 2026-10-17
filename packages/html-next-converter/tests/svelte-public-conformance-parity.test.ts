@@ -358,7 +358,7 @@ const regressions: readonly ConverterCase[] = [
   {
     name: "handler destinations and raw control writes preserve distinct native boundaries",
     source: `<template component="x-declared-destinations" status="early" summary="Destination boundaries."><defs>
-      <state name="count" type="number" value="3"></state><state name="optional" type="number" nullable value="3"></state><state name="free" value="Seed"></state>
+      <state name="count" type="number" value="3"></state><state name="optional" type="number" value="3"></state><state name="free" value="Seed"></state>
       <handler name="write"><set name="count" expr:value="null"></set><set name="optional" expr:value="null"></set><set name="free" expr:value="42"></set></handler>
       <handler name="recover"><set name="count" expr:value="4"></set><set name="optional" expr:value="4"></set><set name="free" value="Next"></set></handler>
       </defs><section><input class="count" type="number" bind:value="count"><input class="optional" type="number" bind:value="optional">

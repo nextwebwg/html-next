@@ -6,7 +6,7 @@ const T0 = ["",[],"\n    ",4,"\n  "];
 const T1 = ["",[]];
 let P0, P1;
 const S = { n: [], t: [], f: import.meta.url, g: "x-button" };
-const D = { g: "x-button", props: { "size": { "required":false,"values":["sm","md","lg"],"default":"md", c: checkFormat("keyword", keywordFormat), t: "keyword", j: 0, m: ["p",formatOf(keywordFormat),false] }, "variant": { "required":false,"values":["outline","solid","destructive","ghost"],"default":"outline", c: checkFormat("keyword", keywordFormat), t: "keyword", j: 0, m: ["p",formatOf(keywordFormat),false] } } };
+const D = { g: "x-button", props: { "size": { "required":false,"values":["sm","md","lg"],"default":"md", c: checkFormat("keyword", keywordFormat), t: "keyword", j: 0, m: ["p",formatOf(keywordFormat)] }, "variant": { "required":false,"values":["outline","solid","destructive","ghost"],"default":"outline", c: checkFormat("keyword", keywordFormat), t: "keyword", j: 0, m: ["p",formatOf(keywordFormat)] } } };
 
 export function createXButton(options = {}, html) {
   const { attributes = {}, children = [], slots = {}, ...componentProps } = options;

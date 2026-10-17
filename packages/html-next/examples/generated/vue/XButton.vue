@@ -37,14 +37,14 @@ const props = defineProps({
 const acceptedProps: Record<string, unknown> = { size: 'md', variant: 'outline' }
 const checkedProps = computed(() => ({
   size: checkedProp<'sm' | 'md' | 'lg'>(
-    props['size'],
+    props['size'] ?? 'md',
     { kind: 'terminal', name: 'keyword' },
     false,
     'size',
     acceptedProps,
   ) as 'sm' | 'md' | 'lg',
   variant: checkedProp<'outline' | 'solid' | 'destructive' | 'ghost'>(
-    props['variant'],
+    props['variant'] ?? 'outline',
     { kind: 'terminal', name: 'keyword' },
     false,
     'variant',

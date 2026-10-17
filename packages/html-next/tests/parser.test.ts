@@ -303,14 +303,14 @@ describe("parseComponent", () => {
 
   it("constrains nested event and state fields with their own declared types", () => {
     const definition = parseComponent(`<template component="x-events"><defs>
-      <state name="history" type="list" value="[]" nullable>
+      <state name="history" type="list" value="[]">
         <prop type="object">
           <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
         </prop>
       </state>
       <event name="change" type="object" open>
         <prop name="value" type="number" required></prop>
-        <prop name="previous" type="string" required nullable></prop>
+        <prop name="previous" type="string"></prop>
         <prop name="output" type="unknown"></prop>
         <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
       </event>
@@ -319,14 +319,21 @@ describe("parseComponent", () => {
     const event = definition.declarations!.find((item) => item.kind === "event");
     assert.ok(state?.kind === "state" && state.shape !== undefined);
     assert.ok(event?.kind === "event" && event.shape !== undefined);
-    assert.equal(typeScriptType(event.shape), '{ readonly value: number; readonly previous: string | null; readonly output?: unknown; readonly trigger: "keyboard" | "pointer"; readonly [name: string]: unknown }');
+    assert.equal(typeScriptType(event.shape), '{ readonly value: number; readonly previous?: string | null; readonly output?: unknown | null; readonly trigger: "keyboard" | "pointer"; readonly [name: string]: unknown }');
     assert.equal(parseTypedValue({ value: 3, previous: null, trigger: "keyboard" }, event.shape).ok, true);
     assert.equal(parseTypedValue({ value: 3, previous: null, output: { arbitrary: true }, extra: 5, trigger: "keyboard" }, event.shape).ok, true);
     assert.equal(parseTypedValue({ value: 3, previous: null, trigger: "touch" }, event.shape).ok, false);
-    assert.equal(parseTypedValue({ value: 3, trigger: "keyboard" }, event.shape).ok, false);
+    // A null field is a missing one.
+    assert.equal(parseTypedValue({ value: 3, trigger: "keyboard" }, event.shape).ok, true);
+    assert.equal(parseTypedValue({ value: null, trigger: "keyboard" }, event.shape).ok, false);
     assert.equal(parseTypedValue([{ trigger: "pointer" }], state.shape).ok, true);
     assert.equal(parseTypedValue([{ trigger: "touch" }], state.shape).ok, false);
-    assert.equal(parseTypedValue(null, state.shape).ok, true);
+  });
+
+  it("reports nullable as a declaration attribute to remove", () => {
+    for (const declaration of ['<prop name="label" type="string" nullable></prop>', '<state name="level" type="integer" nullable></state>']) {
+      expectDiagnostic("HC013", `<template component="x-nullable"><defs>${declaration}</defs><output></output></template>`);
+    }
   });
 
   it("keeps a prop's HTML pattern constraint", () => {

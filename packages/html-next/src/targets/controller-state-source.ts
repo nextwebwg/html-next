@@ -97,7 +97,7 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
       return undefined;
     },
     set: (_target, name, value) => write(String(name), [], unwrap(value), typeof name !== "string" || !Object.hasOwn(options.state, name),
-      () => options.state[String(name)]!.set(unwrap(value))),
+      () => options.state[String(name)]!.set(unwrap(value) ?? null)),
     deleteProperty: (_target, name) => { warn(String(name), true); return true; },
     defineProperty: (_target, name) => { warn(String(name), true); return false; },
     has: (_target, name) => typeof name === "string" && (Object.hasOwn(options.state, name) || Object.hasOwn(options.computed, name)),

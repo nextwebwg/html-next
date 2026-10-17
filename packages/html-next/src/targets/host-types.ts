@@ -137,8 +137,9 @@ function stateTypes(
       const value = declared === undefined ? inferred : present(declared);
       types.set(declaration.name, { ...value, nullable: value.nullable || declaration.expression === undefined });
       result.set(declaration.name, {
+        // A state without value reads null until written (types#null-and-missing-values).
         type: declaration.expression === undefined && declared !== undefined
-          ? `${typeScript(present(declared))} | undefined` : typeScript(types.get(declaration.name)!),
+          ? `${typeScript(present(declared))} | null` : typeScript(types.get(declaration.name)!),
         writable: true,
       });
     } else if (declaration.kind === "computed") {
@@ -178,8 +179,10 @@ export function generateHostDeclaration(
     const type = defaulted && !prop.required ? propTypeSource({ ...prop, required: true }) : propTypeSource(prop);
     return `readonly ${propKey(name)}: HostProp<${type}>`;
   });
-  const state = [...stateTypes(definition, definitions)].map(([name, { type, writable }]) =>
-    `${writable ? "" : "readonly "}${propKey(name)}: ${type}`);
+  // A write of null or undefined is never wrong-typed, so a writable state's setter takes both.
+  const state = [...stateTypes(definition, definitions)].map(([name, { type, writable }]) => writable
+    ? `get ${propKey(name)}(): ${type}; set ${propKey(name)}(value: ${type} | null | undefined)`
+    : `readonly ${propKey(name)}: ${type}`);
   const data = declarations.flatMap((declaration) => declaration.kind !== "data" ? [] : [
     `readonly ${propKey(declaration.name)}: HostData<${declaration.type === undefined ? "unknown"
       : declaration.type === "text" ? "string" : typeScriptType(parseTypeExpression(declaration.type))}>`,
