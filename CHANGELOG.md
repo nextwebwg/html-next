@@ -12,6 +12,12 @@
 - Tests cover each `componentRegistry` algorithm and error in the live runtime and compiled output in jsdom, an import of the package with no document, and, in Chromium, Firefox and WebKit, the live delivery and a compiled module as separate bundles each creating and updating the other's components, with the created root's controller running when it is inserted.
 - `assembleComponentPackage` takes `hostTypes: true` and writes each controller's typed host, `<tag>.host.d.ts`, beside the component source that declares it, as the build and convert paths do, so a package typechecks its controllers in its own build. A test assembles a package with and without it.
 
+### Breaking
+
+- A slot's name is a literal identifier, written on both sides ([Slots](https://nextwebwg.org/declarative-components/components#slots)). `<slot from:name="…">` is an `HT008` error that says to use one named scoped slot passing the item as a prop, such as `<slot name="option" from:item="$row">`; the live runtime, compiled output and the Vue, React and Svelte targets no longer render computed slot names. An outlet's `name` and a component child's `slot` attribute are spelled as an expression name, letters, digits and `_` without `-`, and a child's `slot` cannot be bound with `from:slot`; each is an `HT008` error, which suggests the camel-case spelling, such as `labelAction` for `label-action`. `slot=""` still assigns the default slot, and `slot` on an element that is not a component's child keeps its native meaning.
+
+To migrate, give each slot an identifier name, `labelAction` for `label-action`, in its outlet and in every consumer, and replace a slot whose name is computed per item with one scoped slot that passes the item: `<slot from:name="concat('option-', $row.id)">` becomes `<slot name="option" from:item="$row">`, and a consumer's per-item elements become one `<template slot="option">` that reads `$item`.
+
 ### Changed
 
 - `componentRegistry.update` replaces `updateComponentProps` and `updateGeneratedProps` as the one prop channel for code, for live, compiled and framework-attached instances alike, and refuses an undeclared prop with a `TypeError`.

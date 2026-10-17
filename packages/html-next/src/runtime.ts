@@ -84,7 +84,7 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { definitionMayInvokeComponents, dynamicSlotNames, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
@@ -1572,9 +1572,8 @@ function renderDynamicNode(
   let childOwned: RenderOwned | undefined;
   let adopting = existing !== undefined;
   // What the body was built for: its element (none for a false `$if`; null before a build completes),
-  // its slot names' text, and the scope holding its alias.
+  // and the scope holding its alias.
   let built: ElementNode | undefined | null = null;
-  let builtNames: readonly string[] = [];
   let bodyScope = scope;
   ownEffect(context, scope, () => {
     const flow = node.flow!;
@@ -1585,11 +1584,9 @@ function renderDynamicNode(
     const chosen = flow.kind === "if" ? truthy(test!) ? node : undefined : flow.kind === "with" ? node : match!.chosen;
     const alias = flow.kind === "with" || flow.kind === "match" ? flow.alias : undefined;
     const value = flow.kind === "with" ? aliased! : match?.value;
-    const names = chosen === undefined ? [] : dynamicSlotNames(chosen).map((name) => toText(evaluateCompiled(name,
-      match?.scope ?? (alias === undefined ? scope : layer(scope, { [alias]: value! })))));
-    // The body rebuilds only when its decision does: the `$if` result, the `$match` arm, or a slot
-    // name. Otherwise it stays, inputs and focus included, and its alias takes the new value.
-    if (chosen === built && names.length === builtNames.length && names.every((name, index) => name === builtNames[index])) {
+    // The body rebuilds only when its decision does: the `$if` result or the `$match` arm. Otherwise
+    // it stays, inputs and focus included, and its alias takes the new value.
+    if (chosen === built) {
       if (alias !== undefined) bodyScope.set(alias, value!);
       return;
     }
@@ -1618,7 +1615,6 @@ function renderDynamicNode(
     end.before(...output);
     if (slotted) regionChanged(start);
     built = chosen;
-    builtNames = names;
     syncContainingSelect(end);
   });
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
@@ -2624,9 +2620,7 @@ function renderSlot(
   document: Document,
   context: RuntimeRenderContext,
 ): Node[] {
-  const name = node.nameExpression === undefined
-    ? node.name ?? ""
-    : toText(evaluateCompiled(node.nameExpression, scope));
+  const name = node.name ?? "";
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
   const props = node.props ?? [];
   const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);

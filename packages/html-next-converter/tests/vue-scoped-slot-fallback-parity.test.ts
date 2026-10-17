@@ -16,7 +16,7 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const staticSource = `<template component="x-static-scoped" status="early" summary="Static scoped slot."><div><slot name="row" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
-const dynamicSource = `<template component="x-dynamic-scoped" status="early" summary="Dynamic scoped slot."><defs><state name="slotName" value="row"></state></defs><div><slot from:name="$slotName" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
+const repeatedSource = `<template component="x-repeated-scoped" status="early" summary="Repeated scoped slot."><defs><state name="names" type="list(string)" value="['Ada']"></state></defs><div><slot $each="name of $names" name="row" from:item="$name"><span>Fallback</span></slot></div></template>`;
 
 describe.skipIf(!enabled)("public Vue converter scoped-slot fallback parity", () => {
   let directory = "";
@@ -27,14 +27,14 @@ describe.skipIf(!enabled)("public Vue converter scoped-slot fallback parity", ()
     directory = await mkdtemp(join(tmpdir(), "html-next-vue-scoped-slot-fallback-"));
     await mkdir(join(directory, "components"));
     await writeFile(join(directory, "components", "static.html"), staticSource);
-    await writeFile(join(directory, "components", "dynamic.html"), dynamicSource);
+    await writeFile(join(directory, "components", "repeated.html"), repeatedSource);
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [livePath], outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
 
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, mode);
-      const manifest = await convertComponents({ mode, target: "vue", entries: ["components/static.html", "components/dynamic.html"], root: directory, outDirectory });
-      assert.deepEqual(manifest.components.map((component) => component.tag).sort(), ["x-dynamic-scoped", "x-static-scoped"]);
+      const manifest = await convertComponents({ mode, target: "vue", entries: ["components/static.html", "components/repeated.html"], root: directory, outDirectory });
+      assert.deepEqual(manifest.components.map((component) => component.tag).sort(), ["x-repeated-scoped", "x-static-scoped"]);
       for (const component of manifest.components) {
         const file = join(outDirectory, component.artifact);
         const parsed = parseVue(await readFile(file, "utf8"), { filename: file });
@@ -44,8 +44,8 @@ describe.skipIf(!enabled)("public Vue converter scoped-slot fallback parity", ()
       const entry = join(outDirectory, "entry.ts");
       const bundle = join(outDirectory, "vue.js");
       await writeFile(entry, `import { createApp, h } from "vue";
-import { XStaticScoped, XDynamicScoped } from "./vue/${mode === "application" ? "application" : "index"}";
-const Component = window.scopedSlotKind === "static" ? XStaticScoped : XDynamicScoped;
+import { XStaticScoped, XRepeatedScoped } from "./vue/${mode === "application" ? "application" : "index"}";
+const Component = window.scopedSlotKind === "static" ? XStaticScoped : XRepeatedScoped;
 createApp({ render: () => h(Component, { id: "case" }) }).mount(document.querySelector("main"));
 `);
       await build({
@@ -62,13 +62,13 @@ createApp({ render: () => h(Component, { id: "case" }) }).mount(document.querySe
 
   for (const mode of ["application", "library"] as const) {
     for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-      for (const kind of ["static", "dynamic"] as const) {
+      for (const kind of ["static", "repeated"] as const) {
         it(`${engine} ${mode} renders the ${kind} scoped-slot fallback`, async () => {
           const browser = await launchParityBrowser(browserType);
           const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
           try {
-            const tag = kind === "static" ? "x-static-scoped" : "x-dynamic-scoped";
-            await live.setContent(`${staticSource}${dynamicSource}<main><${tag} id="case"></${tag}></main>`);
+            const tag = kind === "static" ? "x-static-scoped" : "x-repeated-scoped";
+            await live.setContent(`${staticSource}${repeatedSource}<main><${tag} id="case"></${tag}></main>`);
             await live.addScriptTag({ path: liveBundle });
             await live.evaluate(() => window.HtmlRuntime.lowerDocument());
             await vue.setContent("<main></main>");
@@ -95,6 +95,6 @@ createApp({ render: () => h(Component, { id: "case" }) }).mount(document.querySe
 declare global {
   interface Window {
     HtmlRuntime: { lowerDocument(): void };
-    scopedSlotKind: "static" | "dynamic";
+    scopedSlotKind: "static" | "repeated";
   }
 }

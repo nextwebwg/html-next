@@ -1586,34 +1586,6 @@ void [scoped, staticNode];`);
     });
   });
 
-  it("selects React scoped slots by a dynamic outlet name", async () => {
-    const root = await mkdtemp(join(tmpdir(), "html-next-react-dynamic-scoped-slot-"));
-    temporary.push(root);
-    await mkdir(join(root, "components"), { recursive: true });
-    await writeFile(join(root, "components/receiver.html"), `<template component="x-receiver" status="early" summary="Receiver.">
-      <props><prop name="which" type="string">Outlet name.</prop></props>
-      <div from:data-which="$which"><slot from:name="$which" from:item="'Ada'"><span>Fallback</span></slot></div></template>`);
-    await writeFile(join(root, "components/app.html"), `<link rel="component" href="./receiver.html">
-      <template component="x-app" status="early" summary="App."><main>
-      <x-receiver which="row"><template slot="row"><b $value="$item"></b></template></x-receiver>
-      <x-receiver which="other"><template slot="row"><b $value="$item"></b></template></x-receiver>
-      </main></template>`);
-    const outDirectory = join(root, "out");
-    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
-    const files = manifest.output.artifacts
-      .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
-      .map((artifact) => join(outDirectory, artifact.path));
-    await typecheckReact(root, files);
-    const bundle = await build({
-      entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
-      platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" },
-    });
-    const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
-    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-    assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><div data-which="row" data-x-receiver-prop-which="row" data-component="x-receiver"><b data-slotted="">Ada</b></div> <div data-which="other" data-x-receiver-prop-which="other" data-component="x-receiver"><span>Fallback</span></div></main>');
-  });
-
   it("marks sanitized fragment roots projected through a React slot", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-html-slot-"));
     temporary.push(root);

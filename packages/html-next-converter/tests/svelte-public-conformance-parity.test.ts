@@ -586,11 +586,9 @@ const regressions: readonly ConverterCase[] = [
   },
 
   {
-    name: "named and dynamic slot snippets preserve projection and fallbacks",
-    dependencies: { "panel.html": `<template component="x-panel" status="early" summary="Panel."><defs>
-      <state name="slotName" value="title"></state><handler name="rotate"><set name="slotName" value="secondary"></set></handler>
-      </defs><section><header><slot from:name="$slotName"><b>Untitled</b></slot></header><main><slot><i>Empty</i></slot></main>
-        <button class="rotate" on:click="rotate">Rotate</button></section>
+    name: "named slot snippets preserve projection and fallbacks",
+    dependencies: { "panel.html": `<template component="x-panel" status="early" summary="Panel.">
+      <section><header><slot name="title"><b>Untitled</b></slot></header><main><slot><i>Empty</i></slot></main></section>
       <style>:host { display: block; background: rgb(238 244 250); padding: 4px; } header { color: rgb(32 48 64); }
         h2 { font-style: italic; } :slotted(h2) { color: rgb(200 20 30); }</style></template>` },
     source: `<template component="x-slot-app" status="early" summary="Slot app."><defs>
@@ -600,7 +598,6 @@ const regressions: readonly ConverterCase[] = [
     expect: { probe: `return [qa('section header').map(e => e.textContent.trim()), qa('section main').map(e => e.textContent.trim()), q('h2') ? getComputedStyle(q('h2')).color : null, q('h2') ? getComputedStyle(q('h2')).fontStyle : null, qa('x-panel, slot').length];`,
       result: [["Title", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0], after: [
         { action: `document.querySelector('button.rename').click();`, result: [["Changed", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0] },
-        { action: `document.querySelector('button.rotate').click();`, result: [["Changed", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0] },
       ] },
   },
   {

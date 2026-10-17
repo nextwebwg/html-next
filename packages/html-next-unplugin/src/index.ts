@@ -233,7 +233,6 @@ function routeSupportImports(module: string, imports: Set<string>): string {
 function visitTemplate(node: TemplateNode, capabilities: Set<string>): void {
   if (node.kind === "slot") {
     capabilities.add(node.name === undefined ? "default-slot" : "named-slots");
-    if (node.nameExpression !== undefined) capabilities.add("dynamic-slots");
     for (const child of node.fallback ?? []) visitTemplate(child, capabilities);
     return;
   }

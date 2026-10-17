@@ -1407,43 +1407,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], projection);
   });
 
-  it("gives projected nodes to the outlet live's assembly appends last when two share a name", async () => {
-    // Static names are unique, so outlets share one only in rows or through a dynamic name.
-    for (const body of [
-      '<section><ul><li $each="n of $rows" $key="$n" from:data-id="$n"><slot name="head">row</slot></li></ul></section>',
-      '<section><slot from:name="$which"></slot><div><slot name="head"></slot></div></section>',
-      '<section><div><slot name="head"></slot></div><slot from:name="$which"></slot></section>',
-      '<section><div><slot from:name="$which"></slot></div><p><slot name="head"></slot></p><b $if="$open"><slot from:name="$other"></slot></b></section>',
-    ]) {
-      await same(slotsShape(`<state name="which" type="string" value="head"></state><state name="other" type="string" value="head"></state>
-        <state name="rows" type="list(integer)" value="[1, 2]"></state>`, body), [
-        (host) => { host.state.open = false; },
-        (host) => { host.state.open = true; host.state.rows = [2, 1, 3]; },
-        (host) => { host.state.rows = [4]; },
-      ], projection);
-    }
-  });
-
-  it("names a slot by its expression when it renders", async () => {
-    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
-      <section><div $if="$open"><slot from:name="$which">fallback {$which}</slot></div></section>`), [
-      (host) => { host.state.which = "default"; },
+  it("gives projected nodes to the outlet live's assembly appends last when rows share a name", async () => {
+    // Slot names are unique, so outlets share one only in rows.
+    await same(slotsShape(`<state name="rows" type="list(integer)" value="[1, 2]"></state>`,
+      '<section><ul><li $each="n of $rows" $key="$n" from:data-id="$n"><slot name="head">row</slot></li></ul></section>'), [
       (host) => { host.state.open = false; },
-      (host) => { host.state.which = ""; host.state.open = true; },
-    ], projection);
-    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
-      <section><slot from:name="$which">fallback {$which}</slot><p $with="$label as l"><slot from:name="$which">{$l}</slot></p></section>`), [
-      (host) => { host.state.which = "default"; },
-      (host) => { host.state.which = ""; },
-    ], projection);
-    // A name reading the region's alias, or inside the chosen `$match` arm, rebuilds that body too.
-    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
-      <section><p $with="$which as w"><slot from:name="$w">none {$w}</slot></p>
-        <template $match><div $when="$open"><slot from:name="$which">open</slot></div><div $else><slot from:name="$which">shut</slot></div></template></section>`), [
-      (host) => { host.state.which = "default"; },
-      (host) => { host.state.open = true; },
-      (host) => { host.state.which = "head"; },
-      (host) => { host.state.label = "kept"; },
+      (host) => { host.state.open = true; host.state.rows = [2, 1, 3]; },
+      (host) => { host.state.rows = [4]; },
     ], projection);
   });
 

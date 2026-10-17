@@ -387,7 +387,7 @@ describe("parseComponent", () => {
         `<computed name="empty" from="not $query"></computed>` +
         `<event name="value-change" type="string"></event>` +
         `</defs>` +
-        `<div><slot name="start"><span>Start</span></slot><slot from:name="$query"></slot></div>` +
+        `<div><slot name="start"><span>Start</span></slot><slot></slot></div>` +
         `</template>`,
       "combobox.html",
     );
@@ -404,13 +404,37 @@ describe("parseComponent", () => {
     assert.ok(computed?.kind === "computed");
     assert.deepEqual(state.expression?.dependencies, []);
     assert.deepEqual(computed.expression?.dependencies, ["query"]);
-    assert.deepEqual(definition.slots!.map(({ name, dynamic, required }) => ({ name, dynamic, required })), [
-      { name: "start", dynamic: false, required: false },
-      { name: undefined, dynamic: true, required: true },
+    assert.deepEqual(definition.slots!.map(({ name, required }) => ({ name, required })), [
+      { name: "start", required: false },
+      { name: undefined, required: true },
     ]);
     assert.ok(Object.isFrozen(definition));
     assert.ok(Object.isFrozen(definition.contract));
     assert.ok(Object.isFrozen(definition.contract.props));
+  });
+
+  it("names slots with literal identifiers on outlets and consumers alike", () => {
+    const card = (markup: string): string => `<template component="x-card" status="early" summary="Card.">${markup}</template>`;
+    const message = (source: string): string => {
+      try { parseComponent(source, "component.html"); } catch (error) { if (error instanceof HtmlDiagnosticError) return error.diagnostic.message; }
+      return "";
+    };
+    // An outlet's name is written, never computed; the diagnostic points to a scoped slot that passes the item.
+    assert.match(message(card(`<defs><state name="rows" type="list(object({ id: string }))" value="[]"></state></defs>` +
+      `<ul><li $each="row of $rows"><slot from:name="concat('option-', $row.id)"></slot></li></ul>`)),
+      /never computed with `from:name`.*one named scoped slot that passes the item as a prop/);
+    // A slot name is an expression-scope identifier: no `-`.
+    assert.match(message(card(`<div><slot name="label-action"></slot></div>`)), /`label-action` is not an identifier.*such as `labelAction`/);
+    assert.deepEqual(parseComponent(card(`<div><slot name="labelAction"></slot><slot name="_end2"></slot></div>`)).slots?.map((slot) => slot.name), ["labelAction", "_end2"]);
+    // A consumer names the slot it fills the same way, on an element or a <template slot>.
+    const page = (children: string): string => `<template component="x-page" status="early" summary="Page."><main><x-card>${children}</x-card></main></template>`;
+    expectDiagnostic("HT008", page(`<b slot="label-action">A</b>`));
+    expectDiagnostic("HT008", page(`<b slot="$which">A</b>`));
+    expectDiagnostic("HT008", page(`<template slot="row-a"><b>A</b></template>`));
+    assert.match(message(page(`<b from:slot="'title'">A</b>`)), /cannot be bound with `from:slot`/);
+    // An empty `slot` assigns the default slot, and a plain element outside a component keeps its native `slot`.
+    parseComponent(page(`<b slot="">A</b><b slot="labelAction">B</b>`));
+    parseComponent(`<template component="x-plain" status="early" summary="Plain."><div><b slot="header-actions">A</b></div></template>`);
   });
 
   it("parses repeated scoped slots and exposes their row bindings", () => {
@@ -427,7 +451,7 @@ describe("parseComponent", () => {
     assert.deepEqual(slot.props?.map((prop) => [prop.name, prop.expressionPlan.dependencies]), [
       ["item", ["row"]], ["index", ["loop.index"]],
     ]);
-    assert.deepEqual(definition.slots, [{ name: "row", dynamic: false, required: false, props: ["item", "index"] }]);
+    assert.deepEqual(definition.slots, [{ name: "row", required: false, props: ["item", "index"] }]);
     assert.deepEqual(slot.fallback?.[0]?.kind === "element" && slot.fallback[0].attributes[0]?.kind === "directive"
       && slot.fallback[0].attributes[0].expressionPlan?.dependencies, ["row.name"]);
   });
@@ -438,7 +462,7 @@ describe("parseComponent", () => {
       `<state type="boolean" name="alternate" value="false"></state></defs>` +
       `<template $match><section $when="$alternate"><slot name="item" from:first="$first"></slot></section>` +
       `<article $else><slot name="item" from:second="$second"></slot></article></template></template>`);
-    assert.deepEqual(definition.slots, [{ name: "item", dynamic: false, required: true, props: ["first", "second"] }]);
+    assert.deepEqual(definition.slots, [{ name: "item", required: true, props: ["first", "second"] }]);
   });
 
   it("defers unknown names only inside a consumer's scoped-slot template", () => {
@@ -764,7 +788,7 @@ describe("parseComponent", () => {
         `<section from:data-ready="$hasQuery" class:active="$hasQuery" style:opacity="$hasQuery" $ref="root">` +
         `<input .value="$query" bind:data-index="form.selected" $ref="search" on:input.capture.once="select">` +
         `<ol><li $each="row, i of $results.value" $where="$row.visible" $sort="-row.score,row.name" $limit="3" $key="$row.id">` +
-        `<slot from:name="$row.id"><span $value="$i"></span></slot></li></ol>` +
+        `<slot name="row"><span $value="$i"></span></slot></li></ol>` +
         `<div $with="$form as current"><output $value="$current.selected"></output></div>` +
         `<div $match="$form as current"><span $when="$current.selected > 0">Selected</span><span $else>None</span></div>` +
         `</section><style>:scope { display: block; }</style></template>`,
@@ -812,7 +836,7 @@ describe("parseComponent", () => {
     const item = list.children[0];
     assert.ok(item?.kind === "element" && item.flow?.kind === "each");
     assert.deepEqual(item.flow?.kind === "each" && item.flow.keyPlan?.dependencies, ["row.id"]);
-    assert.deepEqual(definition.slots, [{ dynamic: true, required: false }]);
+    assert.deepEqual(definition.slots, [{ name: "row", required: false }]);
   });
 
   it("records polymorphic native roots and delegated component roots", () => {
@@ -826,7 +850,7 @@ describe("parseComponent", () => {
     assert.deepEqual(polymorphic.root, { kind: "native", element: "button", choices: ["a", "button"] });
     assert.equal(polymorphic.contract.nativeElement, "button");
     // Each arm declares the same slots; the contract lists each once.
-    assert.deepEqual(polymorphic.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: false, required: true }]);
+    assert.deepEqual(polymorphic.slots, [{ name: "icon", required: true }, { required: true }]);
     // `as` does not retag an element.
     expectDiagnostic("HT021", componentSource(`<button as="button|a"></button>`));
     // Exactly one native root is always chosen.
@@ -839,12 +863,12 @@ describe("parseComponent", () => {
       `<prop name="as" type="keyword" values="button, a" default="button">Root.</prop><state type="boolean" name="open" value="false"></state>` +
         `<computed name="linked" from="$as = 'a'"></computed>`,
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
-    // A slot required by any arm is required; arms' dynamic slots merge by position.
+    // A slot required by any arm is required.
     const merged = parseComponent(button(
-      `<template $match><a $when="$as = 'a'"><slot name="icon"></slot><slot from:name="$as"></slot></a>` +
-        `<button $else><slot name="icon">★</slot><slot from:name="$as">fallback</slot></button></template>`,
+      `<template $match><a $when="$as = 'a'"><slot name="icon"></slot><slot name="label"></slot></a>` +
+        `<button $else><slot name="icon">★</slot><slot name="label">fallback</slot></button></template>`,
     ));
-    assert.deepEqual(merged.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: true, required: true }]);
+    assert.deepEqual(merged.slots, [{ name: "icon", required: true }, { name: "label", required: true }]);
     // A slot is not a native root.
     expectDiagnostic("HT021", button(`<template $match><slot></slot><button $else></button></template>`));
     // A slot is still declared once within an arm.

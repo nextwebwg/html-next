@@ -370,7 +370,6 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
       if (flow.alias !== undefined) known.add(flow.alias);
     }
     if (node.kind === "slot") {
-      dependencies(node.nameExpression, known);
       for (const prop of node.props ?? []) dependencies(prop.expressionPlan, known);
       for (const child of node.fallback ?? []) visit(child, known);
       return;
@@ -443,15 +442,14 @@ const isSlotTemplate = (node: TemplateNode): node is ElementNode => node.kind ==
  */
 function renderProjection(nodes: readonly TemplateNode[], names: Names, context: Context, tag: string): string {
   const contracts = context.slotsByTag?.get(tag);
-  const contractOf = (slot: string) => contracts?.find((entry) => !entry.dynamic && (entry.name ?? "") === slot);
+  const contractOf = (slot: string) => contracts?.find((entry) => (entry.name ?? "") === slot);
   const groups = new Map<string, TemplateNode[]>();
   for (const child of nodes) groups.set(assignedSlot(child), [...groups.get(assignedSlot(child)) ?? [], child]);
   for (const [slot, children] of groups) {
     if (children.some(isSlotTemplate)) continue;
     // Default content stays implicit unless a `<template slot="">` names the default slot. Elements
     // for a scoped slot stay there too, where the receiving host reports the missing template.
-    const scoped = contractOf(slot) ?? contracts?.find((entry) => entry.dynamic && (entry.props?.length ?? 0) > 0);
-    if (slot === "" || (scoped?.props?.length ?? 0) > 0) groups.delete(slot);
+    if (slot === "" || (contractOf(slot)?.props?.length ?? 0) > 0) groups.delete(slot);
   }
   const named = [...groups].map(([slot, children]) => {
     const carrier = children.find(isSlotTemplate);
@@ -509,13 +507,9 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEachNode(node, node.flow, names, context);
     const scoped = (node.props?.length ?? 0) > 0;
-    const slotName = node.nameExpression !== undefined
-      ? lowering.value(ast(node.nameExpression, "slot name"), names.template)
-      : quote(node.name ?? "");
-    const name = node.nameExpression !== undefined
-      ? ` :name=${bound(scoped ? `scopedSlotName(${slotName})` : slotName)}`
-      : scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
-        : node.name === undefined ? "" : ` name=${quote(node.name)}`;
+    const slotName = quote(node.name ?? "");
+    const name = scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
+      : node.name === undefined ? "" : ` name=${quote(node.name)}`;
     const props = (node.props ?? []).map((prop) => ` :${prop.name}=${bound(lowering.value(prop.expressionPlan.ast, names.template))}`).join("");
     const fallback = renderChildren(node.fallback ?? [], names, context);
     return fallback === "" ? `<slot${name}${props} />` : `<slot${name}${props}>${fallback}</slot>`;

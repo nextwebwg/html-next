@@ -1670,8 +1670,6 @@ function parseElementAtSource(
     ? { defaults: slotState.defaults, names: [...slotState.names], refs: [...slotState.refs] }
     : undefined;
   const merged = { defaults: slotState.defaults, names: new Set<string>(), refs: new Set<string>() };
-  // Dynamic slots have no name to match, so arms' dynamic slots merge by position.
-  const dynamicSlots: SlotContract[] = [];
   for (const child of contentNodes(element)) {
     if (typeof child === "string") {
       // A `$match`'s children are its arms; whitespace between them is layout, not content.
@@ -1680,22 +1678,21 @@ function parseElementAtSource(
     }
     if (sourceTag(child) === "slot") {
       const name = attr(child, "name");
-      const nameExpression = attr(child, "from:name");
-      if (name !== undefined && nameExpression !== undefined) {
-        fail("HT008", "A slot cannot declare both `name` and `from:name`.", source);
+      if (attr(child, "from:name") !== undefined) {
+        fail("HT008", "A slot's name is written as `name`, never computed with `from:name`; for content that varies by item, use one named scoped slot that passes the item as a prop, such as `<slot name=\"option\" from:item=\"$row\">`.", source);
       }
       const flowValues: Record<string, string> = {};
       const rawProps: Array<{ name: string; expression: string }> = [];
       for (const attribute of sourceAttributes(child)) {
         if (FLOW_NAME_RE.test(attribute.name)) {
           flowValues[attribute.name] = attribute.value;
-        } else if (attribute.name.startsWith("from:") && attribute.name !== "from:name") {
+        } else if (attribute.name.startsWith("from:")) {
           const prop = attribute.name.slice("from:".length);
           if (!isIdentifier(prop)) {
             fail("HT008", `Slot prop \`${prop}\` is not an expression-scope name.`, source);
           }
           rawProps.push({ name: prop, expression: attribute.value });
-        } else if (attribute.name !== "name" && attribute.name !== "from:name") {
+        } else if (attribute.name !== "name") {
           fail("HT008", "A slot has an unsupported attribute.", source);
         }
       }
@@ -1709,7 +1706,7 @@ function parseElementAtSource(
         ...prop,
         expressionPlan: compileScopedExpression(prop.expression, slotScope, source),
       }));
-      if (name === undefined && nameExpression === undefined) {
+      if (name === undefined) {
         slotState.defaults += 1;
         if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
       }
@@ -1717,6 +1714,7 @@ function parseElementAtSource(
         if (name === "" || slotState.names.has(name)) {
           fail("HT008", `Slot name \`${name}\` is empty or duplicated.`, source);
         }
+        if (!isIdentifier(name)) fail("HT008", slotNameMessage(name), source);
         slotState.names.add(name);
       }
       const fallback: TemplateNode[] = [];
@@ -1724,17 +1722,13 @@ function parseElementAtSource(
         if (typeof fallbackNode === "string") fallback.push(...parseText(fallbackNode, slotScope, source));
         else fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
       }
-      const dynamic = nameExpression !== undefined;
-      const slotContract: { name?: string; dynamic: boolean; required: boolean; props?: readonly string[] } = {
-        dynamic,
+      const slotContract: { name?: string; required: boolean; props?: readonly string[] } = {
         required: fallback.length === 0,
       };
       if (name !== undefined) slotContract.name = name;
       if (props.length > 0) slotContract.props = props.map((prop) => prop.name);
       // Root arms repeat their slots; the contract lists each once, required if any arm requires it.
-      const existing = dynamic
-        ? -1
-        : slotState.contracts.findIndex((contract) => !contract.dynamic && contract.name === name);
+      const existing = slotState.contracts.findIndex((contract) => contract.name === name);
       if (existing === -1) slotState.contracts.push(slotContract);
       else {
         const previous = slotState.contracts[existing]!;
@@ -1745,13 +1739,12 @@ function parseElementAtSource(
           ...(names.length === 0 ? {} : { props: names }),
         };
       }
-      if (name === undefined && nameExpression === undefined && fallback.length === 0 && flow === undefined && props.length === 0) {
+      if (name === undefined && fallback.length === 0 && flow === undefined && props.length === 0) {
         children.push({ kind: "slot" });
       } else {
         const slot: {
           kind: "slot";
           name?: string;
-          nameExpression?: CompiledExpression;
           flow?: Extract<Flow, { kind: "each" }>;
           props?: readonly { name: string; expression: string; expressionPlan: CompiledExpression }[];
           fallback: TemplateNode[];
@@ -1760,9 +1753,6 @@ function parseElementAtSource(
           fallback,
         };
         if (name !== undefined) slot.name = name;
-        if (nameExpression !== undefined) {
-          slot.nameExpression = compileScopedExpression(nameExpression, slotScope, source);
-        }
         if (flow !== undefined) slot.flow = flow;
         if (props.length > 0) slot.props = props;
         children.push(slot);
@@ -1778,20 +1768,12 @@ function parseElementAtSource(
     slotState.refs.clear();
     for (const name of shared.names) slotState.names.add(name);
     for (const ref of shared.refs) slotState.refs.add(ref);
-    const before = slotState.contracts.length;
     children.push(parseElement(child, contract, childScope, source, slotState, platform));
-    const armDynamic = slotState.contracts.slice(before).filter((slot) => slot.dynamic);
-    slotState.contracts.splice(0, slotState.contracts.length, ...slotState.contracts.filter((slot) => !armDynamic.includes(slot)));
-    for (const [index, slot] of armDynamic.entries()) {
-      const known = dynamicSlots[index];
-      dynamicSlots[index] = known === undefined ? slot : { ...known, required: known.required || slot.required };
-    }
     merged.defaults = Math.max(merged.defaults, slotState.defaults);
     for (const name of slotState.names) merged.names.add(name);
     for (const ref of slotState.refs) merged.refs.add(ref);
   }
   if (shared !== undefined) {
-    slotState.contracts.push(...dynamicSlots);
     slotState.defaults = merged.defaults;
     for (const name of merged.names) slotState.names.add(name);
     for (const ref of merged.refs) slotState.refs.add(ref);
@@ -1801,6 +1783,15 @@ function parseElementAtSource(
   // named slot lays out the invocation, and would otherwise reach the default slot and hide its
   // fallback; whitespace between default-slot content stays.
   if (tagName.includes("-") && !platform.isNativeElement(tagName)) {
+    // A child names the slot it fills with a literal identifier, as the slot's outlet does.
+    for (const child of children) {
+      if (child.kind !== "element") continue;
+      if (child.attributes.some((binding) => binding.kind !== "literal" && binding.name === "slot")) {
+        fail("HT008", "A `slot` attribute names its slot with a literal identifier; it cannot be bound with `from:slot`.", source);
+      }
+      const slot = child.attributes.find((binding) => binding.kind === "literal" && binding.name === "slot");
+      if (slot?.kind === "literal" && slot.value !== "" && !isIdentifier(slot.value)) fail("HT008", slotNameMessage(slot.value), source);
+    }
     const named = (node: TemplateNode | undefined): boolean => node?.kind === "element" &&
       node.attributes.some((binding) => binding.kind === "literal" && binding.name === "slot" && (binding.value !== "" || node.name === "template"));
     for (let index = children.length - 1; index >= 0; index -= 1) {
@@ -1865,6 +1856,12 @@ function parseElementAtSource(
   if (ref !== undefined) parsed.ref = ref;
   if (transition !== undefined) parsed.transition = transition;
   return parsed;
+}
+
+/** A slot name is a literal identifier, spelled as an expression name: no `-`, no `$`, never an expression. */
+function slotNameMessage(name: string): string {
+  const suggestion = name.replace(/-+([A-Za-z0-9])/g, (_, next: string) => next.toUpperCase());
+  return `Slot name \`${name}\` is not an identifier: a slot is named with letters, digits and \`_\`, as an expression name is${isIdentifier(suggestion) && suggestion !== name ? `, such as \`${suggestion}\`` : ""}.`;
 }
 
 function parseTransition(

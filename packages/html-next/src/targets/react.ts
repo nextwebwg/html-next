@@ -463,9 +463,8 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     fail("HT030", `React conversion of $${flow.kind} is not implemented.`);
   }
   if (node.kind === "slot") {
-    const name = node.nameExpression === undefined ? quote(node.name ?? "")
-      : `String(${lowering.value(node.nameExpression.ast, scope)})`;
-    const supplied = node.name === undefined && node.nameExpression === undefined ? "props.children" : `props.slots?.[${name}]`;
+    const name = quote(node.name ?? "");
+    const supplied = node.name === undefined ? "props.children" : `props.slots?.[${name}]`;
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
     if ((node.props?.length ?? 0) > 0) {
       state.usesScopedSlots = true;
@@ -747,8 +746,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (slots.size > 0) bindings.push(`slots={{ ${[...slots].map(([name, children]) => {
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
       const contracts = state.slotsByTag?.get(node.name);
-      const contract = contracts?.find((slot) => !slot.dynamic && slot.name === name)
-        ?? contracts?.find((slot) => slot.dynamic && (slot.props?.length ?? 0) > 0);
+      const contract = contracts?.find((slot) => slot.name === name);
       if ((contract?.props?.length ?? 0) > 0) {
         const alias = `__slotProps${state.nextSlotAlias++}`;
         const projectedScope: RenderScope = {
@@ -985,14 +983,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const stateSelectors = [...new Set(stateSelectedProps.map((prop) => prop.contract.select!.from))];
   const validityType = (prop: PropContract) => prop.select === undefined ? normalizeType(prop.type)
     : { kind: "union" as const, members: prop.select.options.map((option) => option.type) };
-  const namedSlots = (definition.slots ?? []).filter((slot) => !slot.dynamic && slot.name !== undefined);
-  const dynamicSlots = (definition.slots ?? []).some((slot) => slot.dynamic);
+  const namedSlots = (definition.slots ?? []).filter((slot) => slot.name !== undefined);
   const slotValueType = (slot: SlotContract): string => (slot.props?.length ?? 0) === 0
     ? "ReactNode"
     : `(props: Readonly<{ ${slot.props!.map((prop) => `${propKey(prop)}: any;`).join(" ")} }>) => ReactNode`;
-  const slotsType = namedSlots.length === 0 && !dynamicSlots
+  const slotsType = namedSlots.length === 0
     ? "Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>"
-    : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")}${dynamicSlots ? " [name: string]: ReactNode | ((props: Record<string, any>) => ReactNode);" : ""} }>`;
+    : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")} }>`;
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
   const contextMarkup = states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
     `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);

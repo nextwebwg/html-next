@@ -339,12 +339,12 @@ limit, the public converter emits an `HR008` depth guard. Ordinary graphs omit i
 fixture checks the permitted boundary, the over-limit diagnostic, SSR output, behavior, and pixels
 in both graph modes and all three browser engines.
 
-A public-converter slot fixture compares named/default projection, row-dependent dynamic slot
-names, fallback changes, and root-switch output and pixels in application and library mode across
+A public-converter slot fixture compares named/default projection, a scoped slot repeated in rows,
+fallback changes, and root-switch output and pixels in application and library mode across
 all three engines before and after SSR/hydration. Scoped-slot fixtures also compare consumer lexical scope, slot-prop shadowing,
 server output, hydration, and later reactive updates. An additional public-converter fixture
-checks that an absent scoped-slot consumer renders fallback content for both static and dynamic
-slot names, with matching pixels in both graph modes and all three engines. Node-object identity
+checks that an absent scoped-slot consumer renders fallback content for a single and a repeated
+scoped slot, with matching pixels in both graph modes and all three engines. Node-object identity
 across an explicit root switch is not itself a parity criterion; the gate is the behavior HTML Next
 intentionally specifies.
 When a converted consumer assigns an ordinary element to a scoped slot instead of using its

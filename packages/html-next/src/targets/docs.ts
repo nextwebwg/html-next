@@ -57,7 +57,7 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     ...(target.slots.length === 0
       ? ["This component has no projected-content slots."]
       : target.slots.map((slot) =>
-        `- ${slot.name === undefined ? "Default slot" : `\`${slot.name}\``}: ${slot.required ? "required" : "optional"}${slot.dynamic ? "; selected from data at runtime" : ""}.`
+        `- ${slot.name === undefined ? "Default slot" : `\`${slot.name}\``}: ${slot.required ? "required" : "optional"}.`
       )),
     "",
     "## Events",

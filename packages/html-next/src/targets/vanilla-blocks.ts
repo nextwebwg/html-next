@@ -27,7 +27,7 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { dynamicSlotNames, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
 import { fail } from "../diagnostics.js";
 import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
@@ -153,8 +153,6 @@ interface Region {
    * -1 for none, or NONCONFORMING), with the match value in `m` when it has one.
    */
   readonly test?: Lowered;
-  /** The dynamic slot names each body reads as it renders (one list per `$match` arm), when any does. */
-  readonly names?: readonly (readonly Lowered[])[] | undefined;
   readonly list?: Lowered;
   /** Keyed rows' key, or undefined for rows that follow positions. */
   readonly key?: Lowered | undefined;
@@ -163,8 +161,8 @@ interface Region {
   readonly positional?: boolean;
   /** Rows (or their key) read the row count. */
   readonly counted?: boolean;
-  /** A slot's name: a literal, or an expression evaluated when the slot renders. */
-  readonly slot?: string | Lowered;
+  /** A slot's name. */
+  readonly slot?: string;
   /** The slot the region's element names (`slot`), which its marks and content are projected into. */
   readonly projected?: string;
   /** A slot has fallback content, which renders when nothing is projected into it. */
@@ -1272,7 +1270,7 @@ class Planner {
       const projecting = this.projecting;
       if (projecting === undefined || projecting.block !== block || path.length > 0) return [["template", ["slot", slot]]];
       const props = [...new Set((projecting.definition.slots ?? [])
-        .filter((contract) => contract.dynamic || (contract.name ?? "") === slot).flatMap((contract) => contract.props ?? []))];
+        .filter((contract) => (contract.name ?? "") === slot).flatMap((contract) => contract.props ?? []))];
       const inner: Scope = { ...scope, level: scope.level + 1 };
       const types: TypeScope = { get: () => undefined };
       declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, undefined])));
@@ -1303,8 +1301,7 @@ class Planner {
         const { flow, ...slot } = node;
         return this.child(block, parent, { kind: "element", name: "template", attributes: [], children: [slot], flow }, path, scope, svg);
       }
-      // The name is read when the slot renders, without reference checks, as live evaluates it.
-      const slot = node.nameExpression === undefined ? node.name ?? "" : lower(node.nameExpression.ast, scope);
+      const slot = node.name ?? "";
       const fallback = this.block({ kind: "element", name: "template", attributes: [], children: node.fallback ?? [] },
         false, { ...scope, level: scope.level + 1 }, false, svg, false);
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
@@ -1344,27 +1341,17 @@ class Planner {
     const body: typeof authored = slotted === undefined || node.name === "template" ? authored
       : { ...authored, attributes: [...authored.attributes, { kind: "literal", name: PROJECTED_ATTRIBUTE, value: "" }] };
     const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
-    /**
-     * A body rebuilds only when its decision changes, as live's region compares it: the `$if` result,
-     * the `$match` arm, or the text of a dynamic slot name the body reads as it renders. The names
-     * read the region's alias as the value it decided, `mv`; their reads join the decision's.
-     */
-    const decide = (test: Lowered, bodies: readonly ElementNode[], alias?: string, type?: TypeNode): { test: Lowered; names?: Lowered[][] } => {
-      const nameScope = alias === undefined ? scope : this.layer(scope, alias, type, "item", "mv");
-      const names = bodies.map((body) => dynamicSlotNames(body).map((name) => lower(name.ast, nameScope)));
-      if (names.every((list) => list.length === 0)) return { test };
-      return { test: { ...test, ...names.flat().reduce<Reads>((all, name) => merge(all, name), test), fails: test.fails }, names };
-    };
+    // A body rebuilds only when its decision changes, as live's region compares it: the `$if` result or the `$match` arm.
     const inner: Scope = { ...scope, level: scope.level + 1 };
     if (flow.kind === "if") {
-      const decision = decide(truthiness(this.checked(plan(flow.testPlan, flow.test), scope)), [node]);
+      const decision = { test: truthiness(this.checked(plan(flow.testPlan, flow.test), scope)) };
       block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), ...decision, ...projected });
       return 1;
     }
     if (flow.kind === "with") {
       const expression = plan(flow.expressionPlan, flow.expr);
       const type = declaredExpressionType(expression, scope.types);
-      const decision = decide(this.checked(expression, scope), [node], flow.alias, type);
+      const decision = { test: this.checked(expression, scope) };
       const aliasScope = this.layer(inner, flow.alias, type, "item");
       block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), ...decision, alias: flow.alias, ...projected });
       return 1;
@@ -1399,8 +1386,7 @@ class Planner {
       });
       const source = `((o) => { ${lines.join(" ")} return -1; })(${value === undefined ? "undefined" : "mv"})`;
       const selection = value === undefined ? source : `((mv = ${value.source}) === NONCONFORMING ? mv : ${source})`;
-      const decision = decide({ ...none(`match:${site}`, selection), ...reads, fails: true }, chosen, alias,
-        expression === undefined ? undefined : declaredExpressionType(expression, scope.types));
+      const decision = { test: { ...none(`match:${site}`, selection), ...reads, fails: true } };
       const armBlocks = chosen.map((arm) => {
         const { flow: _armFlow, ...armBody } = arm;
         return this.block(armBody, false, armScope, false, svg, alias !== undefined);
@@ -1787,7 +1773,6 @@ export function emitBlocks(
       if (region.kind !== "each") {
         entries.push(`a${region.site}: ${marked}`, `e${index}: ${end}`, `b${index}: ${hydrate ? "z && ADOPT" : "undefined"}`,
           ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined ? [] : [`x${index}: undefined`]] : []);
-        if (region.names !== undefined) entries.push(`q${index}: undefined`);
       } else {
         const child = region.block.id;
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
@@ -2001,7 +1986,7 @@ export function emitBlocks(
       if (region.kind === "slot") {
         // Filled once, when its block first renders; then only its fallback updates.
         const body = `r.b${index}`;
-        const name = typeof region.slot === "string" ? JSON.stringify(region.slot) : `toText(${region.slot!.source})`;
+        const name = JSON.stringify(region.slot ?? "");
         const make = hydrate ? `m${child}(d, undefined, r, ad ? at : undefined)` : `m${child}(d${region.block.needsParent === true ? ", undefined, r" : ""})`;
         // An adopting block's slot keeps what the server rendered in it; its fallback adopts the range it rendered.
         const fill = hydrate ? `const ad = ${body} === ADOPT; ${body} = undefined; const at = (ad ? adoptSlot : fillSlot)` : "const at = fillSlot";
@@ -2088,13 +2073,7 @@ export function emitBlocks(
         const adopting = hydrate ? `${body} === ADOPT || ` : "";
         const settle = hydrate ? `{ if (${body} === ADOPT) ${body} = undefined; else ${patchBody("c")} }` : patchBody("c");
         const flip = `${adopting}${region.kind === "if" ? `!t${index} !== !${body}` : region.kind === "with" ? `${body} === undefined` : `t${index} !== ${shown}`}`;
-        // Slot names: the shown body's, or the chosen arm's, compared by their text.
-        const names = region.names?.map((list) => `[${list.map((name) => `toText(${name.source})`).join(", ")}]`);
-        const named = names === undefined ? undefined : region.kind === "if" ? `t${index} ? ${names[0]} : []`
-          : region.kind === "with" ? names[0]! : names.reduceRight((rest, list, arm) => `t${index} === ${arm} ? ${list} : ${rest}`, "[]");
-        const changed = named === undefined ? flip : `${flip} || readsChanged(r.q${index}, q${index})`;
-        const remember = named === undefined ? [] : [`        r.q${index} = q${index};`];
-        if (region.kind === "if" && named === undefined && !test.fails) {
+        if (region.kind === "if" && !test.fails) {
           // An `$if` flips by building its body or tearing it down.
           lines.push(
             `  if (${guard(maskOf(test))} && ${hydrate ? `(${adopting}!(${test.source}) !== !${body})` : `!(${test.source}) !== !${body}`}) {`,
@@ -2109,11 +2088,10 @@ export function emitBlocks(
         }
         if (region.kind === "if" || region.alias === undefined) {
           // Without an alias, a decision that holds, fails to conform or was not reached patches alike.
-          const decided = named === undefined ? hydrate ? `(${flip})` : flip : `(q${index} = ${named}, ${changed})`;
+          const decided = hydrate ? `(${flip})` : flip;
           lines.push(
-            `  let t${index}${named === undefined ? "" : `, q${index}`};`,
+            `  let t${index};`,
             `  if (${guard(maskOf(test))} && ${test.fails ? `(t${index} = ${test.source}) !== NONCONFORMING && ${decided}` : `(t${index} = ${test.source}, ${decided})`}) {`,
-            ...remember.map((line) => line.slice(4)),
             ...rebuild.map((line) => line.slice(2)),
             `  } else if (${body} !== undefined) ${settle}`,
           );
@@ -2128,9 +2106,7 @@ export function emitBlocks(
           `    const t${index} = ${test.source};`,
           // A nonconforming decision leaves the region as it is, and its body keeps updating.
           test.fails ? `    if (t${index} === NONCONFORMING) { if (${body} !== undefined) ${settle} } else {` : "    {",
-          ...named === undefined ? [] : [...region.kind === "with" ? [`      const mv = t${index};`] : [], `      const q${index} = ${named};`],
-          `      if (${changed}) {`,
-          ...remember,
+          `      if (${flip}) {`,
           ...rebuild.map((line) => `  ${line}`),
           `      } else ${keep}`,
           "    }",

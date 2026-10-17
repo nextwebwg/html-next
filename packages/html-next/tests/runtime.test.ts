@@ -2538,7 +2538,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<section $if="$open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
           '<template component="rf-list" status="early" summary="Rendered form fixture.">' +
           '<defs><prop name="rows" type="list(string)" default="[]">Rows.</prop></defs>' +
-          `<ul><li $each="row of $rows" $key="$row"><slot from:name="concat('row-', $row)">Unnamed</slot></li></ul></template>` +
+          `<ul><li $each="row of $rows" $key="$row"><slot name="row">Unnamed</slot></li></ul></template>` +
           '<template component="rf-wrap" status="early" summary="Rendered form fixture.">' +
           '<section><rf-card><span slot="title"><slot name="heading"></slot></span><slot></slot></rf-card></section></template>',
         );
@@ -2552,7 +2552,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             { name: "text beside template text", html: '<rf-adj>world</rf-adj>' },
             { name: "slot under $if opened by a prop", html: '<rf-if><i slot="extra">E</i>main</rf-if>', change: ["attr", "data-open", "true"] },
             { name: "slot under $if opened by a handler", html: '<rf-toggle><i slot="extra">E</i>main</rf-toggle>', change: ["click"] },
-            { name: "$each row added later", html: '<rf-list rows="[&quot;a&quot;]"><span slot="row-b">B</span></rf-list>', change: ["attr", "data-rows", '["a","b"]'] },
+            { name: "$each row added later", html: '<rf-list rows="[&quot;a&quot;]"><span slot="row">B</span></rf-list>', change: ["attr", "data-rows", '["a","b"]'] },
             { name: "slot passthrough into a nested component", html: '<rf-wrap><em slot="heading">H</em>Inner</rf-wrap>' },
           ];
           const shapes = (box) => JSON.stringify([...box.querySelectorAll("[data-component]")].map((el) => R.inspectInstance(el)));
@@ -4103,14 +4103,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
         // A root `$match` chooses the native root, and each arm declares the same slots.
         const panelBody = `<header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
           `<output class="label" $value="$label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
-          `<ul><li $each="row of $rows" $key="$row.id"><slot from:name="concat('row-', $row.id)"><span class="row-fallback" $value="$row.id"></span></slot></li></ul>`;
+          `<ul><li $each="row of $rows" $key="$row.id" $value="$row.id"></li></ul><aside><slot name="row"><span class="row-fallback">none</span></slot></aside>`;
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
             `<defs><state type="list(unknown)" name="rows" value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
             `<prop name="as" type="keyword" values="section, article" default="section">Root.</prop></defs>` +
             `<template $match><article $when="$as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
           `</template>` +
-          `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
+          `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row">A</strong></x-panel>` +
           `<x-panel id="empty"></x-panel>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -4169,13 +4169,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
             bodySame: true,
             rowSame: true,
             projected: [true, true, true],
-            rows: ["A", "b"],
+            rows: ["a", "b"],
             fallbacks: ["Untitled", "Empty"],
           },
           written: "Initial",
           updated: {
             label: "Updated",
-            rows: ["A", "b"],
+            rows: ["a", "b"],
             reflectedLabel: "Updated",
             reflectedInitially: "Initial",
             reflectedDefault: false,
