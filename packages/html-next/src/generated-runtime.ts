@@ -1378,6 +1378,30 @@ export interface ScopedTemplate {
 
 const scopedTemplates = new WeakMap<Element, ScopedTemplate>();
 
+/**
+ * A `<template slot>` no compiled consumer registered, such as one code passes to
+ * `componentRegistry.create`. The live runtime on the page, when there is one, renders it as it
+ * renders an authored one, bindings and all. Without it, a template that holds no HTML Next syntax
+ * renders a copy of its content each time its slot renders; one with bindings needs that parser.
+ */
+function runtimeTemplate(carrier: HTMLTemplateElement, names: readonly string[]): ScopedTemplate {
+  const live = registryRecord(carrier.ownerDocument).t?.(carrier, names) as ScopedTemplate | undefined;
+  if (live !== undefined) return scopedTemplate(carrier, live);
+  if (authoredSyntax(carrier.content)) fail("HR007", "A <template slot> with bindings, outside a compiled consumer, requires the live delivery's parser.");
+  return scopedTemplate(carrier, { m: () => ({ n: document.importNode(carrier.content, true), s: {} }), p: () => {}, l: new Set() });
+}
+
+/** Whether a template's content uses HTML Next syntax: text interpolation, `$` directives or prefixed bindings. */
+function authoredSyntax(content: DocumentFragment): boolean {
+  for (const element of content.querySelectorAll("*")) {
+    if (element.localName === "template" && authoredSyntax((element as HTMLTemplateElement).content)) return true;
+    for (const { name } of element.attributes) if (name.startsWith("$") || /^(?!xml|xlink)[a-z]+:/.test(name)) return true;
+  }
+  const texts = document.createTreeWalker(content, 4);
+  for (let text = texts.nextNode(); text !== null; text = texts.nextNode()) if (text.nodeValue!.includes("{")) return true;
+  return false;
+}
+
 /** Registers a consumer's compiled template on its `<template slot>` carrier, which the slot it is projected into finds. */
 export function scopedTemplate(carrier: Element, template: ScopedTemplate): ScopedTemplate {
   scopedTemplates.set(carrier, template);
@@ -1403,8 +1427,7 @@ export function fillSlot(
   const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template");
   if (props !== undefined && assigned.length > 0 || carrier !== undefined) {
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
-    const template = scopedTemplates.get(carrier as Element);
-    if (template === undefined) fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
+    const template = scopedTemplates.get(carrier as Element) ?? runtimeTemplate(carrier as HTMLTemplateElement, Object.keys(props ?? {}));
     const record = template.m(dirty ?? new Map(), props ?? {});
     for (const node of Array.from(record.n.childNodes)) markProjectedRoot(node);
     template.l.add(record);

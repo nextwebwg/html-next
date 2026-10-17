@@ -360,6 +360,7 @@ function registryFor(root: Document): DocumentRegistry {
     record.i.add(liveChannel);
     record.f = (carrier) => defineCarrier(root, carrier);
     record.u = (node) => { if ("querySelectorAll" in node) lowerScopes(root, [node as QueryRoot]); };
+    record.t = (carrier, names) => projectedSlotParser === undefined ? undefined : liveSlotTemplate(root, carrier, names);
   }
   return registry;
 }
@@ -595,6 +596,37 @@ function createInstance(root: Document, tag: string, props: Readonly<Record<stri
   } finally {
     state.staticRendering = wasStatic === true;
   }
+}
+
+/**
+ * Renders a `<template slot>` that code gave a compiled component, as this runtime renders an
+ * authored one at the top of a document: parsed with the slot's props in scope, rendered afresh for
+ * each outlet, and re-rendered as those props change. Its shape is the compiled `ScopedTemplate`.
+ */
+function liveSlotTemplate(root: Document, carrier: HTMLTemplateElement, names: readonly string[]): unknown {
+  const definition = { contract: { tag: "", props: {} }, template: { kind: "element", name: "template", attributes: [], children: [] }, source: { file: root.URL } } as unknown as ComponentDefinition;
+  const content = projectedSlotParser!(carrier, definition, names);
+  type Rendering = { n: Node; s: Record<string, unknown>; z: (() => void)[]; scope: ReactiveScope };
+  return {
+    l: new Set(),
+    m: (_dirty: unknown, props: Record<string, unknown>): Rendering => {
+      const scope = new ReactiveScope(Object.entries(props) as [string, Value][]);
+      const owned = new RenderOwned();
+      const context = {
+        definition, owned, refs: {}, projectedNodes: [], projectedSlotNames: new WeakMap(), slotInsertions: [],
+        selectBindings: [], rootNode: definition.template, frameworkOwned: false, committed: true,
+      } as unknown as RuntimeRenderContext;
+      const fragment = root.createDocumentFragment();
+      fragment.append(...renderChildren(content, scope, root, context));
+      for (const applySelection of context.selectBindings) applySelection();
+      return { n: fragment, s: { ...props }, z: [() => owned.stop()], scope };
+    },
+    p: (rendering: Rendering): void => {
+      for (const [name, value] of Object.entries(rendering.s)) {
+        if (!Object.is(untracked(() => rendering.scope.get(name)), value)) rendering.scope.set(name, value as Value);
+      }
+    },
+  };
 }
 
 /** A live instance's prop channel; a compiled root attached here takes its own. */

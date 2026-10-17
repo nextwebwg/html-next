@@ -3,7 +3,7 @@ import { HtmlDiagnosticError, fail } from "./diagnostics.js";
 import { ComponentGraphRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
 import { loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
-import { parseBrowserComponent, parseBrowserComponentResource } from "./browser-source.js";
+import { parseBrowserComponent, parseBrowserComponentResource, parseBrowserProjectedSlot } from "./browser-source.js";
 import { createStylesheetLoader } from "./stylesheet-resources.js";
 import { parseStylesheetInBrowser } from "./stylesheet-resources-browser.js";
 import { holdController } from "./requests.js";
@@ -13,6 +13,7 @@ import {
   installComponentGraph,
   setDefinitionNonce,
   installInlineDefinitionParser,
+  installProjectedSlotParser,
   registerComponentDefinitions,
   lowerDocument,
   observeDocument,
@@ -166,6 +167,8 @@ export async function startBrowserComponents(
   const pending = new WeakMap<Element, Promise<void>>();
   installInlineDefinitionParser((carrier, source) => prepared.get(carrier) ??
     (pending.has(carrier) ? undefined : parseBrowserComponent(carrier, source)));
+  // A consumer's <template slot> in the document is parsed when its slot first renders it.
+  installProjectedSlotParser(parseBrowserProjectedSlot);
   const prepareInline = (carrier: Element): Promise<void> => {
     const existing = pending.get(carrier);
     if (existing !== undefined) return existing;
