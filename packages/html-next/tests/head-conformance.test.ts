@@ -38,10 +38,10 @@ globalThis.app = {
     mount().innerHTML = '<docs-layout><page-a></page-a></docs-layout><img-card></img-card><img-card></img-card>' +
       '<x-product></x-product><x-product></x-product><vendor-widget></vendor-widget><cdn-badge></cdn-badge>';
   },
-  section(text) { HtmlNextLive.updateComponentProps(root("page-a"), { section: text }); },
+  section(text) { HtmlNextLive.componentRegistry.update(root("page-a"), { section: text }); },
   note(shown) { if (shown) root("page-a").append(document.createElement("x-note")); else root("x-note").remove(); },
   cards(count) { const cards = mount().querySelectorAll('[data-component~="img-card"]'); for (const card of [...cards].slice(count)) card.remove(); },
-  schema(value) { HtmlNextLive.updateComponentProps(root("x-product"), { schema: value }); },
+  schema(value) { HtmlNextLive.componentRegistry.update(root("x-product"), { schema: value }); },
   page(name) { root("page-a").replaceWith(document.createElement("page-" + name)); },
   unmount() { mount().replaceChildren(); },
 };`;
@@ -85,7 +85,7 @@ describe.skipIf(!enabled)("head declarations in the live runtime, in every engin
     directory = await mkdtemp(join(tmpdir(), "html-next-head-"));
     const entry = join(directory, "entry.ts");
     await writeFile(entry, `export * from ${JSON.stringify(join(source, "browser-loader.ts"))};
-export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts"))};\n`);
+export { componentRegistry } from ${JSON.stringify(join(source, "runtime.ts"))};\n`);
     bundle = join(directory, "live.js");
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", globalName: "HtmlNextLive", platform: "browser", target: ["es2022"] });
   });
@@ -214,7 +214,7 @@ export { updateComponentProps } from ${JSON.stringify(join(source, "runtime.ts")
           const server = (globalThis as unknown as { serverJson: Element[] }).serverJson;
           const same = () => { const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]')); return blocks.length === server.length && blocks.every((block, index) => block === server[index]); };
           const adopted = same();
-          (window as unknown as { HtmlNextLive: { updateComponentProps(root: Element, props: object): void } }).HtmlNextLive.updateComponentProps(document.getElementById("product")!, { name: "Hammer" });
+          (window as unknown as { HtmlNextLive: { componentRegistry: { update(root: Element, props: object): void }; } }).HtmlNextLive.componentRegistry.update(document.getElementById("product")!, { name: "Hammer" });
           await new Promise((resolve) => setTimeout(resolve, 20));
           return { adopted, same: same(), text: server.map((block) => block.textContent) };
         });

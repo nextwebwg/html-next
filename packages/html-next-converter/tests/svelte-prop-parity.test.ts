@@ -90,8 +90,8 @@ let n = $state<unknown>(42);
           await svelte.locator("#case").waitFor();
           for (const [index, value] of [42, "bad", 43].entries()) {
             if (index > 0) {
-              await live.evaluate((next) => (window as unknown as { HtmlRuntime: { updateComponentProps(root: Element, props: Record<string, unknown>): void } })
-                .HtmlRuntime.updateComponentProps(document.querySelector("#case")!, { n: next }), value);
+              await live.evaluate((next) => (window as unknown as { HtmlRuntime: { componentRegistry: { update(root: Element, props: Record<string, unknown>): void }; } })
+                .HtmlRuntime.componentRegistry.update(document.querySelector("#case")!, { n: next }), value);
               await svelte.evaluate((next) => (window as unknown as { svelteSetN(value: unknown): void }).svelteSetN(next), value);
             }
             const [native, converted] = await Promise.all([observe(live), observe(svelte)]);

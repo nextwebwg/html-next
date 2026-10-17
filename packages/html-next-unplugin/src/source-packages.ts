@@ -35,6 +35,11 @@ export interface SourcePackage {
   readonly directory: string;
   readonly manifest: string;
   readonly exports: readonly { specifier: string; source: string }[];
+  /**
+   * The package's `sideEffects` is `false` or a list: bundlers may drop a component module nothing
+   * imports a name from, and with it the module's definition in componentRegistry.
+   */
+  readonly sideEffectFree: boolean;
 }
 
 export async function sourcePackages(root: string): Promise<SourcePackage[]> {
@@ -49,14 +54,14 @@ export async function sourcePackages(root: string): Promise<SourcePackage[]> {
     const directory = await packageDirectory(root, name);
     if (directory === undefined) continue;
     const path = resolve(directory, "package.json");
-    const definition = JSON.parse(await readFile(path, "utf8")) as { exports?: unknown };
+    const definition = JSON.parse(await readFile(path, "utf8")) as { exports?: unknown; sideEffects?: unknown };
     const exports = sourceExports(definition.exports).map(([subpath, path]) => {
       if (!path.startsWith("./")) throw new Error(`HTML Next package exports must be relative: ${name} ${path}.`);
       const source = resolve(directory, path);
       assertPackageSource(source, directory);
       return { specifier: subpath === "." ? name : `${name}/${subpath.slice(2)}`, source };
     });
-    if (exports.length > 0) packages.push({ directory, manifest: path, exports });
+    if (exports.length > 0) packages.push({ directory, manifest: path, exports, sideEffectFree: definition.sideEffects === false || Array.isArray(definition.sideEffects) });
   }
   return packages;
 }

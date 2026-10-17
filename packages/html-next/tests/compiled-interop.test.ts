@@ -20,7 +20,7 @@ interface Runtime {
   serializeRenderedForm(container: Element): string;
   registerComponentDefinitions(definitions: readonly ComponentDefinition[]): void;
   lowerDocument(root?: Document): number;
-  updateComponentProps(element: Element, props: Record<string, unknown>): void;
+  componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
 }
 
 /** Loads a compiled component beside the live runtime's inspection, serialization and hydration APIs. */
@@ -29,7 +29,7 @@ async function load(definition: ComponentDefinition): Promise<{ runtime: Runtime
     .find((artifact) => artifact.path.endsWith(".js"))!.content;
   assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/, "the component compiles directly");
   const entry = `${module}
-export { getComponentHost, inspectInstance, serializeRenderedForm, registerComponentDefinitions, lowerDocument, updateComponentProps } from "@nextwebwg/html-next/runtime";`;
+export { getComponentHost, inspectInstance, serializeRenderedForm, registerComponentDefinitions, lowerDocument, componentRegistry } from "@nextwebwg/html-next/runtime";`;
   const result = await build({
     stdin: { contents: entry, loader: "js", resolveDir: fileURLToPath(fixtures) },
     bundle: true, format: "esm", write: false, platform: "browser", target: ["es2022"],
@@ -124,13 +124,13 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     assert.deepEqual(Array.from(adopted.querySelectorAll("li.danger"), (row) => row.getAttribute("data-id")), ["3"]);
   });
 
-  it("updates a compiled root's props through the live runtime's updateComponentProps", async () => {
+  it("updates a compiled root's props through componentRegistry.update", async () => {
     const button = await readFile(new URL("../benchmarks/fixtures/prop-button.html", import.meta.url), "utf8");
     const { runtime, document } = await load(parseComponent(button, new URL("../benchmarks/fixtures/prop-button.html", import.meta.url).href));
     const element = runtime.factory({ size: "lg" });
     document.body.append(element);
     await flush();
-    runtime.updateComponentProps(element, { variant: "solid", size: 5 });
+    runtime.componentRegistry.update(element, { variant: "solid", size: 5 });
     await flush();
     // An accepted value renders; one its type refuses leaves the prop as it was, as for a live instance.
     assert.equal(element.getAttribute("data-variant"), "solid");

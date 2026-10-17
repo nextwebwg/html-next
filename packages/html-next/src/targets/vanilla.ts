@@ -82,6 +82,12 @@ export function generateVanilla(
     "  slots?: Readonly<Record<string, readonly (string | Node)[]>>;",
     "}",
     `export declare function create${contract.name}${genericDeclaration}(props${hasRequired ? "" : "?"}: ${contract.name}Props${genericReference}): ${elementType};`,
+    // `componentRegistry.create` types this tag's props and root, as HTMLElementTagNameMap types createElement.
+    "declare global {",
+    "  interface ComponentTagMap {",
+    `    ${js(contract.tag)}: { element: ${elementType}; props: Omit<${contract.name}Props, "attributes" | "children" | "slots"> };`,
+    "  }",
+    "}",
     "",
   ].join("\n");
 

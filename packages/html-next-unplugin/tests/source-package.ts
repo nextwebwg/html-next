@@ -12,7 +12,7 @@ export async function installSourcePackage(root: string, files: Record<string, s
   await rm(library, { recursive: true, force: true });
   await mkdir(library, { recursive: true });
   await writeFile(join(library, "package.json"), JSON.stringify({
-    name: "@example/controls", version: "1.0.0", type: "module", files: ["components"],
+    name: "@example/controls", version: "1.0.0", type: "module", files: ["components"], sideEffects: ["**/*.css"],
     exports: { ".": { "html-next": "./components/" }, "./nested": { "html-next": "./components/nested/" } },
   }));
   for (const [path, content] of Object.entries(files)) {

@@ -24,5 +24,7 @@ export const ready = state.ready;
 export type { StartedBrowserComponents };
 /** Page scripts ask, answer and check requests with `RequestEvent`'s static methods, or listen for a `RequestEvent`. */
 export { RequestEvent } from "./requests.js";
+/** Page scripts create and update components with `componentRegistry`, which every bundle on the page shares. */
+export { ComponentRegistry, componentRegistry, type ComponentDefinition, type ComponentInit } from "./component-registry.js";
 
 browserGlobal.HTMLNext ??= Object.freeze({ ready });

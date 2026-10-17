@@ -1,6 +1,7 @@
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
+import { checkProps, registerEntry, registryRecord } from "./component-registry.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
@@ -8,7 +9,7 @@ import { isNativeEvent, isPlatformObject } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
-import { renderedFormMark, serverMark, serverRanges } from "./rendered-form.js";
+import { currentProjection, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
@@ -47,6 +48,7 @@ export {
 } from "./type-checks.js";
 export { boundFailures } from "./value-constraints.js";
 export { RequestEvent } from "./requests.js";
+export { ComponentRegistry, componentRegistry, type ComponentDefinition, type ComponentInit } from "./component-registry.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
 export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
@@ -208,12 +210,54 @@ export function propText(type: CompactType | null, value: unknown, attribute: st
   return value === NONCONFORMING || !fits(value, type) ? null : toAttribute(value as Value, attribute);
 }
 
-/** The parent's projected content, by slot: elements with a `slot` attribute go to that slot, the rest to the unnamed one. */
+export { regionChanged } from "./rendered-form.js";
+
+/** A consumer region's start mark, for an element with `slot`: that slot, and the region's end mark. */
+const regionSlots = new WeakMap<Node, readonly [slot: string, end: Node]>();
+
+/**
+ * How a slot fills from projected nodes that may hold consumer regions: the nodes as the regions hold
+ * them now, whether the slot shows its fallback, and, for a slot given only regions, the node its
+ * fallback block is placed before. `slotRegion` sets it, so only components that project such regions
+ * bundle it; without it a slot places its projected nodes as they are.
+ */
+let regionFill: ((assigned: readonly Node[], fallback: boolean) =>
+  { readonly nodes: Node[]; readonly empty: boolean; readonly at?: (open: Node) => ChildNode }) | undefined;
+
+/** Records that the region from `start` to `end` is for an element with `slot`; returns `start`. */
+export function slotRegion<T extends Node>(start: T, end: Node, slot: string): T {
+  regionSlots.set(start, [slot, end]);
+  regionFill ??= (assigned, fallback) => {
+    const nodes = currentProjection(assigned);
+    const regions = fallback ? slotRegions(assigned) : undefined;
+    if (regions === undefined) return { nodes, empty: false };
+    const empty = (): boolean => regions.every(([first, last]) => first.nextSibling === last);
+    return { nodes, empty: empty(), at: (open) => {
+      // The fallback block is placed through this node's `before`, which hands its nodes to the switch.
+      const at = open.ownerDocument!.createComment("");
+      at.before = (...given) => {
+        const fallback = (given as Node[]).flatMap((node) => node.nodeType === 11 ? Array.from(node.childNodes) : [node]);
+        if (empty()) (regions[0]![0] as ChildNode).before(...fallback);
+        switchFallback(open, regions, fallback);
+      };
+      return at;
+    } };
+  };
+  return start;
+}
+
+/**
+ * The parent's projected content, by slot: elements with a `slot` attribute go to that slot, a region
+ * for such an element goes there whole, marks included, and the rest to the unnamed one.
+ */
 export function projected(fragment: Node): { children: Node[]; slots: Record<string, Node[]> } {
   const children: Node[] = [];
   const slots: Record<string, Node[]> = {};
+  let region: readonly [string, Node] | undefined;
   for (const node of Array.from(fragment.childNodes)) {
-    const name = node.nodeType === 1 ? (node as Element).getAttribute("slot") : null;
+    region ??= regionSlots.get(node);
+    const name = region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") : null);
+    if (node === region?.[1]) region = undefined;
     if (name === null) children.push(node);
     else (slots[name] ??= []).push(node);
   }
@@ -507,9 +551,35 @@ export function manageData(
   return () => { if (connected) request(); };
 }
 
-/** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
-export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
-  generatedPropUpdaters.get(element)?.(props);
+/** A compiled root's prop channel, which `componentRegistry.update` finds. */
+const generatedChannel = (element: Element) => generatedPropUpdaters.get(element);
+
+/**
+ * Defines a compiled component in the document's `componentRegistry` when its module is evaluated,
+ * so `create` makes it: `content` goes to the slot each node's `slot` attribute names, or the default.
+ */
+export function defineComponent(
+  tag: string,
+  factory: (options: Readonly<Record<string, unknown>>) => Element,
+  props: readonly string[],
+): void {
+  if (typeof document === "undefined") return;
+  registerEntry(document, {
+    d: Object.freeze({ tag }),
+    p: props,
+    c: (values, nodes) => {
+      const children: Node[] = [];
+      const slots: Record<string, Node[]> = {};
+      for (const node of nodes) {
+        const slot = node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "";
+        if (slot === "") children.push(node);
+        else (slots[slot] ??= []).push(node);
+      }
+      return factory({ ...values, children, slots });
+    },
+    k: factory,
+  }, true);
+  registryRecord(document).i.add(generatedChannel);
 }
 
 interface PropInput { readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean }
@@ -676,8 +746,8 @@ export function acceptProps(
 /**
  * The live runtime's prop boundary for an attached compiled instance: on first connect the root
  * takes its validity and bound props their reflection; a reconnect reflects every explicit or bound
- * prop again; and the framework channel (`updateGeneratedProps`) applies inputs as
- * `updateComponentProps` does, recording the raw input and re-rendering what an accepted value changed.
+ * prop again; and its prop channel, which `componentRegistry.update` reaches, applies inputs as
+ * a live instance's does, recording the raw input and re-rendering what an accepted value changed.
  */
 export function manageProps(instance: GeneratedInstance): void {
   const record = instance.B!;
@@ -748,6 +818,7 @@ export function manageProps(instance: GeneratedInstance): void {
     job.schedule();
   };
   const update = (input: Readonly<Record<string, unknown>>): void => {
+    checkProps(names, input, D.g);
     const element = instance.e;
     const next: Record<string, unknown> = {};
     for (const name of names) {
@@ -1267,9 +1338,9 @@ export function project(
   }
   // A consumer's <template slot> lists the elements its outlets render now, in document order (none
   // while the instance is disconnected); any other projected element lists itself.
-  const into = (key: string): Element[] => projected
-    .filter(([node, name]) => node.nodeType === 1 && name === (key === "default" ? "" : key))
-    .flatMap(([node]) => {
+  const into = (key: string): Element[] => {
+    const given = projected.filter(([, name]) => name === (key === "default" ? "" : key)).map(([node]) => node);
+    return (regionFill?.(given, false).nodes ?? given).filter((node) => node.nodeType === 1).flatMap((node) => {
       const template = scopedTemplates.get(node as Element);
       if (template === undefined) return [node as Element];
       if ((instance as GeneratedInstance).c?.() !== true) return [];
@@ -1283,6 +1354,7 @@ export function project(
         return elements;
       });
     });
+  };
   // A host lists the elements a slot was given, in order; `default` reads the unnamed slot.
   instance.Y = new Proxy({}, {
     get: (_target, key) => typeof key === "string" ? into(key) : undefined,
@@ -1346,8 +1418,11 @@ export function fillSlot(
     end.remove();
     return rendered;
   }
+  // Given only the consumer's `$if` or `$each` regions, the slot shows its fallback while they render nothing.
+  const regional = rendered === undefined ? regionFill?.(assigned, fallback) : undefined;
+  const empty = assigned.length === 0 || regional?.empty === true;
   const close = renderedFormMark(doc, "end", "") as ChildNode;
-  const open = renderedFormMark(doc, "start", assigned.length === 0 ? `${slot} fallback=""${scoped}` : `${slot}${scoped}`) as ChildNode;
+  const open = renderedFormMark(doc, "start", empty ? `${slot} fallback=""${scoped}` : `${slot}${scoped}`) as ChildNode;
   start.replaceWith(open);
   end.replaceWith(close);
   if (assigned.length === 0) return close;
@@ -1356,16 +1431,17 @@ export function fillSlot(
     close.before(rendered[1].n);
   }
   else {
-    close.before(...assigned);
+    const nodes = regional?.nodes ?? assigned;
+    close.before(...nodes);
     // Components invoked in the nodes this slot now places are created, as live lowers them now.
-    for (const node of assigned) {
+    for (const node of nodes) {
       const pending = waiting.get(node);
       if (pending === undefined) continue;
       waiting.delete(node);
       for (const realize of pending.values()) realize();
     }
   }
-  return rendered;
+  return regional?.at?.(open) ?? rendered;
 }
 
 /**
@@ -1384,6 +1460,8 @@ export function adoptSlot(
   const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template") as Element | undefined;
   const contents: Node[] = [];
   if (rendered) for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) contents.push(node);
+  const regional = regionFill?.(assigned, fallback);
+  const current = regional?.nodes ?? assigned;
   // What `fillSlot` renders here: a consumer's template, the fallback, nothing, or the projected nodes.
   if (props !== undefined && assigned.length > 0 || carrier !== undefined) {
     const template = carrier === undefined ? undefined : scopedTemplates.get(carrier);
@@ -1401,20 +1479,23 @@ export function adoptSlot(
   } else if (assigned.length === 0) {
     if (fallback && rendered && mark.attributes.has("fallback")) return start;
     if (!fallback && mark?.target === "marker") return undefined;
-  } else if (rendered && !mark.attributes.has("fallback") && contents.length === assigned.length &&
-    contents.every((node, index) => node === assigned[index])) {
-    for (const node of assigned) {
+  } else if (rendered && !mark.attributes.has("fallback") && contents.length === current.length &&
+    contents.every((node, index) => node === current[index])) {
+    for (const node of current) {
       const pending = waiting.get(node);
       if (pending === undefined) continue;
       waiting.delete(node);
       for (const realize of pending.values()) realize();
     }
-    return undefined;
+    // Given only the consumer's regions, the slot keeps a fallback block for when they render nothing.
+    return regional?.at?.(start);
   }
   // Rendered otherwise: the slot fills as it would have, in place of what the server rendered.
   const doc = start.ownerDocument!;
   const open = doc.createComment("html-next:slot-start"), close = doc.createComment("html-next:slot-end");
   for (const node of contents) node.parentNode?.removeChild(node);
+  // Each region's marks and content stay siblings, where `fillSlot` finds what the region holds.
+  doc.createDocumentFragment().append(...current);
   start.replaceWith(open);
   if (end === start) open.after(close);
   else end.replaceWith(close);
@@ -1444,7 +1525,17 @@ export function serverProjection(root: Element, tag: string): [children: Node[],
   const slots: Record<string, Node[]> = {};
   const server = serverRanges(root, true, tag);
   const add = (node: Node, slot: string): void => { if (slot === "") children.push(node); else (slots[slot] ??= []).push(node); };
-  for (const range of server?.ranges ?? []) if (!range.fallback && !range.scoped) for (const node of range.content) add(node, range.slot);
+  for (const range of server?.ranges ?? []) {
+    if (range.scoped) continue;
+    if (!range.fallback) for (const node of range.content) add(node, range.slot);
+    // After a fallback, the marks of the consumer's regions that render nothing, which its adoption registered.
+    else for (let index = 0; index < range.content.length; index += 1) {
+      const region = regionSlots.get(range.content[index]!);
+      if (region === undefined) continue;
+      add(range.content[index]!, region[0]);
+      add(range.content[++index]!, region[0]);
+    }
+  }
   for (const node of server?.carried ?? []) add(node, node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
   return [children, slots];
 }

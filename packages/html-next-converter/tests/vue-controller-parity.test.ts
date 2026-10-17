@@ -129,7 +129,7 @@ describe.skipIf(!enabled)("public Vue converter controller parity", () => {
     loaderBundle = join(directory, "loader.js");
     const loaderEntry = join(directory, "loader-entry.ts");
     await writeFile(loaderEntry, `export { startBrowserComponents } from ${JSON.stringify(browserLoaderPath)};
-export { updateComponentProps } from ${JSON.stringify(new URL("../../html-next/src/runtime.ts", import.meta.url).pathname)};`);
+export { componentRegistry } from ${JSON.stringify(new URL("../../html-next/src/runtime.ts", import.meta.url).pathname)};`);
     await build({ entryPoints: [loaderEntry], outfile: loaderBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
     for (const mode of ["application", "library"] as const) {
       const output = join(directory, `generated-${mode}`);
@@ -318,8 +318,8 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         // Another prop changing does not rerun an effect that read only `amount`; `flat` stayed 0 through every click.
         const amountRuns = (await snapshot(live)).behavior.trace.amountEffects;
         await live.evaluate(() => (window as unknown as { HtmlNextLoader: {
-          updateComponentProps(element: Element, props: Record<string, unknown>): void;
-        } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
+          componentRegistry: { update(element: Element, props: Record<string, unknown>): void };
+        } }).HtmlNextLoader.componentRegistry.update(document.querySelector("#case")!, { tone: "loud" }));
         await vue.evaluate(() => window.vueSetProps({ tone: "loud" }));
         await Promise.all([live, vue].map((page) => page.waitForTimeout(50)));
         const [toneLive, toneVue] = await Promise.all([snapshot(live), snapshot(vue)]);

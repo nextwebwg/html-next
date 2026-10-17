@@ -1,5 +1,6 @@
-import { buildComponentGraph, type ComponentGraph } from "./graph.js";
-import { ComponentRegistry } from "./registry.js";
+import { buildComponentGraph, type ComponentGraph, type ComponentGraphNode } from "./graph.js";
+import { HtmlDiagnosticError, fail } from "./diagnostics.js";
+import { ComponentGraphRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
 import { loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
 import { parseBrowserComponent, parseBrowserComponentResource } from "./browser-source.js";
@@ -22,7 +23,7 @@ export interface BrowserLoaderOptions {
   readonly importMap?: ImportMapLike;
   readonly fetch?: typeof fetch;
   readonly importer?: ModuleImporter;
-  readonly registry?: ComponentRegistry;
+  readonly registry?: ComponentGraphRegistry;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -63,7 +64,7 @@ function readImportMap(root: Document): ImportMapLike {
 export async function loadBrowserComponents(
   rootSpecifiers: readonly string[],
   options: BrowserLoaderOptions = {},
-): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
+): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentGraphRegistry }> {
   return loadWithStylesheets(rootSpecifiers, options);
 }
 
@@ -71,7 +72,7 @@ async function loadWithStylesheets(
   rootSpecifiers: readonly string[],
   options: BrowserLoaderOptions,
   stylesheetLoader?: ReturnType<typeof createStylesheetLoader>,
-): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
+): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentGraphRegistry }> {
   const root = options.document ?? document;
   const request = options.fetch ?? fetch;
   const resolver = documentResolver(root, options.importMap);
@@ -95,7 +96,7 @@ async function loadWithStylesheets(
     isCustomElementRegistered: (tag) => root.defaultView?.customElements.get(tag) !== undefined,
     isApplicationURL: (url) => matchesSourceList(url, applicationSourceList(root), root.URL),
   });
-  const registry = options.registry ?? new ComponentRegistry();
+  const registry = options.registry ?? new ComponentGraphRegistry();
   registry.addGraph(graph, (node) => loadController(node, options.importer));
   return Object.freeze({ graph, registry });
 }
@@ -133,7 +134,7 @@ function applyNonces(root: Document, graph: ComponentGraph, resolver: ResourceRe
 
 export interface StartedBrowserComponents {
   readonly graph: ComponentGraph;
-  readonly registry: ComponentRegistry;
+  readonly registry: ComponentGraphRegistry;
   readonly stop: () => void;
 }
 
@@ -187,6 +188,29 @@ export async function startBrowserComponents(
   let stopped = false;
   let extensions = Promise.resolve();
   const initialized = new WeakSet<object>();
+  /**
+   * An inline definition's controller edge: its `controller` resolves against the document's base
+   * URL, as a linked definition's resolves against its resource, within the application's root.
+   */
+  const inlineNodes = new WeakMap<object, ComponentGraphNode>();
+  const inlineNode = (definition: import("./template.js").ComponentDefinition): ComponentGraphNode | undefined => {
+    if (definition.controller === undefined) return undefined;
+    let node = inlineNodes.get(definition);
+    if (node === undefined) {
+      const parent = resolver.resolveRoot(root.baseURI);
+      let url: string;
+      try { url = resolver.resolveDependency(definition.controller, root.baseURI, parent.trustRoot).url; }
+      catch (error) {
+        if (error instanceof HtmlDiagnosticError && error.diagnostic.code === "HL003") {
+          fail("HL005", `Controller \`${definition.controller}\` is outside the component's approved root.`, root.URL);
+        }
+        throw error;
+      }
+      node = { definition, url: root.URL, controller: { specifier: definition.controller, url } } as unknown as ComponentGraphNode;
+      inlineNodes.set(definition, node);
+    }
+    return node;
+  };
   // A later root may share dependencies with the installed graph; only its new definitions are
   // added. Installing them renders the instances already waiting in the document.
   const addRoot = (href: string | null): void => {
@@ -223,7 +247,7 @@ export async function startBrowserComponents(
       for (const link of element.querySelectorAll(componentLinkSelector)) addRoot(link.getAttribute("href"));
     },
     onConnect(element, definition) {
-      const node = loaded.registry.get(definition.contract.tag)?.node;
+      const node = loaded.registry.get(definition.contract.tag)?.node ?? inlineNode(definition);
       if (node?.controller === undefined) return;
       const host = getComponentHost(element)!;
       if (initialized.has(host)) return;

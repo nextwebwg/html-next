@@ -28,6 +28,89 @@ export function renderedFormMark(document: Document, target: string, data: strin
     : document.createComment(`?${target}${data === "" ? "" : ` ${data}`}?`);
 }
 
+/** 1 for the start mark of an `$if`, `$each`, `$with` or `$match` region, -1 for its end, else 0. Both runtimes write these marks (see `buildTemplate`). */
+function regionMark(node: Node): number {
+  if (node.nodeType !== 8) return 0;
+  const data = (node as Comment).data;
+  return data === "html-next:start" || data === "html-next:each-start" ? 1 : data === "html-next:end" || data === "html-next:each-end" ? -1 : 0;
+}
+
+/**
+ * The consumer regions that make up all of a slot's assigned nodes, as [start, end] marks, or
+ * undefined when the slot is given anything else.
+ */
+export function slotRegions(nodes: readonly Node[]): (readonly [Node, Node])[] | undefined {
+  const regions: (readonly [Node, Node])[] = [];
+  let depth = 0;
+  let open: Node | undefined;
+  for (const node of nodes) {
+    const mark = regionMark(node);
+    if (mark === 1) {
+      if (depth++ === 0) open = node;
+    } else if (mark === -1) {
+      if (--depth === 0) regions.push([open!, node]);
+    } else if (depth === 0) return undefined;
+  }
+  return regions.length === 0 || depth !== 0 ? undefined : regions;
+}
+
+/**
+ * Projected nodes with each region's content as the DOM holds it now, between its marks, and each
+ * node's slot (a region's content is its start mark's). A projection records what a region held when
+ * it was taken; the region renders, and removes, its own content since.
+ */
+export function withRegionContent<T>(entries: readonly (readonly [Node, T])[]): [Node, T][] {
+  const current: [Node, T][] = [];
+  let depth = 0;
+  for (const [node, slot] of entries) {
+    const mark = regionMark(node);
+    if (depth === 0 && mark === 1) {
+      let inner = 0;
+      for (let next: Node | null = node; next !== null; next = next.nextSibling) {
+        current.push([next, slot]);
+        const nested = regionMark(next);
+        if (nested === 1) inner += 1;
+        else if (nested === -1 && --inner === 0) break;
+      }
+    } else if (depth === 0 && mark === 0) current.push([node, slot]);
+    depth += mark;
+  }
+  return current;
+}
+
+/** `withRegionContent` over nodes alone. */
+export const currentProjection = (nodes: readonly Node[]): Node[] => withRegionContent(nodes.map((node) => [node, 0] as const)).map(([node]) => node);
+
+/** Each consumer region's slot, told when the region renders, by the region's start mark. */
+const regionListeners = new WeakMap<Node, () => void>();
+
+/** A region for a named slot rendered: its slot shows its fallback or its content accordingly. */
+export function regionChanged(start: Node): void {
+  regionListeners.get(start)?.();
+}
+
+/**
+ * Shows a slot's fallback while every consumer region it is given renders nothing, and the regions'
+ * content otherwise, as a native `<slot>` shows its own children only while nothing is assigned to it.
+ * Each region tells its slot when it renders (`regionChanged`); `open`, the slot's start mark, keeps
+ * its `fallback` attribute in step. The fallback goes before the first region.
+ */
+export function switchFallback(open: Node, regions: readonly (readonly [Node, Node])[], fallback: readonly Node[]): void {
+  const mark = open as CharacterData;
+  const content = mark.data.replace(' fallback=""', "");
+  const shown = content.replace(/(slot="[^"]*")/, '$1 fallback=""');
+  let showing = mark.data !== content;
+  const sync = (): void => {
+    const empty = regions.every(([start, end]) => start.nextSibling === end);
+    if (empty === showing) return;
+    showing = empty;
+    mark.data = empty ? shown : content;
+    if (empty) (regions[0]![0] as ChildNode).before(...fallback);
+    else for (const node of fallback) node.parentNode?.removeChild(node);
+  };
+  for (const [start] of regions) regionListeners.set(start, sync);
+}
+
 export interface HydrationRange {
   readonly slot: string;
   readonly fallback: boolean;

@@ -50,7 +50,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
   let elsewhere = "";
 
   beforeAll(async () => {
-    compiled = await compiledFixtures("iife", 'export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";', [...definitions, ...widget]);
+    compiled = await compiledFixtures("iife", 'export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";', [...definitions, ...widget]);
     const rendered = await renderComponents('<docs-layout><page-a id="page"></page-a></docs-layout><x-product></x-product>', { definitions, head: authoredHead, url: "https://app.example/" });
     page = `<!doctype html><head>${rendered.head}</head><body><main id="mount">${rendered.html}</main></body>`;
     const widgetPage = await renderComponents("<x-widget></x-widget>", { definitions: widget, head: '<meta charset="utf-8">', url: "http://localhost/" });
@@ -123,7 +123,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
 
         // A deeper component takes the title, and gives it back; a binding change updates the same JSON-LD block.
         const updated = await tab.evaluate(async () => {
-          const { factories, updateGeneratedProps } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options?: object) => Element>; updateGeneratedProps(element: Element, props: object): void } }).HtmlCompiled;
+          const { factories, componentRegistry } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options?: object) => Element>; componentRegistry: { update(element: Element, props: object): void }; } }).HtmlCompiled;
           const settle = () => new Promise((done) => setTimeout(done, 20));
           const pageRoot = document.querySelector('[data-component~="page-a"]')!;
           const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
@@ -134,7 +134,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
           note.remove();
           await settle();
           const back = document.title;
-          updateGeneratedProps(pageRoot, { section: "Upgrade" });
+          componentRegistry.update(pageRoot, { section: "Upgrade" });
           await settle();
           const after = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
           // Each instance's block is its own: the page's changes in place, as the same node; the product's stays.

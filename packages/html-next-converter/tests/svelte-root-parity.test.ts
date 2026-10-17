@@ -91,8 +91,8 @@ let as = $state("button");
           await svelte.locator("#case").waitFor();
           for (const [index, as] of ["button", "a", "button"].entries()) {
             if (index > 0) {
-              await live.evaluate((value) => (window as unknown as { HtmlRuntime: { updateComponentProps(root: Element, props: Record<string, unknown>): void } })
-                .HtmlRuntime.updateComponentProps(document.querySelector("#case")!, { as: value }), as);
+              await live.evaluate((value) => (window as unknown as { HtmlRuntime: { componentRegistry: { update(root: Element, props: Record<string, unknown>): void }; } })
+                .HtmlRuntime.componentRegistry.update(document.querySelector("#case")!, { as: value }), as);
               await svelte.evaluate((value) => (window as unknown as { svelteSetAs(value: string): void }).svelteSetAs(value), as);
             }
             await Promise.all([live, svelte].map((page) => page.waitForFunction((tag) => document.querySelector("#case")?.localName === tag, as)));

@@ -22,7 +22,7 @@ import {
 import type { ArmRoot, CompactType } from "../generated-runtime.js";
 import { componentStateNames } from "../component-styles-build.js";
 import type { ComponentStyleGraph } from "../component-styles.js";
-import { stateAttribute } from "../component-styles.js";
+import { PROJECTED_ATTRIBUTE, stateAttribute } from "../component-styles.js";
 import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
@@ -165,6 +165,8 @@ interface Region {
   readonly counted?: boolean;
   /** A slot's name: a literal, or an expression evaluated when the slot renders. */
   readonly slot?: string | Lowered;
+  /** The slot the region's element names (`slot`), which its marks and content are projected into. */
+  readonly projected?: string;
   /** A slot has fallback content, which renders when nothing is projected into it. */
   readonly fallback?: boolean;
   /** A scoped slot's props: the values a consumer's template reads, by its names. */
@@ -1332,8 +1334,15 @@ class Planner {
       const { flow: _ignored, ...plain } = node;
       return this.element(block, plain, path, scope, false, svg);
     }
-    const { flow: _flow, ...body } = node;
+    const { flow: _flow, ...authored } = node;
     const site = this.site(block, path);
+    // A region among a component's children, for an element with `slot`, is projected into that slot.
+    const slotted = block.projection === true && path.length === 1
+      ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot") : undefined;
+    const projected = slotted?.kind === "literal" ? { projected: slotted.value } : {};
+    // Content for a named slot is projected content wherever it renders, as `:slotted()` selects it.
+    const body: typeof authored = slotted === undefined || node.name === "template" ? authored
+      : { ...authored, attributes: [...authored.attributes, { kind: "literal", name: PROJECTED_ATTRIBUTE, value: "" }] };
     const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
     /**
      * A body rebuilds only when its decision changes, as live's region compares it: the `$if` result,
@@ -1349,7 +1358,7 @@ class Planner {
     const inner: Scope = { ...scope, level: scope.level + 1 };
     if (flow.kind === "if") {
       const decision = decide(truthiness(this.checked(plan(flow.testPlan, flow.test), scope)), [node]);
-      block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), ...decision });
+      block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), ...decision, ...projected });
       return 1;
     }
     if (flow.kind === "with") {
@@ -1357,7 +1366,7 @@ class Planner {
       const type = declaredExpressionType(expression, scope.types);
       const decision = decide(this.checked(expression, scope), [node], flow.alias, type);
       const aliasScope = this.layer(inner, flow.alias, type, "item");
-      block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), ...decision, alias: flow.alias });
+      block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), ...decision, alias: flow.alias, ...projected });
       return 1;
     }
     if (flow.kind === "match") {
@@ -1397,7 +1406,7 @@ class Planner {
         return this.block(armBody, false, armScope, false, svg, alias !== undefined);
       });
       block.regions.push({ kind: "match", site, block: armBlocks[0] ?? this.block({ ...body, children: [] }, false, inner, false, svg, false),
-        arms: armBlocks, ...decision, ...alias === undefined ? {} : { alias } });
+        arms: armBlocks, ...decision, ...alias === undefined ? {} : { alias }, ...projected });
       return 1;
     }
     const listPlan = plan(flow.listPlan, flow.list);
@@ -1429,7 +1438,7 @@ class Planner {
     const positional = reads.some((value) => ((value.positional ?? 0) & own) !== 0);
     rows.positional = positional;
     block.regions.push({ kind: "each", site, block: rows, list: shaped.list, key, alias: flow.item, positional,
-      counted: reads.some((value) => ((value.counted ?? 0) & own) !== 0) });
+      counted: reads.some((value) => ((value.counted ?? 0) & own) !== 0), ...projected });
     return 2;
   }
 
@@ -1773,8 +1782,10 @@ export function emitBlocks(
       const start = sites[region.site]!;
       // An adopting block's region ends where the server's content does, and adopts it on its first render.
       const end = hydrate ? `z ? z[${preorder(block.spec, block.sites[region.site]!) + 1}] : ${start}.nextSibling` : `${start}.nextSibling`;
+      // Projected content's region for an element with `slot` goes to that slot whole (`projected`).
+      const marked = region.projected === undefined ? start : `slotRegion(${start}, ${end}, ${JSON.stringify(region.projected)})`;
       if (region.kind !== "each") {
-        entries.push(`a${region.site}: ${start}`, `e${index}: ${end}`, `b${index}: ${hydrate ? "z && ADOPT" : "undefined"}`,
+        entries.push(`a${region.site}: ${marked}`, `e${index}: ${end}`, `b${index}: ${hydrate ? "z && ADOPT" : "undefined"}`,
           ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined ? [] : [`x${index}: undefined`]] : []);
         if (region.names !== undefined) entries.push(`q${index}: undefined`);
       } else {
@@ -1782,7 +1793,7 @@ export function emitBlocks(
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
         const positional = region.positional === true || Boolean(region.key?.positional);
         const type = `${region.block.ranged === true ? "Ranged" : ""}${region.key === undefined ? "IndexedList" : positional ? "PositionalList" : "KeyedList"}`;
-        entries.push(`L${index}: new ${type}(${start}, ${end}, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`,
+        entries.push(`L${index}: new ${type}(${marked}, ${end}, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`,
           ...hydrate ? [`b${index}: z && 1`] : []);
       }
     });
@@ -2155,6 +2166,10 @@ export function emitBlocks(
     });
     // Renderings of this block's scoped-slot templates follow its own changes too.
     block.scopes.forEach((scope, index) => lines.push(`  for (const x of r.k${index}.l) p${scope.block.id}(x, c, d);`));
+    // A region for a named slot tells that slot it rendered, which shows its fallback or the region's content.
+    block.regions.forEach((region, index) => {
+      if (region.projected !== undefined) lines.push(`  regionChanged(${region.kind === "each" ? `r.L${index}.s` : `r.a${region.site}`});`);
+    });
     return lines;
   };
 
@@ -2211,7 +2226,16 @@ export function emitBlocks(
     const into = blocks.flatMap((owner) => owner.invocations).find((invocation) => invocation.projection === block);
     if (into === undefined) return [`    const z = h && adoptTree(${block.spec === 5 ? "5" : `T${block.id}`}, h${invoked});`];
     const tag = [...invocations?.values() ?? []].find((candidate) => `create${candidate.definition.contract.name}` === into.factory)!.definition.contract.tag;
-    return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked});`];
+    // Each top-level region's slot, by its position among the prototype's children (a region's two marks are one).
+    const children = (block.spec as unknown[]).slice(2);
+    const position = (node: number): number => {
+      for (let index = 0, at = 0; index < children.length; at += typeof children[index] === "number" ? 2 : 1, index += 1) if (at === node) return index + 2;
+      return -1;
+    };
+    const regions = block.regions.flatMap((region) => region.projected === undefined || block.sites[region.site]!.length !== 1 ? []
+      : [`${position(block.sites[region.site]![0]!)}: ${JSON.stringify(region.projected)}`]);
+    const slotted = regions.length === 0 ? "" : `${invoked === "" ? ", []" : ""}, { ${regions.join(", ")} }`;
+    return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked}${slotted});`];
   };
   /** The block's node: the one it adopted, or its prototype's clone. Projected content leaves its nodes where the server put them. */
   const node = (block: Block): string => {
@@ -2593,12 +2617,14 @@ export function emitBlocks(
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "placeFallback", "recordInputs",
-    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection",
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && definition.controller !== undefined) helpers.push("scriptHost");
+  // Evaluating the module defines the component in the document's componentRegistry.
+  helpers.push("defineComponent");
   // Decimal operations are `binaryValue`'s last argument; their names are also common authored names.
   helpers.push(...Object.values(DECIMAL).filter((name) => `${source}\n${stateSpec}`.includes(`, ${name})`)));
   // A root without children, and an arm without them, build no prototype.
@@ -2641,6 +2667,7 @@ export function emitBlocks(
         .reduce((wrapped, wrap) => `${wrap}(${wrapped}, I)`, "host")});`]),
     "",
     source,
+    `defineComponent(${JSON.stringify(contract.tag)}, create${contract.name}, ${JSON.stringify(propNames)});`,
     "",
   ].join("\n");
 }

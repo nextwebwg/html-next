@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { describe, it } from "vitest";
 
 import { loadNodeComponents } from "../src/node-loader.js";
-import { ComponentRegistry } from "../src/registry.js";
+import { ComponentGraphRegistry } from "../src/registry.js";
 
 describe("package loader and registry", () => {
   it("resolves a package subpath, walks HTML edges, and records ESM inputs without execution", async () => {
@@ -74,7 +74,7 @@ describe("package loader and registry", () => {
         source: `<template component="x-a" status="early" summary="A."><div></div></template>`,
       }),
     });
-    const registry = new ComponentRegistry();
+    const registry = new ComponentGraphRegistry();
     const waiting = registry.whenDefined("x-a");
     registry.addGraph(graph);
     await waiting;
