@@ -9,13 +9,13 @@
 ## No specification in this repository
 
 - This repository is the proposal's JavaScript tooling. It holds no specification, and none may be added.
-- The specification is the public proposal in the `nextwebwg/specs` repository, written in Markdown and rendered by the site at https://nextwebwg.org/declarative-components/.
+- The specification is the public proposal in the `nextwebwg/specs` repository, written in Markdown and rendered by the site at https://nextwebwg.org/declarative-components/ and https://nextwebwg.org/expressive-markdown/.
 - A request to "add to the spec", "update the spec", or "amend the spec" means editing the public proposal in `nextwebwg/specs`, even when it is made while working here. Never create spec documents, support profiles, or spec tests in this repository.
 - Tooling documentation (implementation notes, converter requirements) may live here and links to the proposal for normative behavior.
 
 ## Workspace structure
 
-- Keep proposal implementations in separate packages under `packages/`. The four publishable packages share one release version and publish together.
+- Keep proposal implementations in separate packages under `packages/`. The four HTML Next packages share one release version and publish together. `expressmark` has its own version and protected release workflow.
 - Record each change in `CHANGELOG.md` under the version its pull request targets. Merging a new shared version publishes it, so there is no Unreleased section: a change merged without a version bump belongs to the next version.
 - Put shared tooling at the repository root; keep proposal-specific source, tests, and build configuration with its package.
 - Use pnpm through Corepack and preserve strict ESM TypeScript package boundaries.

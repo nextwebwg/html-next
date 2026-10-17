@@ -11,7 +11,7 @@ function pnpm(...args: string[]) {
 }
 
 if (job.suite === "node") {
-  pnpm("--filter", `@nextwebwg/${job.package}`, "typecheck");
+  pnpm("--filter", `./packages/${job.package}`, "typecheck");
 }
 const config = job.suite === "targets" ? "vitest.targets.config.ts"
   : job.suite === "browser" ? "vitest.browser.config.ts" : "vitest.config.ts";
