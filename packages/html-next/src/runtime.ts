@@ -53,6 +53,7 @@ import {
   compileComponentStyles,
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
+  type ComponentStyleGraph,
   markProjectedRoot,
   stateAttribute,
   stateAttributeValue,
@@ -355,7 +356,51 @@ function registryFor(root: Document): DocumentRegistry {
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
 type ComponentStyleCompiler = (css: string, definition: ComponentDefinition, source?: string,
-  adopters?: readonly ComponentDefinition[], includeBoundaryReset?: boolean) => CompiledComponentStyles;
+  adopters?: readonly ComponentDefinition[], includeBoundaryReset?: boolean, graph?: ComponentStyleGraph) => CompiledComponentStyles;
+
+/**
+ * The states styles test on each component with `:state()` conditions, per document. A stylesheet that
+ * tests another component's state adds to that component's names, so its roots carry them too.
+ */
+const testedStatesByDocument = new WeakMap<Document, Map<string, ReactiveSignal<readonly string[]>>>();
+/** Instances whose state attribute is kept in step; others write none until a stylesheet tests their state. */
+const stateWriters = new WeakSet<RuntimeInstance>();
+
+function testedStateNames(document: Document, tag: string): ReactiveSignal<readonly string[]> {
+  let byTag = testedStatesByDocument.get(document);
+  if (byTag === undefined) testedStatesByDocument.set(document, byTag = new Map());
+  let names = byTag.get(tag);
+  if (names === undefined) byTag.set(tag, names = createSignal<readonly string[]>([]));
+  return names;
+}
+
+/**
+ * Records the states a compiled stylesheet tests on components. Roots already in the document that
+ * write no state attribute start writing one; those that do pick up the new names.
+ */
+function recordTestedStates(document: Document, tested: Readonly<Record<string, readonly string[]>> | undefined): void {
+  for (const [tag, added] of Object.entries(tested ?? {})) {
+    const names = testedStateNames(document, tag);
+    const current = untracked(() => names.get());
+    const next = [...new Set([...current, ...added])];
+    if (next.length === current.length) continue;
+    names.set(next);
+    for (const root of document.querySelectorAll(`[${COMPONENT_ATTRIBUTE}~="${tag}"]`)) {
+      const owner = runtimeInstances.get(root);
+      for (const instance of owner === undefined ? [] : [owner, ...owner.delegates]) {
+        if (instance.definition.contract.tag === tag && !stateWriters.has(instance)) installStateAttribute(instance);
+      }
+    }
+  }
+}
+
+/** The definitions registered in a document, and those being installed with them, by tag. */
+function styleGraph(registry: DocumentRegistry, installing: Iterable<ComponentDefinition>): ComponentStyleGraph {
+  const graph = new Map<string, ComponentDefinition>();
+  for (const [tag, live] of registry.definitions) graph.set(tag, live.definition);
+  for (const definition of installing) graph.set(definition.contract.tag, definition);
+  return graph;
+}
 
 /** Shared platform-workaround rules are independent of authored import conditions and layers. */
 function installStyleBoundaries(document: Document): void {
@@ -369,7 +414,7 @@ function installStyleBoundaries(document: Document): void {
 
 const sharedStyleDefinitions = new WeakMap<Document, Map<string, ComponentDefinition>>();
 
-function installSharedStyles(definition: ComponentDefinition, document: Document, compiler?: ComponentStyleCompiler): readonly string[] {
+function installSharedStyles(definition: ComponentDefinition, document: Document, compiler?: ComponentStyleCompiler, graph?: ComponentStyleGraph): readonly string[] {
   let definitions = sharedStyleDefinitions.get(document);
   if (definitions === undefined) { definitions = new Map(); sharedStyleDefinitions.set(document, definitions); }
   definitions.set(definition.contract.tag, definition);
@@ -384,15 +429,17 @@ function installSharedStyles(definition: ComponentDefinition, document: Document
     const tags = adopters.map(owner => owner.contract.tag).join(" ");
     if (carrier.getAttribute("data-html-next-shared-adopters") !== tags) {
       const compiled = compiler === undefined
-        ? compileComponentStyles(stylesheet.css, adopters[0]!, document, stylesheet.url, adopters, false)
-        : compiler(stylesheet.css, adopters[0]!, stylesheet.url, adopters, false);
+        ? compileComponentStyles(stylesheet.css, adopters[0]!, document, stylesheet.url, adopters, false, graph)
+        : compiler(stylesheet.css, adopters[0]!, stylesheet.url, adopters, false, graph);
       if (compiled.css !== "") installStyleBoundaries(document);
       carrier.setAttribute("data-html-next-shared-styles", id);
       carrier.setAttribute("data-html-next-shared-adopters", tags);
       carrier.setAttribute("data-html-next-style-states", JSON.stringify(compiled.stateNamesByTag ?? { [adopters[0]!.contract.tag]: compiled.stateNames }));
+      writeTestedStates(carrier, compiled);
       carrier.textContent = wrapStylesheetConditions(compiled.css, stylesheet.conditions);
     }
     if (added) document.head.append(carrier);
+    recordTestedStates(document, readTestedStates(carrier));
     if (adopters.includes(definition)) {
       const names = JSON.parse(carrier.getAttribute("data-html-next-style-states") ?? "{}") as Record<string, string[]>;
       for (const name of names[definition.contract.tag] ?? []) tested.add(name);
@@ -401,12 +448,24 @@ function installSharedStyles(definition: ComponentDefinition, document: Document
   return [...tested];
 }
 
+/** Hydration reads the states a style node's rules test on other components without recompiling it. */
+function writeTestedStates(style: Element, compiled: CompiledComponentStyles): void {
+  if (compiled.testedStates === undefined) style.removeAttribute("data-html-next-tested-states");
+  else style.setAttribute("data-html-next-tested-states", JSON.stringify(compiled.testedStates));
+}
+
+function readTestedStates(style: Element): Record<string, string[]> | undefined {
+  const tested = style.getAttribute("data-html-next-tested-states");
+  return tested === null ? undefined : JSON.parse(tested) as Record<string, string[]>;
+}
+
 /** Only explicitly owned style nodes participate in reuse; application CSS is never inspected. */
 function installComponentStyles(
   definition: ComponentDefinition,
   document: Document,
   carrier?: HTMLStyleElement,
   styleCompiler?: ComponentStyleCompiler,
+  graph?: ComponentStyleGraph,
 ): HTMLStyleElement | HTMLLinkElement | undefined {
   const tag = definition.contract.tag;
   const existing = document.head.querySelector<HTMLStyleElement | HTMLLinkElement>(
@@ -415,14 +474,15 @@ function installComponentStyles(
   if (existing !== null) {
     const names = JSON.parse(existing.getAttribute("data-html-next-style-states") ?? "{}") as Record<string, string[]>;
     stateNamesByDefinition.set(definition, names[tag] ?? []);
+    recordTestedStates(document, readTestedStates(existing));
     return existing;
   }
-  const sharedNames = installSharedStyles(definition, document, styleCompiler);
+  const sharedNames = installSharedStyles(definition, document, styleCompiler, graph);
   if (definition.css === "" && carrier === undefined && (definition.stylesheets?.length ?? 0) === 0) return undefined;
   const style = carrier ?? document.createElement("style");
   const compiled = styleCompiler === undefined
-    ? compileComponentStyles(definition.css, definition, document, undefined, undefined, false)
-    : styleCompiler(definition.css, definition, undefined, undefined, false);
+    ? compileComponentStyles(definition.css, definition, document, undefined, undefined, false, graph)
+    : styleCompiler(definition.css, definition, undefined, undefined, false, graph);
   if (compiled.css !== "") installStyleBoundaries(document);
   const stateNames = [...new Set([...sharedNames, ...compiled.stateNames])];
   stateNamesByDefinition.set(definition, stateNames);
@@ -430,7 +490,9 @@ function installComponentStyles(
   style.setAttribute("data-html-next-component-styles", tag);
   // Hydration needs this metadata without parsing or transforming the server's CSS again.
   style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: stateNames }));
+  writeTestedStates(style, compiled);
   document.head.append(style);
+  recordTestedStates(document, compiled.testedStates);
   return style;
 }
 
@@ -526,11 +588,13 @@ export function installComponentGraph(
 ): number {
   const registry = registryFor(root);
   let installed = 0;
+  const installing = [...graph.nodes.values()].filter((node) => !node.shadowedByCustomElement).map((node) => node.definition);
+  const styles = styleGraph(registry, installing);
   for (const node of graph.nodes.values()) {
     if (node.shadowedByCustomElement) continue;
     const tag = node.definition.contract.tag;
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
-    const style = installComponentStyles(node.definition, root);
+    const style = installComponentStyles(node.definition, root, undefined, undefined, styles);
     registerDefinition(registry, tag, {
       definition: node.definition,
       style,
@@ -2673,12 +2737,19 @@ function renderTemplateNode(
  * test, so styles see defaults and state as well as explicit props.
  */
 function installStateAttribute(instance: RuntimeInstance): void {
-  const names = stateNamesByDefinition.get(instance.definition) ?? [];
-  if (names.length === 0) return;
-  const attribute = stateAttribute(instance.definition.contract.tag);
+  const own = stateNamesByDefinition.get(instance.definition) ?? [];
+  const tag = instance.definition.contract.tag;
+  const document = instance.element?.ownerDocument;
+  const tested = document === undefined ? undefined : testedStatesByDocument.get(document)?.get(tag);
+  // Until a stylesheet tests this component's state, its roots write none.
+  if (own.length === 0 && (tested === undefined || untracked(() => tested.get()).length === 0)) return;
+  stateWriters.add(instance);
+  const attribute = stateAttribute(tag);
   instance.effects.push(createEffect(instance.scope.scheduler, () => {
     const root = instance.rootElement.get();
     if (root === undefined) return;
+    const others = testedStateNames(root.ownerDocument, tag).get();
+    const names = others.length === 0 ? own : [...new Set([...own, ...others])];
     const value = stateAttributeValue(names, (name) => instance.scope.get(name));
     if (value === "") root.removeAttribute(attribute);
     else if (root.getAttribute(attribute) !== value) root.setAttribute(attribute, value);
@@ -3406,9 +3477,10 @@ function lowerScopes(
     collect(newDefinitions, existing);
   }
 
+  const styles = styleGraph(registry, definitions.map((live) => live.definition));
   for (const live of definitions) {
     const style = installComponentStyles(live.definition, live.wrapper!.ownerDocument,
-      live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined);
+      live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined, undefined, styles);
     registry.definitions.set(live.definition.contract.tag, { ...live, style });
     live.wrapper!.remove();
   }
@@ -3603,6 +3675,7 @@ export function registerComponentDefinitions(
   styleCompiler?: ComponentStyleCompiler,
 ): void {
   const registry = registryFor(root);
+  const styles = styleGraph(registry, definitions);
   for (const definition of definitions) {
     const existing = registry.definitions.get(definition.contract.tag);
     if (existing !== undefined) {
@@ -3613,7 +3686,7 @@ export function registerComponentDefinitions(
     }
     registerDefinition(registry, definition.contract.tag, {
       definition,
-      style: installComponentStyles(definition, root, undefined, styleCompiler),
+      style: installComponentStyles(definition, root, undefined, styleCompiler, styles),
     });
   }
 }

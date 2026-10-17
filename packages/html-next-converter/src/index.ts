@@ -452,6 +452,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   const definitions = [...graph.nodes.values()].map((node) => node.definition);
   const slotsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition.slots ?? []] as const));
+  // Another component's `:state()` tests resolve against the whole graph, and each root carries the states they test on it.
+  const componentGraph = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition] as const));
   const propsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     new Set(Object.keys(node.definition.contract.props))] as const));
   const propContractsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
@@ -521,6 +523,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         content = options.target === "vue" ? generateVueComponent(definition, {
           publishedStates: published,
           slotsByTag,
+          componentGraph,
           propContractsByTag,
           guardNestedDepth,
           importSpecifier,
@@ -532,6 +535,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
           publishedStates: published,
           slotsByTag,
+          componentGraph,
           guardNestedDepth,
           rootDecorations: decorationReceivers?.get(tag),
           ...(bindingReceivers?.has(tag) === true ? { rootBindings: [...bindingReceivers.get(tag)!] } : {}),
@@ -554,6 +558,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         })).component : (reactConversion = generateReactConversion(definition, {
           publishedStates: published,
           slotsByTag,
+          componentGraph,
           propsByTag,
           propContractsByTag,
           guardNestedDepth,

@@ -9,8 +9,9 @@ contract is the source of truth; this note only records how the tooling meets it
   markup root is another component) lists every owner: `data-component="x-primary x-base"`.
 - `data-slotted` is on each top-level projected node.
 - `data-<tag>-state="name=value name"` carries the resolved props and state the definition's
-  `:host()` prop and state rules test, and nothing else. A truthy value adds the bare `name`; a string or
-  number adds `name=<URI-encoded value>`.
+  `:host()` prop and state rules test, and the state any stylesheet in the component graph tests on
+  it with a `:state()` condition, and nothing else. A truthy value adds the bare `name`; a string or
+  number adds `name=<URI-encoded value>`. A root whose state nothing tests carries no attribute.
 
 ## Compilation
 
@@ -28,7 +29,18 @@ A style block compiles to two scopes:
   type (HY001, HY002). `:state()` is renamed to an attribute test before parsing, because its value
   form is not native syntax. `:host-state()` reports its replacement (HY005).
 - `:state()` outside `:host()`, or with `of` naming another component, tests another component's
-  state. This implementation does not support it yet (HY006).
+  state: `x-item:state(selected)` becomes `[data-x-item-state~="selected"]` on whichever root it
+  qualifies. Without `of`, it matches any component in the graph that declares the state,
+  `:is([data-x-item-state~="selected"], [data-x-row-state~="selected"])`; `of x-item` limits it to
+  one. Each component resolves against the component graph: the definitions registered with the
+  live runtime and those installed with them, or the linked graph a build converts. A state no
+  component declares, or a tag outside the graph, is HY001; without a graph, HY006.
+- Every compilation reports `testedStates`, the names it tests on each component. A component's
+  root writes its own `:host()` names and every name the graph's styles test on it. In the live
+  runtime, a stylesheet registered later that tests a component's state makes its existing roots
+  start writing it. Server rendering folds these names into `styleOwnership`, so a hydrating client
+  keeps writing them without compiling again; a per-component carrier records its own as
+  `data-html-next-tested-states`.
 - `:slotted(X)` matches projected content at any depth:
   `:where([data-slotted], [data-slotted] *):is(X)`.
 - A component tag in a selector matches its lowered root with type specificity:

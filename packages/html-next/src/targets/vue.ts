@@ -24,7 +24,7 @@ import type {
 } from "../template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../template.js";
 import type { WritablePathSegment } from "../expression.js";
-import { compileComponentStylesForVue, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
+import { compileComponentStylesForVue, componentStateNames, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import type { PropContract } from "../types.js";
@@ -875,6 +875,11 @@ export interface VueConversionOptions {
   /** Public graph output can relocate components into nested source-mirrored directories. */
   readonly importSpecifier?: (tag: string) => string;
   readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests" | "head") => string;
+  /**
+   * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
+   * against them, and the component's root carries the states their styles test on it.
+   */
+  readonly componentGraph?: ReadonlyMap<string, ComponentDefinition>;
   /** The states a `<context>` reader can read, from `publishedStates`; without it, every state is published. */
   readonly publishedStates?: ReadonlySet<string> | undefined;
 }
@@ -999,7 +1004,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     " }",
   ].join("");
 
-  const styles = compileComponentStylesForVue(definition.css, definition);
+  const styles = compileComponentStylesForVue(definition.css, definition, undefined, options.componentGraph);
+  const hostStateNames = componentStateNames(definition, options.componentGraph);
   const controlled = definition.controller !== undefined;
   const dispatches = events.length > 0 || controlled;
   const headed = declaresHead(definition);
@@ -1015,7 +1021,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     handlers: handlerNames,
     root: needsRoot,
     ...(arms === undefined ? {} : { rootArmRef: "@html-next/root" }),
-    hostState: styles.stateNames.length > 0,
+    hostState: hostStateNames.length > 0,
     hostClass: styles.components !== undefined,
     ...(styles.owner === undefined ? {} : { owner: styles.owner }),
     styledComponents: new Set(styles.components ?? []),
@@ -1232,11 +1238,11 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     }),
     ...(!(definition.slots ?? []).some((slot) => (slot.props?.length ?? 0) > 0) ? [] : ["const scopedSlotName = useScopedSlotName();"]),
     `checkHydratedRoot(${hydrationExpectedTag}, ${quote(contract.tag)});`,
-    ...(styles.stateNames.length === 0 ? [] : [
+    ...(hostStateNames.length === 0 ? [] : [
       "",
-      "/** The values the styles' :host() prop and state rules test. */",
+      "/** The values the styles' :host() and :state() rules test. */",
       "const hostState = computed(() => [",
-      ...styles.stateNames.flatMap((name) => stateTokens(name, script, lowering)).map((token) => `  ${token},`),
+      ...hostStateNames.flatMap((name) => stateTokens(name, script, lowering)).map((token) => `  ${token},`),
       "].filter(Boolean).join(\" \"));",
     ]),
     ...(!dispatches ? [] : ["", ...checkSources, dispatchSource]),

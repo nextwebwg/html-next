@@ -1,7 +1,7 @@
 /** Svelte 5 output from the shared, checked component definition. */
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
-import { compileComponentStylesForSvelte } from "../component-styles-build.js";
+import { compileComponentStylesForSvelte, componentStateNames } from "../component-styles-build.js";
 import { kebabCase, componentName, propAttribute } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
@@ -31,6 +31,11 @@ function unknownValueScope(name: string): Scope {
 
 
 export interface SvelteConversionOptions {
+  /**
+   * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
+   * against them, and the component's root carries the states their styles test on it.
+   */
+  readonly componentGraph?: ReadonlyMap<string, ComponentDefinition>;
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
   readonly rootBindings?: readonly string[] | undefined;
@@ -1079,7 +1084,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
-  const styles = compileComponentStylesForSvelte(definition.css, definition);
+  const styles = compileComponentStylesForSvelte(definition.css, definition, undefined, options.componentGraph);
+  const hostStateNames = componentStateNames(definition, options.componentGraph);
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
@@ -1159,7 +1165,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     tag: definition.contract.tag,
     props: target.props.map((prop) => prop.name),
     propContracts: definition.contract.props,
-    stateNames: styles.stateNames,
+    stateNames: hostStateNames,
     preservesRootFocus: rootArms(definition.template) !== undefined,
     code,
     types,
@@ -1518,8 +1524,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...Array.from({ length: context.htmlSites }, (_, index) => index)
       .filter((site) => !context.localHtmlSites.has(site))
       .map((site) => `const htmlSite${site} = ${retainedHtmlSource(context, site)};`),
-    ...(styles.stateNames.length === 0 ? [] : [
-      `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
+    ...(hostStateNames.length === 0 ? [] : [
+      `let hostState = $derived([${hostStateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
     ...(context.refs.size === 0 && !usesController ? [] : [
       `const ${context.refsName} = new Map<string, Element | Element[]>();`,

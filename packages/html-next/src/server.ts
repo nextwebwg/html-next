@@ -23,7 +23,10 @@ export interface RenderedComponents {
    */
   readonly head: string;
   readonly css: string;
-  /** Component tags and tested state names for the carrier delivering this compiled CSS. */
+  /**
+   * Component tags and their state names for the carrier delivering this compiled CSS: those each
+   * component's own styles test, and those any `:state()` condition tests on it.
+   */
   readonly styleOwnership: Readonly<Record<string, readonly string[]>>;
 }
 

@@ -3,7 +3,7 @@ import { compileStyle } from "@vue/compiler-sfc";
 import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
-import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "../src/component-styles-build.js";
+import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph } from "../src/component-styles-build.js";
 import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
@@ -116,17 +116,57 @@ describe("resolved prop and state selectors", () => {
     }
   });
 
-  it("rejects malformed :state() arguments, :host-state(), and other components' state", () => {
+  it("rejects malformed :state() arguments and :host-state()", () => {
     for (const compile of compilers) {
       for (const malformed of [":state(step=2)", ":state(tone=)", ":state(open closed)", ":state(open of x)", ":state()"]) {
         assert.throws(() => compile(`:host(${malformed}) { color: red; }`, definition), /HY002.*quote a value/, malformed);
       }
       assert.throws(() => compile(":host-state([open]) { color: red; }", definition), /HY005.*:host\(:state\(name\)\)/);
-      assert.throws(() => compile("x-child:state(open) + p { color: red; }", definition), /HY006/);
-      assert.throws(() => compile(":host(:state(open of x-other)) { color: red; }", definition), /HY006/);
       assert.throws(() => compile(":host(:state(size)) { color: red; }", definition), /HY001.*:host\(\[size\]\)/);
       assert.throws(() => compile(":host([open]) { color: red; }", definition), /HY001.*:host\(:state\(open\)\)/);
     }
+  });
+
+  it("resolves another component's :state() against the component graph", () => {
+    const item = parseComponent(`<template component="x-item"><defs>
+      <state name="selected" type="boolean" value="false"></state>
+      <state name="tone" type="keyword" values="warm, cool" value="warm"></state>
+    </defs><li></li></template>`);
+    const toggle = parseComponent(`<template component="x-toggle"><defs><state name="selected" type="boolean" value="false"></state></defs><button></button></template>`);
+    const list = parseComponent(`<template component="x-list"><defs><state name="open" type="boolean" value="false"></state></defs>
+      <ul><li class="row"><x-item></x-item></li><x-toggle></x-toggle><label>Label</label></ul>
+      <style>.row:has(x-item:state(tone=cool)) { color: red; } x-toggle:state(selected of x-toggle) + label { color: blue; }
+        .row:has(:state(selected)) { color: green; } :host(:state(open)) { color: navy; }</style></template>`);
+    const graph = definitionGraph([list, item, toggle]);
+    for (const result of [compileComponentStylesForBuild(list.css, list, undefined, undefined, true, graph),
+      compileComponentStylesForSvelte(list.css, list, undefined, graph), compileComponentStylesForVue(list.css, list, undefined, graph)]) {
+      assert.match(result.css, /\.row:has\(:is\(x-item, :where\([^)]*\)\)\[data-x-item-state~="tone=cool"\]\)/);
+      assert.match(result.css, /\[data-x-toggle-state~="selected"\] \+ label/);
+      // Without `of`, the test matches whichever component declaring the state is rendered there.
+      assert.match(result.css, /\.row:has\(:is\(\[data-x-item-state~="selected"\], \[data-x-toggle-state~="selected"\]\)\)/);
+      assert.deepEqual(result.stateNames, ["open"]);
+      assert.deepEqual(result.testedStates, { "x-item": ["tone", "selected"], "x-toggle": ["selected"] });
+    }
+    // Each component's root carries the states other components' styles test on it.
+    assert.deepEqual(componentStateNames(item, graph), ["tone", "selected"]);
+    assert.deepEqual(componentStateNames(toggle, graph), ["selected"]);
+    assert.deepEqual(componentStateNames(list, graph), ["open"]);
+    assert.deepEqual(componentStateNames(item), []);
+  });
+
+  it("diagnoses another component's :state() that the graph cannot resolve", () => {
+    const item = parseComponent(`<template component="x-item"><defs>
+      <prop name="label" type="string" default="">Label.</prop>
+      <state name="rows" type="list(string)" value="[]"></state>
+    </defs><li></li></template>`);
+    const list = parseComponent('<template component="x-list"><ul><x-item></x-item></ul></template>');
+    const graph = definitionGraph([list, item]);
+    const compile = (style: string, withGraph = graph) => compileComponentStylesForBuild(style, list, undefined, undefined, true, withGraph);
+    assert.throws(() => compile("x-item:state(open) + p { color: red; }"), /HY001.*no component in the graph/);
+    assert.throws(() => compile("p:has(:state(selected of x-other)) { color: red; }"), /HY001.*<x-other>, which is not in the component graph/);
+    assert.throws(() => compile("p:has(:state(label of x-item)) { color: red; }"), /HY001.*:host\(\[label\]\)/);
+    assert.throws(() => compile("p:has(:state(rows)) { color: red; }"), /HY002/);
+    assert.throws(() => compile("x-item:state(rows) + p { color: red; }", definitionGraph([list])), /HY001/);
   });
 
   it("restores a browser-serialized :state() to its authored form", () => {

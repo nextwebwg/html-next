@@ -20,7 +20,8 @@ import {
   type Scope as TypeScope,
 } from "../expression.js";
 import type { ArmRoot, CompactType } from "../generated-runtime.js";
-import { compileComponentStylesForBuild } from "../component-styles-build.js";
+import { componentStateNames } from "../component-styles-build.js";
+import type { ComponentStyleGraph } from "../component-styles.js";
 import { stateAttribute } from "../component-styles.js";
 import { foreignContent } from "parse5";
 
@@ -1472,7 +1473,7 @@ class Planner {
  * Plans a component for direct-extend emission, or returns undefined when it uses a feature the
  * subset does not cover yet (the caller keeps the general-runtime fallback).
  */
-export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>, transitions = false): BlockPlan {
+export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>, transitions = false, graph?: ComponentStyleGraph): BlockPlan {
     const arms = rootArms(definition.template);
     // A real element's `$match` keeps the element and switches its content, as live's `elementMatchRoot`.
     const flow = arms === undefined ? definition.template.flow : undefined;
@@ -1498,8 +1499,8 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       }
       select = { ...reads as Lowered, source: `(${source})` };
     }
-    // `:host()` prop and state rules test `data-<tag>-state`, kept in step with the props and state they name.
-    const states = compileComponentStylesForBuild(definition.css, definition).stateNames;
+    // `:host()` and `:state()` rules test `data-<tag>-state`, kept in step with the props and state they name.
+    const states = componentStateNames(definition, graph);
     if (states.length > 0) {
       const values = states.map((name) => lower({ kind: "id", name }, planner.scope));
       const reads = values.reduce<Reads>((all, value) => merge(all, value), none("", ""));

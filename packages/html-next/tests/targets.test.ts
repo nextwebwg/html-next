@@ -1015,6 +1015,25 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /@scope \(\.demo-plain\) to \(\[data-hn\]\) \{\s+:global\(:scope\) \{\s+display: block;\s+\}\s+:global\(h2\) \{/);
   });
 
+  it("writes the state another component's :state() tests from every target, given the graph", () => {
+    const item = parseComponent(`<template component="x-graph-switch" status="early" summary="Switch.">
+      <defs><state name="on" type="boolean" value="false"></state></defs><button type="button"></button></template>`);
+    const panel = parseComponent(`<template component="x-graph-panel" status="early" summary="Panel.">
+      <div><x-graph-switch></x-graph-switch><label>Label</label></div>
+      <style>x-graph-switch:state(on) + label { font-weight: 700; }</style></template>`);
+    const definitions = new Map([[item.contract.tag, item], [panel.contract.tag, panel]] as const);
+    const vanilla = generateComponent(item, { definitions }).find((artifact) => artifact.path.startsWith("vanilla/") && artifact.path.endsWith(".js"))!;
+    assert.match(vanilla.content, /hostState\(\["on"\]/);
+    assert.match(generateVueComponent(item, { componentGraph: definitions }), /hostStateTokens|data-x-graph-switch-state/);
+    assert.match(generateReactComponent(item, { componentGraph: definitions }), /hostStateTokens\("on"/);
+    assert.match(generateSvelteOutput(item, "test", { componentGraph: definitions }).component, /hostStateTokens\('on'/);
+    const css = generateComponent(panel, { definitions }).find((artifact) => artifact.path.endsWith(".css"))!.content;
+    assert.match(css, /\[data-x-graph-switch-state~="on"\] \+ label/);
+    // Without the graph, the switch writes nothing and the panel's condition has nothing to resolve against.
+    assert.doesNotMatch(generateComponent(item).find((artifact) => artifact.path.endsWith(".js"))!.content, /hostState\(/);
+    assert.throws(() => generateComponent(panel), /HY001/);
+  });
+
   it("rejects :scope and undeclared or structured :state() names", () => {
     assert.throws(() => generated(componentSource("demo-a", "", `<div></div><style>:scope { color: red; }</style>`)), /HY003/);
     assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host(:state(missing)) { color: red; }</style>`)), /HY001/);

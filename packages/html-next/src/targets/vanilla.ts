@@ -1,3 +1,4 @@
+import type { ComponentStyleGraph } from "../component-styles.js";
 import type { ComponentDefinition } from "../template.js";
 import { rootArms } from "../template.js";
 import type { PropContract } from "../types.js";
@@ -38,6 +39,8 @@ export function generateVanilla(
   /** The factory also adopts a server-rendered root. */
   hydrate = false,
   scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
+  /** The linked graph, which another component's `:state()` tests resolve against. */
+  graph?: ComponentStyleGraph,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -91,5 +94,5 @@ export function generateVanilla(
       ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
       : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
   });
-  return { module: emitBlocks(blockPlan(definition, invocations, transitions), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL), declaration };
+  return { module: emitBlocks(blockPlan(definition, invocations, transitions, graph), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL), declaration };
 }

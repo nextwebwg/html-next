@@ -70,7 +70,9 @@ export interface GenerationOptions {
   readonly scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined;
   /**
    * The linked graph's definitions, by tag. Their slots and props type converted Vue invocations as
-   * the converter's do; `invocations`' definitions when omitted.
+   * the converter's do, another component's `:state()` tests resolve against them, and the
+   * component's root carries the states their styles test on it; `invocations`' definitions when
+   * omitted.
    */
   readonly definitions?: ReadonlyMap<string, ComponentDefinition>;
 }
@@ -85,18 +87,21 @@ export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
+  const graph = new Map([
+    ...options?.definitions ?? new Map([...options?.invocations ?? []].map(([tag, invoked]) => [tag, invoked.definition] as const)),
+    [definition.contract.tag, definition] as const,
+  ]);
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL);
-  const graph = options?.definitions
-    ?? new Map([...options?.invocations ?? []].map(([tag, invoked]) => [tag, invoked.definition] as const));
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph);
   const vue = convertedToVue(definition, {
     slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
     propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
+    componentGraph: graph,
   });
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
   const styles = (definition.stylesheets?.length ?? 0) > 0
-    ? compileComponentGraphStylesForBuild([definition]) : compileComponentStylesForBuild(definition.css, definition).css;
+    ? compileComponentGraphStylesForBuild([definition], graph) : compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, graph).css;
 
   return Object.freeze([
     Object.freeze({ path: `vanilla/${name}.js`, content: vanilla.module }),
