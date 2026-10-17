@@ -14,8 +14,9 @@ import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { HtmlDiagnosticError, reactControlArtifact } from "@nextwebwg/html-next";
+import { generateComponent, HtmlDiagnosticError, parseComponentResource, reactControlArtifact } from "@nextwebwg/html-next";
 
+import { linkFormSource, rowSource } from "./fixtures/named-slots.js";
 import { cases as conformanceCases, type ConformanceCase, type DiagnosticExpect } from "../../html-next/tests/conformance/cases.js";
 
 import {
@@ -521,6 +522,39 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     assert.match(markup, /class="choice"[\s\S]*<option value="b" selected=""/);
     assert.match(markup, /class="multiple"[\s\S]*<option value="b" selected=""/);
     assert.match(markup, /<textarea class="note">Memo<\/textarea>/);
+  });
+
+  it("passes an invocation's slot content to Vue's named slots, converted and generated", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-converter-named-slots-"));
+    temporary.push(root);
+    await writeFile(join(root, "package.json"), "{}");
+    await writeFile(join(root, "row.html"), rowSource);
+    await writeFile(join(root, "form.html"), linkFormSource);
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode: "library", entries: ["form.html"], target: "vue", root, outDirectory });
+    const converted = await readFile(join(outDirectory, manifest.components.find(({ tag }) => tag === "ui-editor-link-form")!.artifact), "utf8");
+    // assembleComponentPackage and the build generate each component with the graph's definitions.
+    const definitions = new Map([rowSource, linkFormSource].map((source, index) => {
+      const [definition] = parseComponentResource(source, `file://${join(root, index === 0 ? "row.html" : "form.html")}`).definitions;
+      return [definition!.contract.tag, definition!] as const;
+    }));
+    const generated = generateComponent(definitions.get("ui-editor-link-form")!, { definitions })
+      .find(({ path }) => path === "vue/UiEditorLinkForm.vue")!.content;
+    for (const vue of [converted, generated]) {
+      compileVue(vue, "UiEditorLinkForm.vue");
+      const invocation = /<UiSearchResultRow[^>]*>([\s\S]*)<\/UiSearchResultRow>/.exec(vue)![1]!;
+      const slots = new Map([...invocation.matchAll(/<template (#[\w-]+)(?:="[^"]*")?>([\s\S]*?)<\/template>(?=\s*(?:<template #|$))/g)]
+        .map(([, name, content]) => [name!, content!]));
+      assert.deepEqual([...slots.keys()], ["#prefix", "#leading", "#label", "#title", "#meta", "#trailing", "#action"]);
+      assert.match(slots.get("#prefix")!, /^<i slot="prefix" class="icon">&gt;<\/i>$/);
+      assert.match(slots.get("#meta")!, /^<span v-if="open" slot="meta">Opened<\/span>$/);
+      // A slot's elements share one Vue slot, in authored order; its `<template slot>` replaces them.
+      assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in tags"[\s\S]*slot="leading"/);
+      assert.equal(slots.get("#trailing"), "<b>!</b>");
+      assert.match(invocation, /<template #action="(\w+)"><button type="button" class="act">\s*\{\{ text\(Object\.hasOwn\(\1, 'value'\)/);
+      // Only default content stays outside a named slot.
+      assert.match(invocation, /^<p>Body text<\/p>\n\s*<template #prefix>/);
+    }
   });
 
   it("discovers a nested component directory and mirrors its graph in Vue output", async () => {
