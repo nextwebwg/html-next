@@ -138,19 +138,24 @@ export function adoptTree(spec: Spec | 5, base: Node, invoked: readonly number[]
  * each top-level node is in the slot range its slot rendered, or carried when none did, as live's
  * hydration binds a consumer's projected nodes.
  */
-export function adoptProjection(spec: Spec, root: Element, tag: string, invoked: readonly number[] = []): Node[] | undefined {
+export function adoptProjection(spec: Spec, root: Element, tag: string, invoked: readonly number[] = [],
+  regions: Readonly<Record<number, string>> = {}): Node[] | undefined {
   const server = serverRanges(root, false, tag);
   const runs = new Map<string, Cursor>();
   for (const range of server?.ranges ?? []) {
-    if (range.fallback || range.scoped || runs.has(range.slot)) continue;
-    runs.set(range.slot, { node: range.markers[0]!.nextSibling, end: range.markers[1] ?? range.markers[0]!, parent: range.markers[0]!.parentNode! });
+    if (range.scoped || runs.has(range.slot)) continue;
+    // A range showing its fallback ends with the marks of the slot's regions that render nothing, two each.
+    const empty = range.fallback ? Object.values(regions).filter((slot) => slot === range.slot).length * 2 : 0;
+    if (range.fallback && empty === 0) continue;
+    runs.set(range.slot, { node: range.fallback ? range.content[range.content.length - empty]! : range.markers[0]!.nextSibling,
+      end: range.markers[1] ?? range.markers[0]!, parent: range.markers[0]!.parentNode! });
   }
   const carried = server?.carried ?? [];
   const rest: Cursor = { node: carried[0] ?? null, end: null, parent: carried[0]?.parentNode ?? root };
   const nodes: Node[] = [];
   for (let index = 2; index < spec.length; index += 1) {
     const child = spec[index];
-    const slot = Array.isArray(child) ? slotOf(child[1] as readonly string[]) : "";
+    const slot = Array.isArray(child) ? slotOf(child[1] as readonly string[]) : regions[index] ?? "";
     if (!adoptChild(child, runs.get(slot) ?? rest, nodes, invoked)) return undefined;
   }
   return nodes;

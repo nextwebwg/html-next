@@ -112,6 +112,14 @@ export const definitions = [
     <label>Rows <template $each="row of $rows" $key="$row"><i>{$row}</i> <b>label</b></template> end</label>
     <p>Plain <template><i>plain</i> <b>p</b></template> end</p>
     <span><template $if="$open"><template $if="$open"><i>nested</i></template></template></span></section></template>`,
+  `<template component="ssr-slot-row"><div><span class="meta"><slot name="meta">No meta</slot></span>
+    <span class="leading"><slot name="leading">None</slot></span><span class="body"><slot></slot></span></div></template>`,
+  `<template component="ssr-slot-form"><defs>
+    <state name="open" type="boolean" value="false"></state>
+    <state name="tags" type="list(string)" value="[]"></state>
+    <handler name="toggle"><set name="open" expr:value="not $open"></set><set name="tags" expr:value="$open ? [] : ['docs', 'guide']"></set></handler>
+    </defs><section><button type="button" on:click="toggle">Toggle</button>
+    <ssr-slot-row><b slot="meta" $if="$open">Opened</b><i slot="leading" $each="tag of $tags">#{$tag}</i>Body</ssr-slot-row></section></template>`,
 ].map((source) => parseComponent(source));
 
 export const cases = [
@@ -137,6 +145,9 @@ export const cases = [
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
   { name: "whitespace between inline content, in rows and under white-space: pre", html: '<ssr-whitespace id="subject"></ssr-whitespace>', state: {} },
   { name: "fragment bodies of $if, $match, $with, $each and plain templates in phrasing content", html: '<ssr-phrasing id="subject"></ssr-phrasing>', state: { open: true } },
+  { name: "conditional and repeated content for named slots, shown after the server's fallback", html: '<ssr-slot-form id="subject"></ssr-slot-form>', state: {} },
+  { name: "conditional and repeated content for named slots, replaced by their fallback", html: '<ssr-slot-form id="subject"></ssr-slot-form>',
+    state: { open: true, tags: ["x"] } },
 ] as const;
 
 /**

@@ -30,6 +30,7 @@ import {
 import { kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
+  currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -1163,6 +1164,24 @@ interface ProjectedTemplate {
 }
 
 const projectedTemplates = new WeakMap<HTMLTemplateElement, ProjectedTemplate>();
+/** A consumer region's start mark, for an element with `slot`: that slot, and the region's end mark. */
+const regionSlots = new WeakMap<Node, readonly [slot: string, end: Node]>();
+
+/** The slot a region's element names, which its marks and content are projected into. */
+function registerRegionSlot(node: ElementNode | SlotNode, start: Node, end: Node): boolean {
+  if (node.kind !== "element") return false;
+  const slot = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
+  if (slot?.kind === "literal") regionSlots.set(start, [slot.value, end]);
+  return slot !== undefined;
+}
+
+/** Region start marks an invocation projected, as its children or from a server's slot ranges. */
+const projectedRegions = new WeakSet<Node>();
+
+/** Content a region for a named slot renders is projected content wherever it renders, as `:slotted()` selects it. */
+function markRegionContent(start: Node, nodes: readonly Node[]): void {
+  if (projectedRegions.has(start)) for (const node of nodes) markProjectedRoot(node);
+}
 /** The element roots each consumer `<template slot>` renders, one set per outlet rendering it now. */
 const templateRenderings = new WeakMap<HTMLTemplateElement, Set<Element[]>>();
 
@@ -1515,6 +1534,7 @@ function renderDynamicNode(
   const existing = context.committed ? existingDynamicRange(candidate) : undefined;
   const start = existing?.[0] ?? document.createComment("html-next:start");
   const end = existing?.[1] ?? document.createComment("html-next:end");
+  const slotted = registerRegionSlot(node, start, end);
   const fragment = existing === undefined ? document.createDocumentFragment() : undefined;
   fragment?.append(start, end);
   let childOwned: RenderOwned | undefined;
@@ -1562,7 +1582,9 @@ function renderDynamicNode(
       for (const stale of previous) if (!output.includes(stale)) stale.parentNode?.removeChild(stale);
       adopting = false;
     }
+    if (slotted) markRegionContent(start, output);
     end.before(...output);
+    if (slotted) regionChanged(start);
     built = chosen;
     builtNames = names;
     syncContainingSelect(end);
@@ -1721,6 +1743,7 @@ function renderEachRegion(
   const existing = context.committed ? existingEachRange(candidate, "each") : undefined;
   const start = existing?.[0] ?? document.createComment("html-next:each-start");
   const end = existing?.[1] ?? document.createComment("html-next:each-end");
+  const slotted = registerRegionSlot(node, start, end);
   const fragment = existing === undefined ? document.createDocumentFragment() : undefined;
   fragment?.append(start, end);
   const adopting: (readonly [Comment, Comment])[] = [];
@@ -1800,6 +1823,7 @@ function renderEachRegion(
         for (const stale of existing) if (!rendered.includes(stale)) stale.parentNode?.removeChild(stale);
         const blockStart = adopted?.[0] ?? document.createComment("html-next:item-start");
         const blockEnd = adopted?.[1] ?? document.createComment("html-next:item-end");
+        if (slotted) markRegionContent(start, rendered);
         end.before(blockStart, ...rendered, blockEnd);
         block = {
           start: blockStart,
@@ -1850,6 +1874,7 @@ function renderEachRegion(
     if (ordered !== undefined) for (let index = 0; index < ordered.length; index += 1) ordered[index]!.position = index;
     blocks = next;
     syncContainingSelect(end);
+    if (slotted) regionChanged(start);
   });
   for (const root of roots) {
     let previous: Value | typeof NONCONFORMING | undefined = ABSENT;
@@ -2373,6 +2398,13 @@ function renderInstance(
     }
     for (const range of rendered) walk(node.children.filter((child) => !scopedTemplate(child) && slotOf(child) === range.slot), range.content);
     const renderedSlots = new Set(rendered.map((range) => range.slot));
+    // A range showing its fallback ends with the marks of this slot's regions that render nothing, two each.
+    for (const range of nested?.ranges ?? []) {
+      const regions = node.children.filter((child) => !scopedTemplate(child) && slotOf(child) === range.slot);
+      if (!range.fallback || range.scoped || regions.length === 0 || !regions.every((child) => child.kind === "element" && child.flow !== undefined)) continue;
+      walk(regions, range.content.slice(-2 * regions.length));
+      renderedSlots.add(range.slot);
+    }
     walk(node.children.filter((child) => !scopedTemplate(child) && !renderedSlots.has(slotOf(child))), nested?.carried ?? []);
     return [candidate];
   }
@@ -2622,13 +2654,28 @@ function renderSlot(
         adopted.push(...out);
         cursor += out.length;
       }
-      return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
+      // After the fallback, the marks of the consumer's regions that render nothing: this slot's content.
+      const empty = hydrating.content.slice(cursor);
+      const regions = slotRegions(empty);
+      if (regions !== undefined) {
+        for (const mark of empty) {
+          projectedRegions.add(mark);
+          (context.projectedNodes as Node[]).push(mark);
+          context.projectedSlotNames.set(mark, name);
+        }
+        switchFallback(hydrating.markers[0]!, regions, adopted);
+      }
+      return [hydrating.markers[0]!, ...adopted, ...empty, ...hydrating.markers.slice(1)];
     }
     if (lazy) {
       const adopted = renderScoped(hydrating.content);
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
     for (const candidate of hydrating.content) markProjectedRoot(candidate);
+    const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(hydrating.content) : undefined;
+    if (regions !== undefined) {
+      switchFallback(hydrating.markers[0]!, regions, materialize(renderChildren(node.fallback!, scope, document, context), document));
+    }
     return hydrating.markers.length === 1
       ? [hydrating.markers[0]!]
       : [hydrating.markers[0]!, ...hydrating.content, hydrating.markers[1]!];
@@ -2649,13 +2696,23 @@ function renderSlot(
   if (lazy) {
     return ranged(renderScoped(), false);
   }
+  let content: Node[];
   if (context.committed) {
-    for (const candidate of assigned) markProjectedRoot(candidate);
-    return ranged([...assigned], false);
+    content = currentProjection(assigned);
+    for (const candidate of content) markProjectedRoot(candidate);
+  } else {
+    const anchor = document.createComment(`html-next:slot:${name}`);
+    context.slotInsertions.push({ anchor, nodes: assigned });
+    content = [anchor];
   }
-  const anchor = document.createComment(`html-next:slot:${name}`);
-  context.slotInsertions.push({ anchor, nodes: assigned });
-  return ranged([anchor], false);
+  // Given only the consumer's `$if` or `$each` regions, the slot shows its fallback while they render nothing.
+  const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(assigned) : undefined;
+  if (regions === undefined) return ranged(content, false);
+  const fallback = materialize(renderChildren(node.fallback!, scope, document, context), document);
+  const empty = regions.every(([start, end]) => start.nextSibling === end);
+  const range = ranged(empty ? [...fallback, ...content] : content, empty);
+  switchFallback(range[0]!, regions, fallback);
+  return range;
 }
 
 // ---- Rendered form (spec: live-browser-distributable.md, "Rendered form") ----
@@ -2720,8 +2777,9 @@ export function serializeRenderedForm(container: Element): string {
       const records = Object.fromEntries([compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, compiledRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     }
-    const projected = instance?.projection?.nodes ?? compiled?.J?.map(([node]) => node);
-    if (projected === undefined) return;
+    const recorded = instance?.projection?.nodes ?? compiled?.J?.map(([node]) => node);
+    if (recorded === undefined) return;
+    const projected = currentProjection(recorded);
     const unrendered = projected.filter((node) => !original.contains(node));
     if (unrendered.length === 0) return;
     const carrier = clone.ownerDocument.createElement("template");
@@ -2777,13 +2835,15 @@ export function inspectInstance(element: Element): unknown {
 function inspectCompiled(handle: CompiledHandle, delegates: readonly CompiledHandle[]): unknown {
   const record = compiledRecord(handle);
   return { tag: handle.S.g, explicit: [...record.explicit].sort(), props: record.props, state: record.state,
-    slots: inspectedSlots(handle.J ?? []), delegates: delegates.map((delegate) => inspectCompiled(delegate, [])) };
+    slots: inspectedSlots(withRegionContent(handle.J ?? [])), delegates: delegates.map((delegate) => inspectCompiled(delegate, [])) };
 }
 
 /** Each slot's projected nodes, as inspection shows them. */
 function inspectedSlots(projected: readonly (readonly [Node, string])[]): Record<string, string[]> {
   const slots: Record<string, string[]> = {};
   for (const [node, slot] of projected) {
+    // Compiled rows are their element; live's item marks around a projected row are not content.
+    if (node.nodeType === 8 && /^html-next:item-(?:start|end)$/.test((node as Comment).data)) continue;
     (slots[slot] ??= []).push(node instanceof Element ? node.outerHTML.replace(/ data-slotted=""/g, "") : node.textContent ?? "");
   }
   // Order across slots is not observable; order within a slot is.
@@ -2793,8 +2853,8 @@ function inspectedSlots(projected: readonly (readonly [Node, string])[]): Record
 function inspectRuntimeInstance(instance: RuntimeInstance): unknown {
   const props: Record<string, unknown> = {};
   for (const name of Object.keys(instance.definition.contract.props)) props[name] = instance.scope.get(name);
-  const slots = inspectedSlots((instance.projection?.nodes ?? []).map((node) => [node,
-    instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "")]));
+  const slots = inspectedSlots(withRegionContent((instance.projection?.nodes ?? []).map((node) => [node,
+    instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "")])));
   return { tag: instance.definition.contract.tag, explicit: [...instance.explicit].sort(), props,
     state: instanceRecord(instance).state, slots, delegates: instance.delegates.map(inspectRuntimeInstance) };
 }
@@ -2931,6 +2991,17 @@ function prepareRuntimeInvocation(
   }
   const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
   const projected = hydration ? children : Array.from(invocation.childNodes);
+  // A consumer region for an element with `slot` projects whole into that slot, its marks included,
+  // so what it renders later lands there too.
+  let region: readonly [string, Node] | undefined;
+  for (const node of children) {
+    if (node.nodeType === 8 && /^html-next:(?:each-)?start$/.test((node as Comment).data)) projectedRegions.add(node);
+    if (hydration) continue;
+    region ??= regionSlots.get(node);
+    if (region === undefined) continue;
+    projectedSlotNames.set(node, region[0]);
+    if (node === region[1]) region = undefined;
+  }
   const replaceProjected = (current: Node, next: Node): void => {
     for (const nodes of [children, projected]) {
       const index = nodes.indexOf(current);
@@ -3310,8 +3381,9 @@ function commitRuntimeInvocations(
 
   for (const invocation of prepared) {
     for (const insertion of invocation.context.slotInsertions) {
-      for (const child of insertion.nodes) markProjectedRoot(child);
-      insertion.anchor.replaceWith(...insertion.nodes);
+      const nodes = currentProjection(insertion.nodes);
+      for (const child of nodes) markProjectedRoot(child);
+      insertion.anchor.replaceWith(...nodes);
     }
     for (const applySelection of invocation.context.selectBindings) applySelection();
     invocation.context.selectBindings.length = 0;
@@ -4177,7 +4249,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     // Hydration records each node's slot; a client-rendered instance carries the author's own
     // `slot` attribute instead, and an unmarked node belongs to the unnamed slot either way.
     // A consumer's <template slot> contributes what its outlets render now, in document order.
-    return projection.nodes.flatMap((node): Element[] =>
+    return currentProjection(projection.nodes).flatMap((node): Element[] =>
       node.nodeType !== 1 || (projection.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") !== slot ? []
         : !(node instanceof HTMLTemplateElement) ? [node as Element]
           : [...templateRenderings.get(node) ?? []].flat().sort((a, b) =>
