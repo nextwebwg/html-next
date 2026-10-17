@@ -11,7 +11,7 @@ import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type 
 import { checkLinks } from "./links.js";
 import { matchRoute, redirectTable } from "./routes.js";
 import type { ServerData, ServerPage } from "./server.js";
-import type { ApplicationOptions, ApplicationRoute, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
+import type { ApplicationOptions, ApplicationRoute, RenderedPolicy, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -53,7 +53,8 @@ export async function readManifest(outDir: string): Promise<BuildManifest> {
  * Write _htmlkit/server: entry.js, whose default export answers requests, and the loaders, endpoints,
  * and middleware it imports. Prerendered pages need none of their code there; their files serve them.
  */
-async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, internals, serverGraphs }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, policy, internals, serverGraphs }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+  readonly policy: RenderedPolicy | undefined;
   readonly stage: string; readonly redirects: readonly ManifestRedirect[]; readonly scripts: readonly string[];
   readonly internals: Awaited<ReturnType<typeof createApplicationInternals>>;
   readonly serverGraphs: readonly { readonly route: ApplicationRoute; readonly graph: RouteGraph; readonly assets: PageAssets }[] }): Promise<void> {
@@ -81,7 +82,7 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
     else pages[application.routes.indexOf(route)] = page;
   }
   const catalog = await internals.catalog();
-  const data: ServerData = { version: 1, base, canonicalOrigin, redirects, scripts, pages, ...(error === undefined ? {} : { error }),
+  const data: ServerData = { version: 2, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
     routes: application.routes.map(path),
     catalog: [...catalog].map(([path, route]) => [path, application.routes.indexOf(route)] as const),
     endpoints: application.endpoints.map(endpoint => ({ ...endpoint, file: source(endpoint.file), module: module(endpoint.file, "api") })),
@@ -187,7 +188,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     // sitemap.xml lists each page at its own URL: no alias, redirect, not-found page, or page marked noindex.
     const indexed: string[] = [];
     const scripts = await headScripts(options, config.root);
-    let notFoundHTML = notFoundPage(scripts).html;
+    const policy = await internals.policy();
+    let notFoundHTML = notFoundPage(scripts, policy).html;
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]!;
       const path = join(stage, decodeURIComponent(page.pathname.slice(config.base.length)), "index.html");
@@ -217,7 +219,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const path = join(stage, decodeURIComponent(from.slice(config.base.length)), "index.html");
       if (await exists(path)) throw new HtmlKitError(`Redirect collision at ${from}: a public asset or page is already there.`, path);
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, redirectPage(to).html);
+      await writeFile(path, redirectPage(to, policy).html);
     }
     // A public sitemap.xml is the site's own and stays as it is.
     if (options.origin !== undefined && !await exists(join(stage, "sitemap.xml"))) {
@@ -229,7 +231,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
       await writeFile(join(stage, "robots.txt"), rules + sitemap);
     }
-    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, internals, serverGraphs: serverGraphs.map(({ route, graph }, i) =>
+    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, policy, internals, serverGraphs: serverGraphs.map(({ route, graph }, i) =>
       ({ route, graph, assets: bundled(pages.length + i, route.pattern).assets })) });
     const routes = delivery.map(page => page.pathname);
     const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };

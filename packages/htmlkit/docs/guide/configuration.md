@@ -37,6 +37,7 @@ export default defineConfig({
 | `prefetch` | `interaction` | What links load before a click: `interaction`, `visible`, or `none` ([details](/htmlkit/client-navigation#faster-clicks)). |
 | `robots` | none | `true`, or the text of `robots.txt`, for the build to write ([search engines](#search-engines)). |
 | `linkCheck` | `error` | What `build` does with a [broken internal link](#link-check): `error` fails the build, and `warn` reports it. |
+| `csp` | generated | Sources to add to each page's [Content Security Policy](#content-security-policy), `reportOnly`, or `false` for none. |
 
 A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`. Each selects the outermost
 layout; a folder's `_layout.html` nests inside it ([nested layouts](/htmlkit/routes#nested-layouts)).
@@ -293,6 +294,62 @@ Links to other sites and to paths outside `base` pass as written, as do `#`, `#t
 fragments (`#:~:text=`). A link without its trailing slash, such as `/docs/guide`, finds the page at
 `/docs/guide/`. The check reads the built HTML, so it covers the links and ids the server rendered.
 `linkCheck: 'warn'` reports the same links as a warning and finishes the build.
+
+## Content Security Policy
+
+Every page carries the site's Content Security Policy, which HTMLKit generates from what the site's
+components declare. It allows the scripts the site needs and nothing else:
+
+```text
+script-src 'self' https://js.stripe.com 'sha256-…'; object-src 'none'; base-uri 'none'
+```
+
+- `'self'` for HTMLKit's own modules, the page's controllers, and same-origin declared scripts.
+- The origin of each [declared script](/htmlkit/routes#declared-scripts) any page, layout, or
+  component of the site names, such as `https://js.stripe.com` for a checkout page that declares
+  Stripe.js.
+- A `sha256` hash of each inline head script: a plugin's `headScript` and `app/head.js`.
+- `object-src 'none'` and `base-uri 'none'`, since pages use neither plugins nor `<base>`.
+
+The `csp` option adds sources to any directive, in CSP's own grammar. They join the generated ones
+and never replace them:
+
+```ts
+// htmlkit.config.ts
+export default defineConfig({
+  csp: {
+    'script-src': ['https://cdn.example/'],
+    'connect-src': ["'self'", 'https://api.example'],
+    'frame-src': ['https://js.stripe.com', 'https://hooks.stripe.com'],
+  },
+});
+```
+
+| Where | Delivery |
+| --- | --- |
+| `htmlkit build` | Each page's `<meta http-equiv="Content-Security-Policy">`, first in its head, so static hosts enforce it. A meta element ignores `frame-ancestors`, `report-uri`, and `sandbox`, so the page's meta leaves them out. |
+| `htmlkit start` and `application.fetch` | The `Content-Security-Policy` header, with every directive, beside the page's meta. |
+| `htmlkit dev` | The same header and meta, plus what Vite needs (below). |
+
+`reportOnly: true` sends `Content-Security-Policy-Report-Only` instead, which reports violations and
+blocks nothing. Only a header can report only, so built pages then carry no meta, and a static host
+needs its own header configuration to report. `csp: false` turns the policy off.
+
+The policy is site-wide. A document keeps the policy it loaded with, and
+[client navigation](/htmlkit/client-navigation) moves between pages in place, so one policy covers
+every page a visitor can reach. A policy per page would need a full page load whenever it changes.
+
+In development, `htmlkit dev` reports each violation in the terminal and the browser console, with the
+page, what was blocked, the directive, and the line that would allow it:
+
+```text
+HTMLKit: /checkout/ blocked https://m.stripe.network/inner.html under frame-src. To allow it, add to htmlkit.config.ts: csp: { "frame-src": ["https://m.stripe.network"] }
+```
+
+Vite's client and modules load from the development server, which `'self'` allows. Where the
+policy restricts `connect-src` (or `default-src`), development adds `ws:` for Vite's HMR socket, and
+where it restricts `style-src`, `'unsafe-inline'` for the styles Vite injects for CSS a module
+imports. Builds have neither.
 
 ## Build manifest
 

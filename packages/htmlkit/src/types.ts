@@ -52,6 +52,33 @@ export interface ApplicationOptions {
    * (default) fails the build, and "warn" reports the links and builds.
    */
   readonly linkCheck?: "error" | "warn";
+  /**
+   * The site's Content Security Policy, which every page carries, generated from what its components declare.
+   * Sources here are added to each directive, never replacing the generated ones; false turns it off.
+   */
+  readonly csp?: ContentSecurityPolicyOptions | false;
+}
+
+/**
+ * Sources to add to the generated policy, per directive, in CSP's own grammar, such as
+ * { "script-src": ["https://cdn.example/"], "connect-src": ["https://api.example"] }.
+ */
+export interface ContentSecurityPolicyOptions {
+  /**
+   * Send Content-Security-Policy-Report-Only, which reports violations and blocks nothing. Only a
+   * header can report only, so static pages then carry no policy.
+   */
+  readonly reportOnly?: boolean;
+  readonly [directive: string]: readonly string[] | boolean | undefined;
+}
+
+/** The site's Content Security Policy. */
+export interface RenderedPolicy {
+  /** The policy as the header sends it. */
+  readonly header: string;
+  readonly reportOnly: boolean;
+  /** The policy as the page's `<meta http-equiv>` carries it, without header-only directives; absent when it only reports. */
+  readonly meta?: string;
 }
 
 export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
@@ -168,6 +195,8 @@ export interface RenderedHead extends PageHead {
   readonly canonical?: string;
   /** A plugin's headScript, then app/head.js, each inlined after the charset so they run before first paint. */
   readonly scripts?: readonly string[];
+  /** The site's Content Security Policy, unless csp is false. */
+  readonly csp?: RenderedPolicy;
 }
 
 export interface LoaderResult {

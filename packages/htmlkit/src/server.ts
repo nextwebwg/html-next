@@ -11,10 +11,11 @@ import { serializePropTarget, serializeTypedValue, type ComponentDefinition } fr
 import { renderComponents, setRenderWorkers } from "@nextwebwg/html-next/server";
 
 import { HtmlKitError, within } from "./config.js";
+import { policyHeader } from "./csp.js";
 import { authoredHead, documentHTML, escapeHTML, pagePayload, redirectPage, type PageAssets } from "./document.js";
 import { matchRoute, parameter, redirectLocation, redirectStatuses } from "./routes.js";
 import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestRedirect, Middleware, NavigationItem,
-  NavigationNode, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions } from "./types.js";
+  NavigationNode, NavigationQuery, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
 
 export { setRenderWorkers } from "@nextwebwg/html-next/server";
 export type { ApplicationServer, EndpointContext, EndpointHandler, EndpointModule, Middleware, ServerApplication, StartOptions } from "./types.js";
@@ -201,6 +202,8 @@ export interface RenderInput {
   /** Every component the layers use, for HTML Next's renderer. */
   readonly definitions: readonly ComponentDefinition[];
   readonly scripts: readonly string[];
+  /** The site's Content Security Policy, unless csp is false. */
+  readonly policy?: RenderedPolicy;
   readonly navigation: Navigation;
   /** What starts an alias page's canonical link: the configured origin, or "" without one. */
   readonly canonicalOrigin: string;
@@ -211,8 +214,8 @@ export interface RenderInput {
 export interface Failure { readonly status: 500; readonly message: string }
 export const serverFailure: Failure = Object.freeze({ status: 500, message: "Internal Server Error" });
 /** The page for a failure without app/error.html, or when it fails too. */
-export function failurePage({ status, message }: Failure, scripts: readonly string[]) {
-  const head: RenderedHead = { html: authoredHead + `<title>${escapeHTML(message)}</title>`, scripts };
+export function failurePage({ status, message }: Failure, scripts: readonly string[], policy?: RenderedPolicy) {
+  const head: RenderedHead = { html: authoredHead + `<title>${escapeHTML(message)}</title>`, scripts, ...(policy === undefined ? {} : { csp: policy }) };
   const body = `<main><h1>${escapeHTML(message)}</h1></main>`;
   return { status, head, body, html: documentHTML(body, head) };
 }
@@ -299,8 +302,9 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const output = await renderComponents(body, { definitions: input.definitions, url: url.href, state,
     head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
   signal.throwIfAborted();
+  const { policy } = input;
   const head: RenderedHead = { html: output.head, ...(lang === undefined ? {} : { lang }), ...(canonical === undefined ? {} : { canonical }),
-    ...(input.scripts.length === 0 ? {} : { scripts: input.scripts }) };
+    ...(input.scripts.length === 0 ? {} : { scripts: input.scripts }), ...(policy === undefined ? {} : { csp: policy }) };
   return { kind: "page", status: response.status, headers: response.headers, body: output.html, css: output.css, head, layers: rendered };
 }
 
@@ -316,6 +320,7 @@ export function pageResponse(page: { readonly status: number; readonly location?
     return new Response(data === undefined || bodyless ? null : JSON.stringify(data), { status: data === undefined ? 404 : 200, headers });
   }
   headers.set("content-type", "text/html; charset=utf-8");
+  if (page.head.csp !== undefined) headers.set(policyHeader(page.head.csp), page.head.csp.header);
   if (page.location !== undefined) {
     headers.set("location", page.location);
     return new Response(bodyless ? null : redirectPage(page.location).html, { status: page.status, headers });
@@ -401,13 +406,15 @@ async function answerEndpoint<Route extends NavigationRoute>(app: Pipeline<Route
 
 /** A build's request server data, which the build writes into _htmlkit/server/entry.js. */
 export interface ServerData {
-  readonly version: 1;
+  readonly version: 2;
   readonly base: string;
   readonly redirects: readonly ManifestRedirect[];
   readonly routes: readonly NavigationRoute[];
   /** Each concrete page URL and its route's index, for navigation. */
   readonly catalog: readonly (readonly [string, number])[];
   readonly scripts: readonly string[];
+  /** The site's Content Security Policy, unless csp is false. */
+  readonly policy?: RenderedPolicy;
   /** What starts an alias page's canonical link: the configured origin, or "" without one. */
   readonly canonicalOrigin: string;
   /** Each server-rendered route, by its index in routes. */
@@ -462,7 +469,7 @@ export async function outputPath(output: string, base: string, pathname: string)
  * output directory two levels above the entry. Prerendered pages and assets come from the output's files.
  */
 export async function serverApplication(entry: string, data: ServerData, modules: Readonly<Record<string, () => Promise<unknown>>>): Promise<ServerApplication> {
-  if (data.version !== 1) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
+  if (data.version !== 2) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
   const output = await realpath(fileURLToPath(new URL("../../", entry)));
   const { base, routes } = data;
   const load = async <Module>(id: string) => await modules[id]!() as Module;
@@ -470,26 +477,27 @@ export async function serverApplication(entry: string, data: ServerData, modules
   const navigation = createNavigation(base, routes, () => Promise.resolve(catalog));
   // Files that are never served: the server's own code, and payloads, which answer through their pages.
   const reserved = [join(output, "_htmlkit/server"), join(output, "_htmlkit/pages")];
-  const file = async (path: string, request: Request, status = 200, init?: Headers) => {
+  // A prerendered page's file carries the site's policy as a header too, which may hold header-only directives.
+  const file = async (path: string, request: Request, status = 200, init?: Headers, page = false) => {
     const headers = new Headers(init);
     headers.set("content-type", mime[extname(path)] ?? "application/octet-stream");
+    if (page && data.policy !== undefined) headers.set(policyHeader(data.policy), data.policy.header);
     // Hashed bundles beside the manifest never change.
     if (/^_htmlkit\/[^/]+$/.test(path.slice(output.length + 1).replaceAll("\\", "/")) && !path.endsWith("manifest.json")) headers.set("cache-control", "public, max-age=31536000, immutable");
     return new Response(request.method === "HEAD" ? null : await readFile(path), { status, headers });
   };
-  const missing = (request: Request, headers?: Headers) => file(join(output, "404.html"), request, 404, headers);
+  const missing = (request: Request, headers?: Headers) => file(join(output, "404.html"), request, 404, headers, true);
   const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure) =>
     renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions,
-      scripts: data.scripts, navigation, ...(failure === undefined ? {} : { failure }),
+      scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }),
       layers: page.layers.map(layer => ({ ...layer, module: () => layer.module === undefined ? Promise.resolve({}) : load<ServerModule>(layer.module) })) });
-  const html = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
   // A failure answers with app/error.html, rendered as the build would render it, and a safe message; the error goes to the console.
   const failed = async (error: unknown, request: Request): Promise<Response> => {
     if (!request.signal.aborted) console.error(error);
     const { pathname } = new URL(request.url);
     // A failed page has no payload, so the browser loads its document, the error page.
     if (pathname.startsWith(base + "_htmlkit/pages/")) return new Response(null, { status: 500 });
-    const builtin = () => html(request.method === "HEAD" ? "" : failurePage(serverFailure, data.scripts).html, 500);
+    const builtin = () => pageResponse({ ...failurePage(serverFailure, data.scripts, data.policy), layers: [] }, request, false);
     if (data.error === undefined || pathname.startsWith("//")) return builtin();
     try {
       const rendered = await render(data.error, data.error.route, {}, new URL(pathname, request.url), undefined, request.signal, serverFailure);
@@ -511,7 +519,7 @@ export async function serverApplication(entry: string, data: ServerData, modules
       if (server === undefined) {
         // A prerendered page: its document or payload, if the build wrote one for this URL.
         const found = await outputPath(output, base, payload ? `${base}_htmlkit/pages/${url.pathname.slice(base.length)}payload.json` : url.pathname);
-        if (typeof found === "object") return file(found.file, request);
+        if (typeof found === "object") return file(found.file, request, 200, undefined, !payload);
         return payload ? new Response(null, { status: 404 }) : missing(request);
       }
       const rendered = await render(server, route, params, url, request, request.signal);

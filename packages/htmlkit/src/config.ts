@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { checkPolicyOptions } from "./csp.js";
 import type { ApplicationOptions, HtmlKitPlugin, RouteLayer } from "./types.js";
 
 /**
@@ -50,7 +51,7 @@ export function configure(options: ApplicationOptions) {
   if (!["interaction", "visible", "none"].includes(prefetch)) throw new HtmlKitError('prefetch must be "interaction", "visible", or "none".');
   if (![undefined, "error", "warn"].includes(options.linkCheck)) throw new HtmlKitError('linkCheck must be "error" or "warn".');
   if (!["undefined", "boolean", "string"].includes(typeof options.robots)) throw new HtmlKitError("robots must be true, false, or the text of robots.txt.");
-  return { root, base, origin: origin.origin, outDir, prefetch };
+  return { root, base, origin: origin.origin, outDir, prefetch, csp: checkPolicyOptions(options.csp) };
 }
 
 /** Plugins' named layouts, kept apart from the site's: a site's app/layouts/<name>.html wins over them. */

@@ -1,4 +1,4 @@
-import type { RenderedHead, RenderedPage } from "./types.js";
+import type { RenderedHead, RenderedPage, RenderedPolicy } from "./types.js";
 /**
  * The application document's own head, which pages and layouts' head declarations start from: the
  * viewport, which a page may replace. The charset and head scripts precede it in every document.
@@ -11,7 +11,9 @@ export function escapeHTML(value: string): string {
 }
 export function documentHTML(body: string, head: RenderedHead, assets: PageAssets = { styles: [], modules: [] }): string {
   // Head scripts precede stylesheets, which would otherwise delay them until they load.
-  return `<!doctype html>\n<html lang="${escapeHTML(head.lang ?? "en")}"><head><meta charset="utf-8">` +
+  // The policy precedes every script it governs.
+  const policy = head.csp?.meta === undefined ? "" : `<meta http-equiv="Content-Security-Policy" content="${head.csp.meta.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}">`;
+  return `<!doctype html>\n<html lang="${escapeHTML(head.lang ?? "en")}"><head><meta charset="utf-8">${policy}` +
     (head.scripts ?? []).map(script => `<script>${script}</script>`).join("") + head.html +
     assets.styles.map(href => `<link rel="stylesheet" href="${escapeHTML(href)}">`).join("") +
     assets.modules.map(src => `<script type="module" src="${escapeHTML(src)}"></script>`).join("") +
@@ -22,8 +24,8 @@ export function documentHTML(body: string, head: RenderedHead, assets: PageAsset
  * The page at a redirect's old URL, for static hosts without server redirects: a meta refresh and a
  * canonical link to the Location, and a plain link for readers that don't refresh.
  */
-export function redirectPage(location: string) {
-  const head: RenderedHead = { html: `${authoredHead}<meta http-equiv="refresh" content="0; url=${escapeHTML(location)}">` +
+export function redirectPage(location: string, policy?: RenderedPolicy) {
+  const head: RenderedHead = { ...(policy === undefined ? {} : { csp: policy }), html: `${authoredHead}<meta http-equiv="refresh" content="0; url=${escapeHTML(location)}">` +
     `<link rel="canonical" href="${escapeHTML(location)}"><title>Redirecting</title>` };
   const body = `<main><p>This page is now at <a href="${escapeHTML(location)}">${escapeHTML(location)}</a>.</p></main>`;
   return { head, body, html: documentHTML(body, head) };

@@ -21,7 +21,7 @@ async function site(): Promise<string> {
         <a id="blank" href="/kit/guide/" target="_blank">Blank</a> <a id="reload" href="/kit/guide/" data-hk-reload>Reload</a>
         <a id="outside" href="/elsewhere/">Outside</a> <a id="hash" href="#top">Hash</a> <a id="to-deep" href="/kit/guide/install/#deep">Deep</a>
         <a id="items" href="/kit/items/one/">Items</a> <a id="broken" href="/kit/items/two/">Broken</a>
-        <a id="conflict" href="/kit/conflict/">Conflict</a> <a id="missing" href="/kit/missing/">Missing</a>
+        <a id="conflict" href="/kit/conflict/">Conflict</a> <a id="missing" href="/kit/missing/">Missing</a> <a id="pay" href="/kit/pay/">Pay</a>
         <span data-hk-prefetch="none"><a id="quiet" href="/kit/guide/install/">Quiet</a></span>
         <a id="counter" href="/kit/counter/" data-hk-prefetch="visible">Counter</a></p>
       <slot name="page"></slot></div>
@@ -52,6 +52,9 @@ async function site(): Promise<string> {
     <article><h1>Install</h1><div class="spacer"></div><h2 id="deep">Deep</h2><div class="spacer"></div></article><style>@import "@/app/styles/heading.css"; .spacer { height: 3000px; }</style></template>`);
   await write(root, "app/pages/items/[slug].html", `<template component="item-page"><defs><prop name="slug" type="string" required>Slug</prop><meta name="hk:layout" content="items"><title>{$slug}</title></defs><article><h1 $value="$slug"></h1><a id="home" href="/kit/">Home</a></article></template>`);
   await write(root, "app/pages/items/[slug].server.ts", "export const entries = () => [{ slug: 'one' }, { slug: 'two' }]; export const load = ({ params }) => ({ props: { slug: params.slug } });");
+  // A page with a third-party declared script, whose origin the site's one policy allows on every page.
+  await write(root, "app/pages/pay.html", `<template component="pay-page"><defs><title>Pay</title><meta name="hk:navigation" content="hidden">
+    <script src="https://pay.example/v3/" loading="lazy"></script></defs><article><h1>Pay</h1></article></template>`);
   // Another <shared-badge> cannot join a document that already defines one (HR001).
   await write(root, "app/pages/conflict.html", `<meta name="hk:page" content="conflict-page"><template component="shared-badge"><i>conflict badge</i></template>
     <template component="conflict-page"><defs><title>Conflict</title><meta name="hk:navigation" content="hidden"></defs><article><h1><shared-badge></shared-badge></h1></article></template>`);
@@ -107,6 +110,10 @@ async function open(context: BrowserContext) {
   const requests: { path: string; type: string }[] = [];
   page.on("request", request => requests.push({ path: new URL(request.url()).pathname, type: request.resourceType() }));
   const count = (path: string, type?: string) => requests.filter(request => request.path === path && (type === undefined || request.type === type)).length;
+  // Everything here works under the page's generated Content Security Policy.
+  await page.exposeFunction("htmlkitViolation", (violation: string) => errors.push(violation));
+  await page.addInitScript(() => addEventListener("securitypolicyviolation", event =>
+    (window as unknown as { htmlkitViolation(violation: string): void }).htmlkitViolation(`${event.effectiveDirective} blocked ${event.blockedURI}`)));
   return { page, errors, requests, count };
 }
 
@@ -239,6 +246,17 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await loads("#reload", "Guide", "/kit/guide/");
     await loads("#missing", "Page not found", "/kit/missing/");
     await loads("#conflict", "Conflict", "/kit/conflict/", "conflict badge");
+    // The site has one policy, so a page with a third-party script renders in place, and the script runs under it.
+    await context.route("https://pay.example/**", route => route.fulfill({ contentType: "text/javascript", body: "window.payRuns = (window.payRuns ?? 0) + 1;" }));
+    await mark(page);
+    await page.locator("#pay").click();
+    await settled(page, "Pay");
+    expect(await marked(page)).toBe(true);
+    await poll(() => page.evaluate(() => (window as unknown as { payRuns?: number }).payRuns)).toBe(1);
+    await page.locator('nav a[href="/kit/"]').first().click();
+    await settled(page, "Home");
+    expect(await marked(page)).toBe(true);
+    await page.goto(url);
     await page.route(`**${payloadPath("items/two/")}`, route => route.abort());
     await page.route("**/kit/items/two/", route => route.request().resourceType() === "fetch" ? route.abort() : route.continue());
     await loads("#broken", "two", "/kit/items/two/");

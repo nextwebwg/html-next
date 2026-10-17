@@ -51,6 +51,10 @@ host, such as GitHub Pages, Netlify, or an S3 bucket:
   to it; check your host's trailing-slash setting.
 - Redirects are pages that send readers on; see [redirects](/htmlkit/routes#redirects).
 
+Each page's [Content Security Policy](/htmlkit/configuration#content-security-policy) is a
+`<meta http-equiv>` in its head, which static hosts serve as written. For `frame-ancestors`,
+`report-uri`, or a report-only policy, which only a header carries, configure the host's headers.
+
 `htmlkit preview` serves `dist/` the way a static host does, to check a build first.
 
 ## The Node server
@@ -83,6 +87,8 @@ PORT=8080 HOST=0.0.0.0 npm start
   [`app/error.html`](/htmlkit/routes#the-error-page) with status 500, and the next request
   renders on a new worker.
 - Hashed bundles in `_htmlkit/` are served with `Cache-Control: public, max-age=31536000, immutable`.
+- Every page is served with its [Content Security Policy](/htmlkit/configuration#content-security-policy)
+  header, as the build generated it, including directives a `<meta>` can't carry.
 - `dist/_htmlkit/server/` holds the server's code; it is never served.
 - The server imports `@nextwebwg/htmlkit` and your loaders' packages from `node_modules`, so deploy
   `dist/` with `package.json` and the installed production dependencies, as for any Node application:
