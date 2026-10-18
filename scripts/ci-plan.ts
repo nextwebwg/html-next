@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync, readdirSync, realpathSync } from "node:fs
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const directories = ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit", "expressmark"];
+const directories = ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"];
 const manifests = directories.map((directory) => ({ directory, ...JSON.parse(
   readFileSync(`${root}packages/${directory}/package.json`, "utf8"),
 ) as { name: string; version: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> } }));
