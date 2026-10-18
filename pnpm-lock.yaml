@@ -144,18 +144,6 @@ importers:
         specifier: 'catalog:'
         version: 5.0.4(@types/node@25.9.9)(jsdom@30.1.2)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
 
-  packages/expressmark:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 25.9.9
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.4(@types/node@25.9.9)(jsdom@30.1.2)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
-
   packages/html-next:
     dependencies:
       '@dprint/formatter':

@@ -6,6 +6,8 @@
 
 ## 1.0.0-alpha.58
 
+- Expressive Markdown tooling has moved to the independent [`nextwebwg/expressmark`](https://github.com/nextwebwg/expressmark) repository and is no longer part of this workspace.
+
 ### Added
 
 - `HY007` warns about a component style rule whose subject is a nested component's root, which the rule never matches because a component styles its own root: `x-item:state(on) { … }`, `.row x-item`, `:slotted(x-item)`, or a component's own tag in its styles. The warning suggests conditioning one of the component's own elements on the nested one, as in `x-item:state(on) + label`, or setting a custom property the nested component reads; for its own tag, `:host`. `check`, the Vite plugin and the converter report it with the graph's other warnings, and the live runtime logs it once when it compiles the styles. Rules whose selectors hold `&` are left out, since their subject depends on the parent rule.

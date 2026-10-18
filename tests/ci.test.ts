@@ -20,14 +20,6 @@ describe("affected CI", () => {
     expect(selected.map(({ name }) => name).sort()).toEqual(["@nextwebwg/html-next", "@nextwebwg/htmlkit"]);
   });
 
-  it("keeps Expressive Markdown independent of the component packages", () => {
-    expect(affectedPackages(["packages/expressmark/src/index.ts"])).toEqual(["expressmark"]);
-    const plan = createPlan(["packages/expressmark/src/index.ts"]);
-    expect(plan.packages).toEqual(["expressmark"]);
-    expect(plan.browser).toEqual([]);
-    expect(plan.corpus).toEqual([]);
-  });
-
   it("keeps an HTMLKit fix out of compiler and framework tests", () => {
     expect(affectedPackages(["packages/htmlkit/src/routes.ts"])).toEqual(["htmlkit"]);
     const plan = createPlan(["packages/htmlkit/src/routes.ts"]);
@@ -50,9 +42,9 @@ describe("affected CI", () => {
   it("skips documentation and includes shared build inputs and removed package files", () => {
     expect(affectedPackages(["README.md", "CHANGELOG.md", "docs/guide/install.md", "packages/htmlkit/docs/client-navigation.md"])).toEqual([]);
     expect(affectedPackages(["packages/html-next-converter/src/deleted.ts"])).toEqual(["html-next-converter", "html-next-unplugin"]);
-    expect(affectedPackages(["pnpm-lock.yaml"])).toHaveLength(5);
-    expect(affectedPackages(["vitest.browser.config.ts"])).toHaveLength(5);
-    expect(affectedPackages(["scripts/ci-plan.ts"])).toHaveLength(5);
+    expect(affectedPackages(["pnpm-lock.yaml"])).toHaveLength(4);
+    expect(affectedPackages(["vitest.browser.config.ts"])).toHaveLength(4);
+    expect(affectedPackages(["scripts/ci-plan.ts"])).toHaveLength(4);
   });
 
   it("keeps a lockstep version bump from widening a package fix", () => {
@@ -90,10 +82,10 @@ describe("affected CI", () => {
       cpSync(fileURLToPath(new URL("../scripts/ci-plan.ts", import.meta.url)), join(directory, "scripts/ci-plan.ts"));
       write("tests/target-durations.json", "{}");
       write("pnpm-lock.yaml", "playwright:\n  specifier: 1.63.0\n  version: 1.63.0\n");
-      for (const name of ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit", "expressmark"]) {
+      for (const name of ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"]) {
         mkdirSync(join(directory, `packages/${name}/tests`), { recursive: true });
         const manifest = JSON.parse(readFileSync(fileURLToPath(new URL(`../packages/${name}/package.json`, import.meta.url)), "utf8"));
-        if (name !== "expressmark") manifest.version = "1.0.0-alpha.41";
+        manifest.version = "1.0.0-alpha.41";
         write(`packages/${name}/package.json`, JSON.stringify(manifest));
       }
       mkdirSync(join(directory, "packages/html-next/src")); mkdirSync(join(directory, "packages/htmlkit/src"));
