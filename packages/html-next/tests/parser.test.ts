@@ -477,6 +477,12 @@ describe("parseComponent", () => {
     assert.match(message(disclosure(`<slot name="summary"></slot>`, `<slot name="summary"></slot>`)), /HC013: .*at least one <prop>/);
     assert.match(message(disclosure(`<slot name="summary" count="1"></slot>`, `<slot name="summary"><prop name="count" type="number">C.</prop></slot><slot name="summary"><prop name="count" type="number">C.</prop></slot>`)), /HC020: Slot `summary` is declared more than once/);
     assert.match(message(disclosure(`<slot></slot>`, `<slot name="label-action"><prop name="a" type="string">A.</prop></slot>`)), /HC013: Slot name `label-action` is not an identifier/);
+    // A bound value that reads nothing is known now: one its declared type rejects, checked in full, is an error.
+    const row = `<slot name="summary"><prop name="count" type="number" required>C.</prop><prop name="row" type="object">R.<prop name="id" type="string" required>I.</prop></prop></slot>`;
+    assert.match(message(disclosure(`<slot name="summary" count="1" from:row="{ id: 'a', extra: 1 }"></slot>`, row)), /HT008: <slot name="summary"> gives prop `row` a value that does not satisfy its declared type `object\(\{ id: string \}\)`/);
+    assert.match(message(disclosure(`<slot name="summary" count="1" from:row="{}"></slot>`, row)), /HT008: .*prop `row` a value that does not satisfy/);
+    assert.match(message(disclosure(`<slot name="summary" from:count="'3'"></slot>`)), /HT008: .*prop `count` a value that does not satisfy its declared type `number`/);
+    parseComponent(disclosure(`<slot name="summary" count="1" from:row="{ id: 'a' }"></slot>`, row));
     // A plain slot needs no declaration, and a declared slot's props may be any type, as only static ones are attributes.
     parseComponent(disclosure(`<slot name="summary" from:count="$items.length"></slot>`, `<slot name="summary"><prop name="count" type="unknown" required>C.</prop></slot>`));
   });

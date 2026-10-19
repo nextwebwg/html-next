@@ -24,6 +24,10 @@
 
 A browser test runs the live runtime, compiled Vanilla output and converted Vue, React and Svelte components through a null prop returning to its default, null and undefined writes to states with and without a `value` at the root and below, a `<set>` of null, `host.reset` with and without a name and with a name it refuses, an emptied number input bound to a state with `value="0"` that stays empty while the state reads 0 and shows a later write, and a wrong-typed write that still warns once.
 
+### Fixed
+
+- A bound slot prop is checked in full against its declared type, as an [accepted value](https://nextwebwg.org/declarative-components/javascript#accepted-values-and-prop-inputs) is, in the live runtime, compiled output, Vue, React and Svelte. An object type is closed unless it is `open` ([Types](https://nextwebwg.org/declarative-components/types)), so a row with an undeclared field, a missing `required` field or a field of the wrong type is rejected. The live runtime and compiled output checked only the top-level kind, and took such rows. A rejected value warns `HR007` once per component, slot and prop: ``Slot `row` prop `row` does not satisfy its declared type `object({ id: string, label: string })`.`` The consumer's template then reads the prop as absent. Before this fix, the live runtime and compiled output failed with `HB001` when the first value was rejected. The live runtime, compiled output and Svelte also kept the last accepted value, where Vue and React already read it as absent. A bound value that reads nothing and fails its type is an `HT008` error when the definition is read. The warnings are the same in development and production builds. A test renders an extra field, a missing field, a wrong field type and a row that stops conforming in all five targets, in Chromium, Firefox and WebKit, with development and production bundles. A parser test covers the `HT008` error.
+
 ## 1.0.0-alpha.58
 
 - Expressive Markdown tooling has moved to the independent [`nextwebwg/expressmark`](https://github.com/nextwebwg/expressmark) repository and is no longer part of this workspace.

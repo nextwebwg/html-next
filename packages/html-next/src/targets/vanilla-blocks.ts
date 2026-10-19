@@ -171,7 +171,7 @@ interface Region {
   readonly props?: readonly Lowered[];
   readonly propNames?: readonly string[];
   /** Each bound slot prop's declared type, which its value must fit to be given. */
-  readonly propTypes?: readonly (CompactType | undefined)[];
+  readonly propTypes?: readonly (TypeNode | undefined)[];
 }
 
 interface Block {
@@ -1303,7 +1303,7 @@ class Planner {
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
       block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
         ...props === undefined ? {} : { props, propNames: node.props!.map((prop) => prop.name),
-          propTypes: node.props!.map((prop) => prop.type === undefined ? undefined : compactType(normalizeType(prop.type))) } });
+          propTypes: node.props!.map((prop) => prop.type === undefined ? undefined : normalizeType(prop.type)) } });
       return 4;
     }
     if (node.kind === "text") {
@@ -1720,6 +1720,8 @@ export function emitBlocks(
   // A script relative to the definition resolves at build time, through the bundler, to the URL it serves.
   const scriptImports = (definition.scripts ?? []).map((script) => /^\.\.?\//.test(script.src) ? scriptURL?.(script.src, definition) : undefined);
   const blocks = plan.blocks;
+  // Each declared slot prop's full check, made once for the module: `K0`, `K1`, …
+  const slotPropChecks: string[] = [];
   const selectorRoot = (binding: Binding, region: Region): number => {
     if (binding.kind !== "class" || region.key === undefined || binding.exact !== undefined) return -1;
     const name = keyedEquality(JSON.parse(binding.expression.key), JSON.parse(region.key!.key), region.alias!);
@@ -1999,18 +2001,25 @@ export function emitBlocks(
           return;
         }
         // A scoped slot renders the consumer's template with its props, and patches that rendering
-        // when a prop changes or nested data may have: a nonconforming prop keeps its last value.
+        // when a prop changes or nested data may have: an expression that fails keeps its last value.
         const rendering = `r.x${index}`;
-        // A bound value its declared type does not accept is not given, as live leaves it unset.
-        const accepted = (value: string, at: number): string => {
+        // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
+        // accept warns once (HR007) and is absent (null), as live gives it; absent input is null too.
+        const checks = new Map<number, string>();
+        const given = (value: string, at: number): string => {
           const type = region.propTypes?.[at];
-          return `${value} !== NONCONFORMING${type === undefined ? "" : ` && fits(${value}, ${compactSource(type)})`}`;
+          if (type === undefined) return value;
+          if (!checks.has(at)) checks.set(at, `K${slotPropChecks.push(valueCheckSource(type)) - 1}`);
+          const check = checks.get(at)!;
+          const name = typeof region.slot === "string" && region.slot !== "" ? `Slot \`${region.slot}\`` : "The default slot";
+          const message = `${name} prop \`${region.propNames![at]}\` does not satisfy its declared type \`${formatType(type)}\`.`;
+          return `(${value} != null && ${value} !== ABSENT && (${check}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${region.slot ?? ""}:${region.propNames![at]}`)}, ${JSON.stringify(message)}), false)) ? ${value} : null)`;
         };
         lines.push(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
-          // A prop that does not conform is not given, as live leaves it unset.
-          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (${accepted("y", at)}) s[${JSON.stringify(region.propNames![at])}] = y; }`).join(" ")}`,
+          // A prop whose expression fails is not given, as live leaves it unset.
+          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = ${given("y", at)}; }`).join(" ")}`,
           `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
           `    else if (at !== undefined) { ${body} = ${make}; ${place} }`,
@@ -2020,7 +2029,7 @@ export function emitBlocks(
           `      let w = c & ${NESTED};`,
           ...props.map((prop, at) => {
             const key = JSON.stringify(region.propNames![at]);
-            return `      { const y = ${convertible(prop)}; if (${accepted("y", at)} && !(${key} in t && Object.is(t[${key}], y))) { t[${key}] = y; w = 1; } }`;
+            return `      { let y = ${convertible(prop)}; if (y !== NONCONFORMING && (y = ${given("y", at)}, !(${key} in t && Object.is(t[${key}], y)))) { t[${key}] = y; w = 1; } }`;
           }),
           `      if (w) ${rendering}[0].p(${rendering}[1], ${NESTED}, d);`,
           "    }",
@@ -2598,9 +2607,9 @@ export function emitBlocks(
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "placeFallback", "recordInputs",
-    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "fits",
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce",
     "transitionStyles", "writeTransitionStyle"]
-    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && definition.controller !== undefined) helpers.push("scriptHost");
@@ -2627,6 +2636,7 @@ export function emitBlocks(
     "",
     ...registration === "" ? [] : [registration],
     ...specs,
+    ...slotPropChecks.map((check, at) => `const K${at} = ${check};`),
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
     // A fresh row's first patch has nothing written yet.
     ...(blocks.some((block) => block.row) ? ["const E = new Map();"] : []),

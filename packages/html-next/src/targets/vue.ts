@@ -31,7 +31,7 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { conformingScalarStates, controllerInitials, revertSource, withRevert } from "./state-roots.js";
-import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -175,6 +175,8 @@ interface Context {
   readonly guarded: string[];
   readonly globals: ReadonlySet<string>;
   usesHtml: boolean;
+  /** An outlet checks a declared slot prop with the props module's parser. */
+  usesSlotPropChecks?: boolean;
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
   usesRetainedInlineText: boolean;
@@ -510,16 +512,18 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
     const slotName = quote(node.name ?? "");
     const name = scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
       : node.name === undefined ? "" : ` name=${quote(node.name)}`;
-    // A bound value its declared type does not accept is not given, as live leaves it unset.
+    // A bound value its declared type does not accept is not given, so the consumer reads it as absent.
     const unchecked = (prop: NonNullable<SlotNode["props"]>[number]): boolean =>
       prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, names.template));
     const props = (node.props ?? []).filter(unchecked)
       .map((prop) => ` :${prop.name}=${bound(lowering.value(prop.expressionPlan.ast, names.template))}`).join("");
     const checked = (node.props ?? []).flatMap((prop) => {
       if (unchecked(prop) || prop.type === undefined) return [];
+      context.usesSlotPropChecks = true;
       const accept = context.identifiers.take("slotProp", "");
       // Its declared type says what a consumer reads; a value that does not conform is left out, so the props are not that type.
-      context.guarded.push(`const ${accept} = (value: unknown): any => ${typeCheck(normalizeType(prop.type), "value")} ? { ${quote(prop.name)}: value } : {};`);
+      context.guarded.push(`const ${accept}Check = ${slotPropCheckSource(context.definition, node.name, prop.name, prop.type)};`,
+        `const ${accept} = (value: unknown): any => ${accept}Check(value) ? { ${quote(prop.name)}: value } : {};`);
       return [`...${accept}(${lowering.value(prop.expressionPlan.ast, names.template)})`];
     });
     const spread = checked.length === 0 ? "" : ` v-bind=${bound(`{ ${checked.join(", ")} }`)}`;
@@ -1313,7 +1317,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
     "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "useReflectedProp", "useScopedSlotName",
     "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", ...Object.values(WRITE_PREDICATES)]
-    .filter((name) => new RegExp(`\\b${name}\\b`).test(code)), ...lowering.helpers()].sort();
+    .filter((name) => new RegExp(`\\b${name}\\b`).test(code)),
+    ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks ? ["warnUnless"] : []])].sort();
   const vueTypes = target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"];
   const requestHelpers = definition.controller === undefined ? [] : REQUEST_HELPERS.filter((name) => new RegExp(`\\b${name}\\(`).test(code));
   const lines: string[] = [
@@ -1323,6 +1328,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
     ...(definition.controller !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
       ? [`import { acceptsControllerWrite } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`] : []),
+    ...(!context.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
     ...(target.requests.length === 0 ? [] : [

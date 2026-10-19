@@ -16,9 +16,9 @@ import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, typeCheck, writeCheck } from "./type-guards.js";
+import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
@@ -160,6 +160,7 @@ interface RenderState {
   usesHtml: boolean;
   usesPlainSlots: boolean;
   usesScopedSlots: boolean;
+  usesSlotPropChecks?: boolean;
   usesKeyedLists: boolean;
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
@@ -474,9 +475,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
       const values = node.props!.map((prop) => unchecked(prop) || prop.type === undefined
         ? `${quote(prop.name)}: ${lowering.value(prop.expressionPlan.ast, scope)}`
-        : `...((value: unknown) => ${typeCheck(normalizeType(prop.type), "value")} ? { ${quote(prop.name)}: value } : {})(${lowering.value(prop.expressionPlan.ast, scope)})`).join(", ");
+        : `...((value: unknown) => (${slotPropCheckSource(state.definition, node.name, prop.name, prop.type)})(value) ? { ${quote(prop.name)}: value } : {})(${lowering.value(prop.expressionPlan.ast, scope)})`).join(", ");
       // Its declared type says what a consumer reads; a value that does not conform is left out, so the object is not that type.
       const checked = node.props!.some((prop) => !unchecked(prop));
+      if (checked) state.usesSlotPropChecks = true;
       return `{renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)}`;
     }
     state.usesPlainSlots = true;
@@ -1011,6 +1013,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(target.props.length === 0 ? [] : ["checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
       ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(!renderState.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
@@ -1473,7 +1476,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     component,
     css: styles.css,
     helpers: [
-      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
+      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !(usesController && target.requests.length > 0) && !renderState.usesSlotPropChecks ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),
