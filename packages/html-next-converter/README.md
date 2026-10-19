@@ -2,7 +2,7 @@
 
 Converts a Declarative Components application or library graph into Vue 3.5 or Svelte 5 single-file
 components, or React 19.3 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
-its nested components, its controller (copied beside it), and only the generated helpers its
+its nested components, its component module (copied beside it), and only the generated helpers its
 features need. A Vue component using
 `$html` imports `vue/html.ts`; that helper requires `parse5` as an application dependency for
 deterministic SSR. It parses inert fragments and applies one pinned safe-default allowlist in every
@@ -65,7 +65,7 @@ emit `html-next.conversion.json`, which records the input entries, output entry,
 the target version, and package-shaped `dependencies` and `peerDependencies`. Copy the relevant
 fields from `package` into the published package's `package.json`. `parse5` appears in
 `dependencies` only when an emitted `$html` helper needs it; Vue, React, or Svelte appears in
-`peerDependencies` for its respective output. Dependencies imported by authored controller
+`peerDependencies` for its respective output. Dependencies imported by authored component
 modules remain the publisher's responsibility.
 
 Publish the `.vue` files together with the `.js` and `.d.ts` your Vue build produces from them
@@ -88,7 +88,7 @@ hydration, and exact pixels with the live runtime in Chromium, Firefox, and WebK
 that cannot be represented fail conversion explicitly rather than silently changing behavior.
 Svelte output uses Svelte 5 runes, snippets, attachments, and public lifecycle APIs, with `.svelte`
 components under `generated/svelte/`, each with its styles in its `<style>`. It supports props (including generic
-and state-selected types), state/computed/handlers, named and scoped slots, native events, context, data reads, controllers and refs, native form controls, safe HTML, structural
+and state-selected types), state/computed/handlers, named and scoped slots, native events, context, data reads, component modules and refs, native form controls, safe HTML, structural
 flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
 Svelte's normal compiler owns rendering, SSR, and hydration. Components import the rendering and
 binding helpers their markup and handlers call from the shared `svelte/render.svelte.ts`, which an
@@ -153,8 +153,22 @@ bundlers retain CSS side-effect imports from unused named re-exports in a shared
 even when they remove the unused JavaScript. The on-demand Vite adapter handles pruning for its
 generated named exports.
 
-Controllers initialize once per component instance. Use `host.on("connect", setup)` for setup
-that must run on every connection; return its disconnect cleanup from `setup`. Register other
+Use `module="./behavior.js"` on the component template and export a named `connect`:
+
+```js
+export function connect(host, { signal }) {
+  host.on("click", () => { host.state.open = !host.state.open; });
+  const observer = new ResizeObserver(() => { /* measure the connected root */ });
+  observer.observe(host.root);
+  signal.addEventListener("abort", () => observer.disconnect(), { once: true });
+}
+```
+
+`connect` runs on each DOM connection. Disconnection aborts its signal and releases its
+listeners, effects and returned cleanup. A reconnect keeps the instance's state and starts a
+new activation. SSR renders supplied props without importing this browser module.
+Compatibility `controller` default exports still initialize once per instance; their
+`host.on("connect", setup)` handles repeated connections. Register other
 native events with `host.on(type, listener)`, which detaches listeners while disconnected and
 reattaches them on reconnect. A handler can dispatch its native `$$event` or selected event fields
 to that listener. `<method>` and automatic named-export element methods are unsupported.
@@ -163,6 +177,14 @@ to that listener. `<method>` and automatic named-export element methods are unsu
 are read through `host.data.name`, including their readonly response and status fields. Invalid
 authored state assignments retain the prior value and warn; native control edits retain their
 ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host(:state(state))`.
+
+Vue and Svelte conversion also support an editable initial value with `<state from="$product">`.
+Initialization waits for the expression's inputs to become available; the first accepted local
+write takes ownership immediately. Refreshes never overwrite the draft. `$await`/`$error`/`$else`
+work with these states and their inherited context, as with typed props and computed values.
+React conversion currently reports an explicit error for `<state from>`. See the public
+[state initialization proposal](https://nextwebwg.org/declarative-components/reactivity#state-initialization)
+for the declaration's behavior.
 The [public proposal](https://nextwebwg.org/declarative-components/javascript/) defines these contracts.
 
 A component that declares a `<request>` accepts a function prop for it, named in camelCase

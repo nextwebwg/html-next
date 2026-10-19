@@ -2,6 +2,10 @@
 
 ## 1.0.0-alpha.60
 
+### Added
+
+- Svelte conversion supports `<state from>` through native runes. It initializes once from available inputs, copies record/list drafts, preserves earlier local writes and edits across refreshes and reconnections, and forwards waiting/error status through context and child props. SSR, hydration and generated-code type checks cover the same initialization scenarios as Vue. React conversion still rejects `<state from>` explicitly.
+
 ### Changed
 
 - Explain route groups with ordinary and parenthesized folder paths side by side, showing exactly which folder name is left out of the URL and how the group appears in navigation.

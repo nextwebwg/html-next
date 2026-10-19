@@ -5,6 +5,7 @@
  * only the ones a component imports. It is a `.svelte.ts` module because its attachments use runes.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { INPUT_STATUS_SOURCE } from "./shared-generated.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 import { formatSvelteScript } from "./vue-format.js";
 import { expressionHelpersSource } from "./vue-lowering.js";
@@ -29,6 +30,7 @@ export const SVELTE_RENDER_COMPONENTS = ["formatValue", "isString", "isNumber", 
   "decorate", "hostStateTokens", "publishState", "injectContext"] as const;
 
 const SOURCE = `import { getContext, setContext } from "svelte";
+${INPUT_STATUS_SOURCE}
 import { createAttachmentKey } from "svelte/attachments";
 
 ${expressionHelpersSource()}
@@ -119,13 +121,13 @@ export function writePath(root: unknown, path: readonly unknown[], value: unknow
  * Publishes a state to the component's descendants, which read it with \`<context>\`. The getter
  * keeps every read current.
  */
-export function publishState(tag: string, name: string, read: () => unknown): void {
-  setContext(\`html-next:\${tag}:\${name}\`, { get value() { return read(); } });
+export function publishState(tag: string, name: string, read: () => unknown, status?: () => InputStatus): void {
+  setContext(\`html-next:\${tag}:\${name}\`, { get value() { return read(); }, get status() { return status?.() ?? READY_INPUT; } });
 }
 
 /** The state an ancestor component publishes; a reader with no such ancestor is HR009. */
-export function injectContext(reader: string, from: string, name: string): { readonly value: unknown } {
-  const context = getContext<{ readonly value: unknown } | undefined>(\`html-next:\${from}:\${name}\`);
+export function injectContext<T>(reader: string, from: string, name: string): { readonly value: T; readonly status: InputStatus } {
+  const context = getContext<{ readonly value: T; readonly status: InputStatus } | undefined>(\`html-next:\${from}:\${name}\`);
   if (context !== undefined) return context;
   const message = "<" + reader + "> requires context \u0060" + name + "\u0060 from <" + from + ">.";
   throw Object.assign(new Error("HR009: " + message), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message }) });
