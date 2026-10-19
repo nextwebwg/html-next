@@ -11,6 +11,7 @@ export async function exerciseStateInitialization(page: Page, bundle: string): P
   assert.deepEqual(await page.evaluate(() => ({ value: (window as any).host.state.draft, status: (window as any).port.status("draft").ready,
     child: (window as any).childPort.status("product").ready, context: (window as any).childPort.status("parentDraft").ready, reads: (window as any).reads || [] })),
   { value: undefined, status: false, child: false, context: false, reads: [] });
+  assert.equal(await page.evaluate(() => { (window as any).host.state.draft = 7; return (window as any).host.state.draft; }), undefined, "an invalid write cannot claim a waiting initializer");
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.locator("input.early").fill("Early edit"); await page.locator("input.early").fill("");
   await page.waitForFunction(() => document.querySelector(".early-state")?.textContent === "Early ready.");
@@ -18,7 +19,7 @@ export async function exerciseStateInitialization(page: Page, bundle: string): P
   await page.evaluate(() => { (window as any).host.state.early = null; (window as any).host.state.same = undefined; (window as any).source.publish({ status: { ready: false, pending: true, error: null, stale: false } }); });
   await page.waitForFunction(() => (window as any).port.status("draft").pending && (window as any).childPort.status("parentDraft").pending);
   await page.evaluate(() => (window as any).source.publish({ status: { ready: false, pending: false, stale: false, error: { name: "Error", message: "Offline" } } }));
-  await page.waitForFunction(() => (window as any).port.status("draft").error?.message === "Offline" && (window as any).childPort.status("parentDraft").error?.message === "Offline");
+  await page.waitForFunction(() => (window as any).port.status("draft").error?.message === "Offline" && (window as any).childPort.status("parentDraft").error?.message === "Offline" && document.querySelector("p")?.textContent === "Offline" && document.querySelector("em")?.textContent === "Offline");
   assert.deepEqual(errors, []);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("p")?.textContent, document.querySelector("em")?.textContent]), ["Offline", "Offline"]);
   await page.evaluate(() => (window as any).source.publish({ value: { name: "Old" }, status: { ready: true, pending: true, stale: true, error: null } }));

@@ -241,7 +241,7 @@ describe("framework converter", () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-unlinked-context-"));
     temporary.push(root);
     await writeFile(join(root, "reader.html"), `<template component="x-reader" status="early" summary="Context reader."><defs>
-      <context name="current" from="x-provider"></context>
+      <context name="current" from="x-provider"></context><state name="draft" type="string" from="$current.name"></state>
     </defs><span $value="$current"></span></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["reader.html"] });

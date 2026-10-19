@@ -25,6 +25,7 @@ interface PropInputRecord {
 export interface InputReactions {
   readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
   track(name: string, kind: "value" | "status" | "supplied"): void;
+  notify?(name: string, kind: "value" | "status" | "supplied"): void;
   watch(run: () => void | (() => void)): () => void;
   untracked<T>(run: () => T): T;
 }
@@ -33,6 +34,7 @@ export class PropInputs {
   #options: PropInputOptions;
   readonly #records: Record<string, PropInputRecord> = Object.create(null) as Record<string, PropInputRecord>;
   #port: ComponentInputs | undefined;
+  #reactions: InputReactions | undefined;
   #portOwner: PropInputs | undefined;
   #baseRevisions: ReadonlyMap<string, number> | undefined;
   constructor(options: PropInputOptions) { this.#options = options; }
@@ -137,10 +139,14 @@ export class PropInputs {
     this.#status(record, !snapshot.status.ready && Object.hasOwn(this.#options.defaults, name)
       ? { ...snapshot.status, ready: true, stale: false } : snapshot.status);
     this.#options.invalidate();
+    if (this.#reactions?.notify !== undefined) {
+      this.#reactions.notify(name, "value"); this.#reactions.notify(name, "status"); this.#reactions.notify(name, "supplied");
+    }
     return true;
   }
   port(reactions: InputReactions): ComponentInputs {
     if (this.#portOwner !== undefined) return this.#portOwner.port(reactions);
+    this.#reactions ??= reactions;
     return this.#port ??= createInputPort({
       names: this.#options.names,
       readNames: [...this.#options.names, ...Object.keys(reactions.declarations ?? {})],

@@ -30,6 +30,7 @@ async function controllerHarness(controller: (host: Host) => void) {
   const react = {
     useRef(value: unknown) { return hooks[cursor++] ??= { current: value }; },
     useLayoutEffect(run: () => void | (() => void)) { layouts.push(run); },
+    useEffect(run: () => void | (() => void)) { layouts.push(run); },
   };
   let checkConnection = () => {};
   vi.stubGlobal("MutationObserver", class {

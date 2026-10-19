@@ -1,14 +1,16 @@
 import type { GeneratedArtifact } from "../generate.js";
 
 const SOURCE = `import React from "react";
+import type { InputStatus } from "./props";
 
 const registryKey = Symbol.for("nextwebwg.html-next.react.context.v1");
-type ContextValue = { readonly value: unknown } | undefined;
+type ContextEntry<T> = { readonly value: T; readonly status?: InputStatus; readonly read?: () => T; readonly readStatus?: () => InputStatus; readonly subscribe?: (notify: () => void) => () => void };
+type ContextValue = ContextEntry<unknown> | undefined;
 type Registry = Map<string, React.Context<ContextValue>>;
 const globalRegistry = globalThis as unknown as Record<symbol, Registry | undefined>;
 
 /** A context identity shared by independently converted component libraries. */
-export function componentContext<T>(tag: string, name: string): React.Context<{ readonly value: T } | undefined> {
+export function componentContext<T>(tag: string, name: string): React.Context<ContextEntry<T> | undefined> {
   let registry = globalRegistry[registryKey];
   if (registry === undefined) {
     registry = new Map();
@@ -20,7 +22,7 @@ export function componentContext<T>(tag: string, name: string): React.Context<{ 
     context = React.createContext<ContextValue>(undefined);
     registry.set(key, context);
   }
-  return context as React.Context<{ readonly value: T } | undefined>;
+  return context as React.Context<ContextEntry<T> | undefined>;
 }
 `;
 

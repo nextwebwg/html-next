@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { runInNewContext } from "node:vm";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, it, vi } from "vitest";
 import { componentInputs, READY_INPUT, copyStateSeed } from "../src/inputs.js";
@@ -125,6 +126,24 @@ describe("one-time state initialization", () => {
     const cycle: { next?: unknown } = {}; cycle.next = cycle;
     const copiedCycle = copyStateSeed(cycle);
     assert.equal(copiedCycle.next, copiedCycle);
+  });
+
+  it("copies foreign-realm records and graphs while preserving opaque identities", () => {
+    const foreign = runInNewContext(`(() => {
+      const shared = { name: "Original" }; class Opaque { value = 1; }
+      const graph = { left: shared, right: shared, values: [shared], opaque: new Opaque() };
+      graph.self = graph; return graph;
+    })()`) as { left: { name: string }; right: { name: string }; values: { name: string }[]; opaque: object; self: unknown };
+    const copy = copyStateSeed(foreign);
+    assert.notEqual(copy, foreign); assert.notEqual(copy.left, foreign.left); assert.notEqual(copy.values, foreign.values);
+    assert.equal(copy.left, copy.right); assert.equal(copy.values[0], copy.left); assert.equal(copy.self, copy);
+    assert.equal(Object.getPrototypeOf(copy), Object.getPrototypeOf(foreign));
+    copy.left.name = "Edited"; assert.equal(foreign.left.name, "Original");
+    assert.equal(copy.opaque, foreign.opaque);
+    class LocalOpaque { name = "Kept"; }
+    const opaque = new LocalOpaque(); assert.equal(copyStateSeed(opaque), opaque);
+    const native = new Date(); assert.equal(copyStateSeed(native), native);
+    assert.equal(Object.isFrozen(copy), false);
   });
 
   it("retains waiting and already edited ownership through rendered-form adoption", async () => {

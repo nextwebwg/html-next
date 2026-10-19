@@ -155,6 +155,7 @@ interface EventAttachment {
 interface RenderState {
   readonly definition: ComponentDefinition;
   readonly observe: (scope: Scope) => Scope;
+  readonly status: (name: string, read: string) => string | undefined;
   readonly slotsByTag: ReadonlyMap<string, readonly SlotContract[]> | undefined;
   readonly propsByTag: ReadonlyMap<string, ReadonlySet<string>> | undefined;
   readonly propContractsByTag: ReadonlyMap<string, Readonly<Record<string, PropContract>>> | undefined;
@@ -372,7 +373,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const computed = (state.definition.declarations ?? []).find(declaration => declaration.kind === "computed" && declaration.name === flow.binding?.name);
       const computedStatus = computed === undefined ? undefined : scope.code.get(computed.name)?.replace(/\.get\(\)$/, ".status()");
       const value = flow.binding === undefined ? read : `requireInputStatus(${Object.hasOwn(state.definition.contract.props, flow.binding.name)
-        ? `propInputs.status(${quote(flow.binding.name)})` : computedStatus ?? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)`}, ${flow.binding.handlesError})`;
+        ? `propInputs.status(${quote(flow.binding.name)})` : computedStatus ?? state.status(flow.binding.name, read) ?? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)`}, ${flow.binding.handlesError})`;
       const alias = localIdentifier(flow.alias, scope, state);
       const scoped = localScope(scope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, scope) : present(flow.aliasType), alias]]);
       const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
@@ -875,7 +876,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const handlerTakesEvent = new Set<HandlerDeclaration>();
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
-  if (states.some(state => state.initializer !== undefined)) fail("HT030", "React conversion of <state from> is not implemented.");
+  const initializedStates = states.filter(state => state.initializer !== undefined);
+  const initializedNames = new Set(initializedStates.map(state => state.name));
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
@@ -905,6 +907,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const scriptSetters = new Map([...scriptNames].map(([name, variable]) => [name, allocate(`set${pascal(variable)}`)] as const));
   const stateSetters = new Map(states.map((state) => [state.name, allocate(`set${pascal(valueNames.get(state.name)!)}`)] as const));
   const stateGetters = new Map(states.map((state) => [state.name, allocate(`get${pascal(valueNames.get(state.name)!)}`)] as const));
+  const stateSubscriptions = new Map(states.filter(state => (providedContexts.has(state.name) || usesController) && state.initializer === undefined).map(state => [state.name, allocate(`subscribe${pascal(valueNames.get(state.name)!)}`)] as const));
+  const stateTouches = new Map(states.filter(state => usesController && state.initializer === undefined).map(state => [state.name, allocate(`notify${pascal(valueNames.get(state.name)!)}`)] as const));
+  const stateOwners = new Map(initializedStates.map(state => [state.name, allocate(`${valueNames.get(state.name)!}Seed`)] as const));
+  const contextEntries = new Map(contexts.map((context, index) => [context.as ?? context.name, `__context${index}!`] as const));
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
   const stateWritesName = invalidateStateName === "" ? "" : allocate("stateWrites");
@@ -937,10 +943,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     const inferred = state.expression === undefined ? UNKNOWN : typeOf(state.expression.ast, { code, types });
     const declaredType = declarationTypeNode(state.type, state.shape);
     const declared = declaredType === undefined ? inferred : present(declaredType);
-    code.set(state.name, valueNames.get(state.name)!);
+    code.set(state.name, state.initializer === undefined ? valueNames.get(state.name)! : `${stateOwners.get(state.name)!}.get()`);
     types.set(state.name, { ...declared, nullable: declared.nullable || state.expression === undefined });
     stateTypes.set(state.name, state.expression === undefined && declaredType !== undefined
-      ? `${typeScript(present(declaredType))} | null`
+      ? `${typeScript(present(declaredType))} | null${state.initializer === undefined ? "" : " | undefined"}`
       : typeScript(types.get(state.name)!));
   }
   const stateType = (state: ReactiveDeclaration): string => stateTypes.get(state.name)!;
@@ -969,7 +975,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   for (const context of contexts) {
     const alias = context.as ?? context.name;
     code.set(alias, valueNames.get(alias)!);
-    types.set(alias, UNKNOWN);
+    const provider = options.componentGraph?.get(context.from)?.declarations?.find(value => value.kind === "state" && value.name === context.name);
+    const declared = provider?.kind === "state" ? declarationTypeNode(provider.type, provider.shape) : undefined;
+    types.set(alias, declared === undefined ? UNKNOWN : { ...present(declared), nullable: true });
   }
   // A fresh render recreates these lazy cells. Forward references stay valid, and a cyclic read
   // reaches the diagnostic guard instead of failing while the generated declarations initialize.
@@ -983,7 +991,15 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const attachments: EventAttachment[] = [];
   const root: ElementNode = template;
   const scope = { code, types };
+  const declarationStatus = (name: string, read: string, canonical = false): string | undefined => {
+    if (initializedNames.has(name)) return `${stateOwners.get(name)!}.${canonical ? "readStatus" : "status"}()`;
+    const entry = contextEntries.get(name);
+    if (entry !== undefined) return canonical ? `(${entry}.readStatus?.() ?? ${entry}.status ?? READY_INPUT)` : `(${entry}.status ?? ((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT))`;
+    return undefined;
+  };
   const observedScope = (source: Scope, inputs = "propInputs") => inputScope(source, (name, read) => {
+    const status = declarationStatus(name, read, inputs.endsWith(".committed"));
+    if (status !== undefined) return status;
     if (Object.hasOwn(definition.contract.props, name)) return `${inputs}.status(${quote(name)})`;
     if (computedByName.has(name)) return read.replace(/\.get\(\)$/, ".status()");
     return states.some(state => state.name === name) || contexts.some(context => (context.as ?? context.name) === name)
@@ -992,9 +1008,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
   const styles = compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
-  const renderState: RenderState = { definition, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
+  const renderState: RenderState = { definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
-      : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : undefined), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
+      : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : declarationStatus(name, read)), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
     nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
@@ -1038,21 +1054,22 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")} }>`;
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
   const contextMarkup = states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
-    `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
+    `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${code.get(state.name)!}, ${state.initializer === undefined ? `subscribe: ${stateSubscriptions.get(state.name)!}, ` : `status: ${stateOwners.get(state.name)!}.status(), readStatus: ${stateOwners.get(state.name)!}.readStatus, subscribe: ${stateOwners.get(state.name)!}.subscribe, `}read: ${stateGetters.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
   const HEAD_IMPORTS = "/* html-next head imports */";
   const written = [
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
     'import React from "react";',
     'import type { ReactNode } from "react";',
-    ...(target.props.length === 0 && !checksControllerWrites && !renderState.usesInputStatus && computed.length === 0 ? [] : [`import { ${[
+    ...(target.props.length === 0 && !checksControllerWrites && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 ? [] : [`import { ${[
       ...(target.props.length === 0 ? [] : ["checkedProp", "checkPropInput", "usePropInputs", "BINDING_INPUTS_PROP", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
-      ...(!renderState.usesInputStatus && computed.length === 0 ? [] : ["requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT"]),
+      ...(!renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 ? [] : ["requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT"]),
+      ...(initializedStates.length === 0 ? [] : ["useInitializedState"]),
       ...(computed.length === 0 ? [] : ["inputComputed"]),
-      ...(computed.length === 0 && !renderState.usesInputExpressions ? [] : ["inputRead", "inputDefault"]),
-      ...(!renderState.usesInputExpressions ? [] : ["evaluateInput"]),
+      ...(computed.length === 0 && initializedStates.length === 0 && !renderState.usesInputExpressions ? [] : ["inputRead", "inputDefault"]),
+      ...(!renderState.usesInputExpressions && initializedStates.length === 0 ? [] : ["evaluateInput"]),
       ...((computed.length > 0 || renderState.usesInputExpressions) && target.props.length === 0 ? ["BINDING_INPUTS_PROP"] : []),
-      ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
+      ...(checksControllerWrites || initializedStates.length > 0 ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(!renderState.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
@@ -1079,7 +1096,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...[...imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.tsx`)};`),
     ...[...new Map(contexts.filter((context) => context.from !== definition.contract.tag || !providedContexts.has(context.name))
       .map((context) => [`${context.from}:${context.name}`, context] as const)).values()]
-      .map((context) => `const ${contextExportName(context.from, context.name)} = componentContext<unknown>(${quote(context.from)}, ${quote(context.name)});`),
+      .map((context) => `const ${contextExportName(context.from, context.name)} = componentContext<${types.get(context.as ?? context.name) === UNKNOWN ? "unknown" : `${typeScript(types.get(context.as ?? context.name)!)} | undefined`}>(${quote(context.from)}, ${quote(context.name)});`),
     ...(checksControllerWrites ? [`const controllerStateTypes = ${JSON.stringify(controllerStateTypes)} as const;`] : []),
     ...(usesController && target.requests.length > 0 ? [`const requestAsk = ${frameworkRequestSource(target.requests, definition.source.file)};`] : []),
     ...target.events.map((event) =>
@@ -1130,7 +1147,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const type = select === undefined ? JSON.stringify(normalizeType(prop.contract.type))
           : Object.hasOwn(definition.contract.props, select.from)
             ? `selectedPropNode(values[${quote(select.from)}], ${JSON.stringify(select.options)})`
-            : `selectedPropNode(${stateGetters.get(select.from)!}(), ${JSON.stringify(select.options)})`;
+            : `selectedPropNode(source ? ${stateGetters.get(select.from)!}() : ${code.get(select.from)!}, ${JSON.stringify(select.options)})`;
         return `    case ${quote(prop.name)}: return checkPropInput(value, ${type}, false, ${!prop.contract.required});`;
       }),
       `    default: return { ok: false }; } });`,
@@ -1142,35 +1159,6 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }),
       "  };",
     ]),
-    ...(stateWritesName === "" ? [] : [`  const ${stateWritesName} = React.useRef<unknown[][]>([]);`]),
-    // Handlers read a state's latest write through its getter; rendering reads the value React has.
-    ...states.map((state) => {
-      // A state without value reads null until written, as in every target (types#null-and-missing-values).
-      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope);
-      return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
-    }),
-    ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
-    ...stateSelectedProps.map((prop) =>
-      `  checkedProps[${quote(prop.name)}] = propInputs.value<${typeSource(prop.contract.type)}${prop.contract.required ? "" : " | null"}>(${quote(prop.name)}, props[${quote(prop.name)}], _inputBindings as any, inputAccepted);`),
-    ...(target.props.length === 0 ? [] : [
-      "  const propInputValues = { ...checkedProps,",
-      ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] == null ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
-      "  };",
-      "  const reflectedAttrs = {",
-      ...target.props.map((prop) => {
-        const value = `(hasMounted.current && !inputAccepted[${quote(prop.name)}] ? props[${quote(prop.name)}] : checkedProps[${quote(prop.name)}])`;
-        const serialized = `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`;
-        return `    ...(Object.hasOwn(props, ${quote(prop.name)}) ? { ${quote(propAttribute(definition.contract.tag, prop.name))}: ${value} == null ? undefined : (${serialized}) } : {}),`;
-      }),
-      "  };",
-    ]),
-    ...data.map((declaration) => {
-      const parameters = declaration.parameters.map((parameter) =>
-        `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
-      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from")
-        .map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
-      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
-    }),
     ...contexts.flatMap((context, index) => {
       const variable = `__context${index}`;
       const alias = context.as ?? context.name;
@@ -1178,8 +1166,34 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       return [
         `  const ${variable} = React.useContext(${contextExportName(context.from, context.name)});`,
         `  if (${variable} === undefined) throw Object.assign(new Error(${quote(`HR009: ${message}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message: ${quote(message)} }) });`,
-        `  const ${valueNames.get(alias)!} = ${variable}.value;`,
+        `  const ${valueNames.get(alias)!} = ${variable}.value${types.get(alias) === UNKNOWN ? " as any" : ""};`,
       ];
+    }),
+    ...(stateWritesName === "" ? [] : [`  const ${stateWritesName} = React.useRef<unknown[][]>([]);`]),
+    // Handlers read a state's latest write through its getter; rendering reads the value React has.
+    ...states.map((state) => {
+      // A state without value reads null until written, as in every target (types#null-and-missing-values).
+      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope);
+      if (state.initializer !== undefined) {
+        const canonicalCode = new Map(scope.code);
+        for (const prop of target.props) canonicalCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
+        for (const item of states) canonicalCode.set(item.name, `${stateGetters.get(item.name)!}()`);
+        for (const item of computed) canonicalCode.set(item.name, `${controllerComputedNames.get(item.name)!}.get()`);
+        for (const [alias, entry] of contextEntries) canonicalCode.set(alias, `((${entry}.read === undefined ? ${entry}.value : ${entry}.read())${types.get(alias) === UNKNOWN ? " as any" : ""})`);
+        const expression = lowering.value(state.initializer.ast, observedScope(scope));
+        const canonical = lowering.value(state.initializer.ast, observedScope({ code: canonicalCode, types: scope.types }, "propInputs.committed"));
+        const declared = declarationTypeNode(state.type, state.shape);
+        return `  const ${stateOwners.get(state.name)!}: ReturnType<typeof useInitializedState<${stateType(state)}>> = useInitializedState<${stateType(state)}>(() => evaluateInput(() => ${expression}), () => evaluateInput(() => ${canonical}), value => ${declared === undefined ? "true" : `acceptsControllerWrite(value, ${JSON.stringify(declared)}, []) || ${lowering.use("warnUnless")}(false, ${quote(`initializer:${state.name}`)}, ${quote(`State \`${state.name}\` does not satisfy its declared type.`)})`}, cycleCheckedComputed${stateWritesName === "" ? contexts.length === 0 ? "" : ", undefined, undefined" : `, ${stateWritesName}.current, ${quote(state.name)}`}${contexts.length === 0 ? "" : `, [${[...contextEntries.values()].join(", ")}]`});\n  const ${stateSetters.get(state.name)!} = ${stateOwners.get(state.name)!}.set, ${stateGetters.get(state.name)!} = ${stateOwners.get(state.name)!}.read;`;
+      }
+      return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}${stateSubscriptions.has(state.name) ? `, ${stateSubscriptions.get(state.name)!}` : ""}${stateTouches.has(state.name) ? `, ${stateTouches.get(state.name)!}` : ""}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
+    }),
+    ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
+    ...data.map((declaration) => {
+      const parameters = declaration.parameters.map((parameter) =>
+        `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
+      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from")
+        .map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
+      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
     }),
     ...computed.map((value) => {
       const type = typeScript(types.get(value.name)!);
@@ -1196,6 +1210,36 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }
       return `  const ${valueNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, cycleCheckedComputed);`;
     }),
+    ...(usesController || initializedStates.length > 0 ? computed.map((value) => {
+      const controllerCode = new Map(scope.code);
+      for (const prop of target.props) controllerCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
+      for (const state of states) controllerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
+      for (const [alias, entry] of contextEntries) controllerCode.set(alias, `((${entry}.read === undefined ? ${entry}.value : ${entry}.read())${types.get(alias) === UNKNOWN ? " as any" : ""})`);
+      for (const declaration of computed) controllerCode.set(declaration.name, `${controllerComputedNames.get(declaration.name)!}.get()`);
+      const controllerScope: Scope = { code: controllerCode, types: scope.types };
+      const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, observedScope(controllerScope, "propInputs.committed"));
+      const type = typeScript(types.get(value.name)!);
+      if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, controllerScope)) {
+        const previous = computedPreviousNames.get(value.name)!;
+        return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current?.value ?? null as ${type} : (${previous}.current = { value: next }).value, ${previous}.current === undefined ? undefined : READY_INPUT);`;
+      }
+      return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, (compute) => cycleCheckedComputed(compute, false));`;
+    }) : []),
+    ...stateSelectedProps.map((prop) =>
+      `  checkedProps[${quote(prop.name)}] = propInputs.value<${typeSource(prop.contract.type)}${prop.contract.required ? "" : " | null"}>(${quote(prop.name)}, props[${quote(prop.name)}], _inputBindings as any, inputAccepted);`),
+    ...(target.props.length === 0 ? [] : [
+      "  const propInputValues = { ...checkedProps,",
+      ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] == null ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
+      "  };",
+      "  const reflectedAttrs = {",
+      ...target.props.map((prop) => {
+        const value = `(hasMounted.current && !inputAccepted[${quote(prop.name)}] ? props[${quote(prop.name)}] : checkedProps[${quote(prop.name)}])`;
+        const serialized = `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`;
+        return `    ...(Object.hasOwn(props, ${quote(prop.name)}) ? { ${quote(propAttribute(definition.contract.tag, prop.name))}: ${value} == null ? undefined : (${serialized}) } : {}),`;
+      }),
+      "  };",
+    ]),
+    ...initializedStates.map(state => `  const ${valueNames.get(state.name)!} = ${stateOwners.get(state.name)!}.get();`),
     ...(hostStateNames.length === 0 ? [] : [
       `  const hostState = [${hostStateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" ");`,
     ]),
@@ -1284,6 +1328,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const state = states.find((candidate) => candidate.name === step.writablePath[0]);
         if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
         const setter = stateSetters.get(state.name)!;
+        const assignment = state.initializer === undefined ? setter : `${stateOwners.get(state.name)!}.assign`;
         const value = lowering.value(step.value.ast, handlerScope);
         const mayBeInvalid = mayProduceInvalidResult(step.value.ast, handlerScope);
         const proven = !mayBeInvalid && provenWrite(step, definition);
@@ -1309,12 +1354,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           const write = step.writablePath.length > 1 ? setPath(reverted)
             : self !== undefined ? `${setter}((${current}) => ${self.decimal
               ? `${lowering.use(self.op === "+" ? "decimalAdd" : "decimalSubtract")}(${current}, ${self.amount})` : `${current} ${self.op} ${self.amount}`})`
-            : (unknown ? `${setter}(() => ${reverted} as typeof ${current})`
-              : category(destination) === category(typeOf(step.value.ast, handlerScope).type) ? `${setter}(${reverted})`
-              : `${setter}(${reverted} as ${declared === undefined ? "never" : `typeof ${current}`})`);
+            : (unknown ? state.initializer === undefined ? `${setter}(() => ${reverted} as typeof ${current})` : `${assignment}(${reverted} as typeof ${current})`
+              : category(destination) === category(typeOf(step.value.ast, handlerScope).type) ? `${assignment}(${reverted})`
+              : `${assignment}(${reverted} as ${declared === undefined ? "never" : `typeof ${current}`})`);
           return `    ${guard}${write}${write.endsWith("}") ? "" : ";"}`;
         }
-        const to = step.writablePath.length > 1 ? `(next) => ${setPath("next")}` : unknown ? `(next) => ${setter}(() => next)` : setter;
+        const to = step.writablePath.length > 1 ? `(next) => ${setPath("next")}` : unknown ? state.initializer === undefined ? `(next) => ${setter}(() => next)` : `(next) => ${assignment}(next)` : assignment;
         return `    ${guard}${lowering.use("write")}(${to}, ${reverted}${writeCheck(destinationCheck, definition, handler, step)});`;
       });
       const takesEvent = [...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line));
@@ -1364,12 +1409,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const control = attachment.control;
         const write = control?.write;
         const setter = write === undefined ? "" : stateSetters.get(write.state)!;
+        const assignment = write === undefined || !initializedNames.has(write.state) ? undefined : `${stateOwners.get(write.state)!}.assign`;
         // An emptied control's null reverts the state to its declared value; the update returns what the
         // state took, so the control is not echoed that value.
         const revert = write === undefined ? undefined : bindingRevertSource(definition, write.state, write.path === "[]" ? undefined : "path");
         const written = revert === undefined ? "value" : `(value ?? ${revert})`;
         const update = write === undefined ? "undefined" : write.path === "[]"
-          ? `(value) => { const written = ${written}; ${setter}(() => written as typeof ${valueNames.get(write.state)!}); return written; }`
+          ? `(value) => { const written = ${written}; ${assignment === undefined ? `${setter}(() => written as typeof ${valueNames.get(write.state)!})` : `${assignment}(written as typeof ${valueNames.get(write.state)!})`}; return written; }`
           : stateWritesName === "" ? `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; const written = ${written}; ${setter}((previous) => writeBoundPath(previous, path, written)); return written; }`
           : `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; const written = ${written}; ${setter}((previous) => writeBoundPath(previous, path, written), path); return written; }`;
         const genericUpdates = attachment.genericWrites.map((generic, index) => {
@@ -1377,7 +1423,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           const valueName = valueNames.get(generic.state)!;
           const revert = bindingRevertSource(definition, generic.state, generic.path === "[]" ? undefined : "path");
           const written = revert === undefined ? "value" : `(value ?? ${revert})`;
-          const source = generic.path === "[]" ? `(value) => ${writeSetter}(() => ${written} as typeof ${valueName})`
+          const source = generic.path === "[]" ? initializedNames.has(generic.state) ? `(value) => ${stateOwners.get(generic.state)!}.assign(${written} as typeof ${valueName})` : `(value) => ${writeSetter}(() => ${written} as typeof ${valueName})`
             : stateWritesName === "" ? `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, ${written})); }`
             : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, ${written}), path); }`;
           return `const genericCleanup${index} = attachGenericBinding(element, ${source});`;
@@ -1404,20 +1450,6 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         return `  const ${attachment.name} = React.useCallback((element: Element | null, paths?: readonly (((() => readonly (string | number)[]) | undefined))[]${attachment.scoped ? ", scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }" : ""}) => ${callback}, []);`;
       }),
     ] : []),
-    ...(usesController ? computed.map((value) => {
-      const controllerCode = new Map(scope.code);
-      for (const prop of target.props) controllerCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
-      for (const state of states) controllerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
-      for (const declaration of computed) controllerCode.set(declaration.name, `${controllerComputedNames.get(declaration.name)!}.get()`);
-      const controllerScope: Scope = { code: controllerCode, types: scope.types };
-      const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, observedScope(controllerScope, "propInputs.committed"));
-      const type = typeScript(types.get(value.name)!);
-      if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, controllerScope)) {
-        const previous = computedPreviousNames.get(value.name)!;
-        return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current?.value ?? null as ${type} : (${previous}.current = { value: next }).value, ${previous}.current === undefined ? undefined : READY_INPUT);`;
-      }
-      return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, (compute) => cycleCheckedComputed(compute, false));`;
-    }) : []),
     ...(!headed ? [] : [
       ...[...scriptNames].map(([name, variable]) => `  const [${variable}, ${scriptSetters.get(name)!}] = React.useState<ScriptStatus>({ pending: false, ok: false, error: null });`),
       ...(definition.head === undefined ? [] : ["  const headKept = React.useRef<unknown[]>([]).current;", `  const headDepth = useHead(rootRef, ${headEntriesSource(definition, (expression) => {
@@ -1437,17 +1469,22 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    props: () => ${target.props.length === 0 ? "({})" : "acceptedProps.current"},`,
       ...(target.props.length === 0 ? [] : [
         `    propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
-        `    inputs: propInputs,`,
-        `    propInputs: (name: string) => propInputs.inputValue(name),`,
-        `    propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ...propInputValues${propSelectors.map((selector) => `, ${propKey(selector)}: checkedProps[${quote(selector)}]`).join("")}${stateSelectors.map((selector) => `, ${propKey(selector)}: ${valueNames.get(selector)!}`).join("")} } }, name),`,
+        `    inputs: propInputs.committed,`,
+        `    propInputs: (name: string) => propInputs.committed.inputValue(name),`,
+        `    propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ${target.props.map(prop => `${propKey(prop.name)}: propInputs.committed.inputValue(${quote(prop.name)})`).join(", ")}${propSelectors.map((selector) => `, ${propKey(selector)}: propInputs.committed.read(${quote(selector)})`).join("")}${stateSelectors.map((selector) => `, ${propKey(selector)}: ${stateGetters.get(selector)!}()`).join("")} } }, name),`,
       ]),
-      `    state: { ${states.map((state) => `${propKey(state.name)}: { get: ${stateGetters.get(state.name)!}, set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
+      ...(contexts.length === 0 ? [] : [`    contexts: [${[...contextEntries].map(([alias, entry]) => `{ name: ${quote(alias)}, subscribe: ${entry}.subscribe }`).join(", ")}],`]),
+      `    state: { ${states.map((state) => `${propKey(state.name)}: { get: ${stateGetters.get(state.name)!}, set: (value: unknown) => { ${state.initializer === undefined ? `${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!})` : `${stateOwners.get(state.name)!}.assign(value as typeof ${valueNames.get(state.name)!})`}; }, touch: ${state.initializer !== undefined ? `${stateOwners.get(state.name)!}.touch` : stateTouches.has(state.name) ? `() => { ${stateTouches.get(state.name)!}(); ${invalidateStateName}(); }` : invalidateStateName}${state.initializer !== undefined ? `, subscribe: ${stateOwners.get(state.name)!}.subscribe` : stateSubscriptions.has(state.name) ? `, subscribe: ${stateSubscriptions.get(state.name)!}` : ""} }`).join(", ")} },`,
       ...(stateWritesName === "" ? [] : [`    written: () => ${stateWritesName}.current.splice(0),`]),
       `    computed: { ${[
         ...computed.map((value) => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.get()`),
-        ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => ${valueNames.get(value.as ?? value.name)!}`),
+        ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => (${contextEntries.get(value.as ?? value.name)!}.read === undefined ? ${valueNames.get(value.as ?? value.name)!} : ${contextEntries.get(value.as ?? value.name)!}.read!())`),
       ].join(", ")} },`,
-      ...(computed.length === 0 ? [] : [`    availability: { ${computed.map(value => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.status()`).join(", ")} },`]),
+      ...(computed.length + initializedStates.length + contexts.length === 0 ? [] : [`    availability: { ${[
+        ...computed.map(value => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.status()`),
+        ...initializedStates.map(value => `${propKey(value.name)}: ${stateOwners.get(value.name)!}.readStatus`),
+        ...contexts.map(value => `${propKey(value.as ?? value.name)}: () => ${declarationStatus(value.as ?? value.name, valueNames.get(value.as ?? value.name)!, true)}`),
+      ].join(", ")} },`]),
       `    data: { ${data.map((value) => `${propKey(value.name)}: () => ${valueNames.get(value.name)!}`).join(", ")} },`,
       ...(scriptNames.size === 0 ? [] : ["    scripts: headScripts,"]),
       ...(checksControllerWrites ? [`    acceptsState: (name, keys, value) => acceptsControllerWrite(value, controllerStateTypes[name as keyof typeof controllerStateTypes], keys),`] : []),
@@ -1527,7 +1564,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     component,
     css: styles.css,
     helpers: [
-      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
+      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),

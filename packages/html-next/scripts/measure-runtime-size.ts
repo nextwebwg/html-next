@@ -165,7 +165,9 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_804);
 // status observation; +17 B on computed-counter for existing-property notification of status.
 const propGenerated = await generatedFixture("prop-button", 13_991);
 const awaitGenerated = await generatedFixture("await-card", 14_562);
-const seededGenerated = await generatedFixture("state-seed", 16_001);
+// +55 B gzip: the seed-copy cold path recognizes ordinary foreign-realm records,
+// retaining local/foreign class and platform identities. Local record/list copies keep their fast path.
+const seededGenerated = await generatedFixture("state-seed", 16_056);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
 const computedGenerated = await generatedFixture("computed-counter", 8_502);

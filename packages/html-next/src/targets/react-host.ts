@@ -15,6 +15,7 @@ interface InputBookkeeping {
   port(reactions: {
     readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
     track(name: string, kind: "value" | "status" | "supplied"): void;
+    notify?(name: string, kind: "value" | "status" | "supplied"): void;
     watch(run: () => void | (() => void)): () => void;
     untracked<T>(run: () => T): T;
   }): unknown;
@@ -59,10 +60,12 @@ export interface StateAccess {
   readonly get: () => unknown;
   readonly set: (value: unknown) => void;
   readonly touch: () => void;
+  readonly subscribe?: (notify: () => void) => () => void;
 }
 
 export interface ComponentHostOptions {
   readonly inputs?: InputBookkeeping;
+  readonly contexts?: readonly { readonly name: string; readonly subscribe?: (notify: () => void) => () => void }[];
   readonly root: React.RefObject<Element | null>;
   readonly definition: string;
   readonly controller: string;
@@ -147,6 +150,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     readonly synchronize: () => void;
     readonly disconnect: () => void;
     readonly checkValues: () => void;
+    readonly contextChanged: (name: string) => void;
     readonly relayLateResponders: () => void;
   } | null>(null);
 
@@ -249,8 +253,9 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           const entry = latest.current.state[name]!;
           const previous = entry.get();
           entry.set(value);
-          if (Object.is(previous, value)) return;
-          previousValues.set("state:" + name, value);
+          const accepted = entry.get();
+          if (Object.is(previous, accepted)) return;
+          previousValues.set("state:" + name, accepted);
           changedPath([name]);
         },
       }])),
@@ -284,6 +289,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
             },
           }])),
           track: (name, kind) => track(dependency("prop:" + kind + ":" + name)),
+          notify: (name, kind) => { notify(dependency("prop:" + kind + ":" + name)); if (kind === "status") checkValues(); },
           watch: run => host.effect(run),
           untracked: run => { const previous = activeReaction; activeReaction = undefined; try { return run(); } finally { activeReaction = previous; } },
         });
@@ -467,7 +473,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       cleanup = undefined;
     };
     const synchronize = (): void => {
-      const next = latest.current.root.current;
+      // Suspense hides connected DOM and detaches refs; a ref gap is not a DOM disconnection.
+      const next = latest.current.root.current ?? (root?.isConnected === true ? root : null);
       if (root !== next) {
         // A root-arm replacement keeps the logical component connected. Only a genuine
         // interval without a connected root ends its controller lifetime.
@@ -536,11 +543,21 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       for (const name of replaced) if (!writes.some((path) => path[0] === name)) changedPath([name]);
       checkComputed();
     };
-    runtime.current = { host, synchronize, disconnect, checkValues, relayLateResponders };
+    runtime.current = { host, synchronize, disconnect, checkValues, contextChanged: name => { checkValues(); changedPath([name]); }, relayLateResponders };
   }
 
   React.useLayoutEffect(() => { runtime.current!.checkValues(); runtime.current!.synchronize(); runtime.current!.relayLateResponders(); });
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
+    let active = true;
+    const changed = (name?: string): void => { queueMicrotask(() => { if (active) { if (name === undefined) runtime.current!.checkValues(); else runtime.current!.contextChanged(name); } }); };
+    const stops = [
+      ...Object.values(options.state).flatMap(state => state.subscribe === undefined ? [] : [state.subscribe(() => changed())]),
+      ...(options.contexts ?? []).flatMap(context => context.subscribe === undefined ? [] : [context.subscribe(() => changed(context.name))]),
+    ];
+    runtime.current!.checkValues();
+    return () => { active = false; for (const stop of stops) stop(); };
+  }, [...Object.values(options.state).map(state => state.subscribe), ...(options.contexts ?? []).map(context => context.subscribe)]);
+  React.useEffect(() => {
     const root = latest.current.root.current;
     if (root === null) return;
     const stopObserving = observeConnection(root, runtime.current!.synchronize);
@@ -552,7 +569,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
 export function useLifecycle(root: { readonly current: Element | null }, connect?: () => void, disconnect?: () => void): void {
   const latest = React.useRef({ connect, disconnect });
   React.useLayoutEffect(() => { latest.current = { connect, disconnect }; });
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     const element = root.current;
     if (element === null) return;
     let connected = false;
