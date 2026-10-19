@@ -247,7 +247,8 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               (document.querySelector("#number") as HTMLInputElement).value === "23")));
             await compare();
             await Promise.all(pages.map((page) => page.locator("#number").fill("")));
-            await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "")));
+            // An emptied number reverts form.amount to its value in the declared value.
+            await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "12")));
             await compare();
             const setSelected = async (value: unknown) => {
               await Promise.all(pages.map((page) => page.evaluate((next) => {
@@ -298,22 +299,26 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await compareSelected([5, 5, true], ["Hello", "Hello", true]);
             await setMode("prop", "number");
             await compareSelected([5, 5, true], [5, 5, true]);
+            // An emptied control reverts selected.value to its value in the declared value.
             await Promise.all(pages.map((page) => page.locator("#state-selected").fill("")));
-            await compareSelected([5, 5, true], [5, 5, true]);
+            await compareSelected([12, 12, true], [12, 12, true]);
             await setSelected(17);
             await compareSelected([17, 17, true], [17, 17, true]);
             await setMode("state", "none");
             await compareSelected([17, 17, false], [17, 17, true]);
+            // A null field write reverts to the declared value's field, 12; the field with no type for its
+            // mode takes no binding, so it keeps 17.
             await setSelected(null);
-            await compareSelected([17, 17, false], [17, 17, true]);
+            await compareSelected([17, 17, false], [12, 12, true]);
             await setMode("state", "number");
-            await compareSelected([17, 17, true], [17, 17, true]);
+            await compareSelected([12, 12, true], [12, 12, true]);
             for (const next of [14, "invalid", 6, null]) {
               await Promise.all(pages.map((page) => page.evaluate((value) => {
                 (window as unknown as { fieldsHost: { state: { literalInput: { value: unknown } } } }).fieldsHost.state.literalInput.value = value;
               }, next)));
               await compare();
               const mixed = (await snapshot(live)).selected;
+              // Null reverts literalInput.value to its declared "invalid", which the number props refuse, so 6 stays.
               const value = next === 14 || next === "invalid" ? 14 : 6;
               for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1", "mixed-selected-from", "mixed-selected-bind", "mixed-selected-prop-from", "mixed-selected-prop-bind"]) assert.deepEqual(mixed[id], { value, input: value, valid: true });
             }

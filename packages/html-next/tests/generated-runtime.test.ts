@@ -99,12 +99,13 @@ describe("compact declared types", () => {
   it("checks destinations and steps into types like the declared-type system", () => {
     const object: CompactType = ["o", ["id", "n", "tags", ["l", "s"]]];
     const open: CompactType = ["o", ["id", "i"], 1];
+    // Null, or undefined, means not present: never a wrong-typed write.
     const cases: Array<[CompactType, unknown, boolean]> = [
-      [0, undefined, true], ["?", undefined, true], ["?", null, true], ["s", "", true], ["s", 1, false], ["s", null, false],
+      [0, undefined, true], ["?", undefined, true], ["?", null, true], ["s", "", true], ["s", 1, false], ["s", null, true],
       ["b", false, true], ["b", 0, false], ["n", Number.NaN, false], ["n", Infinity, false], ["n", -0, true], ["i", 1.5, false],
-      ["i", 2, true], ["z", null, true], ["z", 0, false], ["a", undefined, true], ["a", null, false],
+      ["i", 2, true], ["z", null, true], ["z", 0, false], ["a", undefined, true], ["a", null, true],
       [["l", "s"], [1], true], [["l", "s"], {}, false], [["r", "n"], [], false], [["r", "n"], new Date(), true],
-      [object, { id: "x" }, true], [object, null, false], [["u", "n", "z"], null, true], [["u", "n", "z"], undefined, false],
+      [object, { id: "x" }, true], [object, null, true], [["u", "n", "z"], null, true], [["u", "n", "z"], undefined, true],
       [["u", "n", "z"], 3, true], [["u", ["l", "s"], "s"], "x", true], [["u", "s", "?"], null, true],
     ];
     for (const [type, value, expected] of cases) assert.equal(conforms(value, type), expected, `${JSON.stringify(type)} ${String(value)}`);
@@ -368,7 +369,7 @@ describe("generated controller host", () => {
     document.body.append(root);
     await flush();
     assert.ok(Object.isFrozen(host));
-    assert.deepEqual(Object.keys(host), ["root", "element", "state", "data", "on", "props", "refs", "slots", "signal", "computed", "effect", "dispatch"]);
+    assert.deepEqual(Object.keys(host), ["root", "element", "state", "reset", "data", "on", "props", "refs", "slots", "signal", "computed", "effect", "dispatch"]);
     host.effect(() => { log.push(`effect ${host.state.rows.length}`); });
     const row = { id: 1, label: "a" };
     host.state.rows = [row];

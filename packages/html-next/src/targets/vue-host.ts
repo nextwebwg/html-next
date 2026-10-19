@@ -201,6 +201,7 @@ export interface ComponentHostOptions {
   /** Each named declared script, which a controller reads as \`host.scripts\`. */
   readonly scripts?: Readonly<Record<string, unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  readonly initials?: Readonly<Record<string, unknown>>;
   /** Asks one of the component's declared requests; its \`has\` builds \`host.hasResponder\`. */
   readonly request?: ((root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: any) => Promise<unknown>)
     & { readonly has?: (host: any, own: string[]) => (name: string) => boolean };
@@ -326,6 +327,7 @@ export function useComponentHost(
       computed: Object.fromEntries([...Object.entries(computedValues), ...Object.entries(context)].map(([name, value]) => [name, () => value.value])),
       data: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, () => value.value])),
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
+      ...(options.initials === undefined ? {} : { initials: options.initials }),
     }, options.controllerSource?.definition ?? "<component>"),
     scripts: options.scripts ?? Object.freeze({}),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void { return listen(type, callback); },

@@ -160,8 +160,10 @@ export const checkObject = (
   const issues: TypeIssue[] = [];
   const names = new Set(fields.map(([name]) => name));
   for (const [name, check, optional] of fields) {
-    if (!(name in input)) {
+    // An optional field that is null is a missing one (types#null-and-missing-values).
+    if (!(name in input) || optional && input[name] == null) {
       if (!optional) issues.push({ reason: "typeMismatch", message: "Required field is absent.", path: childPath(path, name) });
+      else if (name in input) output[name] = null;
       continue;
     }
     const result = check(input[name], childPath(path, name), "value");

@@ -204,8 +204,8 @@ export async function load({ breadcrumbs, pager }) {
 <template component="site-shell">
   <defs>
     <prop name="crumbs" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... }))" required>Trail</prop>
-    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })" nullable>Previous page</prop>
-    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })" nullable>Next page</prop>
+    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })">Previous page</prop>
+    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })">Next page</prop>
   </defs>
   <main>
     <hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs>

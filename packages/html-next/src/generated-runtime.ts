@@ -7,7 +7,8 @@ import { documentState, lifecycleKey, type RuntimeElement } from "./generated-li
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent, isPlatformObject } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
-import { applyBoundControlValue, controlValue } from "./controls.js";
+import { applyBoundControlValue, controlValue, holdControl } from "./controls.js";
+import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
 import { currentProjection, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
@@ -710,7 +711,8 @@ export function acceptProps(
   }
   for (const name of names) {
     const prop = props[name]!;
-    v[at(name)] = accepted[name] !== undefined ? accepted[name] : prop.default === undefined ? null : prop.default;
+    // A null input means not present, so the prop takes its default (`invocationValue`).
+    v[at(name)] = accepted[name] != null ? accepted[name] : prop.default === undefined ? null : prop.default;
   }
   const inputs: Record<string, PropInput> = Object.create(null);
   for (const name of names) inputs[name] = incoming[name] ?? { value: null, source: "value", present: false };
@@ -831,8 +833,8 @@ export function manageProps(instance: GeneratedInstance): void {
       for (const [name, value] of Object.entries(input)) {
         const prop = props[name];
         if (prop === undefined || (prop.select !== undefined) !== pass) continue;
-        // A framework's undefined returns the prop to its default (`assignedPropValue`).
-        const accepted = value !== undefined ? taken(selected(prop, next), value, "value") : prop.default === undefined ? null : prop.default;
+        // A framework's null or undefined returns the prop to its default (`assignedPropValue`).
+        const accepted = value != null ? taken(selected(prop, next), value, "value") : prop.default === undefined ? null : prop.default;
         if (accepted !== undefined) next[name] = accepted;
       }
     }
@@ -841,8 +843,8 @@ export function manageProps(instance: GeneratedInstance): void {
       if (prop === undefined) continue;
       // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
       const previous = inputs[name];
-      if (previous?.source !== "value" || previous.present !== (value !== undefined) || !Object.is(previous.value, value === undefined ? null : value)) {
-        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+      if (previous?.source !== "value" || previous.present !== (value != null) || !Object.is(previous.value, value === undefined ? null : value)) {
+        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value != null };
         notifyPropertySet(inputs, name, previous, inputs[name], undefined);
       }
       // A bound data-* attribute is template output; only its binding writes it.
@@ -1059,16 +1061,10 @@ export function clearRegion(start: Comment, end: Comment): void {
 /**
  * A declared type in generated form: 0 none, "?" unknown, "s" string, "b" boolean, "n" number,
  * "i" integer, "z" null, "a" absent, ["l", item], ["r", value], ["o", [field, type, ...], open?],
- * ["u", ...members], ["k", keyword], ["p", check, acceptsNull] for any other kind (a format, a
- * function, an event, trusted content), and ["c", base, acceptsNull] for a constrained type whose
- * base accepts null: a reference checks only the base, a null write the whole type.
+ * ["u", ...members], ["k", keyword], and ["p", check] for any other kind (a format, a function,
+ * an event, trusted content). A constrained type is its base's: writes check the immediate type.
  */
 export type CompactType = 0 | "?" | "s" | "b" | "n" | "i" | "z" | "a" | readonly unknown[];
-
-const acceptsNull = (type: CompactType): boolean =>
-  type === "?" || type === "z" || typeof type === "object" && (
-    type[0] === "u" ? type.some((member, index) => index > 0 && acceptsNull(member as CompactType))
-      : (type[0] === "p" || type[0] === "c") && type[2] === true);
 
 /** A string format's check over any value. */
 export const formatOf = (format: (value: string) => boolean) => (value: unknown): boolean => typeof value === "string" && format(value);
@@ -1093,7 +1089,6 @@ const conformsAtReference = (value: unknown, type: CompactType): boolean => {
     case "u": return (type as readonly unknown[]).some((member, index) => index > 0 && conformsAtReference(value, member as CompactType));
     case "k": return value === (type as readonly unknown[])[1];
     case "p": return ((type as readonly unknown[])[1] as (value: unknown) => boolean)(value);
-    case "c": return conformsAtReference(value, (type as readonly unknown[])[1] as CompactType);
   }
   return false;
 };
@@ -1107,7 +1102,8 @@ export const referenceConforms = (value: unknown, type: CompactType): boolean =>
 
 /** @internal The destination check (`conformsAtDestination`) on a compact type. */
 export const conforms = (value: unknown, type: CompactType): boolean =>
-  type === 0 || (value === null ? acceptsNull(type) : conformsAtReference(value, type));
+  // Null means not present: it is never a wrong-typed write (types#null-and-missing-values).
+  type === 0 || value == null || conformsAtReference(value, type);
 
 /** @internal The declared type one step into `type` (`typeAtKey`); 0 when nothing describes it. */
 export function compactTypeAt(type: CompactType, key: PropertyKey): CompactType {
@@ -1163,6 +1159,8 @@ export interface GeneratedStateSpec {
   readonly r?: typeof readonlyView;
   /** Declared requests' detail and answer checks, which `host.request` applies as the live host does. */
   readonly q?: Readonly<Record<string, RequestChecks>>;
+  /** Each writable state's declared `value`, which a null write and `host.reset` restore; absent when none has one. */
+  readonly i?: readonly unknown[];
 }
 
 /** What `host.request` uses to abort the current connection's requests: paused, it aborts them. */
@@ -1635,7 +1633,12 @@ export function bindControl(instance: GeneratedInstance, target: Element, path: 
         // An outer local's value arrives as an object, reached through a facade of its own.
         object = typeof step === "object" && step !== null ? instance.p(step) : (object as Record<PropertyKey, unknown>)[step as PropertyKey];
       }
-      if (object != null) (object as Record<PropertyKey, unknown>)[resolved.at(-1) as PropertyKey] = controlValue(target);
+      if (object == null) return;
+      const value = controlValue(target);
+      const key = resolved.at(-1) as PropertyKey;
+      (object as Record<PropertyKey, unknown>)[key] = value;
+      // An emptied control reverts its state; the control keeps showing what the user left.
+      holdControl(target, value === null ? raw((object as Record<PropertyKey, unknown>)[key]) : undefined);
     } finally { trusted = false; }
   }, false, false, false);
 }
@@ -1879,6 +1882,13 @@ export function attachGeneratedController(
     }
     return facade.p;
   };
+  /** A field's value in its state's declared `value`: the root facade's key names the state. */
+  const revertedField = (facade: Facade, key: PropertyKey): unknown => {
+    const keys: PropertyKey[] = [key];
+    let root = facade;
+    for (; root.u !== undefined; root = root.u) keys.unshift(root.k);
+    return initialAt(spec.i?.[names.indexOf(root.k as string)], keys);
+  };
   const traps: ThisType<Facade> & ProxyHandler<object> = {
     get(target, key, receiver) {
       if (key === RAW) return target;
@@ -1893,7 +1903,11 @@ export function attachGeneratedController(
       }
       const length = Array.isArray(target) ? target.length : undefined;
       const previous: unknown = Reflect.get(target, key);
-      const next = raw(value);
+      // A null or undefined field goes back to its value in the state's declared `value` (types#null-and-missing-values).
+      let next = raw(value);
+      if (next == null) {
+        next = revertedField(this, key);
+      }
       Reflect.set(target, key, next);
       if (!Object.is(previous, next) || length !== undefined && length !== (target as unknown[]).length) written(this);
       notifyPropertySet(target, key, previous, next, length);
@@ -1934,7 +1948,8 @@ export function attachGeneratedController(
       else if (!trusted && !conforms(value, types[index]!)) mismatch(String(key));
       else {
         const previous = values[index];
-        const next = raw(value);
+        // A null or undefined state goes back to its declared `value` (types#null-and-missing-values).
+        const next = raw(value) ?? initialAt(spec.i?.[index], []);
         if (!Object.is(previous, next)) {
           assign(index, next);
           notifyPropertySet(roots, key, previous, next, undefined);
@@ -1961,6 +1976,11 @@ export function attachGeneratedController(
     get root(): Element { trackProperty(handle, "e"); return handle.e; },
     get element(): Element { trackProperty(handle, "e"); return handle.e; },
     state,
+    reset(name?: string): void {
+      const index = name === undefined ? -1 : names.indexOf(name);
+      if (name !== undefined && (index < 0 || index >= writable)) throw new TypeError(`\`${String(name)}\` is not a state of <${spec.g}>.`);
+      for (let each = index < 0 ? 0 : index; each < (index < 0 ? writable : index + 1); each += 1) (state as Record<string, unknown>)[names[each]!] = null;
+    },
     data,
     on(type: string, callback: (event: Event) => void | (() => void)) {
       let stopped = false;

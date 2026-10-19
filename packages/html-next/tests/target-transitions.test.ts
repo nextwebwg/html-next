@@ -76,7 +76,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
     for (const artifact of generateComponent(parseComponent(`<template component="x-gallery" controller="./gallery-controller.js" status="early" summary="Morph fixture.">
       <defs>
         <state name="photos" type="list(object({ id: string }))" value="[{ id: 'a' }, { id: 'b' }]"></state>
-        <state name="selected" type="unknown" value="null"></state>
+        <state name="selected" type="unknown"></state>
       </defs>
       <section>${morph}</section>
     </template>`, "x-gallery.html"), { extensions: ["transitions"] })) {

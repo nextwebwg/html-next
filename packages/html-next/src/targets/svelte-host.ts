@@ -29,6 +29,8 @@ export interface ComponentHostOptions {
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  /** Each state's declared \`value\`, which a null write and \`host.reset\` restore. */
+  readonly initials?: Readonly<Record<string, unknown>>;
   /** Asks one of the component's declared requests; its \`has\` builds \`host.hasResponder\`. */
   readonly request?: ((root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: any) => Promise<unknown>)
     & { readonly has?: (host: any, own: string[]) => (name: string) => boolean };
@@ -42,6 +44,7 @@ interface ControllerHost {
   readonly root: Element;
   readonly element: Element;
   readonly state: Record<string, unknown>;
+  readonly reset: (name?: string) => void;
   readonly data: Readonly<Record<string, unknown>>;
   readonly scripts: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {

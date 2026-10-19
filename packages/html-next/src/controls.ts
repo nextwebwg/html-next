@@ -20,6 +20,19 @@ export function controlValue(element: Element): Value {
   return (element as unknown as { value?: Value }).value ?? element.getAttribute("value");
 }
 
+const held = new WeakMap<Element, unknown>();
+
+/**
+ * An emptied control's write reverts its state to the declared `value`
+ * (types#null-and-missing-values); the binding does not echo that value back into the control the
+ * user is editing. `reverted` is the value the state took, or undefined to release the control. A
+ * later value that differs, written from anywhere else, shows normally.
+ */
+export function holdControl(element: Element, reverted: unknown): void {
+  if (reverted == null) held.delete(element);
+  else held.set(element, reverted);
+}
+
 /**
  * Writes a bound value into a native control, skipping writes the control already agrees with.
  *
@@ -28,6 +41,10 @@ export function controlValue(element: Element): Value {
  * value. Echoing the user's own input back would therefore switch off their constraints.
  */
 export function applyBoundControlValue(element: Element, name: string, value: Value): boolean {
+  if (held.has(element)) {
+    if (Object.is(held.get(element), value)) return true;
+    held.delete(element);
+  }
   const lowerName = name.toLowerCase();
   if (lowerName === "checked" && element instanceof HTMLInputElement) {
     const next = truthy(value);

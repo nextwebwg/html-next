@@ -4,6 +4,26 @@
 
 - Establish the independently versioned Expressive Markdown package with ESM/types, installed-consumer verification, and a protected release workflow. This is a name reservation with no public API; parsing and writing are not implemented.
 
+## 1.0.0-alpha.59
+
+### Breaking
+
+- `nullable` is no longer a declaration attribute, on a `<prop>`, a `<state>` or a nested field. A declared value keeps its type, as a reflected attribute such as `tabIndex` does ([Types](https://nextwebwg.org/declarative-components/types#null-and-missing-values)): a prop with a `default`, or a state with a `value`, always reads as its type, and null clears it back to that default or value; a prop or state with neither reads null until it is given one. A declaration with `nullable` is `HC013`, which says to remove it (the live parser warns and reads the declaration without it). To migrate, delete `nullable`; for a field written `required nullable`, delete both, since a missing field reads null.
+
+### Added
+
+- `host.reset(name)` returns one state to its declared `value`, a fresh copy of an object or list, or to null without one; `host.reset()` resets every state in one batch. A name that is not a declared `<state>`, such as a computed, context or prop, throws a `TypeError`. It notifies as any write does, only when the value changes. Typed hosts type `reset` with the component's state names. The live runtime, compiled Vanilla output and converted Vue, React and Svelte components have it.
+
+### Changed
+
+- A null or undefined prop clears it to its `default`, or to null without one, whether it comes from a bound expression, a framework prop or `componentRegistry.update`; it is no longer an explicit input. Vue, React and Svelte passed a null prop through even when it had a default.
+- A null or undefined write to a state, from a controller, `<set>` or `bind:`, reverts a state with a `value` to that value, and a field below a state to its value in the state's declared `value`, or to null where that has none; a state without a `value` stores null. A null write is never wrong-typed, so it never warns `HR007`; a closed Looma Disclosure with no `headingLevel` no longer warns. A present value of the wrong type still warns.
+- A bound control that the user empties reverts its state to its declared `value` without that value being written back into the control: the field stays empty while the state reads its value, until the state takes another value from elsewhere. The live runtime, compiled Vanilla output and converted Vue, React and Svelte components behave the same.
+- Typed hosts: a state's setter takes `T | null | undefined`; a state with a `value` reads `T`, and one without reads `T | null` (it was `T | undefined`). A React state without a `value` starts as null, as in the other targets. An optional object field that is null reads as missing and is typed `T | null`.
+- Generated Vanilla modules carry their states' declared values, and the direct js-framework-benchmark entry grows by 158 B gzip.
+
+A browser test runs the live runtime, compiled Vanilla output and converted Vue, React and Svelte components through a null prop returning to its default, null and undefined writes to states with and without a `value` at the root and below, a `<set>` of null, `host.reset` with and without a name and with a name it refuses, an emptied number input bound to a state with `value="0"` that stays empty while the state reads 0 and shows a later write, and a wrong-typed write that still warns once.
+
 ## 1.0.0-alpha.58
 
 - Expressive Markdown tooling has moved to the independent [`nextwebwg/expressmark`](https://github.com/nextwebwg/expressmark) repository and is no longer part of this workspace.
