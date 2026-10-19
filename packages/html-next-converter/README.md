@@ -178,11 +178,12 @@ are read through `host.data.name`, including their readonly response and status 
 authored state assignments retain the prior value and warn; native control edits retain their
 ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host(:state(state))`.
 
-Vue and Svelte conversion also support an editable initial value with `<state from="$product">`.
+Vue, React and Svelte conversion support an editable initial value with `<state from="$product">`.
 Initialization waits for the expression's inputs to become available; the first accepted local
 write takes ownership immediately. Refreshes never overwrite the draft. `$await`/`$error`/`$else`
 work with these states and their inherited context, as with typed props and computed values.
-React conversion currently reports an explicit error for `<state from>`. See the public
+React renders provisional seeds during SSR and concurrent rendering, then claims only committed
+inputs or accepted local writes. An abandoned render cannot initialize a connected instance. See the public
 [state initialization proposal](https://nextwebwg.org/declarative-components/reactivity#state-initialization)
 for the declaration's behavior.
 The [public proposal](https://nextwebwg.org/declarative-components/javascript/) defines these contracts.

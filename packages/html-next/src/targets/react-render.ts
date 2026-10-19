@@ -24,19 +24,24 @@ ${expressionHelpersSource()}
  * With \`written\`, a write that changes the value records the state's name and the path below it
  * that the write changed, for a controller host to read.
  */
-export function useLiveState<T>(initial: T, written?: unknown[][], name?: string): readonly [T, (next: T | ((previous: T) => T), path?: readonly unknown[]) => void, () => T] {
+export function useLiveState<T>(initial: T, written?: unknown[][], name?: string): readonly [T, (next: T | ((previous: T) => T), path?: readonly unknown[]) => void, () => T, (notify: () => void) => () => void, () => void] {
   const [value, setValue] = React.useState<T>(initial);
-  const latest = React.useRef(value);
-  React.useLayoutEffect(() => { latest.current = value; });
+  const latest = React.useRef<{ value: T; revision: number; listeners?: Set<() => void>; subscribe?: (notify: () => void) => () => void; touch?: () => void }>({ value, revision: 0 });
+  const base = latest.current.revision;
+  React.useLayoutEffect(() => { if (latest.current.revision === base) latest.current.value = value; });
   const set = React.useCallback((next: T | ((previous: T) => T), path: readonly unknown[] = []) => {
-    const previous = latest.current;
+    const current = latest.current;
+    const previous = current.value;
     const resolved = typeof next === "function" ? (next as (previous: T) => T)(previous) : next;
-    latest.current = resolved;
+    current.value = resolved;
+    if (!Object.is(previous, resolved)) { current.revision++; for (const notify of current.listeners ?? []) notify(); }
     setValue(() => resolved);
     if (written !== undefined && !Object.is(previous, resolved)) written.push([name, ...path]);
   }, []);
-  const get = React.useCallback(() => latest.current, []);
-  return [value, set, get];
+  const get = React.useCallback(() => latest.current.value, []);
+  const subscribe = latest.current.subscribe ??= (notify: () => void): (() => void) => { (latest.current.listeners ??= new Set()).add(notify); return () => { latest.current.listeners?.delete(notify); }; };
+  const touch = latest.current.touch ??= (): void => { const current = latest.current; current.revision++; for (const notify of current.listeners ?? []) notify(); };
+  return [value, set, get, subscribe, touch];
 }
 
 /** Equal props, with style compared entry by entry: a control with them commits nothing. Its initial default only seeds it. */

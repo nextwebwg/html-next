@@ -933,9 +933,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /parameters: \(\) => \(\{ q: query\.value, token: token\.value \}\)/);
   });
 
-  it("reports unfinished one-time state conversion instead of silently dropping its initializer", () => {
+  it("lowers one-time state initializers for all reactive targets", () => {
     const definition = parseComponent('<template component="x-draft"><defs><prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs><output>{$draft}</output></template>');
-    assert.throws(() => generateReactComponent(definition), /React conversion of <state from> is not implemented/);
+    assert.match(generateReactComponent(definition), /useInitializedState<string \| null \| undefined>/);
     const svelte = generateSvelteOutput(definition, "test").component;
     assert.match(svelte, /initializedState<string>/);
   });

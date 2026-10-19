@@ -20,7 +20,13 @@ export function copyStateSeed<T>(value: T, seen?: WeakMap<object, object>): T {
   if (value === null || typeof value !== "object") return value;
   const array = Array.isArray(value);
   const prototype: unknown = Object.getPrototypeOf(value);
-  if (!array && prototype !== null && prototype !== Object.prototype) return value;
+  if (!array && prototype !== null && prototype !== Object.prototype) {
+    // A different realm has its own Object.prototype. Inspect only that cold path;
+    // class instances and platform objects keep their identity instead of becoming drafts.
+    const constructor: unknown = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value;
+    if (Object.getPrototypeOf(prototype) !== null || typeof constructor !== "function" ||
+      constructor.prototype !== prototype || Function.prototype.toString.call(constructor) !== Function.prototype.toString.call(Object)) return value;
+  }
   const known = seen ?? new WeakMap<object, object>();
   const previous = known.get(value);
   if (previous !== undefined) return previous as T;

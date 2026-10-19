@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0-alpha.61
+
+### Added
+
+- React conversion supports `<state from>` with copied drafts, early local-write ownership, inherited input status and first-frame SSR. Concurrent renders preview seeds without initializing the connected instance; accepted source data and child layout edits survive suspended renders and retries.
+
+### Fixed
+
+- React modules with prop-selected types emit each validity input once, retaining committed selector reads and valid generated TypeScript.
+- React source publications notify value and status watchers without rerunning unchanged caller-ownership eligibility.
+- State draft copying recognizes ordinary records from another realm while preserving class and platform object identities.
+- React data drivers receive canonical input notifications while a render is suspended. Hiding connected DOM with Suspense preserves module activation and data bindings until the root actually disconnects.
+
 ## 1.0.0-alpha.60
 
 ### Added

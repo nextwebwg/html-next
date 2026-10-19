@@ -241,7 +241,7 @@ describe("framework converter", () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-unlinked-context-"));
     temporary.push(root);
     await writeFile(join(root, "reader.html"), `<template component="x-reader" status="early" summary="Context reader."><defs>
-      <context name="current" from="x-provider"></context>
+      <context name="current" from="x-provider"></context><state name="draft" type="string" from="$current.name"></state>
     </defs><span $value="$current"></span></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["reader.html"] });
@@ -718,6 +718,22 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
+      .map((artifact) => join(outDirectory, artifact.path)));
+  });
+
+  it("typechecks React module validity with shared prop selectors and state selectors", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "x-card.js"), "export function connect() {}\n");
+    await writeFile(join(root, "x-card.html"), `<template component="x-card" module="./x-card.js"><defs>
+      <prop name="format" type="keyword" values="text, number" default="number">Format.</prop>
+      <prop name="answer">Answer.<type from="format"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      <prop name="other">Other.<type from="format"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      <state name="mode" type="keyword" values="text, number" value="text"></state>
+      <prop name="local">Local.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+    </defs><output $value="$answer"></output></template>`);
+    const outDirectory = join(root, "out-react-selected-validity");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
+    await typecheckReact(root, manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path))
       .map((artifact) => join(outDirectory, artifact.path)));
   });
 
