@@ -13,9 +13,9 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
-import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, writeCheck } from "./type-guards.js";
+import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { formatSvelteScript } from "./vue-format.js";
@@ -152,6 +152,7 @@ interface RenderContext {
   readonly inputNames: ReadonlyMap<string, string>;
   readonly slotsByTag?: SvelteConversionOptions["slotsByTag"];
   usesScopedSlots: boolean;
+  usesSlotPropChecks?: boolean;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   readonly styleOwner?: string;
   /** The scoped styles' root and limits: the root's tag, and each invoked component's, as classes. */
@@ -395,10 +396,12 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const checked = scoped ? `checkedSlot(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
       const value = lowering.value(prop.expressionPlan.ast, scope);
-      // A bound value its declared type does not accept keeps the last one it did, as live keeps it.
-      const source = prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope)) ? value
-        : `((value: unknown) => ${typeCheck(normalizeType(prop.type), "value")} ? value : Symbol.for('html-next.invalid-result'))(${value})`;
-      return `${objectKey(prop.name)}: ${source !== value || mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
+      // A typed value its declared type does not accept is absent (null), as live gives it; an invalid result keeps the last value.
+      const unchecked = prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
+      if (!unchecked) context.usesSlotPropChecks = true;
+      const source = unchecked || prop.type === undefined ? value
+        : `((value: unknown) => typeof value === "symbol" || (${slotPropCheckSource(context.definition, node.name, prop.name, prop.type)})(value) ? value : null)(${value})`;
+      return `${objectKey(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
     }).join(", ")} }` : "{}";
     const children = !scoped && defaultSlot && hasChildren ? "{:else if children}{@render children()}" : "";
     return `{#if true}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
@@ -1389,6 +1392,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...((context.usesComponentBindings || context.usesDeclaredFormats) ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(!context.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(usesControllerTypeChecks ? [`import { acceptsControllerWrite } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"}${structuredInputs.size > 0 ? ", parseHtmlLiteral" : ""} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
@@ -1616,7 +1620,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     body = body.replace(ROOT_ELEMENT, "");
     template = template.replace(/\s*bind:this=\{rootElement\}/, "");
   }
-  const rendered = [...new Set([...lowering.helpers(), ...SVELTE_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(`${body}\n${template}`))])].sort();
+  const rendered = [...new Set([...lowering.helpers(), ...context.usesSlotPropChecks ? ["warnUnless"] : [], ...SVELTE_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(`${body}\n${template}`))])].sort();
   body = body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? "" : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? SVELTE_RENDER_SPECIFIER)};\n`);
   // Svelte's convention indents the script under its tag.
   const formatted = formatSvelteScript(body, `${definition.contract.name}.ts`).trimEnd().split("\n").map((line) => line === "" ? line : `\t${line}`).join("\n");
@@ -1624,7 +1628,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n${style}`;
   return { component, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
+      ...(hasProps || usesControllerTypeChecks || context.usesSlotPropChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
         (usesController && requestProps.length > 0) ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),

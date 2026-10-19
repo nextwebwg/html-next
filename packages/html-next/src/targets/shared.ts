@@ -5,7 +5,7 @@ import type { PropContract, PropType } from "../types.js";
 import { isPreformattedElement } from "../language.js";
 import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
-import { typeScriptType } from "../type-system.js";
+import { formatType, normalizeType, typeScriptType } from "../type-system.js";
 
 /** Reflected native properties with an HTML representation during server rendering. */
 export const SSR_BOOLEAN_PROPERTIES = new Set(["disabled", "hidden", "required", "readOnly", "multiple", "open", "controls"]);
@@ -105,6 +105,23 @@ export function slotPropsType(declared: Readonly<Record<string, PropContract>>):
     return `readonly ${propKey(name)}${prop.required || prop.default !== undefined ? "" : "?"}: ${type};`;
   }).join(" ")} }`;
 }
+
+/**
+ * A bound slot prop's check as an arrow function's source: absent, null and an invalid result are not
+ * given; a value its declared type does not accept, checked in full as a prop's input is
+ * (`acceptsSlotProp`, the props module's shared parser), warns once (HR007) and is not given.
+ */
+export function slotPropCheckSource(definition: { readonly source: { readonly file: string }; readonly contract: { readonly tag: string } },
+  slot: string | undefined, prop: string, type: PropType): string {
+  const file = definition.source.file;
+  const normalized = normalizeType(type);
+  const name = slot === undefined ? "The default slot" : `Slot \`${slot}\``;
+  const message = `${file}: HR007: ${name} prop \`${prop}\` does not satisfy its declared type \`${formatType(normalized)}\`.`;
+  return `(value: any): boolean => value != null && typeof value !== "symbol" && warnUnless(acceptsSlotProp(value, ${JSON.stringify(normalized)}), ${quote(`${file}#${definition.contract.tag}:slot:${slot ?? ""}:${prop}`)}, ${quote(message)})`;
+}
+
+/** The props module's full value check, imported under the name slot prop checks call it by. */
+export const SLOT_PROP_IMPORT = "acceptsDeclaredEvent as acceptsSlotProp";
 
 /** One generic parameter per selecting prop keeps generated call-site types correlated. */
 export function selectorGenerics(props: Readonly<Record<string, PropContract>>): readonly {

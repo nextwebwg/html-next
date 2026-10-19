@@ -2,7 +2,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { checkExpressionSemantics, compileExpression, compilePath, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
+import { checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
@@ -1758,6 +1758,15 @@ function parseElementAtSource(
         ...prop,
         expressionPlan: compileScopedExpression(prop.expression, slotScope, source),
       }));
+      // A bound value that reads nothing is known when the definition is read: one its declared type rejects is an error.
+      for (const prop of props) {
+        if (prop.type === undefined || prop.expressionPlan.dependencies.length > 0) continue;
+        let value: unknown;
+        try { value = evaluateCompiled(prop.expressionPlan, { get: () => undefined }); } catch { continue; }
+        if (value != null && !parseTypedValue(value, prop.type, "$", "value").ok) {
+          fail("HT008", `${name === undefined ? "<slot>" : `<slot name="${name}">`} gives prop \`${prop.name}\` a value that does not satisfy its declared type \`${formatType(prop.type)}\`.`, source);
+        }
+      }
       const declared = contract.slots?.[name ?? ""]?.props;
       if (name === undefined) {
         slotState.defaults += 1;
