@@ -1,6 +1,9 @@
 import type { GeneratedArtifact } from "../generate.js";
+import { INPUT_STATUS_SOURCE } from "./shared-generated.js";
 
-const SOURCE = `/** Native Svelte derived tracking, with the shared diagnostic at a recursive read. */
+const SOURCE = `import { untrack } from "svelte";
+${INPUT_STATUS_SOURCE}
+/** Native Svelte derived tracking, with the shared diagnostic at a recursive read. */
 export function cycleCheckedComputed<T>(compute: () => T): { get(): T } {
   // Svelte compares deriveds with ===; a box kept while the result is Object.is-equal stops NaN too.
   let box: { readonly value: T } | undefined;
@@ -20,6 +23,42 @@ export function cycleCheckedComputed<T>(compute: () => T): { get(): T } {
     try { return value.value; }
     finally { reading = false; }
   } };
+}
+
+/** A state owns its first available seed, or an earlier accepted local write. */
+export function initializedState<T>(evaluate: () => { value: unknown; status: InputStatus }, accepts: (value: unknown) => boolean,
+  copy: <V>(value: V) => V, warn: () => void): { value: T | null | undefined; status(): InputStatus; start(): void } {
+  let value = $state<T | null | undefined>(undefined);
+  let initialized = false;
+  let seed: ReturnType<typeof cycleCheckedComputed<ReturnType<typeof evaluate>>> | undefined = cycleCheckedComputed(evaluate);
+  const initialize = (): void => {
+    if (initialized) return;
+    const next = seed!.get();
+    if (!next.status.ready || next.status.stale || next.value === undefined) return;
+    if (!accepts(next.value)) { warn(); return; }
+    initialized = true;
+    seed = undefined;
+    // A lazy read may run inside a derived. The accepted cell is created during setup;
+    // claiming it is a one-time untracked write, while subsequent reads track it normally.
+    untrack(() => { value = copy(next.value) as T; });
+  };
+  const state = {
+    get value(): T | null | undefined { initialize(); return value; },
+    set value(next: T | null | undefined) {
+      if (next != null && !accepts(next)) { warn(); return; }
+      initialized = true;
+      seed = undefined;
+      value = next ?? null;
+    },
+    status(): InputStatus {
+      // Waiting status readers must also observe an early local claim of the cell.
+      void state.value;
+      return initialized ? READY_INPUT
+        : { ...seed!.get().status, ready: false, stale: false };
+    },
+    start(): void { $effect(() => { if (!initialized) void state.value; }); },
+  };
+  return state;
 }
 `;
 

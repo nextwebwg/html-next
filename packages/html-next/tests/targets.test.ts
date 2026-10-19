@@ -15,6 +15,7 @@ import { renderToString } from "@vue/server-renderer";
 import { createElement } from "react";
 import { renderToString as renderReactToString } from "react-dom/server";
 import { JSDOM } from "jsdom";
+import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateSvelteOutput } from "../src/targets/svelte.js";
 import { generateComponent, generateReactComponent, generateVueComponent, reactRenderArtifact, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
@@ -935,7 +936,16 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("reports unfinished one-time state conversion instead of silently dropping its initializer", () => {
     const definition = parseComponent('<template component="x-draft"><defs><prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs><output>{$draft}</output></template>');
     assert.throws(() => generateReactComponent(definition), /React conversion of <state from> is not implemented/);
-    assert.throws(() => generateSvelteOutput(definition, "test"), /Svelte conversion of <state from> is not implemented/);
+    const svelte = generateSvelteOutput(definition, "test").component;
+    assert.match(svelte, /initializedState<string>/);
+  });
+
+  it("includes the Svelte initialization helpers without a module, prop or computed declaration", () => {
+    const definition = parseComponent('<template component="x-draft"><defs><state name="draft" from="\'First\'"></state></defs><output>{$draft}</output></template>');
+    const svelte = generateSvelteOutput(definition, "test");
+    assert.ok(svelte.helpers.includes("props"));
+    assert.ok(svelte.helpers.includes("reactivity"));
+    compileSvelte(svelte.component, { filename: "XDraft.svelte" });
   });
 
   it("rejects a derived state initializer in favor of a computed declaration", () => {
