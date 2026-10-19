@@ -2776,8 +2776,18 @@ function renderSlot(
     for (const prop of props) {
       ownEffect(context, scope, () => {
         const value = evalConforming(prop.expression, scope, context.definition);
-        // A bound value its declared type does not accept is not given, as a nonconforming one is not.
-        if (value !== NONCONFORMING && (prop.type === undefined || conformsAtDestination(value, prop.type))) projectedScope.set(prop.name, value);
+        if (value === NONCONFORMING) return;
+        // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
+        // accept warns once (HR007) and is absent (null); absent input is null too.
+        if (prop.type !== undefined && (value == null || value === ABSENT || !parseTypedValue(value, prop.type, "$", "value").ok)) {
+          if (value != null && value !== ABSENT) {
+            warnAuthored(context.definition, `slot:${name}:${prop.name}`,
+              `${name === "" ? "The default slot" : `Slot \`${name}\``} prop \`${prop.name}\` does not satisfy its declared type \`${formatType(prop.type)}\`.`);
+          }
+          projectedScope.set(prop.name, null);
+          return;
+        }
+        projectedScope.set(prop.name, value);
       });
     }
     const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {
