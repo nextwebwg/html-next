@@ -59,6 +59,8 @@ export interface ComponentHostOptions {
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  /** Each state's declared \`value\`, which a null write and \`host.reset\` restore. */
+  readonly initials?: Readonly<Record<string, unknown>>;
   /** The paths, from a state root, that handler and bound-control writes changed since the last call. */
   readonly written?: () => readonly (readonly unknown[])[];
   /** Asks one of the component's declared requests; its \`has\` builds \`host.hasResponder\`. */
@@ -74,6 +76,7 @@ interface ControllerHost {
   readonly root: Element;
   readonly element: Element;
   readonly state: Record<string, unknown>;
+  readonly reset: (name?: string) => void;
   readonly data: Readonly<Record<string, unknown>>;
   readonly scripts: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {
@@ -233,6 +236,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       data: Object.fromEntries(Object.keys(options.data).map((name) => [name,
         () => { track(dependency("data:" + name)); return latest.current.data[name]!(); }])),
       acceptsState: (name, keys, value) => latest.current.acceptsState?.(name, keys, value) ?? true,
+      ...(options.initials === undefined ? {} : { initials: options.initials }),
       read: (name, keys) => track(pathDependency([name, ...keys])),
       changed: (name, keys) => {
         latest.current.state[name]!.touch();
@@ -246,6 +250,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       },
       get element() { return host.root; },
       state: namespaces.state,
+      reset: namespaces.reset,
       data: namespaces.data,
       scripts: options.scripts ?? Object.freeze({}),
       props: Object.freeze(propHandles),

@@ -30,7 +30,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpressio
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
-import { conformingScalarStates } from "./state-roots.js";
+import { conformingScalarStates, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
@@ -63,7 +63,7 @@ const RESERVED = new Set([
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
-  "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
+  "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
   "SanitizedHtml", "RetainedInlineText", "inlineTextSegment",
   "String", "Boolean", "Number", "Math", "Object", "Array", "Symbol", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
@@ -669,7 +669,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
           node.name === "input" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "type" && ["checkbox", "radio", "file"].includes(entry.value))
           ? "change" : "input";
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
-        const read = `readBoundControl(${control}) as any`;
+        // An emptied control's null reverts the state to its declared value, which the control is not echoed.
+        const revert = revertSource(context.definition, attribute.writablePath, (segment) => lowering.value(segment.expression, names.template));
+        const read = revert === undefined ? `readBoundControl(${control}) as any` : `revertBoundControl(${control}, readBoundControl(${control}), ${revert}) as any`;
         const update = node.name === "input" && attribute.name === "checked"
           // Only an <input> binds checked, so the radio guard reads it as one.
           ? `(($event.currentTarget as HTMLInputElement).type !== 'radio' || ($event.currentTarget as HTMLInputElement).checked) && (${writable} = ${read})`
@@ -679,7 +681,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       } else {
         const value = ast(attribute.expressionPlan, attribute.expression);
         attributes.push(`:${svgAttributeName(attribute.name)}.attr=${bound(lowering.attribute(value, names.template, attribute.name))}`);
-        attributes.push(`@input=${bound(`${writable} = ((($event.currentTarget as Element & { value?: any }).value ?? ($event.currentTarget as Element).getAttribute('value')) as any)`)}`);
+        const revert = revertSource(context.definition, attribute.writablePath, (segment) => lowering.value(segment.expression, names.template));
+        const read = `((($event.currentTarget as Element & { value?: any }).value ?? ($event.currentTarget as Element).getAttribute('value')) as any)`;
+        attributes.push(`@input=${bound(`${writable} = ${revert === undefined ? read : `(${read} ?? ${revert})`}`)}`);
       }
     } else if (isRoot && context.model && attribute.name === "value") {
       // The model supplies the root's value (below).
@@ -814,14 +818,17 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
       const proven = !mayBeInvalid && provenWrite(step, context.definition);
+      // A proven write is never null; any other null or undefined reverts to the declared value.
+      const written = proven ? value : withRevert(value, step.value.ast,
+        revertSource(context.definition, step.writablePath, (segment) => lowering.value(segment.expression, local.script)));
       const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, "value", local.script, lowering));
       if (destinationCheck === undefined && !mayBeInvalid) {
-        lines.push(`  ${guard}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${value}`};`);
+        lines.push(`  ${guard}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${written}`};`);
       } else {
         // A state's ref takes the write itself; a path below it is written through a setter.
         const to = /^[\w$]+\.value$/.test(target) ? target.slice(0, -".value".length) : `(next) => (${target} = next)`;
-        lines.push(`  ${guard}${lowering.use("write")}(${to}, ${value}${writeCheck(destinationCheck, context.definition, handler, step)});`);
+        lines.push(`  ${guard}${lowering.use("write")}(${to}, ${written}${writeCheck(destinationCheck, context.definition, handler, step)});`);
       }
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
@@ -898,12 +905,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
   const propType = (prop: (typeof target.props)[number]): string =>
     parameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, parameters);
+  // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
+  const suppliedProp = (name: string): string => "default" in contract.props[name]!
+    ? `(props[${quote(name)}] ?? ${JSON.stringify(contract.props[name]!.default)})` : `props[${quote(name)}]`;
   const selectedNode = (prop: (typeof target.props)[number]): string =>
     prop.contract.select === undefined
       ? JSON.stringify(normalizeType(prop.contract.type))
       : `selectedPropNode(${contract.props[prop.contract.select.from] === undefined
         ? `${stateNames.get(states.find((state) => state.name === prop.contract.select!.from)!)}.value`
-        : `checkedProp<unknown>(props[${quote(prop.contract.select.from)}], ${JSON.stringify(normalizeType(contract.props[prop.contract.select.from]!.type))}, ${contract.props[prop.contract.select.from]!.required}, ${quote(prop.contract.select.from)}, acceptedProps)`}, ${JSON.stringify(prop.contract.select.options)})`;
+        : `checkedProp<unknown>(${suppliedProp(prop.contract.select.from)}, ${JSON.stringify(normalizeType(contract.props[prop.contract.select.from]!.type))}, ${contract.props[prop.contract.select.from]!.required}, ${quote(prop.contract.select.from)}, acceptedProps)`}, ${JSON.stringify(prop.contract.select.options)})`;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const hasStateSelected = target.props.some((prop) => prop.contract.select !== undefined &&
@@ -1102,7 +1112,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
-    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps)`;
+    const checked = `checkedProp<${type}>(${suppliedProp(prop.name)}, ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps)`;
     const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
     return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
       : `  ${propKey(prop.name)}: ${value},`;
@@ -1329,6 +1339,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(context.usesHydrationControl ? [`import { ${[
       ...(rootMarkup.includes("readBoundControl(") ? ["readBoundControl"] : []),
+      ...(rootMarkup.includes("revertBoundControl(") ? ["revertBoundControl"] : []),
       ...(rootMarkup.includes("v-bind-control=") ? ["vBindControl"] : []),
       ...(rootMarkup.includes("<SelectedOptions ") ? ["SelectedOptions"] : []),
     ].join(", ")} } from ${quote(options.helperSpecifier?.("control") ?? VUE_CONTROL_SPECIFIER)};`] : []),
@@ -1380,6 +1391,7 @@ function hostSource(
     "  root,",
     "  dispatch,",
     ...(Object.keys(stateTypes).length === 0 ? [] : [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, (${JSON.stringify(stateTypes)} as Record<string, any>)[name], keys),`]),
+    ...controllerInitials(definition, "  "),
     `  controllerSource: { specifier: ${quote(controllerSpecifier ?? definition.controller!)}, definition: ${quote(definition.source.file)} },`,
     ...(values.props ? [
       "  props: checkedProps,",

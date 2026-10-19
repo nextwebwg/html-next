@@ -24,8 +24,8 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/decimal.ts",
     "packages/html-next/src/duration.ts",
     "packages/html-next/src/event-filter.ts",
-    "packages/html-next/src/expression.ts",
     "packages/html-next/src/expression-parser.ts",
+    "packages/html-next/src/expression.ts",
     "packages/html-next/src/format.ts",
     "packages/html-next/src/head.ts",
     "packages/html-next/src/hydration-value.ts",
@@ -34,6 +34,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/requests.ts",
     "packages/html-next/src/runtime.ts",
     "packages/html-next/src/selection.ts",
+    "packages/html-next/src/state-initial.ts",
   ],
   typesAndValidation: [
     "packages/html-next/src/css-color-keywords.ts",

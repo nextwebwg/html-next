@@ -487,8 +487,8 @@ export function updatePropValidity(el: Element, value: PropValidityBinding): voi
 export function acceptsControllerWrite(value: unknown, type: TypeNode | undefined, keys: readonly string[]): boolean {
   if (type === undefined) return true;
   if (keys.length === 0) {
-    if (value === undefined) return true;
-    if (value === null) return parse(value, type, "$").ok;
+    // Null means not present: it is never a wrong-typed write (types#null-and-missing-values).
+    if (value === undefined || value === null) return true;
     if (type.kind === "list") return Array.isArray(value);
     if (type.kind === "object" || type.kind === "record") return typeof value === "object" && !Array.isArray(value);
     if (type.kind === "union") return type.members.some((member) => acceptsControllerWrite(value, member, keys));

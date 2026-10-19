@@ -1,4 +1,5 @@
 /** React output is compiled from the same checked component definition as the browser runtime. */
+import { bindingRevertSource, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { compilePath, type ExpressionNode } from "../expression.js";
@@ -901,7 +902,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     code.set(state.name, valueNames.get(state.name)!);
     types.set(state.name, { ...declared, nullable: declared.nullable || state.expression === undefined });
     stateTypes.set(state.name, state.expression === undefined && declaredType !== undefined
-      ? `${typeScript(present(declaredType))} | undefined`
+      ? `${typeScript(present(declaredType))} | null`
       : typeScript(types.get(state.name)!));
   }
   const stateType = (state: ReactiveDeclaration): string => stateTypes.get(state.name)!;
@@ -1083,7 +1084,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  const checkedProps = {",
       ...target.props.map((prop) => {
         const value = `props[${quote(prop.name)}]`;
-        const supplied = "default" in prop.contract ? `${value} === undefined ? ${JSON.stringify(prop.contract.default)} : ${value}` : value;
+        // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
+        const supplied = "default" in prop.contract ? `${value} ?? ${JSON.stringify(prop.contract.default)}` : value;
         return `    ${propKey(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${supplied}, ${selectedType(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false)${"default" in prop.contract ? "!" : ""},`;
       }),
       "  };",
@@ -1091,17 +1093,19 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(stateWritesName === "" ? [] : [`  const ${stateWritesName} = React.useRef<unknown[][]>([]);`]),
     // Handlers read a state's latest write through its getter; rendering reads the value React has.
     ...states.map((state) => {
-      const initial = state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope);
+      // A state without value reads null until written, as in every target (types#null-and-missing-values).
+      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope);
       return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
     }),
     ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
     ...stateSelectedProps.map((prop) => {
       const select = prop.contract.select!;
-      return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(props[${quote(prop.name)}], selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
+      const supplied = `props[${quote(prop.name)}]${"default" in prop.contract ? ` ?? ${JSON.stringify(prop.contract.default)}` : ""}`;
+      return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(${supplied}, selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
     }),
     ...(target.props.length === 0 ? [] : [
       "  const propInputValues = { ...checkedProps,",
-      ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] === undefined ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
+      ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] == null ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
       "  };",
       "  const reflectedAttrs = {",
       ...target.props.map((prop) => {
@@ -1233,6 +1237,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const value = lowering.value(step.value.ast, handlerScope);
         const mayBeInvalid = mayProduceInvalidResult(step.value.ast, handlerScope);
         const proven = !mayBeInvalid && provenWrite(step, definition);
+        // A proven write is never null; any other null or undefined reverts to the declared value.
+        const reverted = proven ? value : withRevert(value, step.value.ast,
+          revertSource(definition, step.writablePath, (segment) => lowering.value(segment.expression, handlerScope)));
         // An untyped state accepts any value, as in the live runtime, whatever its initial value's type.
         const declared = declarationTypeNode(state.type, state.shape);
         const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(declared, step.writablePath, 1, "value", handlerScope, lowering));
@@ -1249,16 +1256,16 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           // A value of the state's own kind writes as it is; another kind is cast. React types an untyped
           // state by its initial value, which any other kind would contradict.
           const self = proven ? selfStep(step, definition) : undefined;
-          const write = step.writablePath.length > 1 ? setPath(value)
+          const write = step.writablePath.length > 1 ? setPath(reverted)
             : self !== undefined ? `${setter}((${current}) => ${self.decimal
               ? `${lowering.use(self.op === "+" ? "decimalAdd" : "decimalSubtract")}(${current}, ${self.amount})` : `${current} ${self.op} ${self.amount}`})`
-            : (unknown ? `${setter}(() => ${value} as typeof ${current})`
-              : category(destination) === category(typeOf(step.value.ast, handlerScope).type) ? `${setter}(${value})`
-              : `${setter}(${value} as ${declared === undefined ? "never" : `typeof ${current}`})`);
+            : (unknown ? `${setter}(() => ${reverted} as typeof ${current})`
+              : category(destination) === category(typeOf(step.value.ast, handlerScope).type) ? `${setter}(${reverted})`
+              : `${setter}(${reverted} as ${declared === undefined ? "never" : `typeof ${current}`})`);
           return `    ${guard}${write}${write.endsWith("}") ? "" : ";"}`;
         }
         const to = step.writablePath.length > 1 ? `(next) => ${setPath("next")}` : unknown ? `(next) => ${setter}(() => next)` : setter;
-        return `    ${guard}${lowering.use("write")}(${to}, ${value}${writeCheck(destinationCheck, definition, handler, step)});`;
+        return `    ${guard}${lowering.use("write")}(${to}, ${reverted}${writeCheck(destinationCheck, definition, handler, step)});`;
       });
       const takesEvent = [...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line));
       if (takesEvent) handlerTakesEvent.add(handler);
@@ -1307,16 +1314,22 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const control = attachment.control;
         const write = control?.write;
         const setter = write === undefined ? "" : stateSetters.get(write.state)!;
+        // An emptied control's null reverts the state to its declared value; the update returns what the
+        // state took, so the control is not echoed that value.
+        const revert = write === undefined ? undefined : bindingRevertSource(definition, write.state, write.path === "[]" ? undefined : "path");
+        const written = revert === undefined ? "value" : `(value ?? ${revert})`;
         const update = write === undefined ? "undefined" : write.path === "[]"
-          ? `(value) => ${setter}(() => value as typeof ${valueNames.get(write.state)!})`
-          : stateWritesName === "" ? `(value) => ${setter}((previous) => writeBoundPath(previous, ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}, value))`
-          : `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; ${setter}((previous) => writeBoundPath(previous, path, value), path); }`;
+          ? `(value) => { const written = ${written}; ${setter}(() => written as typeof ${valueNames.get(write.state)!}); return written; }`
+          : stateWritesName === "" ? `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; const written = ${written}; ${setter}((previous) => writeBoundPath(previous, path, written)); return written; }`
+          : `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; const written = ${written}; ${setter}((previous) => writeBoundPath(previous, path, written), path); return written; }`;
         const genericUpdates = attachment.genericWrites.map((generic, index) => {
           const writeSetter = stateSetters.get(generic.state)!;
           const valueName = valueNames.get(generic.state)!;
-          const source = generic.path === "[]" ? `(value) => ${writeSetter}(() => value as typeof ${valueName})`
-            : stateWritesName === "" ? `(value) => ${writeSetter}((previous) => writeBoundPath(previous, ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}, value))`
-            : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, value), path); }`;
+          const revert = bindingRevertSource(definition, generic.state, generic.path === "[]" ? undefined : "path");
+          const written = revert === undefined ? "value" : `(value ?? ${revert})`;
+          const source = generic.path === "[]" ? `(value) => ${writeSetter}(() => ${written} as typeof ${valueName})`
+            : stateWritesName === "" ? `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, ${written})); }`
+            : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, ${written}), path); }`;
           return `const genericCleanup${index} = attachGenericBinding(element, ${source});`;
         });
         const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.ref === undefined ? attach : [
@@ -1384,6 +1397,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    data: { ${data.map((value) => `${propKey(value.name)}: () => ${valueNames.get(value.name)!}`).join(", ")} },`,
       ...(scriptNames.size === 0 ? [] : ["    scripts: headScripts,"]),
       ...(checksControllerWrites ? [`    acceptsState: (name, keys, value) => acceptsControllerWrite(value, controllerStateTypes[name as keyof typeof controllerStateTypes], keys),`] : []),
+      ...controllerInitials(definition, "    "),
       `    refs: ${usesRefs ? "refElements.current" : "new Map<string, ReadonlySet<Element>>()"},`,
       ...(target.requests.length === 0 ? [] : [
         "    request: requestAsk,",

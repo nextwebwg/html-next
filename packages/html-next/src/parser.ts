@@ -449,6 +449,12 @@ function readDeclaredTypeAtSource(
   nested = false,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
 ): PropContract["type"] {
+  // Null means not present, so no declaration opts into it (types#null-and-missing-values).
+  if (attr(element, "nullable") !== undefined) {
+    const message = "`nullable` is not a declaration attribute; remove it. A value without a default or `value` reads null, and null clears one with a default back to it.";
+    if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+    warnInvalidDeclaration(message, source);
+  }
   const written = attr(element, "type");
   if (written === undefined || written === "") fail("HC013", "A typed declaration requires a `type` attribute.", source);
   if (attr(element, "open") !== undefined && written !== "object") {
@@ -499,8 +505,7 @@ function readDeclaredTypeAtSource(
   if (values !== undefined || Object.keys(bounds).length > 0) {
     type = { kind: "constrained", base: normalizeType(type), ...(values === undefined ? {} : { values }), ...bounds };
   }
-  return attr(element, "nullable") === undefined ? type
-    : { kind: "union", members: [normalizeType(type), { kind: "terminal", name: "null" }] };
+  return type;
 }
 
 function readProps(
@@ -974,7 +979,7 @@ function readDeclarations(
         if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
         eventNames.add(name);
         const eventType = attr(element, "type") ?? "object";
-        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
+        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined
           ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
           : normalizeType(parseTypeAttribute(eventType));
         eventTypes.set(name, shape);

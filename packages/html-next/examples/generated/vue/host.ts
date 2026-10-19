@@ -18,6 +18,20 @@ import {
 } from 'vue'
 import type { PropType, VNode } from 'vue'
 
+/** A fresh copy of a state's declared value at `keys`, or null where it has none. */
+function initialAt(initial: unknown, keys: readonly PropertyKey[]): unknown {
+  let value = initial
+  for (const key of keys) {
+    if (value === null || typeof value !== 'object' || !Object.hasOwn(value, key)) return null
+    value = (value as Record<PropertyKey, unknown>)[key]
+  }
+  return value === undefined
+    ? null
+    : value !== null && typeof value === 'object'
+    ? structuredClone(value)
+    : value
+}
+
 interface ControllerStateAccess {
   readonly get: () => unknown
   readonly set: (value: unknown) => void
@@ -27,6 +41,8 @@ interface ControllerNamespaces {
   readonly computed: Readonly<Record<string, () => unknown>>
   readonly data?: Readonly<Record<string, () => unknown>>
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean
+  /** Each state's declared `value`, which a null write and `host.reset` restore; a state without one has none. */
+  readonly initials?: Readonly<Record<string, unknown>>
   /** A read below a state root, by its path from the root. */
   readonly read?: (name: string, keys: readonly string[]) => void
   /** A write below a state root changed the value at this path from the root. */
@@ -36,6 +52,7 @@ interface ControllerNamespaces {
 function controllerNamespaces(options: ControllerNamespaces, source: string): {
   state: Record<string, unknown>
   data: Readonly<Record<string, unknown>>
+  reset: (name?: string) => void
 } {
   const reported = new Set<string>()
   const nested = new WeakMap<object, Map<string, object>>()
@@ -102,7 +119,9 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
         return wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly)
       },
       set: (_target, key, written) => {
+        // A null or undefined field goes back to its value in the state's declared value.
         const next = unwrap(written)
+          ?? initialAt(options.initials?.[name] ?? null, [...keys, String(key)])
         return write(name, [...keys, String(key)], next, readonly, () => {
           const previous = Reflect.get(value, key)
           const length = Array.isArray(value) ? value.length : undefined
@@ -169,7 +188,10 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
         [],
         unwrap(value),
         typeof name !== 'string' || !Object.hasOwn(options.state, name),
-        () => options.state[String(name)]!.set(unwrap(value)),
+        () =>
+          options.state[String(name)]!.set(
+            unwrap(value) ?? initialAt(options.initials?.[String(name)] ?? null, []),
+          ),
       ),
     deleteProperty: (_target, name) => {
       warn(String(name), true)
@@ -199,7 +221,16 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     },
     has: (_target, name) => typeof name === 'string' && Object.hasOwn(options.data ?? {}, name),
   })
-  return { state, data }
+  // Returns one state, or every state, to its declared value: a fresh copy, or null without one.
+  const reset = (name?: string): void => {
+    if (name !== undefined && !Object.hasOwn(options.state, name)) {
+      throw new TypeError('`' + String(name) + '` is not a state of ' + source + '.')
+    }
+    for (const each of name === undefined ? Object.keys(options.state) : [name]) {
+      options.state[each]!.set(initialAt(options.initials?.[each] ?? null, []))
+    }
+  }
+  return { state, data, reset }
 }
 
 const requestStateKey = Symbol.for('@nextwebwg/html-next.runtime.v1')
@@ -562,6 +593,7 @@ export interface ComponentHostOptions {
   /** Each named declared script, which a controller reads as `host.scripts`. */
   readonly scripts?: Readonly<Record<string, unknown>>
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean
+  readonly initials?: Readonly<Record<string, unknown>>
   /** Asks one of the component's declared requests; its `has` builds `host.hasResponder`. */
   readonly request?:
     & ((
@@ -741,6 +773,7 @@ export function useComponentHost(
         Object.entries(data).map(([name, value]) => [name, () => value.value]),
       ),
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
+      ...(options.initials === undefined ? {} : { initials: options.initials }),
     }, options.controllerSource?.definition ?? '<component>'),
     scripts: options.scripts ?? Object.freeze({}),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
@@ -1236,7 +1269,7 @@ export function warnUnless(accepted: boolean, location: string, message: string)
 
 /**
  * A handler's checked write to a ref or through a setter. An invalid result, such as a number that
- * is not finite, writes nothing. A value neither absent nor of the destination's type warns once for
+ * is not finite, writes nothing. A value neither null, absent nor of the destination's type warns once for
  * its authored write (the state `path` in `file`'s `handler`), as the live runtime does, and
  * leaves the destination as it was.
  */
@@ -1252,14 +1285,14 @@ export function write(
     value === Symbol.for('html-next.invalid-result')
     || (typeof value === 'number' && !Number.isFinite(value))
   ) return
-  if (check !== undefined && value !== undefined && !check(value)) {
+  if (check !== undefined && value != null && !check(value)) {
     warnUnless(
       false,
       `${file}#${handler}:${path}`,
       `${file}: HR007: State \`${path}\` does not satisfy its declared type.`,
     )
-  } else if (typeof to === 'function') to(value)
-  else to.value = value
+  } else if (typeof to === 'function') to(value ?? null)
+  else to.value = value ?? null
 }
 
 export const isString = (value: unknown): value is string => typeof value === 'string'
