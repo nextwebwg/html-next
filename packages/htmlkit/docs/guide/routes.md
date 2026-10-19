@@ -17,7 +17,7 @@ Every file in `app/pages` is a page, and its path is its URL:
 | `app/pages/blog/first-post.html` | `/blog/first-post/` |
 | `app/pages/blog/[slug].html` | `/blog/anything/` (one page per value) |
 | `app/pages/docs/[...path].html` | `/docs/a/` and `/docs/a/b/` (any depth) |
-| `app/pages/docs/(guides)/intro.html` | `/docs/intro/` (URLs skip a group folder) |
+| `app/pages/docs/(guides)/intro.html` | `/docs/intro/` (`(guides)` organizes the files without adding a URL segment) |
 
 A few rules cover the rest:
 
@@ -111,9 +111,22 @@ entry whose URL a more specific page matches.
 
 ## Route groups
 
-A folder named in parentheses groups pages, and their URLs skip it. The text inside the
-parentheses labels the group in [navigation](/htmlkit/navigation#groups), and a number and a dot in
-front orders it among its neighbours:
+Wrap a folder's name in parentheses, such as `(marketing)`, to organize pages without including
+that folder name in their URLs. HTMLKit calls this a **route group**:
+
+| File | URL |
+| --- | --- |
+| `app/pages/marketing/about.html` | `/marketing/about/` |
+| `app/pages/(marketing)/about.html` | `/about/` |
+| `app/pages/docs/(guides)/intro.html` | `/docs/intro/` |
+
+Use a route group when pages should share a layout or appear under one navigation heading
+without adding the group's name to their addresses. In the last example, `docs` is still part of
+the URL; only `(guides)` is left out.
+
+The text inside the parentheses labels the group in [navigation](/htmlkit/navigation#groups).
+You can add a number and a dot before the opening parenthesis to order the group among its
+neighbours. For example, these pages appear under “Getting started” and “Reference” headings:
 
 ```text
 app/pages/docs/
