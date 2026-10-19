@@ -30,7 +30,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpressio
 import type { PropContract } from "../types.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
-import { conformingScalarStates } from "./state-roots.js";
+import { conformingScalarStates, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
@@ -63,7 +63,7 @@ const RESERVED = new Set([
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
-  "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
+  "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
@@ -686,7 +686,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
           node.name === "input" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "type" && ["checkbox", "radio", "file"].includes(entry.value))
           ? "change" : "input";
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
-        const read = `readBoundControl(${control}) as any`;
+        // An emptied control's null reverts the state to its declared value, which the control is not echoed.
+        const revert = revertSource(context.definition, attribute.writablePath, (segment) => lowering.value(segment.expression, names.template));
+        const read = revert === undefined ? `readBoundControl(${control}) as any` : `revertBoundControl(${control}, readBoundControl(${control}), ${revert}) as any`;
         const update = node.name === "input" && attribute.name === "checked"
           // Only an <input> binds checked, so the radio guard reads it as one.
           ? `(($event.currentTarget as HTMLInputElement).type !== 'radio' || ($event.currentTarget as HTMLInputElement).checked) && (${writable} = ${read})`
@@ -697,7 +699,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       } else {
         const value = ast(attribute.expressionPlan, attribute.expression);
         attributes.push(`:${svgAttributeName(attribute.name)}.attr=${bound(lowering.attribute(value, names.template, attribute.name))}`);
-        attributes.push(`@input=${bound(`${available}(${writable} = ((($event.currentTarget as Element & { value?: any }).value ?? ($event.currentTarget as Element).getAttribute('value')) as any))`)}`);
+        const revert = revertSource(context.definition, attribute.writablePath, (segment) => lowering.value(segment.expression, names.template));
+        const read = `((($event.currentTarget as Element & { value?: any }).value ?? ($event.currentTarget as Element).getAttribute('value')) as any)`;
+        attributes.push(`@input=${bound(`${available}(${writable} = ${revert === undefined ? read : `(${read} ?? ${revert})`})`)}`);
       }
     } else if (isRoot && context.model && attribute.name === "value") {
       // The model supplies the root's value (below).
@@ -862,14 +866,17 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
       const proven = !mayBeInvalid && provenWrite(step, context.definition);
+      // A proven write is never null; any other null or undefined reverts to the declared value.
+      const written = proven ? value : withRevert(value, step.value.ast,
+        revertSource(context.definition, step.writablePath, (segment) => lowering.value(segment.expression, local.script)));
       const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, "value", local.script, lowering));
       if (destinationCheck === undefined && !mayBeInvalid) {
-        lines.push(`  ${prefix}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${value}`};`);
+        lines.push(`  ${prefix}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${written}`};`);
       } else {
         // A state's ref takes the write itself; a path below it is written through a setter.
         const to = /^[\w$]+\.value$/.test(target) ? target.slice(0, -".value".length) : `(next) => (${target} = next)`;
-        lines.push(`  ${prefix}${lowering.use("write")}(${to}, ${value}${writeCheck(destinationCheck, context.definition, handler, step)});`);
+        lines.push(`  ${prefix}${lowering.use("write")}(${to}, ${written}${writeCheck(destinationCheck, context.definition, handler, step)});`);
       }
       if (nested) lines.push("  } }");
     } else if (step.kind === "dispatch") {
@@ -1398,7 +1405,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
     ...((definition.module ?? definition.controller) !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
       ? [`import { acceptsControllerWrite } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`] : []),
-    ...(target.props.length === 0 && !context.usesInputStatus && computedValues.length === 0 && seeded.length === 0 ? [] : [`import { ${target.props.length === 0 ? computedValues.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : "BINDING_INPUTS_PROP, " : "checkedProp, vPropValidity, checkPropInput, vuePropInputs, BINDING_INPUTS_PROP, type InputBindings, "}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computedValues.length === 0 ? "" : ", inputComputed"}${computedValues.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : ", inputRead"}${context.usesInputExpressions || seeded.length > 0 ? ", evaluateInput" : ""}${seeded.length > 0 ? ", copyStateSeed" : ""}${(definition.module ?? definition.controller) === undefined || target.props.length === 0 ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
+    ...(target.props.length === 0 && !context.usesInputStatus && computedValues.length === 0 && seeded.length === 0 && availability.size === 0 ? [] : [`import { ${target.props.length === 0 ? computedValues.length === 0 && seeded.length === 0 && availability.size === 0 && !context.usesInputExpressions ? "" : "BINDING_INPUTS_PROP, " : "checkedProp, vPropValidity, checkPropInput, vuePropInputs, BINDING_INPUTS_PROP, type InputBindings, "}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computedValues.length === 0 ? "" : ", inputComputed"}${computedValues.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : ", inputRead"}${context.usesInputExpressions || seeded.length > 0 ? ", evaluateInput" : ""}${seeded.length > 0 ? ", copyStateSeed" : ""}${(definition.module ?? definition.controller) === undefined || target.props.length === 0 ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
     ...(target.requests.length === 0 ? [] : [
       ...(requestHelpers.length === 0 ? [] : [
@@ -1414,6 +1421,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(context.usesHydrationControl ? [`import { ${[
       ...(rootMarkup.includes("readBoundControl(") ? ["readBoundControl"] : []),
+      ...(rootMarkup.includes("revertBoundControl(") ? ["revertBoundControl"] : []),
       ...(rootMarkup.includes("v-bind-control=") ? ["vBindControl"] : []),
       ...(rootMarkup.includes("<SelectedOptions ") ? ["SelectedOptions"] : []),
     ].join(", ")} } from ${quote(options.helperSpecifier?.("control") ?? VUE_CONTROL_SPECIFIER)};`] : []),
@@ -1467,6 +1475,7 @@ function hostSource(
     ...(definition.module === undefined ? [] : ["  module: true,"]),
     "  dispatch,",
     ...(Object.keys(stateTypes).length === 0 ? [] : [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, (${JSON.stringify(stateTypes)} as Record<string, any>)[name], keys),`]),
+    ...controllerInitials(definition, "  "),
     `  controllerSource: { specifier: ${quote(controllerSpecifier ?? (definition.module ?? definition.controller)!)}, definition: ${quote(definition.source.file)} },`,
     ...(values.props ? [
       "  props: checkedProps,",

@@ -108,8 +108,8 @@ export const DECLARED_REFERENCE_TYPE_SOURCE = `export function acceptsDeclaredRe
 }
 
 /** Missing input cannot erase a child's accepted prop unless its type explicitly accepts null. */
-export function acceptsBindingDestination(value: unknown, type: TypeNode | null, hasDefault = false): boolean {
-  return value === undefined || value === null && hasDefault || type !== null && (value === null ? parse(value, type, "$").ok : acceptsDeclaredReference(value, type));
+export function acceptsBindingDestination(value: unknown, type: TypeNode | null, _hasDefault = false): boolean {
+  return value == null || type !== null && acceptsDeclaredReference(value, type);
 }
 `;
 

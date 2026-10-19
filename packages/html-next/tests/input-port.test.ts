@@ -330,6 +330,7 @@ describe("renderer input source port", () => {
     const server = create();
     componentRegistry.update(server.root, { product: null });
     await settle();
+    assert.equal(server.inputs.status("product").ready, true);
     const client = create(source, [], serializeRenderedForm(server.document.body));
     assert.equal(client.inputs.status("product").ready, true);
     assert.equal(client.inputs.supplied("product"), true);

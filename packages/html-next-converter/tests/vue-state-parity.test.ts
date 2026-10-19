@@ -126,7 +126,7 @@ describe.skipIf(!enabled)("Vue one-time state through the converter", () => {
         (window as any).host.state.draft.name = "Edited"; return (window as any).port.read("product").name; }), "Remote");
       await page.waitForFunction(() => document.querySelector("h2")?.textContent === "Edited" && document.querySelector(".context")?.textContent === "Edited" && document.querySelector(".child")?.textContent === "Edited" && document.querySelector(".driven")?.textContent === "Edited");
       assert.equal(await page.evaluate(() => (window as any).host.state.early), null);
-      assert.equal(await page.evaluate(() => (window as any).host.state.same), undefined);
+      assert.equal(await page.evaluate(() => (window as any).host.state.same), null);
       await page.locator("input.draft").fill("Control edit");
       await page.waitForFunction(() => document.querySelector("h2")?.textContent === "Control edit" && document.querySelector(".context")?.textContent === "Control edit" && document.querySelector(".child")?.textContent === "Control edit" && document.querySelector(".driven")?.textContent === "Control edit");
       assert.equal(await page.locator(".context-draft").textContent(), "Edited");
@@ -144,6 +144,8 @@ describe.skipIf(!enabled)("Vue one-time state through the converter", () => {
       await page.evaluate(() => (window as any).source.publish({ value: { name: "Reconnected" }, status: { ready: true, pending: false, stale: false, error: null } }));
       assert.equal(await page.locator("h2").textContent(), "Remote!");
       assert.deepEqual(await page.evaluate(() => (window as any).reads), ["Edited", "Control edit", "Remote!"]);
+      await page.evaluate(() => (window as any).host.reset("draft"));
+      assert.equal(await page.evaluate(() => (window as any).host.state.draft), null);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

@@ -38,6 +38,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/requests.ts",
     "packages/html-next/src/runtime.ts",
     "packages/html-next/src/selection.ts",
+    "packages/html-next/src/state-initial.ts",
   ],
   typesAndValidation: [
     "packages/html-next/src/css-color-keywords.ts",

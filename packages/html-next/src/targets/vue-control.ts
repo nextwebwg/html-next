@@ -8,12 +8,15 @@ export function importsVueControl(source: string): boolean {
 }
 
 const SOURCE = `
-import { cloneVNode, createVNode, defineComponent, Fragment, onMounted, onUpdated, type VNode } from "vue";
+import { cloneVNode, createVNode, defineComponent, Fragment, onMounted, onUpdated, toRaw, type VNode } from "vue";
 
 type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type BoundControl = { readonly tag: "input" | "textarea" | "select"; readonly name: "value" | "checked"; readonly value: unknown; readonly nativeProperty?: boolean; readonly optionalValue?: boolean; readonly defaultValue?: string; readonly defaultChecked?: boolean };
 const connectedControls = new WeakSet<Control>();
 const boundValues = new WeakMap<Control, unknown>();
+// An emptied control's write reverted its state to its declared value; that value is not echoed back
+// into the control the user emptied, until the state takes another value.
+const heldControls = new WeakMap<Control, unknown>();
 const selectOptions = new WeakMap<HTMLSelectElement, readonly (readonly [HTMLOptionElement, string])[]>();
 const selectBindings = new WeakMap<HTMLSelectElement, BoundControl>();
 const selectWatches = new WeakMap<HTMLSelectElement, () => void>();
@@ -44,6 +47,10 @@ function snapshotValue(value: unknown): unknown {
 
 function writeBoundControl(element: Control, binding: BoundControl): void {
   const value = binding.value;
+  if (heldControls.has(element)) {
+    if (sameValue(heldControls.get(element), toRaw(value))) return;
+    heldControls.delete(element);
+  }
   // An absent component value leaves the browser's selection/default behavior in charge.
   if (binding.optionalValue && value === undefined) return;
   if (binding.name === "checked" && element instanceof HTMLInputElement) {
@@ -192,6 +199,13 @@ export const vBindControl = {
     }
   },
 };
+
+/** An emptied control's value, \`null\`, reverts its state to \`reverted\`, which the control is not echoed. */
+export function revertBoundControl(element: Control, value: unknown, reverted: unknown): unknown {
+  if (value === null && reverted != null) heldControls.set(element, snapshotValue(reverted));
+  else heldControls.delete(element);
+  return value ?? reverted;
+}
 
 export function readBoundControl(element: Control): unknown {
   if (element instanceof HTMLInputElement) {

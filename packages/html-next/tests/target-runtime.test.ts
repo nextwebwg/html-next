@@ -3314,7 +3314,8 @@ describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
         assert.deepEqual(compiled!.snapshots, live!.snapshots);
         assert.deepEqual(compiled!.identities, live!.identities);
         assert.deepEqual(compiled!.warnings, live!.warnings);
-        assert.equal(live!.warnings!.length, 8);
+        // Deleting a declared field makes it not present, as a null write does, so it no longer warns.
+        assert.equal(live!.warnings!.length, 7);
         assert.deepEqual(compiled!.errors, live!.errors);
         assert.deepEqual(live!.errors!.map((error) => /H[RB]00\d/.exec(error)?.[0]), ["HR004", "HB001", "HB001", "HB001"]);
         // HR004 and HB001 throw before the list touches its DOM.

@@ -36,7 +36,7 @@ import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
 import { hasBounds } from "../validate.js";
 import { kebabCase, propAttribute } from "../names.js";
-import { conformingStates, literalInitial, NotLiteral } from "./state-roots.js";
+import { conformingStates, declaredStateLiteral, literalInitial, NotLiteral } from "./state-roots.js";
 import type { Invoked } from "../generate.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
@@ -304,9 +304,6 @@ const FORMAT_CHECKS: Readonly<Record<string, string>> = {
   duration: "durationFormat",
 };
 
-/** Whether `parseTypedValue` accepts null for the type, decided once at build time. */
-const nullAccepted = (node: TypeNode): boolean => parseTypedValue(null, node, "$", "value").ok;
-
 /** The compact form of a declared type; kinds without a structure of their own check through a predicate. */
 export function compactType(node: TypeNode): CompactType {
   switch (node.kind) {
@@ -321,7 +318,7 @@ export function compactType(node: TypeNode): CompactType {
         : node.name === "function" ? { js: "isFunctionValue" }
         : node.name === "event" ? { js: "isNativeEvent" }
         : { js: `detailCheck(${checkSource(node)})` };
-      return ["p", check, nullAccepted(node)];
+      return ["p", check];
     }
     case "keyword": return ["k", node.value];
     case "list": {
@@ -344,21 +341,13 @@ export function compactType(node: TypeNode): CompactType {
       }
       return ["u", ...members];
     }
-    case "constrained": {
-      // A reference checks only the base; a null write checks the constraints too, so a base
-      // that accepts null carries whether the whole type does.
-      const base = compactType(node.base);
-      return acceptsNullCompact(base) ? ["c", base, nullAccepted(node)] : base;
-    }
+    // A write's immediate check is its base type's; null is never wrong-typed.
+    case "constrained": return compactType(node.base);
     default:
       // A selected type depends on another declaration; a separated list checks its items.
-      return ["p", { js: `detailCheck(${checkSource(node)})` } satisfies CompactCheck, nullAccepted(node)];
+      return ["p", { js: `detailCheck(${checkSource(node)})` } satisfies CompactCheck];
   }
 }
-
-const acceptsNullCompact = (type: CompactType): boolean =>
-  type === "?" || type === "z" || typeof type === "object" && (type[0] === "u" ? type.some((member, index) => index > 0 && acceptsNullCompact(member as CompactType))
-    : (type[0] === "p" || type[0] === "c") && type[2] === true);
 
 /** JavaScript for a compact type: JSON, with each predicate's check written as code. */
 export function compactSource(type: unknown): string {
@@ -2633,12 +2622,14 @@ export function emitBlocks(
   const requests = (definition.module ?? definition.controller) === undefined ? [] : Object.entries(contract.requests ?? {}).map(([name, request]) =>
     `${JSON.stringify(name)}: [${valueCheckSource(request.type)}, ${valueCheckSource(request.returns)}]`);
   const shown = plan.roots.slice(0, plan.shown);
+  // Each writable state's declared value, which a null write and `host.reset` restore.
+  const initials = shown.slice(0, plan.states).map((item) => declaredStateLiteral(definition, item.name));
   // The transitions extension's rules, registered once per document when the module loads.
   const registration = plan.transitions === undefined || plan.transitions === "" ? "" : `transitionStyles(${JSON.stringify(plan.transitions)});`;
   const stateSpec = `const S = { n: ${JSON.stringify(shown.map((item) => item.name))}, t: [${shown.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
     plan.states === plan.shown ? "" : `, k: ${plan.states}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
     requests.length === 0 ? "" : `, q: { ${requests.join(", ")} }`}${
-    blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""}${plan.states === plan.shown ? "" : ", r: readonlyView"}${definition.module === undefined ? "" : ", a: (host, I) => C(host, I)"}${propNames.length === 0 ? "" : ", i: generatedInputs"} };`;
+    blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""}${plan.states === plan.shown ? "" : ", r: readonlyView"}${definition.module === undefined ? "" : ", a: (host, I) => C(host, I)"}${propNames.length === 0 ? "" : ", b: generatedInputs"}${initials.every((value) => value === null) ? "" : `, i: [${initials.map(valueSource).join(", ")}]`} };`;
   // What the shared prop boundary reads (`CompiledProp`): each prop's rule as data and its type as compiled checks.
   const propsSpec = propNames.length === 0 ? undefined : `const D = { g: ${JSON.stringify(contract.tag)}, props: { ${Object.entries(contract.props).map(([name, prop]) => {
       const { type, select, target: _target, description: _description, ...rule } = prop;

@@ -16,6 +16,12 @@ const DATA_STATE_FIELDS: Readonly<Record<string, TypeNode | undefined>> = {
   error: { kind: "terminal", name: "unknown" },
 };
 
+/** A state's declared `value`, which a null write and `host.reset` restore; null without one. */
+export function declaredStateValue(declaration: { readonly expression?: CompiledExpression }): unknown {
+  // The parser compiles a state's typed `value` as its JSON (parser.ts), so the source is that JSON.
+  return declaration.expression === undefined ? null : JSON.parse(declaration.expression.source) as unknown;
+}
+
 const declaredPathTypes = new WeakMap<ComponentDefinition, Map<string, TypeNode | undefined>>();
 
 /**

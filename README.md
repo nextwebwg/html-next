@@ -23,8 +23,8 @@ Author once. Use native DOM, Vue, React, or Svelte.
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
 `@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
 converter and unplugin adapt it to other build workflows.
-The four HTML Next packages share one version and publish together. `expressmark` is independently
-versioned. Shared policy and verification live at the repository root.
+The four HTML Next packages share one version and publish together. Shared policy and verification
+live at the repository root.
 
 Use [`html-next-check`](./packages/html-next-unplugin/README.md#check-components-in-ci) for
 compiler diagnostics without build output, alongside TypeScript or your framework's typechecker.
@@ -36,7 +36,8 @@ The command supports native, Vue, React, and Svelte targets and JSON output for 
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
 | [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
-| [`expressmark`](./packages/expressmark) | Expressive Markdown tooling | 0.0.1 name reservation and ESM/types scaffold; no parser or writer yet |
+
+Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
 
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and

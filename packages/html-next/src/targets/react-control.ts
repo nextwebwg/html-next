@@ -16,6 +16,15 @@ interface HydrationSnapshot {
 }
 const boundValues = new WeakMap<Control, unknown>();
 const preHydrationValues = new WeakMap<Control, HydrationSnapshot>();
+// An emptied control's write reverted its state to its declared value; that value is not echoed back
+// into the control the user emptied, until the state takes another value.
+const heldControls = new WeakMap<Control, unknown>();
+function heldControl(element: Control, value: unknown): boolean {
+  if (!heldControls.has(element)) return false;
+  if (sameValue(heldControls.get(element), value)) return true;
+  heldControls.delete(element);
+  return false;
+}
 
 function snapshot(value: unknown): unknown {
   return Array.isArray(value) ? [...value] : value;
@@ -134,7 +143,7 @@ export function attachBoundControl(
   name: BoundName,
   initial: unknown,
   defaults: BoundDefaults,
-  update?: (value: unknown) => void,
+  update?: (value: unknown) => unknown,
   nativeProperty = false,
   accepted = true,
 ): (() => void) | undefined {
@@ -146,7 +155,7 @@ export function attachBoundControl(
   if (preHydration !== undefined) {
     writeControl(element, name, nativeProperty ? name === "checked" ? preHydration.checked : preHydration.value : preHydration.bound, nativeProperty);
     preHydrationValues.delete(element);
-  } else if (accepted && (!hadBoundValue || !sameValue(previous, initial))) writeControl(element, name, initial, nativeProperty);
+  } else if (accepted && (!hadBoundValue || !sameValue(previous, initial)) && !heldControl(element, initial)) writeControl(element, name, initial, nativeProperty);
   restoreDefault(element, name, defaults);
   // A render can detach and reattach a callback ref to this same control. Keep its last model
   // in the WeakMap so reattachment can distinguish a model change from a native user edit.
@@ -155,7 +164,11 @@ export function attachBoundControl(
     ["checkbox", "radio", "file"].includes(element.type) ? "change" : "input";
   const listener = () => {
     if (element instanceof HTMLInputElement && element.type === "radio" && !element.checked) return;
-    update(readControl(element));
+    const read = readControl(element);
+    // The update returns what the state took: an emptied control's null may have reverted it.
+    const written = update(read);
+    if (read === null && written != null) heldControls.set(element, snapshot(written));
+    else heldControls.delete(element);
   };
   element.addEventListener(eventName, listener);
   return () => { element.removeEventListener(eventName, listener); };
@@ -166,7 +179,8 @@ export function syncBoundControl(element: Element | null, name: BoundName, value
   if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) return;
   if (!accepted) return;
   const previous = boundValues.get(element);
-  if (force || !sameValue(previous, value)) {
+  if (heldControl(element, value)) boundValues.set(element, snapshot(value));
+  else if (force || !sameValue(previous, value)) {
     writeControl(element, name, value, nativeProperty);
     boundValues.set(element, snapshot(value));
   }

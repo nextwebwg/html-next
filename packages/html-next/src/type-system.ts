@@ -394,7 +394,7 @@ export function typeScriptType(type: TypeInput): string {
     case "record": return `Readonly<Record<string, ${typeScriptType(node.value)}>>`;
     case "object": {
       const fields = node.fields.map((field) =>
-        `${typescriptKey(field.name)}${field.optional ? "?" : ""}: ${typeScriptType(field.type)}`,
+        `${typescriptKey(field.name)}${field.optional ? `?: ${typeScriptType(field.type)} | null` : `: ${typeScriptType(field.type)}`}`,
       );
       if (node.open) fields.push("[name: string]: unknown");
       return `{ readonly ${fields.join("; readonly ")} }`;

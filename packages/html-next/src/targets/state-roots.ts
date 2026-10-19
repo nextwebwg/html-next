@@ -1,4 +1,5 @@
-import type { ExpressionNode } from "../expression.js";
+import type { ExpressionNode, WritablePath, WritablePathSegment } from "../expression.js";
+import { initialAt } from "../state-initial.js";
 import type { ComponentDefinition, TemplateNode } from "../template.js";
 import { declarationTypeNode, parseTypedValue } from "../type-system.js";
 
@@ -104,4 +105,64 @@ export function publishedStates(definition: ComponentDefinition, graph: Iterable
     }
   }
   return names;
+}
+
+/** A state's declared `value` as a literal, which a null write and `host.reset` restore; null without one. */
+export function declaredStateLiteral(definition: ComponentDefinition, name: string): unknown {
+  const declaration = definition.declarations?.find((item) => item.kind === "state" && item.name === name);
+  return declaration?.kind !== "state" || declaration.expression === undefined ? null : literalInitial(declaration.expression.ast)?.value ?? null;
+}
+
+/** A framework host's \`initials\` option: each state's declared value, when any state has one. */
+export function controllerInitials(definition: ComponentDefinition, indent: string): string[] {
+  const entries = (definition.declarations ?? []).flatMap((item) => {
+    if (item.kind !== "state") return [];
+    const value = declaredStateLiteral(definition, item.name);
+    return value === null ? [] : [`${JSON.stringify(item.name)}: ${JSON.stringify(value).replaceAll('"__proto__":', '["__proto__"]:')}`];
+  });
+  return entries.length === 0 ? [] : [`${indent}initials: { ${entries.join(", ")} },`];
+}
+
+/**
+ * Source for what a write of null or undefined at `path` stores instead: the state's declared value
+ * there (types#null-and-missing-values), or undefined when that is null and the write stores null.
+ * A dynamic key reads the declared value at run time.
+ */
+export function revertSource(definition: ComponentDefinition, path: WritablePath,
+  key: (segment: Extract<WritablePathSegment, object>) => string): string | undefined {
+  const initial = declaredStateLiteral(definition, String(path[0]));
+  if (initial === null) return undefined;
+  const keys = path.slice(1);
+  if (keys.every((segment) => typeof segment !== "object")) {
+    const value = initialAt(initial, keys as readonly (string | number)[]);
+    return value === null ? undefined : JSON.stringify(value).replaceAll('"__proto__":', '["__proto__"]:');
+  }
+  // Below a static prefix with nothing in it, every dynamic key finds null.
+  const dynamic = keys.findIndex((segment) => typeof segment === "object");
+  const prefix = initialAt(initial, keys.slice(0, dynamic) as readonly (string | number)[]);
+  if (prefix === null || typeof prefix !== "object" || Object.keys(prefix).length === 0) return undefined;
+  return `((${JSON.stringify(initial)} as any)${keys.map((segment) => `?.[${typeof segment === "object" ? key(segment) : JSON.stringify(segment)}]`).join("")} ?? null)`;
+}
+
+/**
+ * Source for a two-way binding's revert at run time: the state's declared value, at the keys `path`
+ * names (an expression for the key list), or undefined when the state has no declared value.
+ */
+export function bindingRevertSource(definition: ComponentDefinition, state: string, path?: string): string | undefined {
+  const initial = declaredStateLiteral(definition, state);
+  if (initial === null) return undefined;
+  const json = JSON.stringify(initial).replaceAll('"__proto__":', '["__proto__"]:');
+  return path === undefined ? json : `(${path}.reduce((value: any, key: any) => value?.[key], ${json} as any) ?? null)`;
+}
+
+/**
+ * A written value with its revert: `value ?? revert`, or the revert alone for a null literal. An
+ * operator's or a literal's result is never null, so it keeps no revert (TypeScript also rejects a
+ * `??` whose left side can never be nullish).
+ */
+export function withRevert(value: string, ast: ExpressionNode, revert: string | undefined): string {
+  if (revert === undefined) return value;
+  if (ast.kind === "literal") return ast.value === null ? revert : value;
+  if (ast.kind === "object" || ast.kind === "array" || ast.kind === "unary" || ast.kind === "binary") return value;
+  return `(${value} ?? ${revert})`;
 }

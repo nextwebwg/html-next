@@ -1,4 +1,5 @@
 /** Svelte 5 output from the shared, checked component definition. */
+import { bindingRevertSource, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
 import { compileComponentStylesForSvelte, componentStateNames, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
@@ -672,9 +673,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const destination = scope.code.get(path[0] as string)!;
     const value = context.bindingValueName;
     if (path.length > 1) context.usesNestedBindings = true;
-    const write = path.length === 1 ? `if (!Object.is(${destination}, ${value})) ${destination} = ${value} as typeof ${destination};`
-      : `writePath(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
-    return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
+    const keys = `[${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}]`;
+    // An emptied control's null reverts the state to its declared value; the writer returns what the
+    // state took, so the control is not echoed that value.
+    const revert = bindingRevertSource(context.definition, path[0] as string, path.length === 1 ? undefined : keys);
+    const written = revert === undefined ? value : `(${value} ?? ${revert})`;
+    const write = path.length === 1 ? `const written = ${written}; if (!Object.is(${destination}, written)) ${destination} = written as typeof ${destination}; return written;`
+      : `const written = ${written}; writePath(${destination}, ${keys}, written); return written;`;
+    return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } return ${value}; }`;
   };
   const selectedBindingInput = (prop: string, attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" }>): void => {
     const candidate = context.freshIdentifier("htmlNextBindingInput");
@@ -1361,6 +1367,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     const destination = scope.code.get(state.name)!;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
     const proven = !read.invalid && provenWrite(step, definition);
+    // A proven write is never null; any other null or undefined reverts to the declared value.
+    const source = proven ? read.source : withRevert(read.source, step.value.ast,
+      revertSource(definition, step.writablePath, (segment) => lowering.value(segment.expression, handlerScope)));
     const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(declarationTypeNode(state.type, state.shape),
       step.writablePath, 1, "value", handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context)));
     const nested = step.writablePath.length > 1;
@@ -1369,10 +1378,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     const declared = declarationTypeNode(state.type, state.shape);
     const sameKind = declared !== undefined && category(declared) === category(typeOf(step.value.ast, handlerScope).type);
     if (destinationCheck === undefined && !read.invalid) {
-      return `  ${guard}${(proven ? increment(step, definition, destination) : undefined) ?? writeTo(nested || sameKind || declared === undefined ? read.source : `${read.source} as typeof ${destination}`)};`;
+      return `  ${guard}${(proven ? increment(step, definition, destination) : undefined) ?? writeTo(nested || sameKind || declared === undefined ? source : `${source} as typeof ${destination}`)};`;
     }
     // A `$state` variable is written through a setter; a path below it, through `writePath`.
-    return `  ${guard}${lowering.use("write")}((next) => ${nested ? writeTo("next") : `(${writeTo("next")})`}, ${read.source}${writeCheck(destinationCheck, definition, handler, step)});`;
+    return `  ${guard}${lowering.use("write")}((next) => ${nested ? writeTo("next") : `(${writeTo("next")})`}, ${source}${writeCheck(destinationCheck, definition, handler, step)});`;
   }).join("\n")}\n}`)
     // A handler that never reads its event takes no parameter.
     .map((source) => /\bevent\b/.test(source.slice(source.indexOf("{"))) ? source : source.replace("(event: Event)", "()"));
@@ -1485,7 +1494,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       "}",
     ]),
     ...(context.usesControls ? [
-      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, options: { nativeProperty?: boolean; observeOptions?: boolean } = {}) {`,
+      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => unknown, options: { nativeProperty?: boolean; observeOptions?: boolean } = {}) {`,
       "  const { nativeProperty = false, observeOptions = true } = options;",
       "  return (element: Element) => {",
       "    const authored = controlDefaults(element, defaults);",
@@ -1652,6 +1661,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `  data: { ${data.map((value) => `${objectKey(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
       ...(scriptNames.size === 0 ? [] : ["  scripts: htmlNextHeadScripts,"]),
       ...(usesControllerTypeChecks ? [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, ${controllerTypesName}[name], keys),`] : []),
+      ...controllerInitials(definition, "  "),
       `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       ...(requestProps.length === 0 ? [] : [

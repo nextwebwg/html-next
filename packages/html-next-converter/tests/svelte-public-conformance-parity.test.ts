@@ -358,18 +358,19 @@ const regressions: readonly ConverterCase[] = [
   {
     name: "handler destinations and raw control writes preserve distinct native boundaries",
     source: `<template component="x-declared-destinations" status="early" summary="Destination boundaries."><defs>
-      <state name="count" type="number" value="3"></state><state name="optional" type="number" nullable value="3"></state><state name="free" value="Seed"></state>
+      <state name="count" type="number" value="3"></state><state name="optional" type="number" value="3"></state><state name="free" value="Seed"></state>
       <handler name="write"><set name="count" expr:value="null"></set><set name="optional" expr:value="null"></set><set name="free" expr:value="42"></set></handler>
       <handler name="recover"><set name="count" expr:value="4"></set><set name="optional" expr:value="4"></set><set name="free" value="Next"></set></handler>
       </defs><section><input class="count" type="number" bind:value="count"><input class="optional" type="number" bind:value="optional">
         <output class="values" $value="concat($count, '/', $optional = null, '/', $free)"></output>
         <button class="write" on:click="write">Write</button><button class="recover" on:click="recover">Recover</button>
       </section></template><x-declared-destinations></x-declared-destinations>`,
+    // A null write reverts a state with a value to it; an emptied control reverts its state without being echoed it.
     expect: { probe: `return [q('input.count').value, q('input.optional').value, q('output').textContent];`, result: ["3", "3", "3/false/Seed"], after: [
-      { action: `document.querySelector('button.write').click();`, result: ["3", "", "3/true/42"] },
+      { action: `document.querySelector('button.write').click();`, result: ["3", "3", "3/false/42"] },
       { action: `document.querySelector('button.recover').click();`, result: ["4", "4", "4/false/Next"] },
-      { action: `for (const e of document.querySelectorAll('input')) { e.value = ''; e.dispatchEvent(new Event('input', { bubbles: true })); }`, result: ["", "", "/true/Next"] },
-      { action: `document.querySelector('button.write').click();`, result: ["", "", "/true/42"] },
+      { action: `for (const e of document.querySelectorAll('input')) { e.value = ''; e.dispatchEvent(new Event('input', { bubbles: true })); }`, result: ["", "", "3/false/Next"] },
+      { action: `document.querySelector('button.write').click();`, result: ["", "", "3/false/42"] },
       { action: `document.querySelector('button.recover').click();`, result: ["4", "4", "4/false/Next"] },
     ] },
   },
@@ -713,7 +714,8 @@ const regressions: readonly ConverterCase[] = [
       after: [
         { action: `document.querySelector('button.change').click();`, result: ["y", "", "-"] },
         { action: `const e = document.querySelector('output'); e.value = 'typed'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["typed", "typed", "typed"] },
-        { action: `document.querySelector('button.clear').click();`, result: [null, "typed", "typed"] },
+        // A null write reverts the state to its declared value.
+        { action: `document.querySelector('button.clear').click();`, result: ["x", "typed", "typed"] },
       ],
     },
   },

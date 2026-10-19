@@ -4,12 +4,13 @@ import { createInputPort, evaluateInput, INPUT_PORT, observingInputs, readInputS
 export { componentInputs } from "./inputs.js";
 export { activateModule } from "./module-connection.js";
 import { selectedPropType } from "./contract.js";
-import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes } from "./declared-types.js";
+import { declaredExpressionType, declareLayerTypes, declaredStateValue, declaredTypeAt, declareTypes } from "./declared-types.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail, HtmlDiagnosticAggregateError, HtmlDiagnosticError } from "./diagnostics.js";
 import { checkDefinable, checkProps, domError, registerEntry, registryRecord, type PropChannel } from "./component-registry.js";
-import { applyBoundControlValue, controlValue } from "./controls.js";
+import { applyBoundControlValue, controlValue, holdControl } from "./controls.js";
+import { initialAt } from "./state-initial.js";
 import { eventPasses } from "./event-filter.js";
 import { isPlatformObject } from "./freeze.js";
 import { encodeHydrationValue } from "./hydration-value.js";
@@ -983,7 +984,7 @@ function readInvocation(
   if (restored !== undefined) {
     for (const [name, prop] of Object.entries(contract.props)) {
       const input = restored.inputs[name];
-      if (!input?.present && prop.default === undefined) scope.setInputStatus(name, UNRESOLVED_INPUT);
+      if (!(input?.provided ?? input?.present) && !(input?.producer && input.present) && prop.default === undefined) scope.setInputStatus(name, UNRESOLVED_INPUT);
       const status = restored.availability?.[name];
       if (status !== undefined) scope.setInputStatus(name, status);
     }
@@ -1364,6 +1365,15 @@ function resolveWritablePath(scope: ReactiveScope, path: WritablePath): (string 
   return resolved;
 }
 
+/**
+ * What a null write at `path` stores: the state's declared `value` there, fresh, or null without one
+ * (types#null-and-missing-values). `host.reset` writes the same value at a state's root.
+ */
+function revertedAt(definition: ComponentDefinition, path: readonly (string | number)[]): Value {
+  const declaration = definition.declarations?.find((item) => item.kind === "state" && item.name === path[0]);
+  return initialAt(declaration?.kind === "state" ? declaredStateValue(declaration) : null, path.slice(1)) as Value;
+}
+
 function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value): void {
   const [root, ...segments] = path;
   if (typeof root !== "string") return;
@@ -1408,11 +1418,12 @@ function runHandler(
       if (guard === NONCONFORMING || !truthy(guard)) continue;
     }
     if (step.kind === "set") {
-      const next = evalConforming(step.value, scope, context.definition);
+      let next = evalConforming(step.value, scope, context.definition);
       // A number that is not finite is an invalid result, as ordinary invalid input: no write, no warning.
       if (next === NONCONFORMING || typeof next === "number" && !Number.isFinite(next)) continue;
       const path = resolveWritablePath(scope, step.writablePath);
       if (path === undefined) continue;
+      if (next == null) next = revertedAt(context.definition, path);
       if (!conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) {
         warnAuthored(context.definition, `handler:${declaration.name}:${step.path}`, `State \`${step.path}\` does not satisfy its declared type.`);
         continue;
@@ -2269,7 +2280,12 @@ function bindElementAttributes(
             ? "change" : "input";
           const listener = (): void => {
             if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
-            setWritablePath(scope, attribute.writablePath!, controlValue(target));
+            const value = controlValue(target);
+            const path = value === null ? resolveWritablePath(scope, attribute.writablePath!) : undefined;
+            // An emptied control reverts its state; the control keeps showing what the user left.
+            const written = path === undefined ? value : revertedAt(context.definition, path);
+            holdControl(target, value === null ? written : undefined);
+            setWritablePath(scope, attribute.writablePath!, written);
           };
           target.addEventListener(eventName, listener);
           return () => target.removeEventListener(eventName, listener);
@@ -4125,8 +4141,8 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
 
 /**
  * Applies props to one named instance, which a shared root makes explicit: the prop channel of
- * `componentRegistry.update` and framework attachments. Each defined value becomes explicit (and is
- * reflected as `data-<tag>-prop-<name>`), and `undefined` returns the prop to its implicit default.
+ * `componentRegistry.update` and framework attachments. Each value becomes explicit (and is
+ * reflected as `data-<tag>-prop-<name>`), and `null` or `undefined` returns the prop to its implicit default.
  */
 function applyComponentProps(
   instance: RuntimeInstance,
@@ -4167,7 +4183,7 @@ function applyComponentProps(
     // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
     const previous = untracked(() => instance.propInputs[name]!.get());
     const provided = acceptedNames.has(name) ? input !== undefined : previous.provided ?? previous.present;
-    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input !== undefined, provided };
+    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input != null, provided };
     if (previous.source !== record.source || previous.present !== record.present || previous.provided !== record.provided || !Object.is(previous.value, record.value)) {
       instance.propInputs[name]!.set(record);
     }
@@ -4177,7 +4193,7 @@ function applyComponentProps(
     // but only the binding may write that output (and an invalid input cannot trigger it).
     const bound = instance.rootNode.attributes.some((binding) =>
       binding.kind === "attribute" && binding.name === attributeName);
-    // Null has no attribute form; the effective value uses the declared default.
+    // Null, like undefined, means not present: the prop returns to its default.
     if (input === undefined || input === null) {
       instance.explicit.delete(name);
       // An attribute the template binds is its own output (it shows the default); leave it be.
@@ -4265,6 +4281,11 @@ export interface ComponentHost {
   readonly element: Element;
   /** Mutable state, readonly computed state and inherited context; never props or resources. */
   readonly state: Record<string, unknown>;
+  /**
+   * Returns one state, or every state, to its declared `value`: a fresh copy, or null without one.
+   * A name that is not a declared `<state>` throws a `TypeError`.
+   */
+  reset(name?: string): void;
   /** Declared resource handles; response and status fields are readonly. */
   readonly data: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** One entry per named declared script; status reads participate in effects. */
@@ -4402,7 +4423,9 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     if (readonly && Array.isArray(value)) surface.length = value.length;
     const proxy = new Proxy(surface, {
       get: (_target, key) => wrap(Reflect.get(value, key), `${path}.${String(key)}`, readonly),
-      set: (_target, key, next) => write(`${path}.${String(key)}`, next, readonly, () => { Reflect.set(value, key, next); }),
+      set: (_target, key, next) => write(`${path}.${String(key)}`, next, readonly, () => {
+        Reflect.set(value, key, next ?? revertedAt(instance.definition, `${path}.${String(key)}`.split(".")));
+      }),
       has: (_target, key) => Reflect.has(value, key),
       ownKeys: () => Reflect.ownKeys(value),
       getOwnPropertyDescriptor: (_target, key) => {
@@ -4433,7 +4456,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       return value === ABSENT ? undefined : wrap(value, key, !writable.has(key));
     },
     set: (_target, key, value) => write(String(key), value, typeof key !== "string" || !writable.has(key),
-      () => instance.scope.set(key as string, value as Value)),
+      () => instance.scope.set(key as string, (value ?? revertedAt(instance.definition, [key as string])) as Value)),
     deleteProperty: (_target, key) => write(String(key), undefined, true, () => {}),
     defineProperty: (_target, key) => { write(String(key), undefined, true, () => {}); return false; },
     has: (_target, key) => typeof key === "string" && stateNames.has(key),
@@ -4509,6 +4532,10 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
     state,
+    reset(name) {
+      if (name !== undefined && !writable.has(name)) throw new TypeError(`\`${String(name)}\` is not a state of <${instance.definition.contract.tag}>.`);
+      for (const each of name === undefined ? writable : [name]) instance.scope.set(each, revertedAt(instance.definition, [each]));
+    },
     data,
     scripts: Object.freeze(scripts),
     on(type, callback) {

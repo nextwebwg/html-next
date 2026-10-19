@@ -1,11 +1,15 @@
+import { STATE_INITIAL_SOURCE } from "../state-initial.js";
+
 /** Shared controller namespaces; each framework supplies its own tracked accessors. */
-export const CONTROLLER_STATE_SOURCE = `
+export const CONTROLLER_STATE_SOURCE = `${STATE_INITIAL_SOURCE}
 interface ControllerStateAccess { readonly get: () => unknown; readonly set: (value: unknown) => void; }
 interface ControllerNamespaces {
   readonly state: Readonly<Record<string, ControllerStateAccess>>;
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  /** Each state's declared \`value\`, which a null write and \`host.reset\` restore; a state without one has none. */
+  readonly initials?: Readonly<Record<string, unknown>>;
   /** A read below a state root, by its path from the root. */
   readonly read?: (name: string, keys: readonly string[]) => void;
   /** A write below a state root changed the value at this path from the root. */
@@ -13,7 +17,7 @@ interface ControllerNamespaces {
 }
 
 function controllerNamespaces(options: ControllerNamespaces, source: string): {
-  state: Record<string, unknown>; data: Readonly<Record<string, unknown>>;
+  state: Record<string, unknown>; data: Readonly<Record<string, unknown>>; reset: (name?: string) => void;
 } {
   const reported = new Set<string>();
   const nested = new WeakMap<object, Map<string, object>>();
@@ -57,7 +61,8 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
         return wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly);
       },
       set: (_target, key, written) => {
-        const next = unwrap(written);
+        // A null or undefined field goes back to its value in the state's declared value.
+        const next = unwrap(written) ?? initialAt(options.initials?.[name] ?? null, [...keys, String(key)]);
         return write(name, [...keys, String(key)], next, readonly, () => {
           const previous = Reflect.get(value, key);
           const length = Array.isArray(value) ? value.length : undefined;
@@ -97,7 +102,7 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
       return undefined;
     },
     set: (_target, name, value) => write(String(name), [], unwrap(value), typeof name !== "string" || !Object.hasOwn(options.state, name),
-      () => options.state[String(name)]!.set(unwrap(value))),
+      () => options.state[String(name)]!.set(unwrap(value) ?? initialAt(options.initials?.[String(name)] ?? null, []))),
     deleteProperty: (_target, name) => { warn(String(name), true); return true; },
     defineProperty: (_target, name) => { warn(String(name), true); return false; },
     has: (_target, name) => typeof name === "string" && (Object.hasOwn(options.state, name) || Object.hasOwn(options.computed, name)),
@@ -110,6 +115,11 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     defineProperty: (_target, name) => { warn("data." + String(name), true); return false; },
     has: (_target, name) => typeof name === "string" && Object.hasOwn(options.data ?? {}, name),
   });
-  return { state, data };
+  // Returns one state, or every state, to its declared value: a fresh copy, or null without one.
+  const reset = (name?: string): void => {
+    if (name !== undefined && !Object.hasOwn(options.state, name)) throw new TypeError("\`" + String(name) + "\` is not a state of " + source + ".");
+    for (const each of name === undefined ? Object.keys(options.state) : [name]) options.state[each]!.set(initialAt(options.initials?.[each] ?? null, []));
+  };
+  return { state, data, reset };
 }
 `;

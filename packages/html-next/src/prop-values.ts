@@ -9,7 +9,8 @@ import type { PropContract, PropType, PropValue } from "./types.js";
 
 /** An invocation's or framework's input, parsed through the prop's type; undefined when it fails. */
 export function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue | undefined {
-  if (input === null) return prop.default === undefined ? null : prop.default;
+  // Null means not present, so a null input clears the prop to its default (types#null-and-missing-values).
+  if (input === null || input === undefined) return prop.default === undefined ? null : prop.default;
   // Bare boolean attributes retain HTML presence semantics. Explicit values
   // are invocation strings and must still pass through the declared type.
   const candidate = type === "boolean" && attributePresent && input === "" ? true : input;
@@ -26,10 +27,9 @@ export function reflectedPropValue(value: unknown, type: PropType | null): strin
   return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
 }
 
-/** A framework's value: undefined returns the prop to its default, and an invalid one is refused. */
+/** A framework's value: null or undefined returns the prop to its default, and an invalid one is refused. */
 export function assignedPropValue(prop: PropContract, input: unknown, type: PropType | null = prop.type): PropValue | undefined {
-  if (input !== undefined) return invocationValue(prop, input, "value", false, type);
-  return prop.default === undefined ? null : prop.default;
+  return invocationValue(prop, input, "value", false, type);
 }
 
 export function conformsAtReference(value: Value, type: TypeNode): boolean {
@@ -51,11 +51,9 @@ export function conformsAtReference(value: Value, type: TypeNode): boolean {
 
 /** Check the destination's immediate type; nested fields are checked when read. */
 export function conformsAtDestination(value: Value, type: PropType | TypeNode | null | undefined): boolean {
-  if (type === undefined || value === ABSENT) return true;
+  // Null, or undefined, means not present: it is never a wrong-typed write (types#null-and-missing-values).
+  if (type === undefined || value === ABSENT || value === null || value === undefined) return true;
   if (type === null) return false;
-  // A missing number source cannot overwrite a child's declared default. Only a destination
-  // that explicitly includes null accepts it; ordinary nullable rendering is handled elsewhere.
-  if (value === null) return parseTypedValue(value, type, "$", "value").ok;
   return conformsAtReference(value, normalizeType(type));
 }
 

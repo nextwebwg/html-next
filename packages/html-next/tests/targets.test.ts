@@ -312,8 +312,9 @@ describe("official target compilers", () => {
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
     compileVue(vue, "XTypedHandlers.vue");
-    assert.match(vue, /  write\(count, concat\(count\.value\), isNumber, '<source>', 'badNumber', 'count'\)\n/);
-    assert.match(vue, /write\(\n\s+\(next\) => \(items\.value\[index\.value\]\.name = next\),\n\s+7,\n\s+isString,\n\s+'<source>',\n\s+'badField',\n\s+'items\[\$index\]\.name',\n/);
+    // A write that may be null reverts to the state's declared value.
+    assert.match(vue, /  write\(count, concat\(count\.value\) \?\? 2, isNumber, '<source>', 'badNumber', 'count'\)\n/);
+    assert.match(vue, /write\(\n\s+\(next\) => \(destination\.name = next\),\n\s+7,\n\s+isString,\n\s+'<source>',\n\s+'badField',\n\s+'items\[\$index\]\.name',\n/);
   });
 
   it("writes proven values plainly and checks the rest in Vue, React and Svelte", async () => {
@@ -356,9 +357,10 @@ describe("official target compilers", () => {
         ["write(loose, loose.value + 1, isInteger, 'writes.html', 'step', 'loose')",
           'write(setLoose, getLoose() + 1, isInteger, "writes.html", "step", "loose");',
           "write((next) => (loose = next), loose + 1, isInteger, 'writes.html', 'step', 'loose');"],
-        ["write(total, label.value, isNumber, 'writes.html', 'wrong', 'total')",
-          'write(setTotal, getLabel(), isNumber, "writes.html", "wrong", "total");',
-          "write((next) => (total = next), label, isNumber, 'writes.html', 'wrong', 'total');"],
+        // A read that may be null reverts to the declared value; an operator's result is never null.
+        ["write(total, label.value ?? 0.5, isNumber, 'writes.html', 'wrong', 'total')",
+          'write(setTotal, getLabel() ?? 0.5, isNumber, "writes.html", "wrong", "total");',
+          "write((next) => (total = next), label ?? 0.5, isNumber, 'writes.html', 'wrong', 'total');"],
       ],
     };
     for (const lines of [...expected.plain, ...expected.checked]) {
@@ -387,10 +389,12 @@ describe("official target compilers", () => {
       write(count, Symbol.for("html-next.invalid-result"));
       write((value: unknown) => set.push(value), Number.POSITIVE_INFINITY, isNumber, "x.html", "overflow", "count");
       write((value: unknown) => set.push(value), Number.NaN);
+      write(count, null, isNumber, "x.html", "absent", "count");
       write(count, undefined, isNumber, "x.html", "absent", "count");
       write((value: unknown) => set.push(value), 4, isNumber, "x.html", "good", "count");
     } finally { console.warn = warn; }
-    assert.deepEqual(count, { value: undefined });
+    // Undefined means not present, as null does: written as null, with no warning.
+    assert.deepEqual(count, { value: null });
     assert.deepEqual(set, [4]);
     assert.deepEqual(warnings, [
       "x.html: HR007: State `count` does not satisfy its declared type.",
@@ -602,7 +606,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /:key="item\.id"/);
     assert.match(vue, /<span>\{\{ item\.name \}\}<\/span>/);
     assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: query, defaultValue: '' \}"/);
-    assert.match(vue, /@input="query = readBoundControl\(/);
+    // An emptied control reverts query to its declared value without echoing it.
+    assert.match(vue, /@input="query = revertBoundControl\(/);
     assert.match(vue, /@click="flip"/);
     assert.match(vue, /:class="\{ compact: checkedProps\.size === 'sm' \}"/);
     assert.match(vue, /:style="\{ '--gap': checkedProps\.size \?\? undefined \}"/);
@@ -822,7 +827,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     compileVue(vue, "XAliasWrites.vue");
     const react = generateReactComponent(definition);
     await transform(react, { loader: "tsx", format: "esm" });
-    assert.match(vue, /draft\.owner\.name = readBoundControl\(/);
+    assert.match(vue, /draft\.owner\.name = revertBoundControl\([\s\S]*?'Ada',?\s*\) as any/);
     assert.match(vue, /rows\[loop\.index\]\.label = readBoundControl\(/);
     assert.match(react, /\["owner", "name"\]/);
     assert.match(react, /\[loop\.index, "label"\]/);

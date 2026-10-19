@@ -18,12 +18,12 @@ describe("await server rendering", () => {
     });
   }
 
-  it("treats an actual nullable null from a parent as available", async () => {
-    const parent = parseComponent('<template component="x-parent"><defs><state name="product" type="object({ name: string })" nullable></state></defs><section><x-await from:product="$product"></x-await></section></template>');
-    const child = parseComponent('<template component="x-await"><defs><prop name="product" type="object({ name: string })" nullable>Product.</prop></defs><article><b $await="$product">Ready.</b><p $else>Loading.</p></article></template>');
+  it("uses a child's default when its parent passes null", async () => {
+    const parent = parseComponent('<template component="x-parent"><defs><state name="product" type="object({ name: string })"></state></defs><section><x-await from:product="$product"></x-await></section></template>');
+    const child = parseComponent('<template component="x-await"><defs><prop name="product" type="object({ name: string })" default="{ name: \'Default\' }">Product.</prop></defs><article><b $await="$product">{$product.name}</b><p $else>Loading.</p></article></template>');
     const rendered = await renderComponents('<x-parent></x-parent>', { definitions: [parent, child] });
     const dom = new JSDOM(rendered.html);
-    try { assert.equal(dom.window.document.querySelector("b")?.textContent, "Ready."); }
+    try { assert.equal(dom.window.document.querySelector("b")?.textContent, "Default"); }
     finally { dom.window.close(); }
   });
 

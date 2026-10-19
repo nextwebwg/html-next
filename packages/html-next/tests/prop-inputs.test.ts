@@ -95,7 +95,7 @@ describe("framework prop input bookkeeping", () => {
     assert.equal(source.publish({ value: { name: 7 }, status: READY_INPUT }), false);
   });
 
-  it("allows fixture replacement, nullable fixtures and explicit release", () => {
+  it("allows fixture replacement, a null override and explicit release", () => {
     const { inputs, port } = create();
     const source = port.source("product");
     inputs.value("product", { name: "Fixture" });

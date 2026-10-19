@@ -216,6 +216,7 @@ export interface ComponentHostOptions {
   /** Each named declared script, which a controller reads as \`host.scripts\`. */
   readonly scripts?: Readonly<Record<string, unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  readonly initials?: Readonly<Record<string, unknown>>;
   /** Asks one of the component's declared requests; its \`has\` builds \`host.hasResponder\`. */
   readonly request?: ((root: Element, connection: AbortSignal, name: string, detail?: unknown, options?: any) => Promise<unknown>)
     & { readonly has?: (host: any, own: string[]) => (name: string) => boolean };
@@ -351,6 +352,7 @@ export function useComponentHost(
       computed: Object.fromEntries([...Object.entries(computedValues), ...Object.entries(context)].map(([name, value]) => [name, () => value.value])),
       data: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, () => value.value])),
       ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
+      ...(options.initials === undefined ? {} : { initials: options.initials }),
     }, options.controllerSource?.definition ?? "<component>"),
     scripts: options.scripts ?? Object.freeze({}),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void { return listen(type, callback); },
@@ -640,8 +642,8 @@ export function cycleCheckedComputed<T>(evaluate: () => T) {
 
 /** A Vue state cell owns its first usable seed or an earlier accepted edit, including equal writes. */
 export function initializedState<T>(evaluate: () => { value: unknown; status: InputStatus }, accepts: (value: unknown) => boolean,
-  copy: <V>(value: V) => V, warn: () => void): Ref<T | undefined> & { status(): InputStatus; start(): void } {
-  const cell = ref<T>() as Ref<T | undefined>;
+  copy: <V>(value: V) => V, warn: () => void): Ref<T | null | undefined> & { status(): InputStatus; start(): void } {
+  const cell = ref<T>() as Ref<T | null | undefined>;
   let seed: ReturnType<typeof cycleCheckedComputed<ReturnType<typeof evaluate>>> | undefined = cycleCheckedComputed(evaluate);
   let initialized = false;
   let stop: (() => void) | undefined;
@@ -662,15 +664,15 @@ export function initializedState<T>(evaluate: () => { value: unknown; status: In
     cell.value = copy(next.value) as T;
     notify();
   };
-  const state = customRef<T | undefined>((track, trigger) => {
+  const state = customRef<T | null | undefined>((track, trigger) => {
     notify = trigger;
     return {
       get() { track(); initialize(); return cell.value; },
       set(value) {
-        if (!accepts(value)) { warn(); return; }
+        if (value != null && !accepts(value)) { warn(); return; }
         const first = !initialized;
         claim();
-        cell.value = value;
+        cell.value = value ?? null;
         if (first) trigger();
       },
     };

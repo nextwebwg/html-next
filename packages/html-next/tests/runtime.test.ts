@@ -1522,7 +1522,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${engine} uses an explicit null before framework root selection`, async () => {
+    it(`${engine} clears an explicit null to its default before framework root selection`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const definition = parseComponent(`<template component="x-null-choice" status="early" summary="Null root.">
@@ -1530,7 +1530,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <template $match><article $when="$choice = null"><output $value="$choice"></output></article><section $else><output $value="$choice"></output></section></template>
         </template>`, "null-choice.html");
         const page = await browser.newPage();
-        await page.setContent(`<article id="null"></article><section id="default"></section>`);
+        // The default's root, not the null arm's: a null prop is not present.
+        await page.setContent(`<section id="null"></section><section id="default"></section>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate((parsed) => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -1546,7 +1547,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           disposeDefault();
           return values;
         }, JSON.parse(JSON.stringify(definition)) as Record<string, unknown>);
-        assert.deepEqual(result, [null, "on"]);
+        // Null means not present, so the default chooses the root (types#null-and-missing-values).
+        assert.deepEqual(result, ["on", "on"]);
       } finally {
         await browser.close();
       }
