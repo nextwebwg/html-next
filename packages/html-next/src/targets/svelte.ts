@@ -1140,6 +1140,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const hostStateNames = componentStateNames(definition, options.componentGraph);
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
+  if (states.some(state => state.initializer !== undefined)) fail("HT030", "Svelte conversion of <state from> is not implemented.");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const contexts = declarations.filter((declaration): declaration is ContextDeclaration => declaration.kind === "context");

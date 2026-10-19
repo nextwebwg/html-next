@@ -873,6 +873,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const handlerTakesEvent = new Set<HandlerDeclaration>();
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
+  if (states.some(state => state.initializer !== undefined)) fail("HT030", "React conversion of <state from> is not implemented.");
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
