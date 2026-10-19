@@ -659,7 +659,9 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         if (args.length !== 2) return { ...none(key, "NONCONFORMING"), fails: true };
         const [value, fallback] = args as [Lowered, Lowered];
         return {
-          ...none(key, `defaultValue(${value.source}, ${fallback.source})`), ...reads,
+          ...none(key, scope.observesInputs
+            ? `inputDefault(() => ${value.source}, () => ${fallback.source}, ABSENT)`
+            : `defaultValue(${value.source}, ${fallback.source})`), ...reads,
           boolean: value.boolean && fallback.boolean, deep: value.deep || fallback.deep,
         };
       }
@@ -2646,7 +2648,7 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "generatedInputs", "awaitInput", "evaluateInput", "inputRead", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "notifyPropertySet", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "generatedInputs", "awaitInput", "evaluateInput", "inputRead", "inputDefault", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "notifyPropertySet", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "bindInput", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
     "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "manageHead", "manageScripts", "headValue", "headAttributes", "headJson", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",

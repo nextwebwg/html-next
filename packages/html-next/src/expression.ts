@@ -1,4 +1,5 @@
 import { add, divide, multiply, remainder, subtract } from "./decimal.js";
+import { inputDefault } from "./inputs.js";
 import { isNativeEvent } from "./freeze.js";
 import { parseExpression } from "./expression-parser.js";
 import { formatValue, formattingType } from "./format.js";
@@ -291,9 +292,7 @@ function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope)
   }
   if (fn === "default") {
     if (args.length !== 2) return NONCONFORMING;
-    const value = evalNode(args[0]!, scope);
-    if (value === NONCONFORMING) return NONCONFORMING;
-    return value === ABSENT || value === null ? evalNode(args[1]!, scope) : value;
+    return inputDefault(() => evalNode(args[0]!, scope), () => evalNode(args[1]!, scope), ABSENT);
   }
   if (fn === "concat" || fn === "join") {
     const values: Value[] = [];

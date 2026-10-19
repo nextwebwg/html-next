@@ -40,7 +40,7 @@ const REACT_RESERVED = new Set([
   "props", "nativeAttrs", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
   "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
-  "inputComputed", "inputRead", "evaluateInput",
+  "inputComputed", "inputRead", "inputDefault", "evaluateInput",
   "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
   "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
   "ref", "cleanup", "binding", "attrs", "detail", "name", "keys", "path",
@@ -1047,7 +1047,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(target.props.length === 0 ? [] : ["checkedProp", "checkPropInput", "usePropInputs", "BINDING_INPUTS_PROP", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
       ...(!renderState.usesInputStatus && computed.length === 0 ? [] : ["requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT"]),
       ...(computed.length === 0 ? [] : ["inputComputed"]),
-      ...(computed.length === 0 && !renderState.usesInputExpressions ? [] : ["inputRead"]),
+      ...(computed.length === 0 && !renderState.usesInputExpressions ? [] : ["inputRead", "inputDefault"]),
       ...(!renderState.usesInputExpressions ? [] : ["evaluateInput"]),
       ...((computed.length > 0 || renderState.usesInputExpressions) && target.props.length === 0 ? ["BINDING_INPUTS_PROP"] : []),
       ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
@@ -1185,10 +1185,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const previous = computedPreviousNames.get(value.name)!;
         const accepted = computedAcceptedNames.get(value.name)!;
         return [
-          `  const ${previous} = React.useRef<${type}>(null as ${type});`,
+          `  const ${previous} = React.useRef<{ value: ${type} } | undefined>(undefined);`,
           `  let ${accepted}: { value: ${type} } | undefined;`,
-          `  const ${valueNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, cycleCheckedComputed, (next) => { if ((next as unknown) === Symbol.for("html-next.invalid-result")) return ${previous}.current; ${accepted} = { value: next }; return next; });`,
-          `  React.useLayoutEffect(() => { if (${accepted} !== undefined) ${previous}.current = ${accepted}.value; });`,
+          `  const ${valueNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, cycleCheckedComputed, (next) => { if ((next as unknown) === Symbol.for("html-next.invalid-result")) return ${previous}.current?.value ?? null as ${type}; ${accepted} = { value: next }; return next; }, ${previous}.current === undefined ? undefined : READY_INPUT);`,
+          `  React.useLayoutEffect(() => { if (${accepted} !== undefined) ${previous}.current = ${accepted}; });`,
         ].join("\n");
       }
       return `  const ${valueNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, cycleCheckedComputed);`;
@@ -1259,7 +1259,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, observedScope(handlerScope, "propInputs.committed"));
         if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, handlerScope)) {
           const previous = computedPreviousNames.get(value.name)!;
-          return `    const ${handlerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current : (${previous}.current = next));`;
+          return `    const ${handlerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current?.value ?? null as ${type} : (${previous}.current = { value: next }).value, ${previous}.current === undefined ? undefined : READY_INPUT);`;
         }
         return `    const ${handlerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, (compute) => cycleCheckedComputed(compute, false));`;
       });
@@ -1411,7 +1411,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       const type = typeScript(types.get(value.name)!);
       if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, controllerScope)) {
         const previous = computedPreviousNames.get(value.name)!;
-        return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current : (${previous}.current = next));`;
+        return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current?.value ?? null as ${type} : (${previous}.current = { value: next }).value, ${previous}.current === undefined ? undefined : READY_INPUT);`;
       }
       return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, (compute) => cycleCheckedComputed(compute, false));`;
     }) : []),

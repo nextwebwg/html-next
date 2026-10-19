@@ -956,8 +956,16 @@ function readInvocation(
   const bindings = pendingInvocationBindings.get(invocation)?.filter(binding => binding.tag === contract.tag) ?? [];
   const boundInputs = new Map(bindings.flatMap(binding => [...binding.inputs]));
   for (const [name, input] of boundInputs) {
+    const bootstrap = incoming[name];
     delete incoming[name];
-    if (input.status.ready) incoming[name] = { value: input.value, source: "value", attributePresent: false };
+    if (input.status.ready) {
+      // A selected input can already have the invocation's HTML bootstrap form. Preserve
+      // its initial coercion; object data and later updates use the typed value channel.
+      const serializable = input.value !== null && (typeof input.value !== "object" || Array.isArray(input.value));
+      incoming[name] = contract.props[name]?.select !== undefined && serializable && bootstrap?.source === "html"
+        ? bootstrap
+        : { value: input.value, source: "value", attributePresent: false };
+    }
   }
 
   const values = parseIncomingProps(contract, incoming);
@@ -977,7 +985,8 @@ function readInvocation(
   const { scope, effects, initialize } = componentScope(definition, values, parent, restored);
   for (const [name, input] of boundInputs) {
     if (!input.status.ready || values[name] !== undefined) {
-      propInputs[name]!.set({ value: input.value ?? null, source: "value", present: input.status.ready, provided: true });
+      const item = incoming[name];
+      propInputs[name]!.set({ value: item?.value ?? null, source: item?.source ?? "value", present: input.status.ready, provided: true });
       scope.setInputStatus(name, input.status);
     }
   }

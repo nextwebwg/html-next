@@ -2,7 +2,7 @@ export { activateModule } from "./module-connection.js";
 export { generatedInputs, awaitInput, bindInput } from "./generated-inputs.js";
 export { stateInitializers } from "./generated-state.js";
 import type { GeneratedStateInitializers } from "./generated-state.js";
-export { evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT } from "./inputs.js";
+export { evaluateInput, inputRead, inputDefault, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT } from "./inputs.js";
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";

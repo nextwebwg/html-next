@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { createEffect, ReactiveScope } from "../src/reactivity.js";
 import { publicInputStatus, readInputStatus } from "../src/input-status.js";
-import { evaluate } from "../src/expression.js";
-import { READY_INPUT } from "../src/inputs.js";
+import { compileExpression, evaluate, evaluateCompiled } from "../src/expression.js";
+import { inputComputed, inputDefault, READY_INPUT } from "../src/inputs.js";
 
 describe("binding availability", () => {
   it("derives availability from actual reads, including short circuits and lexical context", () => {
@@ -37,6 +37,47 @@ describe("binding availability", () => {
     scope.scheduler.flush();
     assert.equal(context.get("inherited"), "Disabled");
     assert.deepEqual(context.inputStatus("inherited"), READY_INPUT);
+  });
+
+  it("makes a default fallback available without hiding the selected value's status", () => {
+    const scope = new ReactiveScope([["label", null], ["fallback", "Default"]]);
+    scope.setInputStatus("label", { ready: false, pending: false, error: null, stale: false });
+    scope.defineComputed("text", () => evaluate("default($label, $fallback)", scope));
+    assert.equal(scope.get("text"), "Default");
+    assert.deepEqual(scope.inputStatus("text"), READY_INPUT);
+    scope.set("label", "Selected");
+    scope.setInputStatus("label", { ...READY_INPUT, pending: true });
+    scope.setInputStatus("fallback", { ready: false, pending: false, error: null, stale: false });
+    scope.scheduler.flush();
+    assert.equal(scope.get("text"), "Selected");
+    assert.deepEqual(scope.inputStatus("text"), { ...READY_INPUT, pending: true });
+    scope.set("label", null);
+    scope.scheduler.flush();
+    assert.equal(scope.get("text"), null);
+    assert.equal(scope.inputStatus("text").ready, false);
+  });
+
+  it("retains an accepted default expression when its selected branch becomes nonconforming", () => {
+    const scope = new ReactiveScope([["enabled", true]]);
+    const expression = compileExpression("default($enabled ? 2px : 1px + 1rem, 3px)");
+    scope.defineComputed("size", () => evaluateCompiled(expression, scope));
+    assert.equal(scope.get("size"), "2px");
+    scope.set("enabled", false);
+    scope.scheduler.flush();
+    assert.equal(scope.get("size"), "2px");
+    assert.deepEqual(scope.inputStatus("size"), READY_INPUT);
+  });
+
+  it("retains a framework default computation when its primary result is nonconforming", () => {
+    const invalid = Symbol.for("html-next.invalid-result");
+    let candidate: unknown = "Accepted";
+    let accepted: unknown = null;
+    const value = inputComputed(() => inputDefault(() => candidate, () => "Fallback"),
+      read => ({ get: read }), next => next === invalid ? accepted : (accepted = next));
+    assert.equal(value.get(), "Accepted");
+    candidate = invalid;
+    assert.equal(value.get(), "Accepted");
+    assert.deepEqual(value.status(), READY_INPUT);
   });
 
   it("notifies await consumers when only a computed prerequisite's status changes", () => {

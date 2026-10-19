@@ -9,7 +9,7 @@ import { generateComponent } from "../src/generate.js";
 import { parseComponent, parseComponentResource } from "../src/source-parser.js";
 import { compiledFixtures } from "./hydration-fixtures.js";
 
-const source = '<template component="x-await"><defs><prop name="product" type="object({ name: string })">Product.</prop></defs><section><template $await="binding of $product"><h2>{$product.name}</h2><input value="initial"><small $if="$binding.pending">Refreshing.</small></template><p $error="problem">{$problem.message}</p><i $else>Loading.</i></section></template>';
+const source = '<template component="x-await"><defs><prop name="product" type="object({ name: string })">Product.</prop><prop name="caption" type="string">Optional caption.</prop><computed name="captionText" type="string" from="default($caption, \'Fallback\')"></computed></defs><section><mark>{$captionText}</mark><template $await="binding of $product"><h2>{$product.name}</h2><input value="initial"><small $if="$binding.pending">Refreshing.</small></template><p $error="problem">{$problem.message}</p><i $else>Loading.</i></section></template>';
 const seededSource = source.replace('</defs>', '<prop name="driven" type="string">Driven.</prop><state name="draft" type="object({ name: string })" from="$product"></state></defs>')
   .replace('binding of $product', 'binding of $draft').replace('{$product.name}', '{$draft.name}');
 const sources = [["direct", source], ["derived", source.replace("</defs>", '<prop name="driven" type="string">Driven.</prop><state name="query" type="integer" value="1"></state><computed name="label" type="string" from="concat($product.name)"></computed><computed name="key" type="string" from="concat($label, \'/\', $query)"></computed></defs>')
@@ -65,6 +65,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("await and rendered-i
           const runtime = (window as unknown as { HtmlRuntime: typeof import("../src/live.js") & typeof import("../src/bindings.js") & { boot(): void } }).HtmlRuntime;
           runtime.boot();
           const root = document.querySelector("section")!;
+          if (root.querySelector("mark")?.textContent !== "Fallback") throw new Error("A default fallback must remain available.");
           const host = runtime.getComponentHost(root)!;
           const port = runtime.componentInputs(host);
           const product = port.source("product");

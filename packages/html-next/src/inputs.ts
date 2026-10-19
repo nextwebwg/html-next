@@ -84,13 +84,25 @@ export function evaluateInput<T>(compute: () => T, previous?: InputStatus, inval
   return { value, status };
 }
 
+/** A fallback handles absence; only the branch supplying the result contributes availability. */
+export function inputDefault<T, F>(read: () => T, fallback: () => F, absent?: unknown): T | F {
+  if (!observingInputs()) {
+    const value = read();
+    return value == null || value === absent ? fallback() : value;
+  }
+  const result = evaluateInput(read, READY_INPUT);
+  if (result.value == null || result.value === absent) return fallback();
+  observeInputStatus(result.status);
+  return result.value;
+}
+
 /** The adapter supplies its own memo/computed primitive; acceptance runs only for available data. */
 export function inputComputed<T>(compute: () => T,
-  make: <V>(read: () => V) => { get(): V }, accept?: (value: T) => T,
+  make: <V>(read: () => V) => { get(): V }, accept?: (value: T) => T, initialStatus?: InputStatus,
 ): { get(): T | null; readonly value: T | null; status(): InputStatus } {
   let previous: { readonly value: T | null; readonly status: InputStatus } | undefined;
   const cell = make(() => {
-    const result = evaluateInput(compute, previous?.status);
+    const result = evaluateInput(compute, previous?.status ?? initialStatus);
     const value = result.status.ready ? accept === undefined ? result.value : accept(result.value) : null;
     if (previous !== undefined && Object.is(previous.value, value) && previous.status === result.status) return previous;
     return previous = { value, status: result.status };
