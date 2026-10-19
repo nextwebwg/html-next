@@ -18,6 +18,20 @@ function create(defaults: Record<string, unknown> = {}) {
 }
 
 describe("framework prop input bookkeeping", () => {
+  it("notifies source value and status without reporting unchanged caller ownership", () => {
+    const notifications: string[] = [];
+    const inputs = new PropInputs({ names: ["product"], values: { product: null }, defaults: {},
+      check: (_name, value) => ({ ok: true, value }), invalidate() {} });
+    const port = inputs.port({ track() {}, notify: (_name, kind) => { notifications.push(kind); },
+      watch: () => () => {}, untracked: run => run() });
+    const source = port.source("product");
+    for (const status of [READY_INPUT, pending, failed]) {
+      source.publish({ value: "Result", status });
+      assert.equal(port.supplied("product"), false);
+    }
+    assert.deepEqual(notifications, ["value", "status", "value", "status", "value", "status"]);
+  });
+
   it("preserves a source publication made after rendering but before commit", () => {
     const { inputs, values, port } = create();
     const source = port.source("product");

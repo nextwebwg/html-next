@@ -140,7 +140,7 @@ export class PropInputs {
       ? { ...snapshot.status, ready: true, stale: false } : snapshot.status);
     this.#options.invalidate();
     if (this.#reactions?.notify !== undefined) {
-      this.#reactions.notify(name, "value"); this.#reactions.notify(name, "status"); this.#reactions.notify(name, "supplied");
+      this.#reactions.notify(name, "value"); this.#reactions.notify(name, "status");
     }
     return true;
   }

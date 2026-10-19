@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- React modules with prop-selected types emit each validity input once, retaining committed selector reads and valid generated TypeScript.
+- React source publications notify value and status watchers without rerunning unchanged caller-ownership eligibility.
 - State draft copying recognizes ordinary records from another realm while preserving class and platform object identities.
 - React data drivers receive canonical input notifications while a render is suspended. Hiding connected DOM with Suspense preserves module activation and data bindings until the root actually disconnects.
 

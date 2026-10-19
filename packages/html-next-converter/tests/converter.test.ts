@@ -721,6 +721,22 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       .map((artifact) => join(outDirectory, artifact.path)));
   });
 
+  it("typechecks React module validity with shared prop selectors and state selectors", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "x-card.js"), "export function connect() {}\n");
+    await writeFile(join(root, "x-card.html"), `<template component="x-card" module="./x-card.js"><defs>
+      <prop name="format" type="keyword" values="text, number" default="number">Format.</prop>
+      <prop name="answer">Answer.<type from="format"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      <prop name="other">Other.<type from="format"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      <state name="mode" type="keyword" values="text, number" value="text"></state>
+      <prop name="local">Local.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+    </defs><output $value="$answer"></output></template>`);
+    const outDirectory = join(root, "out-react-selected-validity");
+    const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
+    await typecheckReact(root, manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path))
+      .map((artifact) => join(outDirectory, artifact.path)));
+  });
+
   it("converts declared state and event shapes through both React dispatch paths", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.js"), "export default function controller() {}\n");
