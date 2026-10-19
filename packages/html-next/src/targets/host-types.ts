@@ -252,6 +252,10 @@ export function generateHostDeclaration(
     "}",
     `/** <${contract.tag}>'s controller: the default export of its controller module. */`,
     "export type Controller = (host: Host) => HostCleanup | Promise<HostCleanup>;",
+    ...(definition.module === undefined ? [] : [
+      "/** Browser activation; cancelled when this connection ends. */",
+      "export type Connect = (host: Host, context: { readonly signal: AbortSignal }) => HostCleanup | Promise<HostCleanup>;",
+    ]),
     "",
   ];
   return lines.join("\n");

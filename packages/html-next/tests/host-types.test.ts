@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { writeHostDeclarations } from "../src/host-declarations.js";
 import { loadNodeComponents } from "../src/node-loader.js";
+import { generateHostTypes } from "../src/generate.js";
+import { parseComponent } from "../src/source-parser.js";
 
 const checkout = `<link rel="component" href="./line-item.html">
 <template component="checkout-form" controller="./checkout-form.ts">
@@ -123,6 +125,7 @@ describe("typed controller hosts", () => {
       { baseURL: pathToFileURL(`${directory}/`).href });
     // Only a component with a controller has a host to type.
     assert.deepEqual(await writeHostDeclarations(graph), [join(directory, "checkout-form.host.d.ts")]);
+    await writeFile(join(directory, "x-module.host.d.ts"), generateHostTypes(parseComponent('<template component="x-module" module="./module.js"><defs><prop name="title" type="string" required>Title.</prop><state name="count" type="number" value="0"></state></defs><section></section></template>')));
   });
   afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
@@ -132,6 +135,13 @@ describe("typed controller hosts", () => {
 
   it("types a JavaScript controller through JSDoc", () => {
     assert.deepEqual(typeErrors("checkout-form.js", jsController), []);
+  });
+
+  it("types a named connect's signal, mutable state and readonly props", () => {
+    const source = 'import type { Connect } from "./x-module.host.js"; export const connect: Connect = (host, { signal }) => { const abort: AbortSignal = signal; host.state.count += 1; const title: string = host.props.title.value; return () => { void [abort, title]; }; };';
+    assert.deepEqual(typeErrors("module.ts", source), []);
+    assert.match(typeErrors("module.ts", source.replace('host.state.count += 1;', 'host.state.count = "wrong";'))[0]!, /Type 'string' is not assignable to type 'number'/);
+    assert.match(typeErrors("module.ts", source.replace('host.state.count += 1;', 'host.props.title.value = "wrong";'))[0]!, /read-only/);
   });
 
   it("rejects a misspelled state name", () => {

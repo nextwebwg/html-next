@@ -105,7 +105,7 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     "",
     "## Runtime support",
     "",
-    `The generated targets use the same HTML Next definition as the live runtime${definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} Mutable and computed state, handlers, structural rendering, data, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
+    `The generated targets use the same HTML Next definition as the live runtime${definition.module !== undefined ? ` and activate its module \`${definition.module}\` through the named \`connect\` export.` : definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} Mutable and computed state, handlers, structural rendering, data, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
     "",
   ].join("\n");
 }

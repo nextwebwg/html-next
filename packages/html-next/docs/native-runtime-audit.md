@@ -15,6 +15,75 @@ The `native_build.capabilityFixtures` group reports isolated generated attributi
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
 the installed Chromium, Firefox, and WebKit builds.
 
+## Component module activation
+
+Native ESM imports own module identity and evaluation; they do not own a rendered instance's
+connection lifetime. The existing document MutationObserver hub already detects retained
+disconnection, reconnection, and connected root replacement. Each module activation uses a native
+AbortController to cancel its work. The remaining gap is disposing returned cleanup (including
+cleanup arriving after cancellation) and assigning subscriptions made through host.on/effect to
+that activation. `module-connection.ts` supplies this layer without a second observer, scheduler,
+or server execution phase. A connection facade preserves the instance's state and typed props and
+refuses subscriptions made through an obsolete activation, including after an await. Legacy
+controller initialization keeps its existing once-per-instance path.
+
+## Asynchronous input availability
+
+Derived availability composes synchronous declaration reads using JavaScript's own evaluation
+order and short-circuit behavior. Promises cannot expose recurring prerequisite status, and a
+static list of referenced identifiers would incorrectly include branches that were not read.
+The remaining layer records public input status only during a synchronous evaluation; nested
+evaluations restore the enclosing collector in finally. It owns no scheduling or subscriptions.
+The live scope uses its existing computed and signal dependencies to publish value and status;
+status-only refreshes therefore reach await consumers even when the derived value is unchanged.
+
+An ordinary accepted value does not describe whether a producer is idle, refreshing, failed, or
+retaining a previous-input value. Promises settle once and therefore cannot supply that recurring
+status. The existing ReactiveScope and signal dependencies already notify template regions of
+changes; the remaining gap is a separate, typed status on a declared input. The status lookup uses
+the same lexical owner as the value, keeps falsy and nullable values available, and preserves public
+error fields without exposing producer capabilities. Await groups reuse the existing owned
+structural regions; their presence does not introduce a request, observer, timer, or scheduler.
+Public SDK status and name reads return copies so callers cannot mutate stored metadata. Readonly
+types and lexical write checks enforce the authoring boundary; these new paths do not freeze
+objects. Physical freezing requires evidence that it does not regress representative runtime cost.
+
+Compiled await groups use the same with/match blocks as compiled synchronous flow. Their status
+reads use the existing root bits; source publication and parent binding propagation mark that root
+even when its accepted value is unchanged. The input SDK uses compiled prop checks and the existing
+property dependencies and scheduler. Components with props supply the SDK to their host; components
+without props do not import its implementation. It does not import the parser or interpreter.
+
+React, Vue and Svelte reuse their existing accepted prop stores and target reactivity. A shared
+bookkeeping adapter records ownership, attempted input and availability; it does not store another
+copy of accepted values. Private invocation metadata carries unavailable caller ownership and
+status-only changes independently of ordinary typed props. Framework getters retain the identity
+of unchanged status so eligibility watchers do not rerun for a producer's own results. SDK watchers
+obtained through a connection host end with that activation, including React StrictMode replay.
+Vue uses an immediate native watch callback outside dependency collection for SDK publication;
+Svelte uses untrack and React uses its existing controller dependency collector.
+React render candidates commit their accepted input metadata in a layout effect, while
+useSyncExternalStore checks source revisions before commit. A suspended or abandoned render
+cannot transfer fixture ownership or expose its tentative values through the connected SDK.
+Actual converter fixtures pass each target's type checker, server renderer and browser runtime. These tests cover
+direct prop bindings; derived input availability and server source preparation require separate
+integration coverage. The pure inputs package entry point imports no renderer or tooling.
+
+A Chromium comparison with origin/main (67230fb) ran 3,000 updates of two typed props per sample,
+including rendering, reflection, validity and native observer work. Five alternating samples gave
+medians of 7.7 ms before and 8.0 ms after (1.039×). This is evidence for that ordinary prop-update
+workload, not a claim of zero regression or a measurement of every async/provider path. The compiled
+prop fixture adds about 1.0 KB gzip for input ownership and the SDK. Sample counts are adjustable
+benchmark choices. Results are recorded in the workspace's private performance artifact.
+
+Structured attribute values require bare keys, single-quoted strings, keywords, units and trailing
+commas, following the existing expression literal spelling. Native JSON parsing changes that
+language, including its escaping rules. `structured-input.ts` reads only those literal forms into
+values and rejects references, calls and operators; the general expression parser and evaluator
+remain outside compiled component output. A differential regression compares the former AST
+literal reader with the direct reader, including nested structures and invalid expressions. The
+same canonical reader is embedded in converted framework prop helpers.
+
 ## Inline text reads
 
 The native HTML parser already creates inert text nodes in context-valid elements, including table

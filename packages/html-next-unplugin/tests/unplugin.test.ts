@@ -350,9 +350,15 @@ describe("HTML Next unplugin", () => {
     // that does nothing until a component on the page asks; the request steps stay with askers.
     // +47 B: the whitespace between the fixture's elements, which templates now keep as authored.
     // +70 B: `host.on` records each listener as a known responder for `hasResponder`.
+    // +34 B: stopped host effects/computeds release their owners; a lifecycle traversal keeps
+    // visiting siblings when connection cleanup removes an owner from the instance.
+    // +19 B: the optional named-module activation callback preserves disconnect listener ordering.
+    // +14 B: an optional typed-input SDK hook on the host; this state-only benchmark imports no SDK.
     // Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 9_083, `direct benchmark entry is ${gzip} B gzip-6`);
+    // +4 B from identifier allocation beside computed-availability exports, which this entry omits.
+    // +60 B: optional seeded-state hooks; the one-time initializer itself is absent here.
+    assert.ok(gzip <= 9_214, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

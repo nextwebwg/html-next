@@ -207,14 +207,17 @@ describe("reactive scope", () => {
     });
     createEffect(scope.scheduler, () => { seen.push(scope.get("derived")); });
     assert.deepEqual(seen, [null]);
+    assert.equal(scope.inputStatus("derived").ready, false);
 
     scope.set("source", 2);
     scope.scheduler.flush();
     assert.deepEqual(seen, [null, 4]);
+    assert.equal(scope.inputStatus("derived").ready, true);
 
     scope.set("source", "oops");
     scope.scheduler.flush();
     assert.equal(scope.get("derived"), 4);
+    assert.equal(scope.inputStatus("derived").ready, true);
     assert.deepEqual(seen, [null, 4]);
 
     scope.set("source", 7);

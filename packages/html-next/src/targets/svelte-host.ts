@@ -1,8 +1,11 @@
 import type { GeneratedArtifact } from "../generate.js";
+import { MODULE_CONNECTION_SOURCE } from "../generated/module-connection-source.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
+import { INPUT_STATUS_SOURCE } from "./shared-generated.js";
 
 const SOURCE = `import { flushSync, untrack } from "svelte";
+${INPUT_STATUS_SOURCE}
 import { cycleCheckedComputed } from "./reactivity.svelte";
 import { componentRoot } from "./render.svelte";
 
@@ -14,11 +17,20 @@ export interface StateAccess {
 }
 
 export interface ComponentHostOptions {
+  readonly inputs?: { port(reactions: {
+    readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
+    track(name: string, kind: "value" | "status" | "supplied"): void;
+    watch(run: () => void | (() => void)): () => void;
+    untracked<T>(run: () => T): T;
+  }): unknown };
+  readonly availability?: Readonly<Record<string, () => InputStatus>>;
+  readonly inputTrack?: (name: string, kind: "value" | "status" | "supplied") => void;
   readonly root: () => Element | null;
   readonly ownsRoot: () => boolean;
   readonly definition: string;
   readonly tag: string;
   readonly controller: string;
+  readonly module?: boolean;
   readonly props: () => Readonly<Record<string, unknown>>;
   readonly propInputs?: (name: string) => unknown;
   readonly propValidity?: (name: string) => unknown;
@@ -39,6 +51,7 @@ export interface ComponentHostOptions {
 }
 
 interface ControllerHost {
+  readonly [key: symbol]: unknown;
   readonly root: Element;
   readonly element: Element;
   readonly state: Record<string, unknown>;
@@ -62,6 +75,7 @@ interface ControllerHost {
 }
 
 interface ControllerModule {
+  readonly connect?: Connect<ControllerHost>;
   readonly default: (host: ControllerHost) => void | (() => void) | Promise<void | (() => void)>;
 }
 
@@ -70,7 +84,7 @@ function moduleDiagnostic(code: "HJ001" | "HJ002", options: ComponentHostOptions
   const url = new URL(options.controller, base).href;
   const tick = String.fromCharCode(96);
   const message = code === "HJ002"
-    ? "Controller module " + tick + url + tick + " must default-export a function."
+    ? options.module ? "Component module " + tick + url + tick + " export connect must be a function." : "Controller module " + tick + url + tick + " must default-export a function."
     : "Controller module " + tick + url + tick + " failed to load: " + (reason instanceof Error ? reason.message : String(reason)) + ".";
   return Object.assign(new Error(base + ": " + code + ": " + message), {
     name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code, message, source: base }),
@@ -82,6 +96,7 @@ function documentOrder(elements: readonly Element[]): Element[] {
     .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1);
 }
 
+${MODULE_CONNECTION_SOURCE}
 ${CONTROLLER_STATE_SOURCE}
 ${REQUEST_HOST_SOURCE}
 
@@ -127,6 +142,13 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     });
   }
   const host: ControllerHost = {
+    get [Symbol.for("@nextwebwg/html-next.inputs.v1")]() {
+      return options.inputs?.port({ track: (name, kind) => options.inputTrack!(name, kind),
+        declarations: Object.fromEntries([...Object.keys(options.state), ...Object.keys(options.computed)].map(name => [name, {
+          read: () => host.state[name], status: () => options.availability?.[name]?.() ?? READY_INPUT,
+        }])),
+        watch: run => host.effect(run), untracked: run => untrack(run) });
+    },
     get root() { return (root ?? lastRoot)!; },
     get element() { return host.root; },
     ...controllerNamespaces(options, options.definition),
@@ -232,7 +254,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     });
   }
   const load = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve().then(loader).then((candidate) => {
-    if (typeof (candidate as { default?: unknown } | null)?.default !== "function") throw moduleDiagnostic("HJ002", options);
+    const loaded = candidate as { default?: unknown; connect?: unknown } | null;
+    if (options.module ? loaded === null || typeof loaded !== "object" || loaded.connect !== undefined && typeof loaded.connect !== "function" : typeof loaded?.default !== "function") throw moduleDiagnostic("HJ002", options);
     return candidate as ControllerModule;
   }).catch((error: unknown) => {
     if (error instanceof Error && "diagnostic" in error) throw error;
@@ -284,12 +307,16 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         relayResponders(next, subscription.type);
       }
     }
-    if (initialized) return;
+    if (initialized && !options.module) return;
     // Requests from inside this root wait until the controller has run, or failed to load.
     const release = releaseController = holdController(next);
     started = load().then(async (module) => {
       if (!connected || current !== generation) return module;
       initialized = true;
+      if (options.module) {
+        try { cleanup = activateModule(module, host, report); } finally { release(); }
+        return module;
+      }
       let invoked: ReturnType<ControllerModule["default"]>;
       try { invoked = module.default(host); } finally { release(); }
       const result = await invoked;

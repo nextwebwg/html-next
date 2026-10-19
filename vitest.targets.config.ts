@@ -58,6 +58,8 @@ config.test!.include = [
   "packages/html-next-converter/tests/named-slot-parity.test.ts",
   "packages/html-next-converter/tests/slotted-style-parity.test.ts",
   "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts",
+  "packages/html-next-converter/tests/component-module-parity.test.ts",
+  "packages/html-next-converter/tests/component-await-parity.test.ts",
   "packages/html-next-converter/tests/slot-props-parity.test.ts",
   "packages/html-next-converter/tests/library-distribution.test.ts",
   "packages/html-next-unplugin/tests/framework.test.ts",

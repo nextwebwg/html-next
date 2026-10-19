@@ -17,6 +17,8 @@ const publicExports = [
   "./runtime",
   "./live",
   "./generated-runtime",
+  "./inputs",
+  "./bindings",
   "./forms",
   "./validation",
   "./browser",
@@ -27,6 +29,8 @@ const browserExports = [
   "./runtime",
   "./live",
   "./generated-runtime",
+  "./inputs",
+  "./bindings",
   "./forms",
   "./validation",
   "./browser",
@@ -163,6 +167,24 @@ describe("workspace package contracts", () => {
       ],
       { cwd: root, shell: useCommandShell },
     );
+    const sdkEntry = join(consumer, "input-driver.ts");
+    const sdkMeta = join(consumer, "input-driver-meta.json");
+    writeFileSync(sdkEntry, 'import { componentInputs } from "@nextwebwg/html-next/inputs"; export { componentInputs };\n');
+    execFileSync("corepack", ["pnpm", "--filter", componentsPackage, "exec", "esbuild", sdkEntry,
+      "--bundle", "--platform=browser", `--outfile=${join(consumer, "input-driver.js")}`, `--metafile=${sdkMeta}`],
+      { cwd: root, shell: useCommandShell });
+    const sdkModules = Object.keys((JSON.parse(readFileSync(sdkMeta, "utf8")) as { inputs: Record<string, unknown> }).inputs)
+      .filter(path => path.includes("/html-next/dist/"));
+    expect(sdkModules.map(path => path.slice(path.lastIndexOf("/dist/") + 6)).sort()).toEqual(["component-inputs.js", "inputs.js"]);
+    const providerEntry = join(consumer, "binding-driver.ts");
+    const providerBundle = join(consumer, "binding-driver.js");
+    const providerMeta = join(consumer, "binding-driver-meta.json");
+    writeFileSync(providerEntry, 'export { BindingScope, bindModule } from "@nextwebwg/html-next/bindings";\n');
+    execFileSync("corepack", ["pnpm", "--filter", componentsPackage, "exec", "esbuild", providerEntry,
+      "--bundle", "--format=esm", "--platform=browser", `--outfile=${providerBundle}`, `--metafile=${providerMeta}`], { cwd: root, shell: useCommandShell });
+    expect(readFileSync(providerBundle, "utf8")).not.toMatch(/compileExpression|parseTypedValue|ReactiveScope|parseComponentNodes|jsdom|worker_threads/);
+    const providerModules = Object.keys((JSON.parse(readFileSync(providerMeta, "utf8")) as { inputs: Record<string, unknown> }).inputs);
+    expect(providerModules.filter(path => /\/(?:expression|expression-parser|source-parser|parser|runtime)\.js$/.test(path))).toEqual([]);
     const browserEntry = join(consumer, "browser-exports.ts");
     writeFileSync(
       browserEntry,

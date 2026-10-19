@@ -1,4 +1,8 @@
-import type { ControllerModule } from "./controller.js";
+import type { ComponentModule, ControllerModule } from "./controller.js";
+import { activateModule } from "./module-connection.js";
+import { createInputPort, evaluateInput, INPUT_PORT, observingInputs, readInputStatus, READY_INPUT, UNRESOLVED_INPUT, withoutInputObservation, type ComponentInputs, type InputSnapshot, type InputStatus } from "./inputs.js";
+export { componentInputs } from "./inputs.js";
+export { activateModule } from "./module-connection.js";
 import { selectedPropType } from "./contract.js";
 import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes } from "./declared-types.js";
 import { DataResource } from "./data.js";
@@ -149,9 +153,14 @@ interface PropInput {
   readonly value: unknown;
   readonly source: "html" | "value";
   readonly present: boolean;
+  /** Accepted caller ownership is distinct from the most recent attempted raw input. */
+  readonly provided?: boolean;
+  readonly producer?: boolean;
 }
 
 interface RuntimeInstance {
+  inputPort?: ComponentInputs;
+  inputRevisions?: Map<string, number>;
   controllerInitialized?: boolean;
   element?: Element;
   /** Stable component ownership, captured when invoked rather than inferred from later DOM position. */
@@ -229,6 +238,8 @@ interface InvocationBinding {
   component: RuntimeInstance | undefined;
   /** Run against the component's root when it lowers and again whenever that root is replaced. */
   readonly effects: ReactiveEffect[];
+  /** Typed inputs survive lowering even when their values have no HTML attribute form. */
+  readonly inputs: Map<string, InputSnapshot>;
   /** Set while those runs re-apply every value, in order, even one a binding already wrote. */
   reapplying?: boolean;
 }
@@ -315,11 +326,14 @@ function runtimeInstance(element: Element): RuntimeInstance | undefined {
 
 /** What a compiled root registers on its lifecycle record: its state spec, raw values and host. */
 interface CompiledHandle {
+  readonly U?: { all(): void; initialized(): readonly string[] };
   readonly S: { readonly n: readonly string[]; readonly g: string; readonly k?: number };
   readonly v: readonly unknown[];
   readonly H: ComponentHost;
   /** Its props: their latest inputs and the explicit ones; values follow the state's in `v`. */
   readonly B?: {
+    readonly a?: Readonly<Record<string, InputStatus>>;
+    readonly r?: Readonly<Record<string, number>>;
     readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string>;
     /** Applies props, as `componentRegistry.update` applies a live instance's. */
     readonly u?: (props: Readonly<Record<string, unknown>>) => void;
@@ -341,12 +355,16 @@ function compiledHandle(element: Element): CompiledHandle | undefined {
 
 /** A compiled root's record, as `instanceRecord` reports a live instance's: computeds are not state. */
 function compiledRecord(handle: CompiledHandle): RenderedInstanceRecord {
+  handle.U?.all();
   const names = Object.keys(handle.B?.D.props ?? {});
   return {
     explicit: [...handle.B?.x ?? []],
     inputs: { ...handle.B?.i },
+    ...(handle.B?.a === undefined ? {} : { availability: { ...handle.B.a } }),
+    ...(handle.B?.r === undefined ? {} : { revisions: { ...handle.B.r } }),
     props: Object.fromEntries(names.map((name, index) => [name, handle.v[handle.S.n.length + index]])),
     state: Object.fromEntries(handle.S.n.slice(0, handle.S.k).map((name, index) => [name, handle.v[index] as Value])),
+    ...(handle.U === undefined ? {} : { initialized: handle.U.initialized() }),
   };
 }
 
@@ -791,7 +809,8 @@ function componentScope(
   definition: ComponentDefinition,
   values: Readonly<Record<string, PropValue | undefined>>,
   parent?: RuntimeInstance,
-): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
+  restored?: RenderedInstanceRecord,
+): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[]; readonly initialize: () => void } {
   const scope = new ReactiveScope();
   declareTypes(scope, definition);
   for (const [name, prop] of Object.entries(definition.contract.props)) {
@@ -802,6 +821,7 @@ function componentScope(
         ? values[name]!
         : prop.default === undefined ? null : prop.default) as Value,
     );
+    if (values[name] === undefined && prop.default === undefined) scope.setInputStatus(name, UNRESOLVED_INPUT);
   }
 
   const declarations = definition.declarations ?? [];
@@ -820,7 +840,8 @@ function componentScope(
     } else if (declaration.kind === "state") {
       scope.set(
         declaration.name,
-        declaration.expression === undefined ? null : evalValue(declaration.expression.source, scope),
+        restored !== undefined && Object.hasOwn(restored.state, declaration.name) ? restored.state[declaration.name] as Value
+          : declaration.expression === undefined ? null : evalValue(declaration.expression.source, scope),
       );
     }
   }
@@ -846,7 +867,23 @@ function componentScope(
       () => evalConforming(declaration.expression!, scope, definition) as Value,
     ));
   }
-  return { scope, effects };
+  const initializers = declarations.flatMap(declaration => {
+    if (declaration.kind !== "state" || declaration.initializer === undefined) return [];
+    const initialized = restored !== undefined && Object.hasOwn(restored.state, declaration.name) &&
+      (restored.initialized === undefined || restored.initialized.includes(declaration.name));
+    const owner = scope.defineInitializer(declaration.name, () => {
+      const value = evalConforming(declaration.initializer!, scope, definition);
+      if (value === ABSENT || value === NONCONFORMING || value === undefined) return NONCONFORMING;
+      if (!conformsAtDestination(value, declaredTypeAt(definition, declaration.name, scope))) {
+        warnAuthored(definition, `initializer:${declaration.name}`, `Initializer for \`${declaration.name}\` does not satisfy its declared type.`);
+        return NONCONFORMING;
+      }
+      return value;
+    }, initialized);
+    effects.push(owner);
+    return [owner];
+  });
+  return { scope, effects, initialize: () => { for (const owner of initializers) owner.start(); } };
 }
 
 interface IncomingProp {
@@ -888,6 +925,7 @@ function readInvocation(
   readonly effects: ReactiveOwner[];
   readonly explicit: Set<string>;
   readonly propInputs: Readonly<Record<string, ReactiveSignal<PropInput>>>;
+  readonly inputRevisions?: Map<string, number>;
 } {
   const contract = definition.contract;
   const restored = hydration && frameworkProps === undefined
@@ -914,6 +952,13 @@ function readInvocation(
     if (prop !== undefined && input !== undefined) incoming[name] = { value: input, source: "value", attributePresent: false };
   }
 
+  const bindings = pendingInvocationBindings.get(invocation)?.filter(binding => binding.tag === contract.tag) ?? [];
+  const boundInputs = new Map(bindings.flatMap(binding => [...binding.inputs]));
+  for (const [name, input] of boundInputs) {
+    delete incoming[name];
+    if (input.status.ready) incoming[name] = { value: input.value, source: "value", attributePresent: false };
+  }
+
   const values = parseIncomingProps(contract, incoming);
   if (restored !== undefined) {
     for (const name of Object.keys(contract.props)) values[name] = restored.props[name] as PropValue;
@@ -921,19 +966,26 @@ function readInvocation(
   const propInputs = Object.create(null) as Record<string, ReactiveSignal<PropInput>>;
   for (const name of Object.keys(contract.props)) {
     const item = incoming[name];
-    propInputs[name] = createSignal(item === undefined
+    propInputs[name] = createSignal(restored?.inputs[name] ?? (item === undefined
       ? { value: null, source: "value", present: false }
-      : { value: item.value, source: item.source, present: true });
+      : { value: item.value, source: item.source, present: true, provided: values[name] !== undefined }));
   }
 
   // Props are attributes on the invocation (or, when hydrating, the recorded `data-<tag>-prop-<name>` of the
   // author's explicit attributes). They are never read from JavaScript properties.
-  const { scope, effects } = componentScope(definition, values, parent);
+  const { scope, effects, initialize } = componentScope(definition, values, parent, restored);
+  for (const [name, input] of boundInputs) {
+    if (!input.status.ready || values[name] !== undefined) {
+      propInputs[name]!.set({ value: input.value ?? null, source: "value", present: input.status.ready, provided: true });
+      scope.setInputStatus(name, input.status);
+    }
+  }
   if (restored !== undefined) {
-    for (const declaration of definition.declarations ?? []) {
-      if (declaration.kind === "state" && Object.hasOwn(restored.state, declaration.name)) {
-        scope.set(declaration.name, restored.state[declaration.name] as Value);
-      }
+    for (const [name, prop] of Object.entries(contract.props)) {
+      const input = restored.inputs[name];
+      if (!input?.present && prop.default === undefined) scope.setInputStatus(name, UNRESOLVED_INPUT);
+      const status = restored.availability?.[name];
+      if (status !== undefined) scope.setInputStatus(name, status);
     }
   }
   for (const [name, prop] of Object.entries(contract.props)) {
@@ -945,6 +997,7 @@ function readInvocation(
       if (values[name] !== undefined) scope.set(name, values[name] as Value);
     }
   }
+  initialize();
   const explicit = new Set(restored?.explicit ?? Object.keys(incoming).filter((name) => incoming[name]?.value !== null));
   const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
@@ -993,7 +1046,8 @@ function readInvocation(
       untracked(() => resource.update(parameters));
     }, 0, active));
   }
-  return { scope, passThrough, effects, explicit, propInputs };
+  return { scope, passThrough, effects, explicit, propInputs,
+    ...(restored?.revisions === undefined ? {} : { inputRevisions: new Map(Object.entries(restored.revisions)) }) };
 }
 
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
@@ -1090,12 +1144,7 @@ function warnAuthored(definition: ComponentDefinition, location: string, message
   console.warn(`${definition.source.file}: HR007: ${message}`);
 }
 
-function evalConforming(
-  expression: string | CompiledExpression,
-  scope: ReactiveScope,
-  definition: ComponentDefinition,
-): Value | typeof NONCONFORMING {
-  const source = typeof expression === "string" ? expression : expression.source;
+function conformingReferences(source: string, scope: ReactiveScope, definition: ComponentDefinition): boolean {
   for (const [path, type] of constrainedReferences(definition, source)) {
     const value = readPath(path, scope);
     // Absence is not a violation: a value that is not there yet has nothing to conform to.
@@ -1104,8 +1153,21 @@ function evalConforming(
       ? type : declaredTypeAt(definition, path, scope);
     if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
     warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` must satisfy ${formatType(selectedType)}.`);
-    return NONCONFORMING;
+    return false;
   }
+  return true;
+}
+
+function evalConforming(
+  expression: string | CompiledExpression,
+  scope: ReactiveScope,
+  definition: ComponentDefinition,
+): Value | typeof NONCONFORMING {
+  const source = typeof expression === "string" ? expression : expression.source;
+  const conforms = observingInputs()
+    ? withoutInputObservation(() => conformingReferences(source, scope, definition))
+    : conformingReferences(source, scope, definition);
+  if (!conforms) return NONCONFORMING;
   try {
     return evaluateCompiled(typeof expression === "string" ? compileExpression(expression) : expression, scope);
   } catch (error) {
@@ -1605,7 +1667,8 @@ function renderDynamicNode(
   ownEffect(context, scope, () => {
     const flow = node.flow!;
     const test = flow.kind === "if" ? evalConforming(flow.test, scope, context.definition) : undefined;
-    const aliased = flow.kind === "with" ? evalConforming(flow.expr, scope, context.definition) : undefined;
+    const aliased = flow.kind === "with" ? flow.binding === undefined ? evalConforming(flow.expr, scope, context.definition)
+      : readInputStatus(scope, flow.binding.name, flow.binding.handlesError) as unknown as Value : undefined;
     const match = flow.kind === "match" ? prepareMatch(node, scope, context.definition) : undefined;
     if (test === NONCONFORMING || aliased === NONCONFORMING || match === NONCONFORMING) return;
     const chosen = flow.kind === "if" ? truthy(test!) ? node : undefined : flow.kind === "with" ? node : match!.chosen;
@@ -1625,7 +1688,7 @@ function renderDynamicNode(
     const childContext = ownedContext(context, childOwned);
     // The body's scope is its own, so writing its alias does not re-run this decision.
     bodyScope = alias === undefined ? scope : flow.kind === "with"
-      ? typedLayer(scope, { [alias]: value! }, { [alias]: declaredExpressionType(flow.expressionPlan ?? flow.expr, scope) })
+      ? typedLayer(scope, { [alias]: value! }, { [alias]: flow.aliasType ?? declaredExpressionType(flow.expressionPlan ?? flow.expr, scope) })
       : layer(scope, { [alias]: value! });
     let rendered: Node[] = [];
     if (chosen !== undefined) {
@@ -2058,7 +2121,7 @@ function bindInvocation(
   awaitsLowering: boolean,
 ): InvocationBinding {
   const invocation: InvocationBinding = {
-    tag: node.name, awaitsLowering, component: committedComponent(element, node.name), effects: [],
+    tag: node.name, awaitsLowering, component: committedComponent(element, node.name), effects: [], inputs: new Map(),
   };
   if (node.ref !== undefined) {
     const ref = node.ref;
@@ -2121,8 +2184,29 @@ function bindElementAttributes(
       let written: Element | undefined;
       let last: unknown;
       const effect = own(() => {
+        const child = invocation?.component;
+        const definition = invocation === undefined ? undefined
+          : child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
+        const propName = definition === undefined || attribute.target !== undefined
+          ? undefined : propAttributeNames(definition, false)[attribute.name.toLowerCase()];
+        const expression = attribute.expressionPlan ?? compileExpression(attribute.expression);
+        const evaluated = propName !== undefined && expression.ast.kind !== "id" && expression.dependencies.length > 0
+          ? evaluateInput(() => evalConforming(expression, scope, context.definition), READY_INPUT, NONCONFORMING) : undefined;
+        const inputStatus = evaluated?.status ?? (propName === undefined ? undefined
+          : expression.ast.kind === "id" ? scope.inputStatus(expression.ast.name) : READY_INPUT);
+        if (propName !== undefined && inputStatus !== undefined && !inputStatus.ready) {
+          invocation!.inputs.set(propName, { status: inputStatus });
+          if (child !== undefined) {
+            if (child.inputRevisions?.has(propName)) child.inputRevisions.set(propName, child.inputRevisions.get(propName)! + 1);
+            const previous = untracked(() => child.propInputs[propName]!.get());
+            child.propInputs[propName]!.set({ ...previous, provided: true });
+            child.scope.setInputStatus(propName, inputStatus);
+          }
+          return;
+        }
         let value: Value | typeof NONCONFORMING;
-        if (selection === undefined || root === undefined) value = evalConforming(attribute.expression, scope, context.definition);
+        if (evaluated !== undefined) value = evaluated.value;
+        else if (selection === undefined || root === undefined) value = evalConforming(attribute.expression, scope, context.definition);
         else {
           const expression = attribute.expressionPlan!.ast as Extract<ExpressionNode, { kind: "binary" }>;
           const outerFirst = expression.left.kind === "id" && expression.left.name === selectedRoot(root);
@@ -2144,19 +2228,17 @@ function bindElementAttributes(
         if (value === NONCONFORMING) return;
         // A component owns its props: write them through the same channel framework adapters use,
         // so the component re-parses the declared type and reflects the value itself.
-        const child = invocation?.component;
-        const definition = invocation === undefined ? undefined
-          : child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
-        const propName = definition === undefined || attribute.target !== undefined
-          ? undefined : propAttributeNames(definition, false)[attribute.name.toLowerCase()];
         if (propName !== undefined) {
           const contract = definition!.contract;
           const prop = contract.props[propName]!;
           const selected = prop.select === undefined ? prop.type : child === undefined ? undefined
             : selectedPropType(contract, prop, { [prop.select.from]: child.scope.get(prop.select.from) });
-          if (!conformsAtDestination(value, selected)) return;
+          // Optional props accept explicitly available null. A missing parent's placeholder
+          // remains unavailable and took the status-only path above, preserving this distinction.
+          if (!(value === null && (prop.default !== undefined || inputStatus?.ready && !prop.required)) && !conformsAtDestination(value, selected)) return;
+          if (inputStatus !== undefined) invocation!.inputs.set(propName, { value, status: inputStatus });
           if (child !== undefined) {
-            applyComponentProps(child, { [propName]: value });
+            applyComponentProps(child, { [propName]: value }, inputStatus === undefined ? undefined : { [propName]: inputStatus });
             return;
           }
           // A server-rendered root carries its serialized props; they replay when it is adopted.
@@ -2772,13 +2854,20 @@ function renderSlot(
 // ---- Rendered form (spec: live-browser-distributable.md, "Rendered form") ----
 
 function instanceRecord(instance: RuntimeInstance): RenderedInstanceRecord {
+  const initialized = (instance.definition.declarations ?? []).flatMap(declaration => declaration.kind === "state" && declaration.initializer !== undefined ? [declaration.name] : []);
+  const availability = Object.fromEntries(Object.keys(instance.definition.contract.props)
+    .map(name => [name, instance.scope.inputStatus(name)] as const)
+    .filter(([, status]) => !status.ready || status.pending || status.error !== null || status.stale));
   return {
     explicit: [...instance.explicit],
     inputs: Object.fromEntries(Object.entries(instance.propInputs).map(([name, signal]) => [name, signal.get()])),
+    ...(Object.keys(availability).length === 0 ? {} : { availability }),
+    ...(instance.inputRevisions === undefined ? {} : { revisions: Object.fromEntries(instance.inputRevisions) }),
     props: Object.fromEntries(Object.keys(instance.definition.contract.props).map((name) => [name, instance.scope.get(name)])),
     state: Object.fromEntries((instance.definition.declarations ?? [])
       .filter((declaration) => declaration.kind === "state")
       .map((declaration) => [declaration.name, instance.scope.get(declaration.name)])),
+    ...(initialized.length === 0 ? {} : { initialized: initialized.filter(name => instance.scope.stateInitialized(name)) }),
   };
 }
 
@@ -3004,7 +3093,7 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, explicit, propInputs } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  const { scope, passThrough, effects, explicit, propInputs, inputRevisions } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
   const rootNode = elementMatchRoot(componentRoot(definition, scope));
   const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
   const renderScope = rootWith === undefined ? scope : scope.fork();
@@ -3080,6 +3169,7 @@ function prepareRuntimeInvocation(
     ...(parent === undefined ? {} : { parent }),
     scope,
     propInputs,
+    ...(inputRevisions === undefined ? {} : { inputRevisions }),
     refs: {},
     effects: instanceEffects,
     connected: false,
@@ -3736,6 +3826,7 @@ export function lowerDocument(root: Document = document, options: DocumentRender
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
+  readonly module?: ComponentModule;
   /**
    * The nodes the caller placed in slots, with each one's slot name. Only the root carries a
    * component marker, so a generated factory that renders slot content itself reports it here.
@@ -3979,6 +4070,7 @@ function attachRuntimeComponent(
   connectRuntimeInstance(attached);
 
   let controllerCleanup: void | (() => void);
+  const moduleCleanup = options.module === undefined ? undefined : activateModule(options.module, getComponentHost(element)!);
   let disposed = false;
   if (options.controller !== undefined && !attached.controllerInitialized) {
     attached.controllerInitialized = true;
@@ -3991,6 +4083,7 @@ function attachRuntimeComponent(
   return () => {
     if (disposed) return;
     disposed = true;
+    moduleCleanup?.();
     controllerCleanup?.();
     disconnectRuntimeInstance(attached);
   };
@@ -4038,10 +4131,12 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
 function applyComponentProps(
   instance: RuntimeInstance,
   props: Readonly<Record<string, unknown>>,
+  availability?: Readonly<Record<string, InputStatus>>,
 ): void {
   // The current root: a root `$match` may have replaced the element a caller last saw.
   const element = instance.element!;
   const contract = instance.definition.contract;
+  const acceptedNames = new Set<string>();
   // Source validation stays tracked; reading the child's current model is write bookkeeping.
   const next = untracked(() => {
     const values = Object.fromEntries(Object.keys(contract.props).map((name) => [name, instance.scope.get(name)]));
@@ -4056,23 +4151,24 @@ function applyComponentProps(
     const prop = contract.props[name];
     if (prop !== undefined && prop.select === undefined) {
       const accepted = assignedPropValue(prop, input) as Value | undefined;
-      if (accepted !== undefined) next[name] = accepted;
+      if (accepted !== undefined) { next[name] = accepted; acceptedNames.add(name); }
     }
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select !== undefined) {
       const accepted = assignedPropValue(prop, input, selectedPropType(contract, prop, next)) as Value | undefined;
-      if (accepted !== undefined) next[name] = accepted;
+      if (accepted !== undefined) { next[name] = accepted; acceptedNames.add(name); }
     }
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop === undefined) continue;
     // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
-    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input !== undefined };
     const previous = untracked(() => instance.propInputs[name]!.get());
-    if (previous.source !== record.source || previous.present !== record.present || !Object.is(previous.value, record.value)) {
+    const provided = acceptedNames.has(name) ? input !== undefined : previous.provided ?? previous.present;
+    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input !== undefined, provided };
+    if (previous.source !== record.source || previous.present !== record.present || previous.provided !== record.provided || !Object.is(previous.value, record.value)) {
       instance.propInputs[name]!.set(record);
     }
     const attributeName = propAttribute(contract.tag, name);
@@ -4081,7 +4177,7 @@ function applyComponentProps(
     // but only the binding may write that output (and an invalid input cannot trigger it).
     const bound = instance.rootNode.attributes.some((binding) =>
       binding.kind === "attribute" && binding.name === attributeName);
-    // Null has no attribute form, but remains the effective in-memory prop value.
+    // Null has no attribute form; the effective value uses the declared default.
     if (input === undefined || input === null) {
       instance.explicit.delete(name);
       // An attribute the template binds is its own output (it shows the default); leave it be.
@@ -4093,7 +4189,67 @@ function applyComponentProps(
       if (!bound && element.getAttribute(attributeName) !== reflected) element.setAttribute(attributeName, reflected);
     }
     if (!Object.is(untracked(() => instance.scope.get(name)), value)) instance.scope.set(name, value);
+    if (acceptedNames.has(name)) {
+      if (instance.inputRevisions?.has(name)) instance.inputRevisions.set(name, instance.inputRevisions.get(name)! + 1);
+      instance.scope.setInputStatus(name, availability?.[name] ?? (input === undefined && prop.default === undefined ? UNRESOLVED_INPUT : undefined));
+    }
   }
+}
+
+/** A source uses the same declared type as direct input, without acquiring caller ownership. */
+function publishSourceInput(instance: RuntimeInstance, name: string, snapshot: InputSnapshot): boolean {
+  const prop = instance.definition.contract.props[name]!;
+  let value: unknown = prop.default === undefined ? null : prop.default;
+  if (snapshot.status.ready) {
+    const candidate = snapshot.value === null ? value : snapshot.value;
+    const type = selectedPropType(instance.definition.contract, prop, Object.fromEntries(
+      Object.keys(instance.definition.contract.props).map(key => [key, key === name ? candidate : instance.scope.get(key)])));
+    if (type === null) return false;
+    const accepted = candidate === null && !prop.required
+      ? { ok: true as const, value: null } : parseTypedValue(candidate, type, name, "value");
+    if (!accepted.ok) return false;
+    value = accepted.value;
+  }
+  const previous = untracked(() => instance.propInputs[name]!.get());
+  if (instance.inputRevisions?.has(name)) instance.inputRevisions.set(name, instance.inputRevisions.get(name)! + 1);
+  if ((!previous.present || previous.producer) && (!Object.is(previous.value, snapshot.value ?? null) ||
+    previous.present !== snapshot.status.ready || previous.producer !== true)) {
+    instance.propInputs[name]!.set({ value: snapshot.value ?? null, source: "value", present: snapshot.status.ready, provided: false, producer: true });
+  }
+  instance.explicit.delete(name);
+  instance.scope.set(name, value as Value);
+  instance.scope.setInputStatus(name, !snapshot.status.ready && prop.default !== undefined
+    ? { ...snapshot.status, ready: true, stale: false } : snapshot.status);
+  return true;
+}
+
+function instanceInputPort(instance: RuntimeInstance): ComponentInputs {
+  if (instance.inputPort !== undefined) return instance.inputPort;
+  const names = Object.keys(instance.definition.contract.props);
+  // Ownership readers observe eligibility changes, not every attempted input or source result.
+  const supplied = Object.fromEntries(names.map(name => [name, createComputed(instance.scope.scheduler, () => {
+    const input = instance.propInputs[name]!.get();
+    return input.provided ?? (input.present && !input.producer);
+  })]));
+  return instance.inputPort = createInputPort({
+    names,
+    readNames: [...names, ...(instance.definition.declarations ?? []).flatMap(declaration =>
+      declaration.kind === "context" ? [declaration.as ?? declaration.name] : declaration.kind === "state" || declaration.kind === "computed" ? [declaration.name] : [])],
+    read: name => instance.scope.get(name),
+    status: name => instance.scope.inputStatus(name),
+    supplied: name => supplied[name]!.get(),
+    revision: name => {
+      const revisions = instance.inputRevisions ??= new Map<string, number>();
+      if (!revisions.has(name)) revisions.set(name, 0);
+      return revisions.get(name)!;
+    },
+    publish: (name, snapshot) => publishSourceInput(instance, name, snapshot),
+    untracked,
+    watch: run => {
+      const effect = createEffect(instance.scope.scheduler, run);
+      return () => effect.stop();
+    },
+  });
 }
 
 /**
@@ -4101,6 +4257,8 @@ function applyComponentProps(
  * so controllers may destructure only the capabilities they use in their parameter list.
  */
 export interface ComponentHost {
+  /** Renderer SDK capability; template values and the props facade remain readonly. */
+  readonly [INPUT_PORT]: ComponentInputs;
   /** The component's root element. Its connection owns this controller's lifetime. */
   readonly root: Element;
   /** Alias for the rendered root used by generated component controllers. */
@@ -4190,7 +4348,9 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
   if (instance.element !== undefined && documentState(instance.element.ownerDocument).staticRendering) return;
   if (instance.connected) return;
   instance.connected = true;
-  for (const effect of instance.effects) effect.resume();
+  // Connection callbacks may add or release owners while this traversal is active.
+  // oxlint-disable-next-line unicorn/no-useless-spread
+  for (const effect of [...instance.effects]) effect.resume();
   for (const effect of instance.owned.effects) effect.resume();
   // A delegated component shares this root and is not separately discoverable.
   for (const delegate of instance.delegates) connectRuntimeInstance(delegate);
@@ -4201,7 +4361,9 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   instance.connected = false;
   instance.connection?.abort();
   delete instance.connection;
-  for (const effect of instance.effects) effect.pause();
+  // Cleanup may release another owner while this traversal is active.
+  // oxlint-disable-next-line unicorn/no-useless-spread
+  for (const effect of [...instance.effects]) effect.pause();
   for (const effect of instance.owned.effects) effect.pause();
   for (const delegate of instance.delegates) disconnectRuntimeInstance(delegate);
 }
@@ -4266,6 +4428,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
   const state = new Proxy({}, {
     get: (_target, key) => {
       if (typeof key !== "string" || !stateNames.has(key)) return undefined;
+      if (instance.scope.stateInitialized(key) === false && !instance.scope.inputStatus(key).ready) return undefined;
       const value = instance.scope.get(key);
       return value === ABSENT ? undefined : wrap(value, key, !writable.has(key));
     },
@@ -4342,6 +4505,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
   // How many known responders this controller's host.on keeps on its own root, by name.
   const own: string[] = [];
   const host: ComponentHost = {
+    get [INPUT_PORT]() { return instanceInputPort(instance); },
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
     state,
@@ -4375,12 +4539,23 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       // derived value can track normally when the instance reconnects.
       if (!instance.connected) computed.pause();
       instance.effects.unshift(computed);
-      return computed;
+      return {
+        get: () => computed.get(),
+        stop: () => {
+          computed.stop();
+          const index = instance.effects.indexOf(computed);
+          if (index >= 0) instance.effects.splice(index, 1);
+        },
+      };
     },
     effect(run) {
       const effect = createEffect(instance.scope.scheduler, run, 2, instance.connected);
       instance.effects.push(effect);
-      return () => effect.stop();
+      return () => {
+        effect.stop();
+        const index = instance.effects.indexOf(effect);
+        if (index >= 0) instance.effects.splice(index, 1);
+      };
     },
     dispatch(event, detail) {
       return dispatchComponentEvent(instance.element!, event, detail, eventDeclaration(instance.definition, event));

@@ -9,14 +9,15 @@ import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
-import { targetComponent } from "./backend.js";
+import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
+import { inputScope, Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
+import { BINDING_INPUTS_PROP as STATUS_INPUTS_PROP } from "../prop-inputs.js";
 import { formatSvelteScript } from "./vue-format.js";
 
 function hasStructuredHtmlInput(type: TypeNode): boolean {
@@ -144,6 +145,9 @@ function checkSupported(definition: ComponentDefinition): { importedNames: Reado
 }
 
 interface RenderContext {
+  usesInputStatus?: boolean;
+  usesInputExpressions?: boolean;
+  readonly observe: (scope: Scope) => Scope;
   readonly lowering: Lowering;
   readonly definition: ComponentDefinition;
   readonly imports: Set<string>;
@@ -417,8 +421,19 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const local: RootScope = {
       ...(scope as RootScope),
       code: new Map([...scope.code, [node.flow.alias, alias]]),
-      types: new Map([...scope.types, [node.flow.alias, typeOf(value, scope)]]),
+      types: new Map([...scope.types, [node.flow.alias, node.flow.aliasType === undefined ? typeOf(value, scope) : present(node.flow.aliasType)]]),
     };
+    if (node.flow.binding !== undefined) {
+      context.usesInputStatus = true;
+      const binding = node.flow.binding;
+      const computed = (context.definition.declarations ?? []).some(declaration => declaration.kind === "computed" && declaration.name === binding.name);
+      const computedStatus = computed ? scope.code.get(binding.name)?.replace(/\.get\(\)$/, ".status()") : undefined;
+      const read = Object.hasOwn(context.definition.contract.props, binding.name)
+        ? `inputStatus(${quote(binding.name)}, ${binding.handlesError})`
+        : computedStatus !== undefined ? `requireInputStatus(${computedStatus}, ${binding.handlesError})`
+        : `requireInputStatus((${lowering.value(value, scope)}) === undefined ? UNRESOLVED_INPUT : READY_INPUT, ${binding.handlesError})`;
+      return `{#if true}{@const ${alias} = ${read}}${renderNode(body, root, local, lowering, context)}{/if}`;
+    }
     const read = conformingRead(node.flow.expressionPlan, scope, context, lowering.value(value, scope));
     const markup = renderNode(body, root, local, lowering, context);
     if (!read.invalid) return `{#if true}{@const ${alias} = ${read.source}}${markup}{/if}`;
@@ -580,6 +595,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (!component && decoratesStyles) context.usesStyleDecorations = true;
   const literals: string[] = [];
   const selectedBindings: string[] = [];
+  const statusBindings: string[] = [];
   const literalInputs: string[] = [];
   const inputDeclarations: string[] = blockInputs ?? [];
   const nativeBindings: string[] = [];
@@ -672,7 +688,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const candidate = context.freshIdentifier("htmlNextBindingValue");
     const input = context.freshIdentifier("htmlNextBindingInput");
     const initial = `{ value: ${literalPropValue(literal, contract)}, raw: ${quote(literal)} } as { value: any; raw: unknown }`;
-    const read = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${raw}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(contract.type))}) ? { value: ${candidate}, raw: ${candidate} } : Symbol.for('html-next.invalid-result'); })()`, initial);
+    const read = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${raw}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(contract.type))}, ${contract.default !== undefined}) ? { value: ${candidate}, raw: ${candidate} } : Symbol.for('html-next.invalid-result'); })()`, initial);
     inputDeclarations.push(`{@const ${input} = ${read}}`);
     literalInputs.push(`[${quote(prop)}]: { get raw() { return ${input}.raw; } }`);
     return `${input}.value`;
@@ -729,6 +745,34 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (attribute.kind === "attribute") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (root && reflectedNames.has(attribute.name) && attribute.twoWay !== true) continue;
+      const statusProp = component ? childProp(attribute.name)?.[0] : undefined;
+      const statusExpression = attribute.expressionPlan.ast;
+      const observed = context.observe(scope);
+      if (statusProp !== undefined && attribute.twoWay !== true && attribute.target === undefined && statusExpression.kind !== "id" && attribute.expressionPlan.dependencies.some(path => {
+        const root = path.split(".")[0]!;
+        return observed.code.get(root) !== scope.code.get(root);
+      })) {
+        context.usesInputStatus = true; context.usesInputExpressions = true;
+        const contract = childProp(attribute.name)![1];
+        const input = context.freshIdentifier("htmlNextBoundInput");
+        const candidate = context.freshIdentifier("htmlNextInputSnapshot");
+        const read = conformingRead(attribute.expressionPlan, scope, context, lowering.value(statusExpression, observed));
+        const literal = node.attributes.find(entry => entry.kind === "literal" && childProp(entry.name)?.[0] === statusProp);
+        const initial = literal?.kind === "literal" ? `{ value: ${literalPropValue(literal.value, contract)}, status: READY_INPUT } as any` : "undefined as any";
+        const accepts = contract.select === undefined ? `${!contract.required ? `${candidate}.value === null || ` : ""}acceptsBindingDestination(${candidate}.value, ${JSON.stringify(normalizeType(contract.type))}, ${contract.default !== undefined})` : "true";
+        const snapshot = retained(context, `((${candidate}) => !${candidate}.status.ready || (${candidate}.value !== Symbol.for('html-next.invalid-result') && (${accepts})) ? ${candidate} : Symbol.for('html-next.invalid-result'))(evaluateInput(() => (${read.source}) as any, READY_INPUT))`, initial);
+        context.usesComponentBindings = true;
+        inputDeclarations.push(`{@const ${input} = ${snapshot}}`);
+        statusBindings.push(`${quote(statusProp)}: () => ${input}`);
+        bindings.push(componentPropAttribute(statusProp, `${input}?.value`));
+        continue;
+      }
+      if (statusProp !== undefined && statusExpression.kind === "id") {
+        const read = scope.code.get(statusExpression.name);
+        const prop = Object.hasOwn(context.definition.contract.props, statusExpression.name) && read === `checkedProps[${quote(statusExpression.name)}]`;
+        const computed = (context.definition.declarations ?? []).some(declaration => declaration.kind === "computed" && declaration.name === statusExpression.name);
+        if (prop || computed && read?.endsWith(".get()")) statusBindings.push(`${quote(statusProp)}: () => ({ value: ${lowering.value(statusExpression, scope)}, status: ${prop ? `inputStatus(${quote(statusExpression.name)}, true)` : read!.replace(/\.get\(\)$/, ".status()")} })`);
+      }
       if (attribute.twoWay === true) {
         if (component) {
           const declared = childProp(attribute.name);
@@ -751,7 +795,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const candidate = context.freshIdentifier("htmlNextBindingValue");
           const literal = node.attributes.find((entry) => entry.kind === "literal" && childProp(entry.name)?.[0] === declared[0]);
           const initial = literal?.kind === "literal" ? `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
-          const value = literal?.kind === "literal" ? boundLiteralInput(declared[0], declared[1], source, guard, literal.value) : retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
+          const value = literal?.kind === "literal" ? boundLiteralInput(declared[0], declared[1], source, guard, literal.value) : retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}, ${declared[1].default !== undefined}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
           bindings.push(componentPropAttribute(declared[0], value));
           bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
         } else if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
@@ -787,7 +831,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           else {
             context.usesComponentBindings = true;
             const candidate = context.freshIdentifier("htmlNextBindingValue");
-            value = retained(context, `(() => { const ${candidate}: unknown = ${read.source}; return ${candidate} !== Symbol.for('html-next.invalid-result') && acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
+            value = retained(context, `(() => { const ${candidate}: unknown = ${read.source}; return ${candidate} !== Symbol.for('html-next.invalid-result') && acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}, ${declared[1].default !== undefined}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
           }
         } else value = read.invalid ? retained(context, read.source, initial) : read.source;
         if (node.name === "select" && attribute.name === "value" || node.name === "input" && ["value", "checked"].includes(attribute.name)) {
@@ -914,6 +958,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     selectedOption = `{...Reflect.apply(() => typeof document === 'undefined' && (${context.boundSelect}) ? (${context.selectSelection}?.(${value}) ? ${yes} : ${no}) : {}, undefined, [])}`;
   }
   if (selectedBindings.length > 0) bindings.push(`${BINDING_INPUTS_PROP}={{ ${selectedBindings.join(", ")} }}`);
+  if (statusBindings.length > 0) bindings.push(`${STATUS_INPUTS_PROP}={{ ${statusBindings.join(", ")} }}`);
   // Svelte preserves NUL-named component props; a spread adds a proxy to every invocation.
   if (literalInputs.length > 0) bindings.push(`${LITERAL_INPUTS_PROP}={{ ${literalInputs.join(", ")} }}`);
   if (component && !root && !decoratesClasses && scopeClasses.length > 0 && !node.attributes.some((attribute) => attribute.name === "class")) {
@@ -1084,7 +1129,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   definition = condenseWhitespace(definition);
   const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);
-  const usesController = definition.controller !== undefined;
+  const usesController = (definition.module ?? definition.controller) !== undefined;
   const styles = compileComponentStylesForSvelte(definition.css, definition, undefined, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
   const declarations = definition.declarations ?? [];
@@ -1108,6 +1153,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
     + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+  for (const name of ["PropInputs", "InputBindings", "propInputs", "statusInputs", "inputVersion", "inputStatus", "inputReads", "checkPropInput", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "inputComputed", "inputRead", "evaluateInput"]) reserved.add(name);
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
@@ -1172,7 +1218,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     types,
   };
   const lowering = new Lowering("warnUnless");
-  const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, propContractsByTag: options.propContractsByTag,
+  const context: RenderContext = { lowering, definition, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
+    : Object.hasOwn(definition.contract.props, name) ? `inputStatus(${quote(name)}, true)`
+      : computed.some(value => value.name === name) ? read.replace(/\.get\(\)$/, ".status()") : undefined), handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, propContractsByTag: options.propContractsByTag,
     ...(styles.hashed === true ? { styleOwner: definition.contract.tag } : {}),
     hostClass: styles.components !== undefined, styledComponents: new Set(styles.components ?? []),
     htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
@@ -1230,30 +1278,32 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const controllerTypesName = freshIdentifier("htmlNextControllerStateTypes");
   const publicChildren = definition.contract.props.children !== undefined;
   const publicSlots = definition.contract.props.slots !== undefined;
-  const internalProps = [!publicChildren ? "children" : undefined, !publicSlots ? "slots" : undefined].filter((name) => name !== undefined);
+  const internalProps = [!publicChildren ? "children" : undefined, !publicSlots ? "slots" : undefined,
+    ...(hasProps ? [`${quote(STATUS_INPUTS_PROP)}: statusInputs`] : [])].filter((name) => name !== undefined);
   const selectors = [...new Set(target.props.flatMap((prop) => prop.contract.select === undefined ? [] : [prop.contract.select.from]))];
   const validityContract = { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) =>
     [name, { ...prop, type: prop.select === undefined ? normalizeType(prop.type)
       : { kind: "union" as const, members: prop.select.options.map((option) => option.type) } }])) };
   const inputSource = (name: string): string => {
-    const prop = definition.contract.props[name]!;
-    const input = selectedInputs.has(name) ? `${inputNames.get(name)}.value` : inputNames.get(name)!;
-    return "default" in prop ? `(${input} === undefined ? ${literalValueSource(prop.default)} : ${input})` : input;
+    return selectedInputs.has(name)
+      ? `(${selectedInputs.get(name)!.raw} === undefined && !Object.hasOwn((rest[${quote(BINDING_INPUTS_PROP)}] as object | undefined) ?? {}, ${quote(name)}) ? undefined : ${inputNames.get(name)}.value)`
+      : inputNames.get(name)!;
   };
   const selectorSource = (name: string): string | undefined => {
     const selector = definition.contract.props[name];
     // A selecting prop is a finite ordinary type. Read its accepted value without
     // depending on the aggregate checkedProps, which also reads this selected input.
     return selector === undefined ? code.get(name)
-      : `checkedProp(${inputSource(name)}, ${JSON.stringify(normalizeType(selector.type))}, ${selector.required}, ${quote(name)}, acceptedProps, inputAccepted, false)`;
+      : `propInputs.value(${quote(name)}, ${inputSource(name)}, statusInputs as InputBindings | undefined, inputAccepted)`;
   };
   const literalInputName = freshIdentifier("htmlNextLiteralInput");
   // Native HTML parses the model once, while selected-type validity follows the current selector.
   const literalInitialsName = freshIdentifier("htmlNextLiteralInitials");
-  const propTypeSource = (prop: (typeof target.props)[number], binding = false): string => {
+  const propTypeSource = (prop: (typeof target.props)[number], binding = false, values?: string): string => {
     const select = prop.contract.select;
     if (select === undefined) return JSON.stringify(normalizeType(prop.contract.type));
-    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${selectorSource(select.from)}, ${literalValueSource(select.options)})`;
+    const selector = values !== undefined && Object.hasOwn(definition.contract.props, select.from) ? `${values}[${quote(select.from)}]` : selectorSource(select.from);
+    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${selector}, ${literalValueSource(select.options)})`;
   };
   const selectedInputSources = target.props.flatMap((prop) => {
     const input = selectedInputs.get(prop.name);
@@ -1263,16 +1313,24 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `let ${inputNames.get(prop.name)} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => { value: unknown; attribute: string | undefined } | symbol> | undefined)?.[${quote(prop.name)}], () => ({ value: ${literalInputName}(${quote(prop.name)}, ${input.raw}, ${selectorSource(prop.contract.select!.from)}, true), raw: (rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined)?.[${quote(prop.name)}]?.raw ?? ${input.raw} ?? null, html: Object.hasOwn((rest[${quote(LITERAL_INPUTS_PROP)}] as object | undefined) ?? {}, ${quote(prop.name)}) }), ${propTypeSource(prop, true)}));`,
     ];
   });
-  const checkedPropSources = target.props.map((prop) =>
-    `    ${objectKey(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${inputSource(prop.name)}, ${propTypeSource(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`);
+  const checkedPropSources = propInputOrder(target.props).map((prop) =>
+    `    ${objectKey(prop.name)}: propInputs.value<${typeSource(prop.contract.type)}${prop.contract.required ? "" : " | null"}>(${quote(prop.name)}, ${inputSource(prop.name)}, statusInputs as InputBindings | undefined, inputAccepted),`);
+  const inputReadNames = new Map(target.props.map(prop => [prop.name, {
+    value: freshIdentifier("htmlNextInputRead"), status: freshIdentifier("htmlNextInputStatus"), supplied: freshIdentifier("htmlNextInputSupplied"),
+  }]));
   const stateSources = states.map((state) =>
     `let ${code.get(state.name)!} = $state<${typeScript(scope.types.get(state.name)!)}>(${state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope)});`);
   const computedSources = computed.map((value) => {
+    const observed = inputScope(scope, (name, read) => Object.hasOwn(definition.contract.props, name) ? `inputReads[${quote(name)}]!.status`
+      : computed.some(value => value.name === name) ? read.replace(/\.get\(\)$/, ".status()")
+        : states.some(state => state.name === name) || contexts.some(context => (context.as ?? context.name) === name)
+          ? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)` : undefined);
     const read = value.expression === undefined ? { source: "null", invalid: false }
-      : conformingRead(value.expression, scope, context, lowering.value(value.expression.ast, scope));
+      : conformingRead(value.expression, scope, context, lowering.value(value.expression.ast, observed));
     const type = typeScript(scope.types.get(value.name)!);
-    return `const ${computedNames.get(value)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => (${read.invalid
-      ? retained(context, read.source, "null as any") : read.source}) as ${type});`;
+    const name = computedNames.get(value)!;
+    return read.invalid ? `let ${name}Previous: ${type} = null;\nconst ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${read.source}) as any, cycleCheckedComputed, next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${name}Previous : (${name}Previous = next));`
+      : `const ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${read.source}) as any, cycleCheckedComputed);`;
   });
   const handlerScope: Scope = { code: new Map(scope.code).set("$$event", "event"),
     types: new Map(scope.types).set("$$event", { type: { kind: "terminal", name: "event" }, nullable: false }) };
@@ -1380,7 +1438,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...((context.usesComponentBindings || context.usesDeclaredFormats) ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(usesControllerTypeChecks ? [`import { acceptsControllerWrite } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
-    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"}${structuredInputs.size > 0 ? ", parseHtmlLiteral" : ""} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(hasProps || context.usesInputStatus || computed.length > 0 ? [`import { ${hasProps ? "PropInputs, type InputBindings, checkPropInput, mountPropValidity, updatePropValidity, " : ""}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computed.length === 0 ? "" : ", inputComputed"}${computed.length === 0 && !context.usesInputExpressions ? "" : ", inputRead"}${context.usesInputExpressions ? ", evaluateInput" : ""}${usesController && hasProps ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"}${structuredInputs.size > 0 ? ", parseHtmlLiteral" : ""} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(nestedDepthLimit === undefined ? [] : [
       `const ${nestedDepthName} = getContext<number>("html-next:nested-depth") ?? 0;`,
@@ -1478,6 +1536,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       .map(([site, entry]) => `const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`};`),
     ...(hasProps ? [
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${objectKey(prop.name)}: ${"default" in prop.contract ? literalValueSource(prop.contract.default) : "null"}`).join(", ")} };`,
+      "let inputVersion = $state.raw(0);",
+      `const propInputs: PropInputs = new PropInputs({ names: Object.keys(acceptedProps), values: acceptedProps, defaults: { ${target.props.filter(prop => "default" in prop.contract).map(prop => `${objectKey(prop.name)}: ${literalValueSource(prop.contract.default)}`).join(", ")} }, invalidate: () => { inputVersion += 1; }, check: (name, value, source, values) => { switch (name) {`,
+      ...target.props.map(prop => `  case ${quote(prop.name)}: return checkPropInput(value, ${propTypeSource(prop, false, "values")}, false, ${!prop.contract.required});`),
+      "  default: return { ok: false }; } } });",
       "const inputAccepted = Object.create(null) as Record<string, boolean>;",
       ...(selectedInputs.size === 0 ? [] : [
         `const ${literalInitialsName} = new Map<string, unknown>();`,
@@ -1493,9 +1555,22 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
         "}",
       ]),
       ...selectedInputSources,
-      "let checkedProps = $derived.by(() => ({",
+      "let checkedProps = $derived.by(() => { void inputVersion; return ({",
       ...checkedPropSources,
-      "}));",
+      "}); });",
+      ...target.props.flatMap(prop => {
+        const names = inputReadNames.get(prop.name)!;
+        return [
+          `let ${names.value} = $derived.by(() => { void checkedProps; return propInputs.read(${quote(prop.name)}); });`,
+          `let ${names.status} = $derived.by(() => { void checkedProps; return propInputs.status(${quote(prop.name)}); });`,
+          `let ${names.supplied} = $derived.by(() => { void checkedProps; return propInputs.supplied(${quote(prop.name)}); });`,
+        ];
+      }),
+      `const inputReads: Record<string, { readonly value: unknown; readonly status: ReturnType<PropInputs["status"]>; readonly supplied: boolean }> = { ${target.props.map(prop => {
+        const names = inputReadNames.get(prop.name)!;
+        return `${quote(prop.name)}: { get value() { return ${names.value}; }, get status() { return ${names.status}; }, get supplied() { return ${names.supplied}; } }`;
+      }).join(", ")} };`,
+      "const inputStatus = (name: string, handlesError: boolean) => requireInputStatus(inputReads[name]!.status, handlesError);",
       `const propValidityContract = ${literalValueSource(validityContract)} as const;`,
       `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${objectKey(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : prop.contract.select === undefined ? inputSource(prop.name) : `(${inputNames.get(prop.name)}.html && rest[${quote(BINDING_INPUTS_PROP)}] !== undefined && Object.hasOwn(rest[${quote(BINDING_INPUTS_PROP)}] as object, ${quote(prop.name)}) ? htmlPropValue(${inputNames.get(prop.name)}.raw, ${propTypeSource(prop, true)}${structuredReader(prop.name)}) : ${inputNames.get(prop.name)}.html ? ${literalInputName}(${quote(prop.name)}, ${inputSource(prop.name)}, ${selectorSource(prop.contract.select.from)}) : ${inputSource(prop.name)})`}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${objectKey(name)}: ${code.get(name)}`).join("")} }));`,
       "$effect(() => {",
@@ -1560,17 +1635,20 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ]),
     ...(usesController ? [
       ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, Parameters<typeof acceptsControllerWrite>[1]> = ${JSON.stringify(controllerStateTypes)};`] : []),
-      `useComponentHost(() => import(${quote(definition.controller!)}), {`,
+      `useComponentHost(() => import(${quote((definition.module ?? definition.controller)!)}), {`,
       "  root: () => rootElement ?? null,",
       `  ownsRoot: () => rest[${quote(ROOT_OWNER_PROP)}] !== true,`,
-      `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
+      ...(definition.module === undefined ? [] : ["  module: true,"]),
+      `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? (definition.module ?? definition.controller)!)},`,
       `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
       ...(hasProps ? [
+        "  inputs: propInputs, inputTrack: (name, kind) => { void inputReads[name]![kind]; },",
         `  propInputs: (name: string) => { ${target.props.filter((prop) => selectedInputs.has(prop.name)).map((prop) => `if (name === ${quote(prop.name)}) return ${inputNames.get(prop.name)}.raw;`).join(" ")} const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.filter((prop) => !selectedInputs.has(prop.name)).map((prop) => `${objectKey(prop.name)}: ${inputNames.get(prop.name)} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
       `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { if (!Object.is(${code.get(state.name)}, value)) ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
       `  computed: { ${[...computed, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
+      ...(computed.length === 0 ? [] : [`  availability: { ${computed.map(value => `${objectKey(value.name)}: () => ${computedNames.get(value)!}.status()`).join(", ")} },`]),
       `  data: { ${data.map((value) => `${objectKey(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
       ...(scriptNames.size === 0 ? [] : ["  scripts: htmlNextHeadScripts,"]),
       ...(usesControllerTypeChecks ? [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, ${controllerTypesName}[name], keys),`] : []),
@@ -1613,7 +1691,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n${style}`;
   return { component, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
+      ...(hasProps || context.usesInputStatus || computed.length > 0 || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
         (usesController && requestProps.length > 0) ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),

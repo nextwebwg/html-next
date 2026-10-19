@@ -198,7 +198,7 @@ function writeProofs(definition: ComponentDefinition): { readonly copyable: Read
   const writes = (definition.declarations ?? []).flatMap((entry) => entry.kind === "handler"
     ? entry.steps.filter((step): step is SetStep => step.kind === "set" && step.writablePath.length === 1) : []);
   // The largest set whose writes keep each member present, assuming the others stay present.
-  let present: ReadonlySet<string> = definition.controller === undefined ? copyable : new Set();
+  let present: ReadonlySet<string> = (definition.module ?? definition.controller) === undefined ? copyable : new Set();
   for (let size = -1; size !== present.size;) {
     size = present.size;
     const assumed = present;

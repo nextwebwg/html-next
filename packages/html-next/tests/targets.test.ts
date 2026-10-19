@@ -416,13 +416,13 @@ describe("official target compilers", () => {
         '<prop name="count" type="number" required>Count.</prop>',
       '<p from:data-label="$label" from:data-size="$size" from:data-count="$count"></p>',
     )).get("vue/XOptional.vue")!;
-    // Vue applies defaults before exposing resolved props, including the implicit null default.
-    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null>, default: null \}/);
-    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null>, default: 'md' \}/);
+    // The input boundary applies defaults so omission remains distinct from a supplied null.
+    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null> \}/);
+    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null> \}/);
+    assert.match(vue, /vuePropInputs\([\s\S]*?size: 'md'/);
     assert.match(vue, /count: \{ type: null as unknown as PropType<number> \}/);
 
-    // A consumer under exactOptionalPropertyTypes can omit an optional prop, but a resolved
-    // instance prop does not include undefined after Vue applies its default.
+    // A consumer under exactOptionalPropertyTypes can omit optional inputs and supply typed values.
     const directory = await mkdtemp(join(packageRoot, ".vue-types-"));
     try {
       await writeFile(join(directory, "XOptional.ts"), compileVue(vue, "XOptional.vue"));
@@ -586,7 +586,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.doesNotMatch(vue.slice(0, vue.indexOf("<style")), /\bhn\b/);
     assert.match(vue, /const open = ref\(false\)\n/);
     assert.match(vue, /const query = ref\(''\)\n/);
-    assert.match(vue, /const count = cycleCheckedComputed\(\(\) => checkedProps\.value\.items\?\.length\)\n/);
+    assert.match(vue, /const count: ReturnType<typeof inputComputed<number \| null>> = inputComputed/);
+    assert.match(vue, /inputRead\(checkedProps\.value\.items, propInputs\.status\('items'\)\)\?\.length/);
     assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('searchElement'\)\n/);
     assert.match(vue, /const hostState = computed\(\(\) =>/);
     assert.match(vue, /checkedProps\.value\.size && 'size'/);
@@ -684,7 +685,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       `<prop name="anchor" type="keyword" values="start, end">Anchor edge.</prop>`,
       `<div from:data-edge="$anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null>, default: null \}/);
+    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null> \}/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
@@ -704,7 +705,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   <style>:host { display: inline-flex; }</style>
 </template>`);
     const vue = outputs.get("vue/XAction.vue")!;
-    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null>, default: 'button' \}/);
+    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null> \}/);
     assert.match(vue, /<a\n\s+v-if="checkedProps\.as === 'a'"/);
     assert.match(vue, /<button\n\s+v-else\n/);
     const script = compileVue(vue, "XAction.vue");

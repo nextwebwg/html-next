@@ -1,0 +1,12 @@
+<template component="state-seed">
+  <defs>
+    <prop name="product" type="object({ name: string })">Product.</prop>
+    <state name="draft" type="string" from="$product.name"></state>
+  </defs>
+  <section>
+    <input bind:value="$draft">
+    <p $await="$draft">{$draft}</p>
+    <p $error="problem">{$problem.message}</p>
+    <p $else>Loading.</p>
+  </section>
+</template>

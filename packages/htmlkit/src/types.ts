@@ -378,6 +378,7 @@ export interface NavigationNode {
 export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
   readonly controller?: string;
+  readonly module?: string;
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {

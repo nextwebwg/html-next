@@ -10,6 +10,8 @@ export interface ComponentDefinition {
   /** Resolved component-owned CSS resources; their bodies are delivered separately from local CSS. */
   readonly stylesheets?: readonly ComponentStylesheet[];
   readonly controller?: string;
+  /** An ES module whose named connect export runs for each browser activation. */
+  readonly module?: string;
   readonly declarations?: readonly ComponentDeclaration[];
   readonly slots?: readonly SlotContract[];
   readonly root?: ComponentRoot;
@@ -83,6 +85,8 @@ export interface ReactiveDeclaration {
   readonly shape?: TypeNode;
   readonly value?: string;
   readonly expression?: CompiledExpression;
+  /** One-time state seed, distinct from a literal value and from continuous computed state. */
+  readonly initializer?: CompiledExpression;
 }
 
 export interface ContextDeclaration {
@@ -232,6 +236,10 @@ export type Flow =
       readonly expr: string;
       readonly expressionPlan?: CompiledExpression;
       readonly alias: string;
+      /** A renderer-owned availability read, normalized from an authored await group. */
+      readonly binding?: { readonly name: string; readonly handlesError: boolean };
+      /** The precise readonly local type supplied by a structural directive. */
+      readonly aliasType?: TypeNode;
     }
   | {
       readonly kind: "match";

@@ -35,6 +35,22 @@ async function assemble() {
 }
 
 describe("component package assembler", () => {
+  it("relocates named component modules without creating a legacy controller", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-module-package-"));
+    temporary.push(root);
+    await writeFile(join(root, "card.html"), '<template component="x-card" module="./card.js"><article>Card</article></template>');
+    await writeFile(join(root, "card.js"), 'export function connect() {}');
+    const outDirectory = join(root, "output");
+    await assembleComponentPackage({ name: "@example/library", version: "1.0.0", outDirectory,
+      components: [{ source: join(root, "card.html") }], hostTypes: true });
+    const vanilla = await readFile(join(outDirectory, "vanilla/XCard.js"), "utf8");
+    assert.match(vanilla, /import \* as controller from "\.\.\/components\/card.js"/);
+    assert.match(vanilla, /activateModule\(controller, host\)/);
+    assert.doesNotMatch(vanilla, /controller.default/);
+    assert.match(await readFile(join(root, "x-card.host.d.ts"), "utf8"), /export type Connect = .*signal: AbortSignal/);
+    const registration = await readFile(join(outDirectory, "dist/index.js"), "utf8");
+    assert.match(registration, /activateModule\(value, host\)/);
+  });
   it("packages every component from one source and preserves their declared names", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-multi-package-"));
     temporary.push(root);

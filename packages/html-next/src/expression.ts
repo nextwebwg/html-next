@@ -3,15 +3,16 @@ import { isNativeEvent } from "./freeze.js";
 import { parseExpression } from "./expression-parser.js";
 import { formatValue, formattingType } from "./format.js";
 import type { TypeNode } from "./type-system.js";
+import { ABSENT, NONCONFORMING } from "./expression-values.js";
 
 /** A missing read or an operation on missing/typed-invalid data. */
-export const ABSENT = Symbol("absent");
+export { ABSENT } from "./expression-values.js";
 /**
  * The result of evaluating a reference whose value breaks its declared type. Absence means "no
  * value here"; this means "a value that the declaration forbids", which must not reach the DOM or
  * recompute anything. Consumers keep whatever they last had instead.
  */
-export const NONCONFORMING = Symbol("nonconforming");
+export { NONCONFORMING } from "./expression-values.js";
 export type Absent = typeof ABSENT;
 
 export type Value =

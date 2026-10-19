@@ -6,7 +6,8 @@
  * depends on Vue alone.
  */
 import { formatVue } from "./vue-format.js";
-import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE } from "./shared-generated.js";
+import { MODULE_CONNECTION_SOURCE } from "../generated/module-connection-source.js";
+import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE, INPUT_STATUS_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
 import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
@@ -22,9 +23,11 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, createTextVNode, defineComponent, Fragment, getCurrentInstance, h, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watch, watchEffect } from "vue";
-import type { PropType, VNode } from "vue";
+import { computed, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, ref, shallowRef, useSlots, watch, watchEffect } from "vue";
+import type { PropType, Ref, VNode } from "vue";
+${INPUT_STATUS_SOURCE}
 
+${MODULE_CONNECTION_SOURCE}
 ${CONTROLLER_STATE_SOURCE}
 ${REQUEST_HOST_SOURCE}
 ${DISPATCH_TARGETS_SOURCE}
@@ -176,11 +179,23 @@ export function preserveRootFocus(componentRoot: Readable<Element | null>): void
 }
 
 export interface ComponentHostOptions {
+  readonly inputs?: { port(reactions: {
+    readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
+    track(name: string, kind: "value" | "status" | "supplied"): void;
+    watch(run: () => void | (() => void)): () => void;
+    untracked<T>(run: () => T): T;
+  }): unknown };
+  readonly availability?: Readonly<Record<string, () => InputStatus>>;
+  readonly inputTracking?: {
+    track(name: string, kind: "value" | "status" | "supplied"): void;
+    untracked<T>(run: () => T): T;
+  };
   /** The component's root element. */
   readonly root: Readable<HTMLElement | null>;
   /** Dispatches a declared component event. */
   readonly dispatch: (name: string, detail?: unknown) => boolean;
   /** The authored controller edge, retained for the live loader's module diagnostic. */
+  readonly module?: boolean;
   readonly controllerSource?: { readonly specifier: string; readonly definition: string };
   /** Accepted component props, which a controller reads through \`host.props\`. */
   readonly props?: Readable<Readonly<Record<string, unknown>>>;
@@ -248,19 +263,19 @@ export function useComponentHost(
     const url = new URL(edge?.specifier ?? "", source ?? document.baseURI).href;
     const tick = String.fromCharCode(96);
     const message = code === "HJ002"
-      ? "Controller module " + tick + url + tick + " must default-export a function."
+      ? options.module ? "Component module " + tick + url + tick + " export connect must be a function." : "Controller module " + tick + url + tick + " must default-export a function."
       : "Controller module " + tick + url + tick + " failed to load: " + (reason instanceof Error ? reason.message : String(reason)) + ".";
     return Object.assign(new Error((source === undefined ? "" : source + ": ") + code + ": " + message), {
       name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code, message, ...(source === undefined ? {} : { source }) }),
     });
   };
-  type ControllerModule = Record<string, unknown> & { readonly default: (host: unknown) => unknown };
+  type ControllerModule = Record<string, unknown> & { readonly default: (host: unknown) => unknown; readonly connect?: Connect<object> };
   let controllerModule: Promise<ControllerModule> | undefined;
   const loadControllerModule = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve()
     .then(controllerLoader)
     .then((candidate) => {
-      const loaded = candidate as { readonly default?: unknown } | null;
-      if (typeof loaded?.default !== "function") throw controllerDiagnostic("HJ002");
+      const loaded = candidate as { readonly default?: unknown; readonly connect?: unknown } | null;
+      if (options.module ? loaded === null || typeof loaded !== "object" || loaded.connect !== undefined && typeof loaded.connect !== "function" : typeof loaded?.default !== "function") throw controllerDiagnostic("HJ002");
       return candidate as ControllerModule;
     })
     .catch((error: unknown) => {
@@ -315,6 +330,16 @@ export function useComponentHost(
   // root, so cleanup that runs after that still reads the root that disconnected.
   let lastRoot: Element | null = null;
   const host = {
+    get [Symbol.for("@nextwebwg/html-next.inputs.v1")](): unknown {
+      return options.inputs?.port({
+        declarations: Object.fromEntries([...Object.keys(state), ...Object.keys(computedValues), ...Object.keys(context)].map(name => [name, {
+          read: () => host.state[name], status: () => options.availability?.[name]?.() ?? READY_INPUT,
+        }])),
+        track: (name, kind) => options.inputTracking!.track(name, kind),
+        watch: run => host.effect(run),
+        untracked: run => options.inputTracking!.untracked(run),
+      });
+    },
     get element(): Element {
       return (root.value ?? lastRoot) as Element;
     },
@@ -371,7 +396,7 @@ export function useComponentHost(
         pause();
         if (connected.value) cleanup = run();
       }, { flush: "post" });
-      const dispose = (): void => { stop(); pause(); pauses.delete(dispose); };
+      const dispose = (): void => { stop(); pause(); pauses.delete(dispose); const index = stops.indexOf(dispose); if (index >= 0) stops.splice(index, 1); };
       pauses.set(dispose, pause);
       stops.push(dispose);
       return dispose;
@@ -440,13 +465,17 @@ export function useComponentHost(
     }
     connected.value = true;
     for (const entry of subscriptions) activate(entry);
-    if (initialized) return;
+    if (initialized && !options.module) return;
     const current = ++connection;
     // Requests from inside this root wait until the controller has run, or failed to load.
     const release = releaseController = holdController(root.value!);
     started = loadControllerModule().then(async (loaded) => {
-      if (!connected.value || current !== connection || initialized) return loaded;
+      if (!connected.value || current !== connection || initialized && !options.module) return loaded;
       initialized = true;
+      if (options.module) {
+        try { cleanup = activateModule(loaded, host, report); } finally { release(); }
+        return loaded;
+      }
       let invoked: unknown;
       try { invoked = loaded.default(host as never); } finally { release(); }
       const result = await invoked;
@@ -605,6 +634,57 @@ export function cycleCheckedComputed<T>(evaluate: () => T) {
       if (reading) throw diagnostic("HR006", "A reactive computed value depends on itself.");
       reading = true;
       try { return target.value; } finally { reading = false; }
+    },
+  });
+}
+
+/** A Vue state cell owns its first usable seed or an earlier accepted edit, including equal writes. */
+export function initializedState<T>(evaluate: () => { value: unknown; status: InputStatus }, accepts: (value: unknown) => boolean,
+  copy: <V>(value: V) => V, warn: () => void): Ref<T | undefined> & { status(): InputStatus; start(): void } {
+  const cell = ref<T>() as Ref<T | undefined>;
+  let seed: ReturnType<typeof cycleCheckedComputed<ReturnType<typeof evaluate>>> | undefined = cycleCheckedComputed(evaluate);
+  let initialized = false;
+  let stop: (() => void) | undefined;
+  let notify = () => {};
+  const claim = (): void => {
+    if (initialized) return;
+    initialized = true;
+    seed = undefined;
+    // A claim can happen inside the seed watcher's read; release after Vue finishes tracking it.
+    if (stop !== undefined) queueMicrotask(stop);
+  };
+  const initialize = (): void => {
+    if (initialized) return;
+    const next = seed!.value;
+    if (!next.status.ready || next.status.stale || next.value === undefined) return;
+    if (!accepts(next.value)) { warn(); return; }
+    claim();
+    cell.value = copy(next.value) as T;
+    notify();
+  };
+  const state = customRef<T | undefined>((track, trigger) => {
+    notify = trigger;
+    return {
+      get() { track(); initialize(); return cell.value; },
+      set(value) {
+        if (!accepts(value)) { warn(); return; }
+        const first = !initialized;
+        claim();
+        cell.value = value;
+        if (first) trigger();
+      },
+    };
+  });
+  return Object.assign(state, {
+    status(): InputStatus {
+      void state.value;
+      return initialized ? cell.value === undefined ? { ...READY_INPUT, ready: false } : READY_INPUT
+        : { ...seed!.value.status, ready: false, stale: false };
+    },
+    start() {
+      if (initialized) return;
+      stop = watchEffect(() => { void state.value; });
+      if (initialized) stop();
     },
   });
 }

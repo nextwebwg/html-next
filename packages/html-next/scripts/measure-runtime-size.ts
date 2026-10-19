@@ -131,37 +131,65 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // +85 B on every fixture with a slot: a slot fills from what a consumer's `$if` and `$each` regions
 // hold now and, given only such regions, switches to its fallback while they render nothing. The
 // switch itself ships only with a consumer that projects such regions (`slotRegion`).
-const staticGenerated = await generatedFixture("static-card", 7_603);
+// +14–35 B on affected fixtures: stopped host effects/computeds release their owner entries,
+// and connection traversal snapshots owners so cleanup can remove them without skipping siblings.
+// +19–31 B: an optional activation callback keeps named connect separate from the legacy
+// initializer, so disconnect listeners run before the activation releases its subscriptions.
+// The module activation helper itself ships only with components that declare module.
+// Availability imports change minified identifier allocation in these existing fixtures by 1–2 B
+// gzip; the generated bundles still contain no interpreter, parser or type-system module.
+// +34–59 B on existing fixtures: optional one-time-state hooks use the existing write epoch,
+// host facade and lifecycle. Components without seeded state omit its helper. An independent
+// Chromium comparison (five fresh processes, paired source variants, 2026-10-19) found ordinary
+// state read/write costs within run variance. This is not a claim about complete application cost.
+const staticGenerated = await generatedFixture("static-card", 7_724);
 // The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
 // +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
 // which the bundle does not include.
-const reactiveGenerated = await generatedFixture("reactive-counter", 7_560);
-const propGenerated = await generatedFixture("prop-button", 12_132);
+const reactiveGenerated = await generatedFixture("reactive-counter", 7_653);
+// +1.0–1.1 KB on prop fixtures: the typed input SDK, accepted caller ownership, and status-only
+// publication use compiled prop checks and the existing scheduler. Components without props
+// do not import the SDK. The dedicated await fixture protects actual status/error lowering.
+// Null inputs resolve through the same declared defaults on factory, update and source paths
+// (+21–26 B gzip on the prop/head fixtures). Computed prerequisite/status composition costs
+// 325 B on computed-counter; components without computeds do not import that collector.
+// +75–99 B on prop/head fixtures: equivalent status/raw-input publications skip notification,
+// and a bound value/status pair commits together. The shared status comparison costs 16 B on
+// computed-counter. These are measured feature costs, with no additional allowance.
+// +279–302 B on prop/head/await fixtures: driver-requested commit identities survive adoption,
+// and renderer-owned synchronous capture composes status for separately bundled drivers.
+// Counters allocate only when queried; neither capability duplicates accepted values.
+// +132–148 B on SDK fixtures for read-only state/computed/context declaration reads and
+// status observation; +17 B on computed-counter for existing-property notification of status.
+const propGenerated = await generatedFixture("prop-button", 13_856);
+const awaitGenerated = await generatedFixture("await-card", 14_416);
+const seededGenerated = await generatedFixture("state-seed", 15_786);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
-const computedGenerated = await generatedFixture("computed-counter", 7_878);
+// Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
+const computedGenerated = await generatedFixture("computed-counter", 8_345);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
-const keyedGenerated = await generatedFixture("keyed-list", 8_035);
+const keyedGenerated = await generatedFixture("keyed-list", 8_106);
 // +5 B: a root renders, at its first connection, what changed after its construction while it waited
 // detached, such as a parent's bound list of objects; until then such a change never rendered.
 // +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
 // does nothing until a component on the page asks.
-const dataGenerated = await generatedFixture("data-read", 7_970);
-const controllerGenerated = await generatedFixture("controller-lifecycle", 7_620);
+const dataGenerated = await generatedFixture("data-read", 8_090);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 7_737);
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 9_319);
+const requestGenerated = await generatedFixture("controller-request", 9_429);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
-const headNoneGenerated = await generatedFixture("head-none", 10_531);
-const headStaticGenerated = await generatedFixture("head-static", 12_649);
-const headJsonGenerated = await generatedFixture("head-json", 12_800);
-const headGenerated = await generatedFixture("head-script", 14_784);
+const headNoneGenerated = await generatedFixture("head-none", 12_253);
+const headStaticGenerated = await generatedFixture("head-static", 14_357);
+const headJsonGenerated = await generatedFixture("head-json", 14_500);
+const headGenerated = await generatedFixture("head-script", 16_475);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -170,10 +198,10 @@ const headGenerated = await generatedFixture("head-script", 14_784);
 // recording the rows it kept in place, so lists whose rows read their position visit only moved rows,
 // 85 B for the platform-object check that keeps DOM nodes in state unwrapped, and 17 B for the
 // whitespace between its elements, which templates keep as authored.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_604);
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_678);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
-const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, awaitGenerated, seededGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),
@@ -211,6 +239,8 @@ const nativeBuild = {
     static: staticGenerated,
     reactive: reactiveGenerated,
     prop: propGenerated,
+    await: awaitGenerated,
+    state: seededGenerated,
     computed: computedGenerated,
     keyed: keyedGenerated,
     data: dataGenerated,

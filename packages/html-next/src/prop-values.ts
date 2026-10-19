@@ -9,7 +9,7 @@ import type { PropContract, PropType, PropValue } from "./types.js";
 
 /** An invocation's or framework's input, parsed through the prop's type; undefined when it fails. */
 export function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue | undefined {
-  if (input === null) return null;
+  if (input === null) return prop.default === undefined ? null : prop.default;
   // Bare boolean attributes retain HTML presence semantics. Explicit values
   // are invocation strings and must still pass through the declared type.
   const candidate = type === "boolean" && attributePresent && input === "" ? true : input;

@@ -35,6 +35,8 @@ const expectedExports = [
   "./runtime",
   "./live",
   "./generated-runtime",
+  "./inputs",
+  "./bindings",
   "./forms",
   "./validation",
   "./browser",

@@ -2,6 +2,7 @@
 import {
   computed,
   createTextVNode,
+  customRef,
   defineComponent,
   Fragment,
   getCurrentInstance,
@@ -11,12 +12,160 @@ import {
   onBeforeUpdate,
   onMounted,
   onUpdated,
+  ref,
   shallowRef,
   useSlots,
   watch,
   watchEffect,
 } from 'vue'
-import type { PropType, VNode } from 'vue'
+import type { PropType, Ref, VNode } from 'vue'
+/** The public failure a template may read; stacks and producer capabilities stay with their owner. */
+interface InputFailure {
+  readonly name: string
+  readonly message: string
+}
+
+/** Availability is independent of the declared value's type, truthiness and input ownership. */
+interface InputStatus {
+  readonly ready: boolean
+  readonly pending: boolean
+  readonly error: InputFailure | null
+  readonly stale: boolean
+}
+
+const READY_INPUT: InputStatus = { ready: true, pending: false, error: null, stale: false }
+
+/** Browser activation shared by live, native-compiled and framework component hosts. */
+export interface ConnectionContext {
+  readonly signal: AbortSignal
+}
+
+export type Connect<H> = (
+  host: H,
+  context: ConnectionContext,
+) => void | (() => void) | Promise<void | (() => void)>
+
+/**
+ * Each call owns a fresh native cancellation signal. The facade also owns subscriptions created
+ * through host.on/effect after an await: retaining a stale host cannot start a new subscription.
+ * It shares the instance's state, props, refs and other capabilities rather than copying them.
+ */
+export function activateModule<H extends object>(
+  module: { readonly connect?: Connect<H> | undefined },
+  host: H,
+  report: (error: unknown) => void = error => {
+    queueMicrotask(() => {
+      throw error
+    })
+  },
+): () => void {
+  const controller = new AbortController()
+  const owned = new Set<() => void>()
+  let cleanup: (() => void) | undefined
+  const dispose = (stop: () => void): void => {
+    try {
+      stop()
+    } catch (error) {
+      report(error)
+    }
+  }
+  const scoped = Object.create(host) as H
+  const stop = (): void => {
+    if (controller.signal.aborted) return
+    controller.abort()
+    for (const release of owned) release()
+    const release = cleanup
+    cleanup = undefined
+    if (release !== undefined) dispose(release)
+  }
+  const failed = (error: unknown): void => {
+    const cancelled = controller.signal.aborted
+      && (error as { name?: string } | null)?.name === 'AbortError'
+    stop()
+    if (!cancelled) report(error)
+  }
+  const own = (stop: () => void): () => void => {
+    let stopped = false
+    const release = (): void => {
+      if (stopped) return
+      stopped = true
+      owned.delete(release)
+      dispose(stop)
+    }
+    if (controller.signal.aborted) release()
+    else owned.add(release)
+    return release
+  }
+  for (const name of ['on', 'effect', 'computed'] as const) {
+    const method: unknown = Reflect.get(host, name)
+    if (typeof method !== 'function') continue
+    Object.defineProperty(scoped, name, {
+      value: (...args: unknown[]) => {
+        if (controller.signal.aborted) {
+          if (name === 'computed') {
+            return {
+              get: () => {
+                throw controller.signal.reason
+              },
+            }
+          }
+          return () => {}
+        }
+        const result: unknown = Reflect.apply(method, host, args)
+        const stop = name === 'computed'
+          ? (result as { stop?: () => void }).stop?.bind(result)
+          : result as () => void
+        if (stop === undefined) return result
+        const release = own(stop)
+        return name === 'computed' ? result : release
+      },
+    })
+  }
+  // A connection owns its input subscriptions and source capabilities. Disposal releases
+  // eligibility for a later activation without disposing the instance's input port or values.
+  const inputKey = Symbol.for('@nextwebwg/html-next.inputs.v1')
+  const inputs: unknown = Reflect.get(host, inputKey)
+  if (inputs !== undefined) {
+    const port = Object.create(inputs as object) as {
+      watch(run: () => void | (() => void)): () => void
+    }
+    Object.defineProperty(port, 'watch', {
+      value: (run: () => void | (() => void)) =>
+        controller.signal.aborted ? () => {} : own((inputs as typeof port).watch(run)),
+    })
+    const source: unknown = Reflect.get(inputs as object, 'source')
+    if (typeof source === 'function') {
+      Object.defineProperty(port, 'source', {
+        value: (...args: unknown[]) => {
+          if (controller.signal.aborted) throw controller.signal.reason
+          const result = Reflect.apply(source, inputs, args) as { dispose(): void }
+          const capability = Object.create(result) as typeof result
+          Object.defineProperty(capability, 'dispose', { value: own(() => result.dispose()) })
+          return capability
+        },
+      })
+    }
+    Object.defineProperty(scoped, inputKey, { value: port })
+  }
+  const accept = (result: void | (() => void)): void => {
+    if (result === undefined) return
+    if (typeof result !== 'function') {
+      failed(new TypeError('A component connect export must return cleanup or undefined.'))
+      return
+    }
+    if (controller.signal.aborted) dispose(result)
+    else cleanup = result
+  }
+  try {
+    const result = module.connect?.(scoped, { signal: controller.signal })
+    if (result !== undefined && typeof result !== 'function') {
+      void Promise.resolve(result).then(accept, failed)
+    } else accept(result)
+  } catch (error) {
+    failed(error)
+  }
+  return stop
+}
 
 interface ControllerStateAccess {
   readonly get: () => unknown
@@ -537,11 +686,27 @@ export function preserveRootFocus(componentRoot: Readable<Element | null>): void
 }
 
 export interface ComponentHostOptions {
+  readonly inputs?: {
+    port(reactions: {
+      readonly declarations?: Readonly<
+        Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>
+      >
+      track(name: string, kind: 'value' | 'status' | 'supplied'): void
+      watch(run: () => void | (() => void)): () => void
+      untracked<T>(run: () => T): T
+    }): unknown
+  }
+  readonly availability?: Readonly<Record<string, () => InputStatus>>
+  readonly inputTracking?: {
+    track(name: string, kind: 'value' | 'status' | 'supplied'): void
+    untracked<T>(run: () => T): T
+  }
   /** The component's root element. */
   readonly root: Readable<HTMLElement | null>
   /** Dispatches a declared component event. */
   readonly dispatch: (name: string, detail?: unknown) => boolean
   /** The authored controller edge, retained for the live loader's module diagnostic. */
+  readonly module?: boolean
   readonly controllerSource?: { readonly specifier: string; readonly definition: string }
   /** Accepted component props, which a controller reads through `host.props`. */
   readonly props?: Readable<Readonly<Record<string, unknown>>>
@@ -630,7 +795,9 @@ export function useComponentHost(
     const url = new URL(edge?.specifier ?? '', source ?? document.baseURI).href
     const tick = String.fromCharCode(96)
     const message = code === 'HJ002'
-      ? 'Controller module ' + tick + url + tick + ' must default-export a function.'
+      ? options.module
+        ? 'Component module ' + tick + url + tick + ' export connect must be a function.'
+        : 'Controller module ' + tick + url + tick + ' must default-export a function.'
       : 'Controller module ' + tick + url + tick + ' failed to load: '
         + (reason instanceof Error ? reason.message : String(reason)) + '.'
     return Object.assign(
@@ -641,14 +808,24 @@ export function useComponentHost(
       },
     )
   }
-  type ControllerModule = Record<string, unknown> & { readonly default: (host: unknown) => unknown }
+  type ControllerModule = Record<string, unknown> & {
+    readonly default: (host: unknown) => unknown
+    readonly connect?: Connect<object>
+  }
   let controllerModule: Promise<ControllerModule> | undefined
   const loadControllerModule = (): Promise<ControllerModule> =>
     controllerModule ??= Promise.resolve()
       .then(controllerLoader)
       .then((candidate) => {
-        const loaded = candidate as { readonly default?: unknown } | null
-        if (typeof loaded?.default !== 'function') throw controllerDiagnostic('HJ002')
+        const loaded = candidate as
+          | { readonly default?: unknown; readonly connect?: unknown }
+          | null
+        if (
+          options.module
+            ? loaded === null || typeof loaded !== 'object'
+              || loaded.connect !== undefined && typeof loaded.connect !== 'function'
+            : typeof loaded?.default !== 'function'
+        ) throw controllerDiagnostic('HJ002')
         return candidate as ControllerModule
       })
       .catch((error: unknown) => {
@@ -717,6 +894,21 @@ export function useComponentHost(
   // root, so cleanup that runs after that still reads the root that disconnected.
   let lastRoot: Element | null = null
   const host = {
+    get [Symbol.for('@nextwebwg/html-next.inputs.v1')](): unknown {
+      return options.inputs?.port({
+        declarations: Object.fromEntries(
+          [...Object.keys(state), ...Object.keys(computedValues), ...Object.keys(context)].map(
+            name => [name, {
+              read: () => host.state[name],
+              status: () => options.availability?.[name]?.() ?? READY_INPUT,
+            }]
+          ),
+        ),
+        track: (name, kind) => options.inputTracking!.track(name, kind),
+        watch: run => host.effect(run),
+        untracked: run => options.inputTracking!.untracked(run),
+      })
+    },
     get element(): Element {
       return (root.value ?? lastRoot) as Element
     },
@@ -799,6 +991,8 @@ export function useComponentHost(
         stop()
         pause()
         pauses.delete(dispose)
+        const index = stops.indexOf(dispose)
+        if (index >= 0) stops.splice(index, 1)
       }
       pauses.set(dispose, pause)
       stops.push(dispose)
@@ -896,13 +1090,23 @@ export function useComponentHost(
     }
     connected.value = true
     for (const entry of subscriptions) activate(entry)
-    if (initialized) return
+    if (initialized && !options.module) return
     const current = ++connection
     // Requests from inside this root wait until the controller has run, or failed to load.
     const release = releaseController = holdController(root.value!)
     started = loadControllerModule().then(async (loaded) => {
-      if (!connected.value || current !== connection || initialized) return loaded
+      if (!connected.value || current !== connection || initialized && !options.module) {
+        return loaded
+      }
       initialized = true
+      if (options.module) {
+        try {
+          cleanup = activateModule(loaded, host, report)
+        } finally {
+          release()
+        }
+        return loaded
+      }
       let invoked: unknown
       try {
         invoked = loaded.default(host as never)
@@ -1112,6 +1316,75 @@ export function cycleCheckedComputed<T>(evaluate: () => T) {
       } finally {
         reading = false
       }
+    },
+  })
+}
+
+/** A Vue state cell owns its first usable seed or an earlier accepted edit, including equal writes. */
+export function initializedState<T>(
+  evaluate: () => { value: unknown; status: InputStatus },
+  accepts: (value: unknown) => boolean,
+  copy: <V>(value: V) => V,
+  warn: () => void,
+): Ref<T | undefined> & { status(): InputStatus; start(): void } {
+  const cell = ref<T>() as Ref<T | undefined>
+  let seed: ReturnType<typeof cycleCheckedComputed<ReturnType<typeof evaluate>>> | undefined =
+    cycleCheckedComputed(evaluate)
+  let initialized = false
+  let stop: (() => void) | undefined
+  let notify = () => {}
+  const claim = (): void => {
+    if (initialized) return
+    initialized = true
+    seed = undefined
+    // A claim can happen inside the seed watcher's read; release after Vue finishes tracking it.
+    if (stop !== undefined) queueMicrotask(stop)
+  }
+  const initialize = (): void => {
+    if (initialized) return
+    const next = seed!.value
+    if (!next.status.ready || next.status.stale || next.value === undefined) return
+    if (!accepts(next.value)) {
+      warn()
+      return
+    }
+    claim()
+    cell.value = copy(next.value) as T
+    notify()
+  }
+  const state = customRef<T | undefined>((track, trigger) => {
+    notify = trigger
+    return {
+      get() {
+        track()
+        initialize()
+        return cell.value
+      },
+      set(value) {
+        if (!accepts(value)) {
+          warn()
+          return
+        }
+        const first = !initialized
+        claim()
+        cell.value = value
+        if (first) trigger()
+      },
+    }
+  })
+  return Object.assign(state, {
+    status(): InputStatus {
+      void state.value
+      return initialized
+        ? cell.value === undefined ? { ...READY_INPUT, ready: false } : READY_INPUT
+        : { ...seed!.value.status, ready: false, stale: false }
+    },
+    start() {
+      if (initialized) return
+      stop = watchEffect(() => {
+        void state.value
+      })
+      if (initialized) stop()
     },
   })
 }

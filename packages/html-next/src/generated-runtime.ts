@@ -1,3 +1,8 @@
+export { activateModule } from "./module-connection.js";
+export { generatedInputs, awaitInput, bindInput } from "./generated-inputs.js";
+export { stateInitializers } from "./generated-state.js";
+import type { GeneratedStateInitializers } from "./generated-state.js";
+export { evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT } from "./inputs.js";
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
@@ -10,6 +15,8 @@ import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
 import { currentProjection, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
+import type { RenderedInstanceRecord } from "./rendered-form.js";
+import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
@@ -35,6 +42,7 @@ import { manageDerivedValidity, setElementValidity, unmanageElementValidity, val
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { add, divide, multiply, remainder, subtract } from "./decimal.js";
+export { notifyPropertySet } from "./reactivity.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
@@ -275,7 +283,7 @@ export function bindProp(child: GeneratedInstance, name: string, value: unknown)
   const from = prop.select?.from;
   const checks = chosen(props, prop, from === undefined ? {}
     : { [from]: record.v[Object.hasOwn(props, from) ? record.n.length + Object.keys(props).indexOf(from) : record.n.indexOf(from)] });
-  if (!fits(value, checks?.m ?? null)) return;
+  if (!(value === null && prop.default !== undefined) && !fits(value, checks?.m ?? null)) return;
   // The child's own channel: a root it shares answers to the component that delegates to it.
   record.u!({ [name]: value });
 }
@@ -368,7 +376,13 @@ export function readContext(
     const values = instance.v!;
     const previous = values[index];
     const next = provider!.v![at];
-    if (!Object.is(previous, next)) {
+    const status = provider!.X?.i?.(at) ?? (next === undefined ? UNRESOLVED_INPUT : READY_INPUT);
+    const previousStatus = channel.a?.[index];
+    if (channel.a !== undefined) {
+      channel.a[index] = status;
+      notifyPropertySet(channel.a, index, previousStatus, status, undefined);
+    }
+    if (!Object.is(previous, next) || previousStatus !== status) {
       instance.w(index, next);
       channel.n?.(index, previous, next);
     } else if (dirty !== undefined && touches(next, dirty)) nested(dirty);
@@ -582,7 +596,10 @@ export function defineComponent(
   registryRecord(document).i.add(generatedChannel);
 }
 
-interface PropInput { readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean }
+interface PropInput {
+  readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean;
+  readonly provided?: boolean; readonly producer?: boolean;
+}
 
 /** `host.props[name]`, as the live host gives it. */
 interface GeneratedPropHandle {
@@ -613,7 +630,7 @@ export interface CompiledProp extends PropRule, Partial<PropChecks> {
 type CompiledProps = Readonly<Record<string, CompiledProp>>;
 
 /** The checks of a prop's type, chosen by its selector's value as `selectedPropType` chooses; null when no option matches. */
-function chosen(props: CompiledProps, prop: CompiledProp, values: Readonly<Record<string, unknown>>): PropChecks | null {
+export function chosen(props: CompiledProps, prop: CompiledProp, values: Readonly<Record<string, unknown>>): PropChecks | null {
   if (prop.select === undefined) return prop as PropChecks;
   const supplied = values[prop.select.from];
   const value = supplied === undefined ? props[prop.select.from]?.default ?? null : supplied;
@@ -621,9 +638,10 @@ function chosen(props: CompiledProps, prop: CompiledProp, values: Readonly<Recor
   return prop.select.options.find((option) => option.value === value) ?? null;
 }
 
-/** An input through a prop's type (`invocationValue`): null stays null, and a value the type refuses is undefined. */
-function taken(checks: PropChecks | null, input: unknown, source: "html" | "value"): unknown {
-  if (input === null || checks === null) return input;
+/** An input through a prop's type (`invocationValue`): null uses its default, and a refused value is undefined. */
+function taken(checks: PropChecks | null, input: unknown, source: "html" | "value", fallback?: unknown): unknown {
+  if (input === null) return fallback === undefined ? null : fallback;
+  if (checks === null) return input;
   const parsed = checks.c(input, "$", source);
   return parsed.ok ? parsed.value : undefined;
 }
@@ -640,6 +658,12 @@ export const fits = (value: unknown, type: CompactType | null): boolean => value
 
 /** A compiled instance's props, as the live runtime keeps an instance's. */
 export interface GeneratedPropRecord {
+  /** Driver-requested accepted-input revisions; no observers or values are stored here. */
+  r?: Record<string, number>;
+  /** Availability is allocated only when the component or SDK observes it. */
+  a?: Record<string, InputStatus>;
+  /** Publishes availability alongside a normal typed-value commit. */
+  p?: (name: string, status: InputStatus | undefined) => void;
   /** The component tag, which namespaces each prop's recording attribute, and its props. */
   readonly D: { readonly g: string; readonly props: CompiledProps };
   /** The state and computed names; each prop's root follows them, in the contract's order. */
@@ -653,7 +677,7 @@ export interface GeneratedPropRecord {
   /** Moves the prop boundary to a new root, set by `manageProps`. */
   m?: (previous: Element, next: Element) => void;
   /** Applies a framework's or parent's props, set by `manageProps`. */
-  u?: (props: Readonly<Record<string, unknown>>) => void;
+  u?: (props: Readonly<Record<string, unknown>>, availability?: Readonly<Record<string, InputStatus>>) => void;
   /** Props whose `data-<tag>-prop-<name>` holds a raw input write, which a first connection leaves as it is. */
   readonly w: Set<string>;
   /** The factory's values, written raw on the root before it first renders its props. */
@@ -672,7 +696,7 @@ export interface GeneratedPropRecord {
  */
 export function acceptProps(
   element: Element | undefined, D: GeneratedPropRecord["D"], n: readonly string[], v: unknown[],
-  input: Readonly<Record<string, unknown>>, bound: readonly string[], html?: Readonly<Record<string, string>>,
+  input: Readonly<Record<string, unknown>>, bound: readonly string[], html?: Readonly<Record<string, string>>, restored?: RenderedInstanceRecord,
 ): GeneratedPropRecord {
   const props = D.props;
   const names = Object.keys(props);
@@ -705,7 +729,7 @@ export function acceptProps(
       const from = prop.select?.from;
       // An invocation's bare boolean attribute is HTML input "", which reads as true.
       accepted[name] = taken(chosen(props, prop, from === undefined || props[from] !== undefined ? accepted : { [from]: v[at(from)] }),
-        item.value, item.source);
+        item.value, item.source, prop.default);
     }
   }
   for (const name of names) {
@@ -713,9 +737,13 @@ export function acceptProps(
     v[at(name)] = accepted[name] !== undefined ? accepted[name] : prop.default === undefined ? null : prop.default;
   }
   const inputs: Record<string, PropInput> = Object.create(null);
-  for (const name of names) inputs[name] = incoming[name] ?? { value: null, source: "value", present: false };
+  for (const name of names) inputs[name] = restored?.inputs[name] ?? (incoming[name] === undefined
+    ? { value: null, source: "value", present: false }
+    : { ...incoming[name]!, provided: accepted[name] !== undefined });
   const record: GeneratedPropRecord = {
     D, n, v, i: inputs, b: bound, w: raw, f: input,
+    ...(restored?.availability === undefined ? {} : { a: Object.assign(Object.create(null) as Record<string, InputStatus>, restored.availability) }),
+    ...(restored?.revisions === undefined ? {} : { r: Object.assign(Object.create(null) as Record<string, number>, restored.revisions) }),
     x: new Set(names.filter((name) => incoming[name] !== undefined && incoming[name]!.value !== null)),
     // Reads every prop's input and value, as live's validity does, so an effect reading it tracks them all.
     y: () => propsValidity(props, (prop, selector) => chosen(props, prop, prop.select === undefined ? {} : { [prop.select.from]: selector }),
@@ -756,6 +784,15 @@ export function manageProps(instance: GeneratedInstance): void {
   const props = D.props;
   const names = Object.keys(props);
   const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
+  record.p = (name, status) => {
+    const statuses = record.a ??= Object.create(null) as Record<string, InputStatus>;
+    const previous = statuses[name];
+    if (sameInputStatus(previous, status)) return;
+    if (status === undefined) delete statuses[name];
+    else statuses[name] = status;
+    instance.w(at(name), v[at(name)]);
+    notifyPropertySet(statuses, name, previous, status, undefined);
+  };
   // The factory's explicit values, as its live attachment writes them before rendering.
   for (const name of record.w) {
     instance.e.setAttribute(propAttribute(D.g, name), reflected(record.f[name], chosen(props, props[name]!, record.f)));
@@ -818,10 +855,11 @@ export function manageProps(instance: GeneratedInstance): void {
     for (const name of names) reflect(name);
     job.schedule();
   };
-  const update = (input: Readonly<Record<string, unknown>>): void => {
+  const update = (input: Readonly<Record<string, unknown>>, availability?: Readonly<Record<string, InputStatus>>): void => {
     checkProps(names, input, D.g);
     const element = instance.e;
     const next: Record<string, unknown> = {};
+    const acceptedNames = new Set<string>();
     for (const name of names) {
       next[name] = v[at(name)];
       const from = props[name]!.select?.from;
@@ -832,8 +870,8 @@ export function manageProps(instance: GeneratedInstance): void {
         const prop = props[name];
         if (prop === undefined || (prop.select !== undefined) !== pass) continue;
         // A framework's undefined returns the prop to its default (`assignedPropValue`).
-        const accepted = value !== undefined ? taken(selected(prop, next), value, "value") : prop.default === undefined ? null : prop.default;
-        if (accepted !== undefined) next[name] = accepted;
+        const accepted = value !== undefined ? taken(selected(prop, next), value, "value", prop.default) : prop.default === undefined ? null : prop.default;
+        if (accepted !== undefined) { next[name] = accepted; acceptedNames.add(name); }
       }
     }
     for (const [name, value] of Object.entries(input)) {
@@ -841,8 +879,9 @@ export function manageProps(instance: GeneratedInstance): void {
       if (prop === undefined) continue;
       // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
       const previous = inputs[name];
-      if (previous?.source !== "value" || previous.present !== (value !== undefined) || !Object.is(previous.value, value === undefined ? null : value)) {
-        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+      const provided = acceptedNames.has(name) ? value !== undefined : previous?.provided ?? previous?.present ?? false;
+      if (previous?.source !== "value" || previous.present !== (value !== undefined) || previous.provided !== provided || !Object.is(previous.value, value === undefined ? null : value)) {
+        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined, provided };
         notifyPropertySet(inputs, name, previous, inputs[name], undefined);
       }
       // A bound data-* attribute is template output; only its binding writes it.
@@ -865,6 +904,10 @@ export function manageProps(instance: GeneratedInstance): void {
         notifyPropertySet(record, name, current, next[name], undefined);
         changed.add(name);
         for (const other of names) if (props[other]!.select?.from === name) changed.add(other);
+      }
+      if (acceptedNames.has(name)) {
+        if (record.r?.[name] !== undefined) record.r[name] += 1;
+        if (record.a !== undefined || availability !== undefined) record.p?.(name, availability?.[name]);
       }
     }
     job.schedule();
@@ -1146,6 +1189,8 @@ export function compactTypeAt(type: CompactType, key: PropertyKey): CompactType 
 
 /** A generated component's declared state: names, compact types, and its source for warnings. */
 export interface GeneratedStateSpec {
+  /** Input SDK supplied by components with declared props, without adding it to scalar bundles. */
+  readonly i?: (instance: GeneratedInstance) => ComponentInputs;
   readonly n: readonly string[];
   readonly t: readonly CompactType[];
   readonly f: string;
@@ -1163,6 +1208,8 @@ export interface GeneratedStateSpec {
   readonly r?: typeof readonlyView;
   /** Declared requests' detail and answer checks, which `host.request` applies as the live host does. */
   readonly q?: Readonly<Record<string, RequestChecks>>;
+  /** Module activation supplied only by components that declare module; legacy initialization stays separate. */
+  readonly a?: (host: never, instance: GeneratedInstance) => () => void;
 }
 
 /** What `host.request` uses to abort the current connection's requests: paused, it aborts them. */
@@ -1240,11 +1287,16 @@ export interface GeneratedChannel {
   e: number;
   readonly g: (index: number) => unknown;
   readonly w: Set<number>;
+  readonly a?: Record<number, InputStatus>;
+  readonly i?: (index: number) => InputStatus;
   n?: (index: number, previous: unknown, next: unknown) => void;
 }
 
 /** The instance internals generated handlers, listeners and refs use; each is imported only when used. */
 export interface GeneratedInstance {
+  readonly U?: GeneratedStateInitializers;
+  readonly X?: GeneratedChannel | undefined;
+  P?: ComponentInputs;
   readonly S: GeneratedStateSpec;
   /** The controller's state facade, which validates, stores raw and schedules. */
   readonly s: Record<PropertyKey, unknown>;
@@ -1821,7 +1873,7 @@ export function attachGeneratedController(
   if (channel !== undefined) channel.n = (index, previous, next) => notifyPropertySet(roots, names[index]!, previous, next, undefined);
   /** Stores a root's new value, marks it changed and schedules the render. */
   const assign = (index: number, next: unknown): void => {
-    if (channel !== undefined) channel.e += 1;
+    if (channel !== undefined) { channel.e += 1; handle.U?.changed(); }
     values[index] = next;
     // Roots from index 29 share one bit; the written map says which of them changed.
     if (index < 29) dirty |= 1 << index;
@@ -1923,7 +1975,11 @@ export function attachGeneratedController(
       const index = names.indexOf(key as string);
       if (index < 0) return undefined;
       trackProperty(roots, key);
-      if (index < writable) return wrap(values[index], types[index]!, undefined, key);
+      if (index < writable) {
+        const value = handle.U?.read(index) ?? values[index];
+        if (handle.U !== undefined && !handle.U.status(index).ready) return undefined;
+        return wrap(value, types[index]!, undefined, key);
+      }
       channel!.w.add(index);
       // A computed or context is read-only, nested writes too, as live's host gives it.
       return spec.r!(spec, channel!.g(index), key as string);
@@ -1933,6 +1989,7 @@ export function attachGeneratedController(
       if (index < 0 || index >= writable) readOnly(String(key));
       else if (!trusted && !conforms(value, types[index]!)) mismatch(String(key));
       else {
+        handle.U?.claim(index);
         const previous = values[index];
         const next = raw(value);
         if (!Object.is(previous, next)) {
@@ -1957,6 +2014,7 @@ export function attachGeneratedController(
   // The live host reads refs from an ordinary object, so inherited names answer as they do there.
   const recorded: Record<string, unknown> = {};
   const host = Object.freeze({
+    get [Symbol.for("@nextwebwg/html-next.inputs.v1")]() { return spec.i?.(handle); },
     // A root switch replaces the element, so the root is read where it is now, and tracked.
     get root(): Element { trackProperty(handle, "e"); return handle.e; },
     get element(): Element { trackProperty(handle, "e"); return handle.e; },
@@ -2000,17 +2058,29 @@ export function attachGeneratedController(
       const computed = createComputed(scheduler, compute);
       if (!connected) computed.pause();
       entries.unshift(computed);
-      return computed;
+      return {
+        get: () => computed.get(),
+        stop: () => {
+          computed.stop();
+          const index = entries.indexOf(computed);
+          if (index >= 0) entries.splice(index, 1);
+        },
+      };
     },
     effect(run: () => void | (() => void)) {
       const effect = createEffect(scheduler, run, 2, connected);
       entries.push(effect);
-      return () => effect.stop();
+      return () => {
+        effect.stop();
+        const index = entries.indexOf(effect);
+        if (index >= 0) entries.splice(index, 1);
+      };
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
+  Object.assign(handle, { S: spec, X: channel, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
+  handle.U?.attach(handle);
   render(-1);
   const disconnect = (): void => {
     if (!gone) {
@@ -2021,12 +2091,16 @@ export function attachGeneratedController(
     }
     connected = false;
     objects.clear();
-    for (const entry of entries) entry.pause();
+    // Connection cleanup can release another owner during this traversal.
+    // oxlint-disable-next-line unicorn/no-useless-spread
+    for (const entry of [...entries]) entry.pause();
   };
   // A delegated root's lifecycle rides the component that owns the element (`L`); otherwise its own.
   (handle.L ?? manageIndexedLifecycle)(handle.e, () => {
     connected = true;
-    for (const entry of entries) entry.resume();
+    // Connection callbacks may add or release owners during this traversal.
+    // oxlint-disable-next-line unicorn/no-useless-spread
+    for (const entry of [...entries]) entry.resume();
     if (started) {
       // Live resumes its template effects after the controller's: every binding re-renders.
       dirty = 0;
@@ -2041,7 +2115,8 @@ export function attachGeneratedController(
         else cleanup = result as () => void;
       });
     }
-    return disconnect;
+    const deactivate = spec.a?.(host as never, handle);
+    return deactivate === undefined ? disconnect : () => { disconnect(); deactivate(); };
   }, handle);
   return handle;
 }

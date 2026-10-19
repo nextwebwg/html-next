@@ -1,15 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-const expression = await readFile(new URL("../src/expression.ts", import.meta.url), "utf8");
-const astStart = expression.indexOf("export type ExpressionNode =");
-const astEnd = expression.indexOf("\nexport interface CompiledExpression", astStart);
-if (astStart === -1 || astEnd === -1) throw new Error("Expression AST declaration not found.");
-const types = "type Value = unknown;\n" + expression.slice(astStart, astEnd);
-const files = await Promise.all(["identifiers", "expression-parser", "structured-input"].map(async (name) =>
+const files = await Promise.all(["identifiers", "structured-input"].map(async (name) =>
   (await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8")).replace(/^import[^\n]*\n/gm, "")));
-const source = [types, ...files].join("\n").replace(/\bExpressionNode\b/g, "HtmlLiteralNode");
+const source = files.join("\n");
 const output = new URL("../src/generated/html-literal-source.ts", import.meta.url);
-const content = "/** Generated from the canonical AST parser and literal reader. */\nexport const HTML_LITERAL_SOURCE = " + JSON.stringify(source) + ";\n";
+const content = "/** Generated from the canonical attribute literal reader. */\nexport const HTML_LITERAL_SOURCE = " + JSON.stringify(source) + ";\n";
 if (process.argv.includes("--check")) {
   if (await readFile(output, "utf8") !== content) throw new Error("HTML literal source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
 } else await writeFile(output, content);
@@ -49,3 +44,24 @@ if (process.argv.includes("--check")) {
     throw new Error("Head source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
   }
 } else await writeFile(headOutput, headContent);
+
+// Connection ownership is identical in live and generated framework hosts.
+const connection = await readFile(new URL("../src/module-connection.ts", import.meta.url), "utf8");
+const connectionOutput = new URL("../src/generated/module-connection-source.ts", import.meta.url);
+const connectionContent = "/** Generated from src/module-connection.ts by scripts/generate-literal-source.ts. */\nexport const MODULE_CONNECTION_SOURCE = "
+  + JSON.stringify(connection) + ";\n";
+if (process.argv.includes("--check")) {
+  if (await readFile(connectionOutput, "utf8").catch(() => "") !== connectionContent) {
+    throw new Error("Module connection source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
+  }
+} else await writeFile(connectionOutput, connectionContent);
+
+// Typed input metadata is shared by every converted prop boundary, without runtime-parser imports.
+for (const [name, constant] of [["inputs", "INPUTS_SOURCE"], ["prop-inputs", "PROP_INPUTS_SOURCE"]] as const) {
+  const source = (await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8")).replace(/^import[^\n]*\n/gm, "");
+  const output = new URL(`../src/generated/${name}-source.ts`, import.meta.url);
+  const content = `/** Generated from src/${name}.ts. */\nexport const ${constant} = ${JSON.stringify(source)};\n`;
+  if (process.argv.includes("--check")) {
+    if (await readFile(output, "utf8").catch(() => "") !== content) throw new Error(`${name} source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.`);
+  } else await writeFile(output, content);
+}

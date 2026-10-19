@@ -172,7 +172,7 @@ describe("generateComponent", () => {
 
     assert.ok(vanilla);
     assert.doesNotMatch(vanilla, /@nextwebwg\/html-next\/runtime/);
-    assert.match(vanilla, /textCall\("join", \[v\[0\], v\[1\]\]\)/);
+    assert.match(vanilla, /textCall\("join", \[inputRead\(v\[0\], inputStatus\(0\)\), inputRead\(v\[1\], inputStatus\(1\)\)\]\)/);
   });
 
   it("provides and reads ancestor state in generated targets and lowers conditional values", () => {

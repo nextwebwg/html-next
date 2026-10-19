@@ -1,0 +1,13 @@
+<template component="await-card" summary="Typed input availability bundle fixture.">
+  <defs>
+    <prop name="product" type="object({ name: string })">Product.</prop>
+  </defs>
+  <article>
+    <template $await="binding of $product">
+      <h2>{$product.name}</h2>
+      <small $if="$binding.pending">Refreshing.</small>
+    </template>
+    <p $error="problem">{$problem.message}</p>
+    <p $else>Loading.</p>
+  </article>
+</template>

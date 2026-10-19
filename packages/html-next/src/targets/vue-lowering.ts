@@ -22,6 +22,14 @@ export interface Scope {
   readonly types: ReadonlyMap<string, Static>;
 }
 
+/** Only expression reads in this scope report prerequisites to an enclosing evaluation. */
+export function inputScope<T extends Scope>(scope: T, status: (name: string, read: string) => string | undefined): T {
+  return { ...scope, code: new Map([...scope.code].map(([name, read]) => {
+    const input = status(name, read);
+    return [name, input === undefined ? read : `inputRead(${read}, ${input})`];
+  })) };
+}
+
 /** A value's static type, whether it may be absent, and whether that absence may be `null`. */
 export interface Static {
   readonly type: TypeNode;

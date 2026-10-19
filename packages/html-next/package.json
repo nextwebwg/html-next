@@ -39,6 +39,14 @@
       "types": "./dist/generated-runtime.d.ts",
       "import": "./dist/generated-runtime.js"
     },
+    "./inputs": {
+      "types": "./dist/component-inputs.d.ts",
+      "import": "./dist/component-inputs.js"
+    },
+    "./bindings": {
+      "types": "./dist/bindings.d.ts",
+      "import": "./dist/bindings.js"
+    },
     "./forms": {
       "types": "./dist/forms.d.ts",
       "import": "./dist/forms.js"

@@ -64,7 +64,8 @@ export function browserSources(components: readonly BrowserDefinition[], options
       return { ...declaration, source: `\u0000htmlkit-read-${reads.length - 1}${url.search}${url.hash}` };
     });
     const definition = { ...component.definition, ...declarations === undefined ? {} : { declarations },
-      ...component.controller === undefined ? {} : { controller: component.controller } };
+      ...component.controller === undefined ? {} : { controller: component.controller },
+      ...component.module === undefined ? {} : { module: component.module } };
     let module = generateComponent(definition, { invocations, hydrate: true })
       .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)!.content
       .replace('"@nextwebwg/html-next/generated-runtime"', JSON.stringify(runtime))

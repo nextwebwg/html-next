@@ -38,6 +38,7 @@ import type {
 import { formatType, isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, TypeSyntaxError, type TypeNode } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropType, PropValue, RequestContract, SlotDeclaration } from "./types.js";
 import { invocationValue } from "./prop-values.js";
+import { INPUT_FAILURE_TYPE, INPUT_STATUS_TYPE } from "./input-status.js";
 
 type DiagnosticFail = typeof fail;
 
@@ -67,13 +68,18 @@ export function parseProjectedSlotContent(
 ): readonly TemplateNode[] {
   const scope: ParseScope = {
     roots: new Set(names),
+    bindings: new Set(names),
     writableRoots: new Set(),
     handlers: new Set(),
     report: platform.onDiagnostic ?? platform.warn,
   };
   const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[], refs: new Set<string>() };
   const nodes: TemplateNode[] = [];
-  for (const child of contentNodes(template)) {
+  const content = contentNodes(template);
+  for (let index = 0; index < content.length; index += 1) {
+    const child = content[index]!;
+    const awaited = parseAwaitGroup(content, index, definition.contract, scope, source, slotState, platform);
+    if (awaited !== undefined) { nodes.push(...awaited.nodes); index = awaited.next - 1; continue; }
     if (typeof child === "string") nodes.push(...parseText(child, scope, source));
     else nodes.push(parseElement(child, definition.contract, scope, source, slotState, platform));
   }
@@ -212,7 +218,7 @@ function validateDeclarationContentAtSource(element: Element, source: string, de
   }
 }
 
-const FLOW_NAME_RE = /^\$(?:if|each|where|sort|limit|key|with|match|when|else)$/;
+const FLOW_NAME_RE = /^\$(?:if|each|where|sort|limit|key|with|match|when|else|await|error)$/;
 const RAW_SINK_RE = /^(?:innerhtml|outerhtml|textcontent|innertext|srcdoc)$/;
 const EACH_RE = new RegExp(String.raw`^\s*(${IDENTIFIER})(?:\s*,\s*(${IDENTIFIER}))?\s+of\b\s*(.+)$`, "u");
 const AS_RE = new RegExp(String.raw`^\s*(.+?)\s+\bas\b\s+(${IDENTIFIER})\s*$`, "u");
@@ -222,6 +228,7 @@ const NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$-]*$/;
 
 interface ParseScope {
   readonly roots: ReadonlySet<string>;
+  readonly bindings?: ReadonlySet<string>;
   readonly writableRoots: ReadonlySet<string>;
   readonly handlers: ReadonlySet<string>;
   readonly allowUndeclared?: boolean;
@@ -292,7 +299,7 @@ function withAliases(scope: ParseScope, flow: Flow | undefined): ParseScope {
     return { ...scope, aliases, loops };
   }
   if ((flow?.kind === "with" || flow?.kind === "match") && flow.alias !== undefined) {
-    const subject = flow.expressionPlan === undefined ? {} : writableAt(flow.expressionPlan.ast, scope);
+    const subject = flow.kind === "with" && flow.aliasType !== undefined ? {} : flow.expressionPlan === undefined ? {} : writableAt(flow.expressionPlan.ast, scope);
     const aliases = new Map(scope.aliases);
     aliases.set(flow.alias, "path" in subject ? subject
       : { reason: `\`${flow.alias}\` stands for \`${flow.expr}\`, which is not a writable state path` });
@@ -1070,6 +1077,10 @@ function readDeclarations(
           fail("HC013", `<state name="${name}"> uses a literal \`value\`; use <computed from> for a derived value.`, source);
         }
         const literal = attr(element, "value");
+        const initializer = attr(element, "from");
+        if (initializer !== undefined && (initializer.trim() === "" || literal !== undefined)) {
+          fail("HC013", `<state name="${name}"> uses either a literal value or a nonempty from initializer.`, source);
+        }
         const declaration: {
           kind: "state";
           name: string;
@@ -1077,6 +1088,7 @@ function readDeclarations(
           shape?: TypeNode;
           value?: string;
           expression?: CompiledExpression;
+          initializer?: CompiledExpression;
         } = {
           kind,
           name,
@@ -1105,6 +1117,7 @@ function readDeclarations(
           : compileScopedExpression(JSON.stringify(initial), scope, source);
         if (literal !== undefined) declaration.value = literal;
         if (expression !== undefined) declaration.expression = expression;
+        if (initializer !== undefined) declaration.initializer = compileScopedExpression(initializer, scope, source);
         declarations.push(declaration);
         continue;
       }
@@ -1648,6 +1661,96 @@ function parseElement(...args: Parameters<typeof parseElementAtSource>): ReturnT
   }
 }
 
+const AWAIT_RE = new RegExp(String.raw`^\s*(?:(${IDENTIFIER})\s+of\s+)?\$(${IDENTIFIER})\s*$`, "u");
+
+/** Normalize sibling branches directly from either source adapter, without rewriting parsed HTML. */
+function parseAwaitGroup(
+  nodes: readonly (Element | string)[],
+  index: number,
+  contract: ComponentContract,
+  scope: ParseScope,
+  source: string,
+  slots: Parameters<typeof parseElementAtSource>[4],
+  platform: ComponentParserPlatform,
+  insideMatch = false,
+): { readonly nodes: readonly ElementNode[]; readonly next: number } | undefined {
+  const first = nodes[index];
+  if (typeof first === "string" || first === undefined) return undefined;
+  const fail: DiagnosticFail = locatedFail(first);
+  const raw = attr(first, "$await");
+  if (raw === undefined) {
+    if (attr(first, "$error") !== undefined || !insideMatch && attr(first, "$else") !== undefined) {
+      fail("HT031", "An `$error` or `$else` branch must follow its adjacent `$await` group.", source);
+    }
+    return undefined;
+  }
+  if (sourceTag(first) === "slot") fail("HT008", "A slot only supports `$each` structural flow.", source);
+  const parsed = AWAIT_RE.exec(raw);
+  if (parsed === null) fail("HT031", "`$await` requires `$name` or `binding of $name`.", source);
+  const requested = parsed[1];
+  const name = parsed[2]!;
+  if (!(scope.bindings ?? scope.roots).has(name) && !scope.allowUndeclared || scope.aliases?.has(name)) {
+    fail("HT031", `Awaited binding \`${name}\` is not a declared prop, state, computed value, context or data source.`, source);
+  }
+  if (requested !== undefined && scope.roots.has(requested)) fail("HT031", `Await status name \`${requested}\` shadows an existing scope name.`, source);
+  let alias = requested ?? "__await0";
+  for (let suffix = 1; scope.roots.has(alias); suffix += 1) alias = `__await${suffix}`;
+  const afterWhitespace = (from: number): number => {
+    while (typeof nodes[from] === "string" && HTML_WHITESPACE_RE.test(nodes[from] as string)) from += 1;
+    return from;
+  };
+  let next = index + 1;
+  const errorIndex = afterWhitespace(next);
+  const errorNode = nodes[errorIndex];
+  const error = typeof errorNode !== "string" && errorNode !== undefined && attr(errorNode, "$error") !== undefined ? errorNode : undefined;
+  if (error !== undefined) next = errorIndex + 1;
+  const fallbackIndex = afterWhitespace(next);
+  const fallbackNode = nodes[fallbackIndex];
+  const fallback = typeof fallbackNode !== "string" && fallbackNode !== undefined && attr(fallbackNode, "$else") !== undefined ? fallbackNode : undefined;
+  if (fallback !== undefined) next = fallbackIndex + 1;
+  const expr = `$${name}`;
+  const flow: Extract<Flow, { kind: "with" }> = {
+    kind: "with", expr, expressionPlan: compileScopedExpression(expr, scope, source), alias,
+    binding: { name, handlesError: error !== undefined }, aliasType: INPUT_STATUS_TYPE,
+  };
+  const statusScope = withAliases(withRoots(scope, alias), flow);
+  // A concise group has a private compiler local; it introduces no authored expression name.
+  const authoredScope = requested === undefined ? scope : statusScope;
+  const arm = (node: ElementNode, test: string): ElementNode => ({ ...node, flow: { kind: "when", test, testPlan: compileScopedExpression(test, statusScope, source) } });
+  const arms: ElementNode[] = [arm(parseElement(first, contract, authoredScope, source, slots, platform, false, undefined, "$await"), `$${alias}.ready`)];
+  if (error !== undefined) {
+    const errorName = attr(error, "$error")!.trim();
+    if (errorName !== "" && (!isIdentifier(errorName) || authoredScope.roots.has(errorName))) {
+      locatedFail(error)("HT031", "An `$error` name must be a fresh local identifier.", source);
+    }
+    const branchScope = errorName === "" ? authoredScope : withRoots(authoredScope, errorName);
+    const body = parseElement(error, contract, branchScope, source, slots, platform, false, undefined, "$error");
+    const errorExpression = `$${alias}.error`;
+    const content: ElementNode = errorName === "" ? body : {
+      kind: "element", name: "template", attributes: [], children: [body], flow: {
+        kind: "with", expr: errorExpression, expressionPlan: compileScopedExpression(errorExpression, statusScope, source),
+        alias: errorName, aliasType: INPUT_FAILURE_TYPE,
+      },
+    };
+    arms.push(arm({ kind: "element", name: "template", attributes: [], children: [content] }, `$${alias}.error != null`));
+  }
+  if (fallback !== undefined) {
+    if (attr(fallback, "$else")!.trim() !== "") locatedFail(fallback)("HT031", "`$else` has no value.", source);
+    const body = parseElement(fallback, contract, authoredScope, source, slots, platform, false, undefined, "$else");
+    arms.push({ ...body, flow: { kind: "else" } });
+  }
+  // A branch may be projected to a different named slot. Each destination gets the same decision,
+  // with empty arms for the other destinations, rather than moving every branch into the first slot.
+  const destinations = [first, ...error === undefined ? [] : [error], ...fallback === undefined ? [] : [fallback]]
+    .map(branch => attr(branch, "slot") ?? "");
+  return { next, nodes: [...new Set(destinations)].map(slot => ({
+    kind: "element", name: "template", attributes: slot === "" ? [] : [{ kind: "literal", name: "slot", value: slot }], flow, children: [
+      { kind: "element", name: "template", attributes: [], flow: { kind: "match" }, children: arms.map((arm, index) =>
+        destinations[index] === slot ? arm : { kind: "element", name: "template", attributes: [], children: [], flow: arm.flow! }) },
+    ],
+  })) };
+}
+
 function parseElementAtSource(
   element: Element,
   contract: ComponentContract,
@@ -1662,6 +1765,7 @@ function parseElementAtSource(
   platform: ComponentParserPlatform,
   rootMatch = false,
   lifecycle?: Parameters<typeof parseEvents>[3],
+  consumed?: "$await" | "$error" | "$else",
 ): ElementNode {
   if (scope.report !== undefined) scope = { ...scope, at: sourceLocation(element) ?? scope.at };
   const tagName = sourceTag(element);
@@ -1684,6 +1788,12 @@ function parseElementAtSource(
     else if (attribute.name === "$transition-name") transitionName = attribute.value;
     else if (attribute.name.startsWith("on:")) (eventAttributes ??= []).push(attribute);
     else bindingAttributes.push(attribute);
+  }
+  if (consumed !== undefined && flowValues !== undefined) {
+    if (Object.keys(flowValues).some(name => name !== consumed)) fail("HT014", "An await branch carries only its own structural directive.", source);
+    delete flowValues[consumed];
+  } else if (flowValues?.$await !== undefined || flowValues?.$error !== undefined) {
+    fail("HT031", "An await branch must be part of a sibling group inside the component's root.", source);
   }
   const flow = extractFlow(flowValues, scope, source);
   const nodeScope = withAliases(
@@ -1712,10 +1822,18 @@ function parseElementAtSource(
     ? { defaults: slotState.defaults, names: [...slotState.names], refs: [...slotState.refs] }
     : undefined;
   const merged = { defaults: slotState.defaults, names: new Set<string>(), refs: new Set<string>() };
-  for (const child of contentNodes(element)) {
+  const content = contentNodes(element);
+  for (let index = 0; index < content.length; index += 1) {
+    const child = content[index]!;
     if (typeof child === "string") {
       // A `$match`'s children are its arms; whitespace between them is layout, not content.
       if ((flow?.kind !== "match" && !discardsWhitespace) || !HTML_WHITESPACE_RE.test(child)) children.push(...parseText(child, childScope, source));
+      continue;
+    }
+    const awaited = parseAwaitGroup(content, index, contract, childScope, source, slotState, platform, flow?.kind === "match");
+    if (awaited !== undefined) {
+      children.push(...awaited.nodes);
+      index = awaited.next - 1;
       continue;
     }
     if (sourceTag(child) === "slot") {
@@ -1766,7 +1884,11 @@ function parseElementAtSource(
         slotState.names.add(name);
       }
       const fallback: TemplateNode[] = [];
-      for (const fallbackNode of contentNodes(child)) {
+      const fallbackContent = contentNodes(child);
+      for (let index = 0; index < fallbackContent.length; index += 1) {
+        const fallbackNode = fallbackContent[index]!;
+        const awaited = parseAwaitGroup(fallbackContent, index, contract, slotScope, source, slotState, platform);
+        if (awaited !== undefined) { fallback.push(...awaited.nodes); index = awaited.next - 1; continue; }
         if (typeof fallbackNode === "string") fallback.push(...parseText(fallbackNode, slotScope, source));
         else fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
       }
@@ -2114,7 +2236,11 @@ function parseComponentNodesAtSource(
     ...(requests === undefined ? {} : { requests }),
     ...(scripts === undefined ? {} : { scripts: scripts.map(({ load: _load, error: _error, ...script }) => script) }),
   });
-  let scope = declarationScope;
+  let scope: ParseScope = { ...declarationScope, bindings: new Set([
+    ...Object.keys(contract.props),
+    ...declarations.flatMap(declaration => declaration.kind === "context" ? [declaration.as ?? declaration.name]
+      : declaration.kind === "state" || declaration.kind === "computed" || declaration.kind === "data" ? [declaration.name] : []),
+  ]) };
   if (legacyProps && platform.onDiagnostic !== undefined && declarationGroup !== undefined) {
     const roots = new Set(scope.roots);
     for (const prop of directElements(declarationGroup, "prop")) {
@@ -2146,6 +2272,9 @@ function parseComponentNodesAtSource(
   }
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
+  const module = attr(wrapper, "module");
+  if (module !== undefined && module.trim() === "") fail("HC022", "A module specifier cannot be empty.", source);
+  if (module !== undefined && controller !== undefined) fail("HC022", "A component cannot declare both controller and module.", source);
 
   const definition: {
     source: { file: string };
@@ -2153,6 +2282,7 @@ function parseComponentNodesAtSource(
     template: ElementNode;
     css: string;
     controller?: string;
+    module?: string;
     declarations: ComponentDeclaration[];
     slots: SlotContract[];
     root: NonNullable<ComponentDefinition["root"]>;
@@ -2175,6 +2305,7 @@ function parseComponentNodesAtSource(
         },
   };
   if (controller !== undefined) definition.controller = controller;
+  if (module !== undefined) definition.module = module;
   if (Object.keys(lifecycle).length > 0) definition.lifecycle = lifecycle;
   if (head !== undefined) definition.head = head;
   if (scripts !== undefined) definition.scripts = scripts;

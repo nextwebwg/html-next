@@ -1247,8 +1247,9 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.match(await readFile(join(outDirectory, "vue", "host.ts"), "utf8"), /function useComponentHost/);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
-    // A conforming state's own value needs no read check, so the computed reads it directly.
-    assert.match(source, /const double = cycleCheckedComputed\(\(\) => decimalMultiply\(count\.value, 2\)\)\n/);
+    // Availability composition uses Vue's memoization and keeps ordinary state values typed.
+    assert.match(source, /const double: ReturnType<typeof inputComputed<number \| null>> = inputComputed/);
+    assert.match(source, /decimalMultiply\(\s*inputRead\(count\.value, \(count\.value\) === undefined \? UNRESOLVED_INPUT : READY_INPUT\),\s*2,/);
     assert.match(source, /function increment\(\): void \{/);
     // A present number state stepped by a literal stays a finite number, so it writes plainly.
     assert.match(source, /  count\.value = decimalAdd\(count\.value, 1\)\n/);
