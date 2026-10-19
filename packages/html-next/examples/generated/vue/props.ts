@@ -223,8 +223,10 @@ function parse(value: unknown, node: TypeNode, path: string): Parsed {
       const issues: string[] = [];
       const fields = new Map(node.fields.map((field) => [field.name, field]));
       for (const field of node.fields) {
-        if (!(field.name in input)) {
+        // An optional field that is null is a missing one (types#null-and-missing-values).
+        if (!(field.name in input) || field.optional && input[field.name] == null) {
           if (!field.optional) issues.push(pathAt(path, field.name) + ": Required field is absent.");
+          else if (field.name in input) output[field.name] = null;
           continue;
         }
         const result = parse(input[field.name], field.type, pathAt(path, field.name));

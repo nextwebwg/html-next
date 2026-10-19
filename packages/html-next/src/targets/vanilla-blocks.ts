@@ -427,7 +427,8 @@ function valueCheck(node: TypeNode, value: string, depth: number): string {
       const fields = node.fields.map((field) => {
         const name = JSON.stringify(field.name);
         const check = valueCheck(field.type, `${value}[${name}]`, depth);
-        return field.optional ? `(!(${name} in ${value}) || ${check})` : `${name} in ${value} && ${check}`;
+        // An optional field that is missing or null is not present (types#null-and-missing-values).
+        return field.optional ? `(${value}[${name}] == null || ${check})` : `${name} in ${value} && ${check}`;
       });
       const closed = node.open ? [] : [`Object.keys(${value}).every((${item}) => ${JSON.stringify(node.fields.map((field) => field.name))}.includes(${item}))`];
       return `(${[`plainObject(${value})`, ...fields, ...closed].join(" && ")})`;
