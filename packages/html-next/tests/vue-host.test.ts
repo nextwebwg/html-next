@@ -10,7 +10,7 @@ import { parseComponent } from "../src/source-parser.js";
 /** The shared Vue host as a consumer receives it, with Vue itself stubbed: dispatch uses none of it. */
 async function loadHost() {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const computed=()=>{},getCurrentInstance=()=>null,onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined';");
+  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>null,onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined';");
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
     createDispatch: (
       root: { value: null },

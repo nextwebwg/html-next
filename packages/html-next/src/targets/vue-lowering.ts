@@ -20,6 +20,15 @@ import { NUMERIC_ATTRIBUTES, quote } from "./shared.js";
 export interface Scope {
   readonly code: ReadonlyMap<string, string>;
   readonly types: ReadonlyMap<string, Static>;
+  readonly observesInputs?: boolean;
+}
+
+/** Only expression reads in this scope report prerequisites to an enclosing evaluation. */
+export function inputScope<T extends Scope>(scope: T, status: (name: string, read: string) => string | undefined): T {
+  return { ...scope, observesInputs: true, code: new Map([...scope.code].map(([name, read]) => {
+    const input = status(name, read);
+    return [name, input === undefined ? read : `inputRead(${read}, ${input})`];
+  })) };
 }
 
 /** A value's static type, whether it may be absent, and whether that absence may be `null`. */
@@ -788,7 +797,9 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     if (node.fn === "default") {
       if (node.args.length !== 2) return "undefined";
       if (node.args[0]?.kind === "literal" && node.args[0].value === null) return this.value(node.args[1]!, scope);
-      return `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})`;
+      return scope.observesInputs
+        ? `inputDefault(() => ${this.value(node.args[0]!, scope)}, () => ${this.value(node.args[1]!, scope)})`
+        : `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})`;
     }
     if (node.fn === "concat" || node.fn === "join") {
       return `${this.use(node.fn)}(${values})`;

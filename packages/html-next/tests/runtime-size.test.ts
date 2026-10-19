@@ -67,6 +67,8 @@ describe("runtime size measurement", () => {
       "static",
       "reactive",
       "prop",
+      "await",
+      "state",
       "computed",
       "keyed",
       "data",

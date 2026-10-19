@@ -2,7 +2,7 @@ import { buildComponentGraph, type ComponentGraph, type ComponentGraphNode } fro
 import { HtmlDiagnosticError, fail } from "./diagnostics.js";
 import { ComponentGraphRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
-import { loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
+import { activateModule, loadComponentModule, loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
 import { parseBrowserComponent, parseBrowserComponentResource, parseBrowserProjectedSlot } from "./browser-source.js";
 import { createStylesheetLoader } from "./stylesheet-resources.js";
 import { parseStylesheetInBrowser } from "./stylesheet-resources-browser.js";
@@ -200,19 +200,20 @@ export async function startBrowserComponents(
    */
   const inlineNodes = new WeakMap<object, ComponentGraphNode>();
   const inlineNode = (definition: import("./template.js").ComponentDefinition): ComponentGraphNode | undefined => {
-    if (definition.controller === undefined) return undefined;
+    const specifier = definition.module ?? definition.controller;
+    if (specifier === undefined) return undefined;
     let node = inlineNodes.get(definition);
     if (node === undefined) {
       const parent = resolver.resolveRoot(root.baseURI);
       let url: string;
-      try { url = resolver.resolveDependency(definition.controller, root.baseURI, parent.trustRoot).url; }
+      try { url = resolver.resolveDependency(specifier, root.baseURI, parent.trustRoot).url; }
       catch (error) {
         if (error instanceof HtmlDiagnosticError && error.diagnostic.code === "HL003") {
-          fail("HL005", `Controller \`${definition.controller}\` is outside the component's approved root.`, root.URL);
+          fail("HL005", `Component module \`${specifier}\` is outside the component's approved root.`, root.URL);
         }
         throw error;
       }
-      node = { definition, url: root.URL, controller: { specifier: definition.controller, url } } as unknown as ComponentGraphNode;
+      node = { definition, url: root.URL, [definition.module === undefined ? "controller" : "module"]: { specifier, url } } as unknown as ComponentGraphNode;
       inlineNodes.set(definition, node);
     }
     return node;
@@ -254,6 +255,16 @@ export async function startBrowserComponents(
     },
     onConnect(element, definition) {
       const node = loaded.registry.get(definition.contract.tag)?.node ?? inlineNode(definition);
+      if (node?.module !== undefined) {
+        const host = getComponentHost(element)!;
+        const release = holdController(element);
+        let disconnected = false;
+        let stop: (() => void) | undefined;
+        void loadComponentModule(node, options.importer).then(loaded => {
+          if (!disconnected) stop = activateModule(loaded, host, report);
+        }).catch(report).finally(release);
+        return () => { disconnected = true; release(); stop?.(); };
+      }
       if (node?.controller === undefined) return;
       const host = getComponentHost(element)!;
       if (initialized.has(host)) return;

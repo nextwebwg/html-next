@@ -139,7 +139,7 @@ function stateTypes(
       result.set(declaration.name, {
         // A state without value reads null until written (types#null-and-missing-values).
         type: declaration.expression === undefined && declared !== undefined
-          ? `${typeScript(present(declared))} | null` : typeScript(types.get(declaration.name)!),
+          ? `${typeScript(present(declared))} | null${declaration.initializer === undefined ? "" : " | undefined"}` : typeScript(types.get(declaration.name)!),
         writable: true,
       });
     } else if (declaration.kind === "computed") {
@@ -258,6 +258,10 @@ export function generateHostDeclaration(
     "}",
     `/** <${contract.tag}>'s controller: the default export of its controller module. */`,
     "export type Controller = (host: Host) => HostCleanup | Promise<HostCleanup>;",
+    ...(definition.module === undefined ? [] : [
+      "/** Browser activation; cancelled when this connection ends. */",
+      "export type Connect = (host: Host, context: { readonly signal: AbortSignal }) => HostCleanup | Promise<HostCleanup>;",
+    ]),
     "",
   ];
   return lines.join("\n");

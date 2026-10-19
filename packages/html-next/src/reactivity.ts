@@ -2,6 +2,7 @@ import { isPlatformObject } from "./freeze.js";
 import { NONCONFORMING, type Scope, type Value } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 import { fail } from "./diagnostics.js";
+import { copyStateSeed, evaluateInput, observeInputStatus, observingInputs, publicInputStatus, sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type InputStatus } from "./inputs.js";
 
 type Cleanup = void | (() => void);
 interface ComputedEffectOwner {
@@ -453,6 +454,11 @@ export interface ReactiveOwner {
   stop(): void;
 }
 
+export interface StateInitialization extends ReactiveOwner {
+  /** All declaration cells are installed before their eager initialization owners start. */
+  start(): void;
+}
+
 /**
  * A cached derived value. Invalidations stay lazy unless a live effect consumes the value; in that
  * case the computed refreshes after the whole upstream change has been marked dirty, so equality
@@ -608,6 +614,8 @@ export function createEffect(
 /** A scope layer whose root reads and nested object/array paths are dependency tracked. */
 export class ReactiveScope implements Scope {
   readonly #cells = new Map<string, ReactiveCell>();
+  readonly #inputStatuses = new Map<string, ReactiveSignal<InputStatus | undefined>>();
+  #stateInitializers?: Map<string, { initialized: boolean; claim?: () => void; commit?: (value: Value) => void }>;
   typeOfPath?: Scope["typeOfPath"];
   typeOfDeclaredPath?: ((path: string) => TypeNode | undefined) | undefined;
   #cachedName: string | undefined;
@@ -625,10 +633,36 @@ export class ReactiveScope implements Scope {
     return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
 
+  /** The declared input's status has the same lexical owner as its accepted value. */
+  inputStatus(name: string): InputStatus {
+    const cell = this.#local(name);
+    if (cell === undefined && !this.#inputStatuses.has(name) && this.parent !== undefined) return this.parent.inputStatus(name);
+    const value = cell?.computed === undefined ? cell?.value : cell.computed.get();
+    if (value !== undefined) this.#commitInitializer(name, value);
+    let status = this.#inputStatuses.get(name);
+    if (status === undefined) {
+      status = createSignal<InputStatus | undefined>(undefined);
+      this.#inputStatuses.set(name, status);
+    }
+    const explicit = status.get();
+    if (explicit !== undefined) return explicit;
+    if (cell !== undefined) activeEffect?.track(cell);
+    return value === undefined ? UNRESOLVED_INPUT : READY_INPUT;
+  }
+
+  /** Renderer input adapters publish availability separately from their normal typed-value commit. */
+  setInputStatus(name: string, status: InputStatus | undefined): void {
+    const next = status === undefined ? undefined : publicInputStatus(status);
+    const current = this.#inputStatuses.get(name);
+    if (current === undefined) { if (next !== undefined) this.#inputStatuses.set(name, createSignal(next)); }
+    else if (!sameInputStatus(untracked(() => current.get()), next)) current.set(next);
+  }
+
   /** The value as JavaScript sees it: an object comes back as its proxy. */
   get(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
+    if (observingInputs()) observeInputStatus(this.inputStatus(name));
     activeEffect?.track(cell);
     return wrap(cell.value);
   }
@@ -637,6 +671,7 @@ export class ReactiveScope implements Scope {
   read(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.read(name);
+    if (observingInputs()) observeInputStatus(this.inputStatus(name));
     activeEffect?.track(cell);
     return cell.value;
   }
@@ -651,6 +686,7 @@ export class ReactiveScope implements Scope {
 
   set(name: string, value: Value): void {
     const plain = toPlain(value);
+    this.#stateInitializers?.get(name)?.claim?.();
     let cell = this.#local(name);
     if (cell === undefined) {
       cell = { value: plain, first: undefined, last: undefined };
@@ -673,16 +709,25 @@ export class ReactiveScope implements Scope {
   }
 
   /** Defines a named derived scope value without evaluating it until a consumer reads it. */
-  defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
+  defineComputed(name: string, compute: () => Value, initializing = false): ReactiveComputed<Value> {
     let cell = this.#local(name);
     if (cell === undefined) {
       cell = { value: null, first: undefined, last: undefined };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
     }
+    const status = createSignal<InputStatus | undefined>(undefined);
+    this.#inputStatuses.set(name, status);
+    let previousStatus: InputStatus | undefined;
     const computed = new ReactiveComputed(
       this.scheduler,
-      () => toPlain(compute()),
+      () => {
+        const result = evaluateInput(() => toPlain(compute()), previousStatus, NONCONFORMING);
+        const next = initializing && result.status.stale ? { ...result.status, ready: false, stale: false } : result.status;
+        previousStatus = sameInputStatus(previousStatus, next) ? previousStatus : next;
+        status.set(previousStatus);
+        return previousStatus!.ready ? initializing ? copyStateSeed(result.value) : result.value : null;
+      },
       cell,
     );
     cell.computed = computed;
@@ -693,6 +738,48 @@ export class ReactiveScope implements Scope {
       this.read = this.#readWithComputed;
     }
     return computed;
+  }
+
+  /** A writable cell seeds once; an accepted explicit write claims it even when the value is equal. */
+  defineInitializer(name: string, compute: () => Value, initialized = false): StateInitialization {
+    const records = this.#stateInitializers ??= new Map();
+    const record: { initialized: boolean; claim?: () => void; commit?: (value: Value) => void } = { initialized };
+    records.set(name, record);
+    if (initialized) return { start() {}, pause() {}, resume() {}, stop() {} };
+    const memo = this.defineComputed(name, compute, true);
+    const cell = this.#local(name)!;
+    let effect: ReactiveEffect | undefined;
+    const claim = (value: Value): void => {
+      if (record.initialized) return;
+      record.initialized = true;
+      delete record.claim;
+      delete record.commit;
+      delete cell.computed;
+      cell.value = toPlain(value);
+      memo.stop();
+      effect?.stop();
+      this.setInputStatus(name, undefined);
+      trigger(cell);
+    };
+    record.claim = () => claim(cell.value);
+    record.commit = claim;
+    return {
+      start: () => {
+        if (record.initialized || effect !== undefined) return;
+        effect = createEffect(this.scheduler, () => { this.get(name); }, 0);
+        if (record.initialized) effect.stop();
+      },
+      pause: () => { if (!record.initialized) { effect?.pause(); memo.pause(); } },
+      resume: () => { if (!record.initialized) { memo.resume(); effect?.resume(); } },
+      stop: () => { memo.stop(); effect?.stop(); },
+    };
+  }
+
+  stateInitialized(name: string): boolean | undefined { return this.#stateInitializers?.get(name)?.initialized; }
+
+  #commitInitializer(name: string, value: Value): void {
+    const pending = this.#stateInitializers?.get(name);
+    if (pending?.commit !== undefined && this.#inputStatuses.get(name)?.get()?.ready) pending.commit(value);
   }
 
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
@@ -713,7 +800,13 @@ export class ReactiveScope implements Scope {
   #getWithComputed(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
-    if (cell.computed !== undefined) return wrap(cell.computed.get());
+    if (cell.computed !== undefined) {
+      const value = cell.computed.get();
+      this.#commitInitializer(name, value);
+      if (observingInputs()) observeInputStatus(this.inputStatus(name));
+      return wrap(value);
+    }
+    if (observingInputs()) observeInputStatus(this.inputStatus(name));
     activeEffect?.track(cell);
     return wrap(cell.value);
   }
@@ -721,7 +814,13 @@ export class ReactiveScope implements Scope {
   #readWithComputed(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.read(name);
-    if (cell.computed !== undefined) return cell.computed.get();
+    if (cell.computed !== undefined) {
+      const value = cell.computed.get();
+      this.#commitInitializer(name, value);
+      if (observingInputs()) observeInputStatus(this.inputStatus(name));
+      return value;
+    }
+    if (observingInputs()) observeInputStatus(this.inputStatus(name));
     activeEffect?.track(cell);
     return cell.value;
   }

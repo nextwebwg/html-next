@@ -42,6 +42,7 @@ export interface BuildManifest {
     readonly artifacts: readonly string[];
     readonly dependencies: readonly string[];
     readonly controller: null | string;
+    readonly module?: string;
   }[];
 }
 
@@ -70,6 +71,7 @@ export interface InspectedComponentGraph {
     readonly source: string;
     readonly dependencies: readonly string[];
     readonly controller: null | string;
+    readonly module?: string;
     readonly support: string | null;
   }[];
   readonly modules: readonly string[];
@@ -87,6 +89,7 @@ export async function inspectComponents(entries: readonly string[]): Promise<Ins
       source: display(node.url),
       dependencies: Object.freeze(node.dependencies.map(display)),
       controller: node.controller === undefined ? null : display(node.controller.url),
+      ...(node.module === undefined ? {} : { module: display(node.module.url) }),
       support: node.definition.contract.status ?? null,
     }))),
     modules: Object.freeze(graph.moduleInputs.map(display)),
@@ -122,15 +125,16 @@ export async function buildComponents(
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const entry = fileURLToPath(node.url);
-    const controllerTarget = node.controller === undefined ? undefined : await addControllerGraph(
-      node.controller.url,
+    const edge = node.module ?? node.controller;
+    const controllerTarget = edge === undefined ? undefined : await addControllerGraph(
+      edge.url,
       node.trustRoot,
-      `controllers/${node.definition.contract.tag}`,
+      `${node.module === undefined ? "controllers" : "modules"}/${node.definition.contract.tag}`,
       artifacts,
     );
     const definition = controllerTarget === undefined
       ? node.definition
-      : Object.freeze({ ...node.definition, controller: `../${controllerTarget}` });
+      : { ...node.definition, [node.module === undefined ? "controller" : "module"]: `../${controllerTarget}` };
     // The graph's components this template invokes, from their sibling Vanilla modules.
     const invocations = new Map([...graph.tags].flatMap(([tag, id]) => {
       const invoked = graph.nodes.get(id)!.definition;
@@ -154,6 +158,7 @@ export async function buildComponents(
       artifacts: generated.map((artifact) => artifact.path),
       dependencies: node.dependencies.map(displayPath),
       controller: node.controller === undefined ? null : displayPath(node.controller.url),
+      ...(node.module === undefined ? {} : { module: displayPath(node.module.url) }),
     });
   }
 

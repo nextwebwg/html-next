@@ -254,6 +254,7 @@ function componentCapabilities(definition: ComponentDefinition): readonly string
   if (Object.keys(definition.contract.props).length > 0) capabilities.add("props");
   if (definition.css !== "") capabilities.add("scoped-styles");
   if (definition.controller !== undefined) capabilities.add("controllers");
+  if (definition.module !== undefined) capabilities.add("modules");
   for (const declaration of definition.declarations ?? []) capabilities.add(declaration.kind);
   if (definition.contract.requests !== undefined) capabilities.add("request");
   if (definition.head !== undefined) capabilities.add("head");
@@ -359,9 +360,10 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   const definitionsByTag = new Map(sortedNodes.map((node) => [node.definition.contract.tag, node.definition] as const));
   const generated = sortedNodes.flatMap((node) => {
     try {
-      const definition: ComponentDefinition = node.controller === undefined
+      const edge = node.module ?? node.controller;
+      const definition: ComponentDefinition = edge === undefined
         ? node.definition
-        : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
+        : { ...node.definition, [node.module === undefined ? "controller" : "module"]: fileURLToPath(edge.url) };
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
         noContextReaders: options.publicState !== true && dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
         definitions: definitionsByTag,

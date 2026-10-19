@@ -1,5 +1,5 @@
 import { fail } from "./diagnostics.js";
-import { ABSENT, NONCONFORMING } from "./expression.js";
+import { ABSENT, NONCONFORMING } from "./expression-values.js";
 
 /**
  * Tagged values keep missing values distinct from null and from authored objects. A `json` value is

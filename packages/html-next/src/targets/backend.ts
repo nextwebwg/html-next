@@ -6,11 +6,32 @@ import type {
 import { requestPropName } from "../names.js";
 import type { PropContract, RequestContract } from "../types.js";
 import { declarationTypeNode, parseTypeExpression, typeScriptType } from "../type-system.js";
+import { fail } from "../diagnostics.js";
 
 export interface TargetProp {
   readonly name: string;
   readonly contract: PropContract;
   readonly local: string;
+}
+
+/** Accept selectors before their dependents, independently of contract key order. */
+export function propInputOrder<P extends Pick<TargetProp, "name" | "contract">>(props: readonly P[]): readonly P[] {
+  const byName = new Map(props.map(prop => [prop.name, prop]));
+  const ordered: P[] = [];
+  const seen = new Set<string>();
+  const pending = new Set<string>();
+  const visit = (prop: P): void => {
+    if (seen.has(prop.name)) return;
+    if (pending.has(prop.name)) fail("HC013", `Cyclic prop type selectors at ${prop.name}.`);
+    pending.add(prop.name);
+    const selector = prop.contract.select === undefined ? undefined : byName.get(prop.contract.select.from);
+    if (selector !== undefined) visit(selector);
+    pending.delete(prop.name);
+    seen.add(prop.name);
+    ordered.push(prop);
+  };
+  for (const prop of props) visit(prop);
+  return ordered;
 }
 
 export interface TargetEvent extends EventDeclaration {
@@ -37,6 +58,7 @@ export interface TargetComponent {
   readonly requests: readonly TargetRequest[];
   readonly slots: readonly SlotContract[];
   readonly controller?: string;
+  readonly module?: string;
 }
 
 function pascalCase(name: string): string {
@@ -81,5 +103,6 @@ export function targetComponent(definition: ComponentDefinition): TargetComponen
     }))),
     slots: Object.freeze([...(definition.slots ?? [])]),
     ...(definition.controller === undefined ? {} : { controller: definition.controller }),
+    ...(definition.module === undefined ? {} : { module: definition.module }),
   });
 }

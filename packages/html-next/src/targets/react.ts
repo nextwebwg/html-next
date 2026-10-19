@@ -13,11 +13,11 @@ import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js"
 import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild, componentStateNames } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { targetComponent } from "./backend.js";
+import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { category, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
+import { category, inputScope, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
@@ -39,6 +39,8 @@ const REACT_RESERVED = new Set([
   "document", "console", "globalThis",
   "props", "nativeAttrs", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
+  "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
+  "inputComputed", "inputRead", "inputDefault", "evaluateInput",
   "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
   "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
   "ref", "cleanup", "binding", "attrs", "detail", "name", "keys", "path",
@@ -152,6 +154,7 @@ interface EventAttachment {
 
 interface RenderState {
   readonly definition: ComponentDefinition;
+  readonly observe: (scope: Scope) => Scope;
   readonly slotsByTag: ReadonlyMap<string, readonly SlotContract[]> | undefined;
   readonly propsByTag: ReadonlyMap<string, ReadonlySet<string>> | undefined;
   readonly propContractsByTag: ReadonlyMap<string, Readonly<Record<string, PropContract>>> | undefined;
@@ -165,6 +168,8 @@ interface RenderState {
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
   usesOutputValue: boolean;
+  usesInputStatus?: boolean;
+  usesInputExpressions?: boolean;
   /** A free name in the component's scope, for an element's event hook. */
   readonly allocate: (base: string) => string;
   /** Inside a preformatted element such as <pre> or <textarea>, whose text is kept exactly, as Vue keeps it. */
@@ -362,11 +367,16 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     }
     if (flow.kind === "with") {
       if (flow.expressionPlan === undefined) fail("HT030", `Uncompiled expression ${flow.expr}.`);
-      const value = lowering.value(flow.expressionPlan.ast, scope);
+      if (flow.binding !== undefined) state.usesInputStatus = true;
+      const read = lowering.value(flow.expressionPlan.ast, scope);
+      const computed = (state.definition.declarations ?? []).find(declaration => declaration.kind === "computed" && declaration.name === flow.binding?.name);
+      const computedStatus = computed === undefined ? undefined : scope.code.get(computed.name)?.replace(/\.get\(\)$/, ".status()");
+      const value = flow.binding === undefined ? read : `requireInputStatus(${Object.hasOwn(state.definition.contract.props, flow.binding.name)
+        ? `propInputs.status(${quote(flow.binding.name)})` : computedStatus ?? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)`}, ${flow.binding.handlesError})`;
       const alias = localIdentifier(flow.alias, scope, state);
-      const scoped = localScope(scope, [[flow.alias, typeOf(flow.expressionPlan.ast, scope), alias]]);
+      const scoped = localScope(scope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, scope) : present(flow.aliasType), alias]]);
       const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
-      if (!mayProduceInvalidResult(flow.expressionPlan.ast, scope)) return `{(() => { const ${alias} = ${value}; return (${content}); })()}`;
+      if (flow.binding !== undefined || !mayProduceInvalidResult(flow.expressionPlan.ast, scope)) return `{(() => { const ${alias} = ${value}; return (${content}); })()}`;
       state.usesRetainedValue = true;
       return `<RetainedValue value={${value}} accepts={() => true} render={(${alias}, hasValue) => hasValue ? (${content}) : null} />`;
     }
@@ -525,13 +535,22 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const findComponentPropName = (attributeName: string): string | undefined => componentContracts === undefined ? undefined
     : Object.keys(componentContracts).find((name) => name.toLowerCase() === attributeName || kebabCase(name) === attributeName);
   const boundPropAliases = new Map<string, string>();
+  const boundPropSnapshots = new Set<string>();
   if (componentContracts !== undefined) for (const attribute of node.attributes) {
     if (attribute.kind !== "attribute" || attribute.target !== undefined || attribute.twoWay) continue;
     const name = findComponentPropName(attribute.name);
-    if (name !== undefined) boundPropAliases.set(name, `__retained${state.nextRetainedAlias++}`);
+    if (name !== undefined) {
+      boundPropAliases.set(name, `__retained${state.nextRetainedAlias++}`);
+      const observed = state.observe(scope);
+      if (attribute.expressionPlan!.ast.kind !== "id" && attribute.expressionPlan!.dependencies.some(path => {
+        const root = path.split(".")[0]!;
+        return observed.code.get(root) !== scope.code.get(root);
+      })) boundPropSnapshots.add(name);
+    }
   }
   const literals: string[] = [];
   const bindings: string[] = [];
+  const inputBindings: string[] = [];
   const retainedBindings: Array<{ readonly alias: string; readonly value: string; readonly accepts?: string; readonly propName?: string }> = [];
   const classes: string[] = [];
   const literalStyles: string[] = [];
@@ -636,7 +655,8 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const selectorContract = select === undefined ? undefined : componentContracts?.[select.from];
         const selectorLiteral = select === undefined ? undefined : node.attributes.find((entry) =>
           entry.kind === "literal" && findComponentPropName(entry.name) === select.from);
-        const selectorValue = select === undefined ? undefined : boundPropAliases.get(select.from)
+        const selectorAlias = select === undefined ? undefined : boundPropAliases.get(select.from);
+        const selectorValue = select === undefined ? undefined : (selectorAlias === undefined ? undefined : `${selectorAlias}${boundPropSnapshots.has(select.from) ? "?.value" : ""}`)
           ?? (selectorLiteral?.kind === "literal" ? (() => {
             const parsed = selectorContract === undefined ? undefined
               : parseTypedValue(selectorLiteral.value, selectorContract.type, "$", "html");
@@ -645,10 +665,24 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const typeCheck = select === undefined || selectorContract === undefined
           ? destinationTypeCheck(normalizeType(componentPropContract.type), "candidate")
           : `(${select.options.map((option) => `(${selectorValue} === ${JSON.stringify(option.value)} && ${destinationTypeCheck(option.type, "candidate")})`).join(" || ")})`;
-        retainedBindings.push({ alias, value,
-          accepts: `(candidate) => ${sourceGuard === undefined ? "" : `(${sourceGuard}) && `}(candidate === undefined || ${typeCheck})`,
-          propName: componentPropName! });
-        bindings.push(`${componentPropName}={${alias}}`);
+        const accepts = `(candidate) => ${sourceGuard === undefined ? "" : `(${sourceGuard}) && `}(candidate === undefined${componentPropContract.required ? "" : " || candidate === null"} || ${typeCheck})`;
+        const snapshot = boundPropSnapshots.has(componentPropName!);
+        if (snapshot) {
+          state.usesInputStatus = true; state.usesInputExpressions = true;
+          const observed = lowering.value(attribute.expressionPlan.ast, state.observe(scope));
+          const input = state.allocate("inputSnapshot");
+          retainedBindings.push({ alias, value: `evaluateInput(() => ${sourceGuard === undefined ? observed : `((${sourceGuard}) ? ${observed} : Symbol.for("html-next.invalid-result"))`}, READY_INPUT)`,
+            accepts: `(snapshot) => { const ${input} = snapshot as ReturnType<typeof evaluateInput>; return !${input}.status.ready || (${accepts})(${input}.value); }`, propName: componentPropName! });
+          inputBindings.push(`${quote(componentPropName!)}: () => ${alias}`);
+        } else retainedBindings.push({ alias, value, accepts, propName: componentPropName! });
+        bindings.push(`${componentPropName}={${alias}${snapshot ? "?.value" : ""}}`);
+        const expression = attribute.expressionPlan.ast;
+        if (expression.kind === "id") {
+          const read = scope.code.get(expression.name);
+          const prop = Object.hasOwn(state.definition.contract.props, expression.name) && read === `checkedProps[${quote(expression.name)}]`;
+          const computed = (state.definition.declarations ?? []).some(declaration => declaration.kind === "computed" && declaration.name === expression.name);
+          if (prop || computed && read?.endsWith(".get()")) inputBindings.push(`${quote(componentPropName!)}: () => ({ value: ${alias}, status: ${prop ? `propInputs.status(${quote(expression.name)})` : read!.replace(/\.get\(\)$/, ".status()")} })`);
+        }
       }
       else if (!component && (sourceGuard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope))) {
         const alias = `__retained${state.nextRetainedAlias++}`;
@@ -812,6 +846,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   });
   const reflections = boundReflections.length === 0 ? rootTag?.reflections ?? []
     : [`{...(Object.assign({}, reflectedAttrs, { ${boundReflections.join(", ")} }) as Record<string, unknown>)}`];
+  if (inputBindings.length > 0) bindings.push(`{...{ [BINDING_INPUTS_PROP]: { ${inputBindings.join(", ")} } }}`);
   const attributes = [...literals, ...(rootTag === undefined ? [] : ["{...nativeAttrs}"]), ...bindings, ...(projected ? ['data-slotted=""'] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
@@ -832,7 +867,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
 export function generateReactOutput(definition: ComponentDefinition, version: string, options: ReactConversionOptions = {}): ReactConversionOutput {
   definition = condenseWhitespace(definition);
   const target = targetComponent(definition);
-  const usesController = definition.controller !== undefined;
+  const usesController = (definition.module ?? definition.controller) !== undefined;
   const headed = declaresHead(definition);
   // The head helper connects through the host's lifecycle.
   const usesHost = usesController || definition.lifecycle !== undefined || headed;
@@ -840,6 +875,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const handlerTakesEvent = new Set<HandlerDeclaration>();
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
+  if (states.some(state => state.initializer !== undefined)) fail("HT030", "React conversion of <state from> is not implemented.");
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
@@ -947,10 +983,18 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const attachments: EventAttachment[] = [];
   const root: ElementNode = template;
   const scope = { code, types };
+  const observedScope = (source: Scope, inputs = "propInputs") => inputScope(source, (name, read) => {
+    if (Object.hasOwn(definition.contract.props, name)) return `${inputs}.status(${quote(name)})`;
+    if (computedByName.has(name)) return read.replace(/\.get\(\)$/, ".status()");
+    return states.some(state => state.name === name) || contexts.some(context => (context.as ?? context.name) === name)
+      ? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)` : undefined;
+  });
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
   const styles = compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
-  const renderState: RenderState = { definition, slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
+  const renderState: RenderState = { definition, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
+    : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
+      : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : undefined), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
     nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
@@ -978,14 +1022,6 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const genericArguments = generics.length === 0 ? "" : `<${generics.map((generic) => generic.parameter).join(", ")}>`;
   const selectorParameters = new Map(generics.map((generic) => [generic.from, generic.parameter]));
   const props = target.props.map((prop) => `  ${propKey(prop.name)}${prop.contract.required ? "" : "?"}: ${selectorParameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, selectorParameters)};`);
-  const selectedType = (prop: (typeof target.props)[number]): string => {
-    const select = prop.contract.select;
-    if (select === undefined) return JSON.stringify(normalizeType(prop.contract.type));
-    const selector = definition.contract.props[select.from];
-    const value = selector === undefined ? "undefined"
-      : `props[${quote(select.from)}]${"default" in selector ? ` ?? ${JSON.stringify(selector.default)}` : ""}`;
-    return `selectedPropNode(${value}, ${JSON.stringify(select.options)})`;
-  };
   const stateSelectedProps = target.props.filter((prop) => prop.contract.select !== undefined &&
     definition.contract.props[prop.contract.select.from] === undefined);
   const propSelectors = [...new Set(target.props.flatMap((prop) => prop.contract.select !== undefined &&
@@ -1009,8 +1045,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
     'import React from "react";',
     'import type { ReactNode } from "react";',
-    ...(target.props.length === 0 && !checksControllerWrites ? [] : [`import { ${[
-      ...(target.props.length === 0 ? [] : ["checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
+    ...(target.props.length === 0 && !checksControllerWrites && !renderState.usesInputStatus && computed.length === 0 ? [] : [`import { ${[
+      ...(target.props.length === 0 ? [] : ["checkedProp", "checkPropInput", "usePropInputs", "BINDING_INPUTS_PROP", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
+      ...(!renderState.usesInputStatus && computed.length === 0 ? [] : ["requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT"]),
+      ...(computed.length === 0 ? [] : ["inputComputed"]),
+      ...(computed.length === 0 && !renderState.usesInputExpressions ? [] : ["inputRead", "inputDefault"]),
+      ...(!renderState.usesInputExpressions ? [] : ["evaluateInput"]),
+      ...((computed.length > 0 || renderState.usesInputExpressions) && target.props.length === 0 ? ["BINDING_INPUTS_PROP"] : []),
       ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(!renderState.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
@@ -1074,7 +1115,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "    throw Object.assign(new Error(`HR008: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR008', message }) });",
       "  }",
     ]),
-    `  const { children: _children, slots: _slots, ${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
+    `  const { children: _children, slots: _slots, ${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
       .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     ...(target.props.length > 0 || usesNativeControls ? [
       "  const hasMounted = React.useRef(false);",
@@ -1083,13 +1124,21 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(target.props.length === 0 ? [] : [
       `  const acceptedProps = React.useRef<Record<string, unknown>>({ ${target.props.map((prop) =>
         `${propKey(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} });`,
+      `  const propInputs = usePropInputs(acceptedProps.current, { ${target.props.filter(prop => "default" in prop.contract).map(prop => `${propKey(prop.name)}: ${JSON.stringify(prop.contract.default)}`).join(", ")} }, (name, value, source, values) => { switch (name) {`,
+      ...target.props.map(prop => {
+        const select = prop.contract.select;
+        const type = select === undefined ? JSON.stringify(normalizeType(prop.contract.type))
+          : Object.hasOwn(definition.contract.props, select.from)
+            ? `selectedPropNode(values[${quote(select.from)}], ${JSON.stringify(select.options)})`
+            : `selectedPropNode(${stateGetters.get(select.from)!}(), ${JSON.stringify(select.options)})`;
+        return `    case ${quote(prop.name)}: return checkPropInput(value, ${type}, false, ${!prop.contract.required});`;
+      }),
+      `    default: return { ok: false }; } });`,
       "  const inputAccepted: Record<string, boolean> = {};",
       "  const checkedProps = {",
-      ...target.props.map((prop) => {
-        const value = `props[${quote(prop.name)}]`;
-        // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
-        const supplied = "default" in prop.contract ? `${value} ?? ${JSON.stringify(prop.contract.default)}` : value;
-        return `    ${propKey(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${supplied}, ${selectedType(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false)${"default" in prop.contract ? "!" : ""},`;
+      ...propInputOrder(target.props).map((prop) => {
+        const type = `${typeSource(prop.contract.type)}${prop.contract.required ? "" : " | null"}`;
+        return `    ${propKey(prop.name)}: ${stateSelectedProps.includes(prop) ? `propInputs.read(${quote(prop.name)}) as ${type}` : `propInputs.value<${type}>(${quote(prop.name)}, props[${quote(prop.name)}], _inputBindings as any, inputAccepted)`},`;
       }),
       "  };",
     ]),
@@ -1101,11 +1150,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
     }),
     ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
-    ...stateSelectedProps.map((prop) => {
-      const select = prop.contract.select!;
-      const supplied = `props[${quote(prop.name)}]${"default" in prop.contract ? ` ?? ${JSON.stringify(prop.contract.default)}` : ""}`;
-      return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(${supplied}, selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
-    }),
+    ...stateSelectedProps.map((prop) =>
+      `  checkedProps[${quote(prop.name)}] = propInputs.value<${typeSource(prop.contract.type)}${prop.contract.required ? "" : " | null"}>(${quote(prop.name)}, props[${quote(prop.name)}], _inputBindings as any, inputAccepted);`),
     ...(target.props.length === 0 ? [] : [
       "  const propInputValues = { ...checkedProps,",
       ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] == null ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
@@ -1137,18 +1183,18 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     }),
     ...computed.map((value) => {
       const type = typeScript(types.get(value.name)!);
-      const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, scope);
+      const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, observedScope(scope));
       if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, scope)) {
         const previous = computedPreviousNames.get(value.name)!;
         const accepted = computedAcceptedNames.get(value.name)!;
         return [
-          `  const ${previous} = React.useRef<${type}>(null as ${type});`,
+          `  const ${previous} = React.useRef<{ value: ${type} } | undefined>(undefined);`,
           `  let ${accepted}: { value: ${type} } | undefined;`,
-          `  const ${valueNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => { const next: any = ${expression}; if (next === Symbol.for("html-next.invalid-result")) return ${previous}.current; ${accepted} = { value: next }; return next; });`,
-          `  React.useLayoutEffect(() => { if (${accepted} !== undefined) ${previous}.current = ${accepted}.value; });`,
+          `  const ${valueNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, cycleCheckedComputed, (next) => { if ((next as unknown) === Symbol.for("html-next.invalid-result")) return ${previous}.current?.value ?? null as ${type}; ${accepted} = { value: next }; return next; }, ${previous}.current === undefined ? undefined : READY_INPUT);`,
+          `  React.useLayoutEffect(() => { if (${accepted} !== undefined) ${previous}.current = ${accepted}; });`,
         ].join("\n");
       }
-      return `  const ${valueNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>((): ${type} => (${expression}) as any);`;
+      return `  const ${valueNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, cycleCheckedComputed);`;
     }),
     ...(hostStateNames.length === 0 ? [] : [
       `  const hostState = [${hostStateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" ");`,
@@ -1189,6 +1235,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...handlers.map((handler) => {
       const handlerCode = new Map(scope.code);
+      for (const prop of target.props) handlerCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
       for (const state of states) handlerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
       for (const value of computed) handlerCode.set(value.name, `${handlerComputedNames.get(value.name)!}.get()`);
       handlerCode.set("$$event", "event");
@@ -1212,12 +1259,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }
       const handlerComputed = computed.filter((value) => referencedComputed.has(value.name)).map((value) => {
         const type = typeScript(types.get(value.name)!);
-        const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, handlerScope);
+        const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, observedScope(handlerScope, "propInputs.committed"));
         if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, handlerScope)) {
           const previous = computedPreviousNames.get(value.name)!;
-          return `    const ${handlerComputedNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => { const next: any = ${expression}; return next === Symbol.for("html-next.invalid-result") ? ${previous}.current : (${previous}.current = next); }, false);`;
+          return `    const ${handlerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current?.value ?? null as ${type} : (${previous}.current = { value: next }).value, ${previous}.current === undefined ? undefined : READY_INPUT);`;
         }
-        return `    const ${handlerComputedNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>((): ${type} => (${expression}) as any, false);`;
+        return `    const ${handlerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, (compute) => cycleCheckedComputed(compute, false));`;
       });
       const steps = handler.steps.map((step) => {
         const guard = step.guard === undefined ? "" : `if (${lowering.condition(step.guard.ast, handlerScope)}) `;
@@ -1359,16 +1406,17 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...(usesController ? computed.map((value) => {
       const controllerCode = new Map(scope.code);
+      for (const prop of target.props) controllerCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
       for (const state of states) controllerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
       for (const declaration of computed) controllerCode.set(declaration.name, `${controllerComputedNames.get(declaration.name)!}.get()`);
       const controllerScope: Scope = { code: controllerCode, types: scope.types };
-      const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, controllerScope);
+      const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, observedScope(controllerScope, "propInputs.committed"));
       const type = typeScript(types.get(value.name)!);
       if (value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, controllerScope)) {
         const previous = computedPreviousNames.get(value.name)!;
-        return `  const ${controllerComputedNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => { const next: any = ${expression}; return next === Symbol.for("html-next.invalid-result") ? ${previous}.current : (${previous}.current = next); }, false);`;
+        return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, (compute) => cycleCheckedComputed(compute, false), next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${previous}.current?.value ?? null as ${type} : (${previous}.current = { value: next }).value, ${previous}.current === undefined ? undefined : READY_INPUT);`;
       }
-      return `  const ${controllerComputedNames.get(value.name)!}: { get(): ${type} } = cycleCheckedComputed<${type}>((): ${type} => (${expression}) as any, false);`;
+      return `  const ${controllerComputedNames.get(value.name)!}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => (${expression}) as any, (compute) => cycleCheckedComputed(compute, false));`;
     }) : []),
     ...(!headed ? [] : [
       ...[...scriptNames].map(([name, variable]) => `  const [${variable}, ${scriptSetters.get(name)!}] = React.useState<ScriptStatus>({ pending: false, ok: false, error: null });`),
@@ -1383,12 +1431,14 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptSetters.get(name)!}(${value})` }))});`]),
     ]),
     ...(usesController ? [
-      `  useComponentHost(() => import(${quote(definition.controller!)}), {`,
-      `    root: rootRef, definition: ${quote(definition.source.file)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
-      `    props: () => ${target.props.length === 0 ? "({})" : "checkedProps"},`,
+      `  useComponentHost(() => import(${quote((definition.module ?? definition.controller)!)}), {`,
+      ...(definition.module === undefined ? [] : ["    module: true,"]),
+      `    root: rootRef, definition: ${quote(definition.source.file)}, controller: ${quote(options.controllerSpecifier ?? (definition.module ?? definition.controller)!)},`,
+      `    props: () => ${target.props.length === 0 ? "({})" : "acceptedProps.current"},`,
       ...(target.props.length === 0 ? [] : [
         `    propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
-        `    propInputs: (name: string) => props[name] ?? null,`,
+        `    inputs: propInputs,`,
+        `    propInputs: (name: string) => propInputs.inputValue(name),`,
         `    propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ...propInputValues${propSelectors.map((selector) => `, ${propKey(selector)}: checkedProps[${quote(selector)}]`).join("")}${stateSelectors.map((selector) => `, ${propKey(selector)}: ${valueNames.get(selector)!}`).join("")} } }, name),`,
       ]),
       `    state: { ${states.map((state) => `${propKey(state.name)}: { get: ${stateGetters.get(state.name)!}, set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
@@ -1397,6 +1447,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         ...computed.map((value) => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.get()`),
         ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => ${valueNames.get(value.as ?? value.name)!}`),
       ].join(", ")} },`,
+      ...(computed.length === 0 ? [] : [`    availability: { ${computed.map(value => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.status()`).join(", ")} },`]),
       `    data: { ${data.map((value) => `${propKey(value.name)}: () => ${valueNames.get(value.name)!}`).join(", ")} },`,
       ...(scriptNames.size === 0 ? [] : ["    scripts: headScripts,"]),
       ...(checksControllerWrites ? [`    acceptsState: (name, keys, value) => acceptsControllerWrite(value, controllerStateTypes[name as keyof typeof controllerStateTypes], keys),`] : []),
@@ -1476,7 +1527,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     component,
     css: styles.css,
     helpers: [
-      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !(usesController && target.requests.length > 0) && !renderState.usesSlotPropChecks ? [] : ["props" as const]),
+      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),

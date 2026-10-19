@@ -25,6 +25,7 @@ export interface ComponentGraphNode {
   /** Linked definition IDs; siblings in the same resource share its declaration scope. */
   readonly dependencies: readonly string[];
   readonly controller?: ControllerEdge;
+  readonly module?: ControllerEdge;
   readonly shadowedByCustomElement: boolean;
   /**
    * An imported component (components#page-wide-head-entries): reached through a bare specifier, from a
@@ -91,6 +92,7 @@ interface DraftNode {
   definition: ComponentDefinition;
   dependencies: string[];
   controller?: ControllerEdge;
+  module?: ControllerEdge;
   shadowedByCustomElement: boolean;
   complete: boolean;
 }
@@ -184,17 +186,18 @@ export async function buildComponentGraph(
     for (const id of ids) {
       const draft = drafts.get(id)!;
       const definition = draft.definition;
-      if (definition.controller !== undefined) {
+      const specifier = definition.module ?? definition.controller;
+      if (specifier !== undefined) {
         let controller: ResolvedResource;
         try {
-          controller = options.resolver.resolveDependency(definition.controller, finalURL, resource.trustRoot);
+          controller = options.resolver.resolveDependency(specifier, finalURL, resource.trustRoot);
         } catch (error) {
           if (error instanceof HtmlDiagnosticError && error.diagnostic.code === "HL003") {
-            fail("HL005", `Controller \`${definition.controller}\` is outside the component's approved root.`, finalURL);
+            fail("HL005", `Component module \`${specifier}\` is outside the component's approved root.`, finalURL);
           }
           throw error;
         }
-        draft.controller = Object.freeze({ specifier: definition.controller, url: controller.url });
+        draft[definition.module === undefined ? "controller" : "module"] = { specifier, url: controller.url };
       }
       draft.dependencies = [...dependencies];
       draft.complete = true;
@@ -240,6 +243,7 @@ export async function buildComponentGraph(
       ...(imported.has(id) ? { imported: true as const } : {}),
       dependencies: Object.freeze(Array.from(draft.dependencies)),
       ...(draft.controller === undefined ? {} : { controller: draft.controller }),
+      ...(draft.module === undefined ? {} : { module: draft.module }),
       shadowedByCustomElement: draft.shadowedByCustomElement,
     })]);
   }

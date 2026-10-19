@@ -1,4 +1,15 @@
 import { SAFE_DEFAULT_ELEMENTS, SAFE_GLOBAL_ATTRIBUTES } from "../sanitizer-default.js";
+import { INPUTS_SOURCE } from "../generated/inputs-source.js";
+
+/** Standalone hosts share the SDK's structural status contract without importing the props helper. */
+const inputStatusEnd = INPUTS_SOURCE.indexOf("export const UNRESOLVED_INPUT");
+const inputStatusCompare = INPUTS_SOURCE.indexOf("export function sameInputStatus");
+const inputStatusObserve = INPUTS_SOURCE.indexOf("interface InputObservation");
+if (inputStatusEnd < 0 || inputStatusCompare < inputStatusEnd || inputStatusObserve < inputStatusCompare) {
+  throw new Error("The canonical input status declarations changed; update their generated host slices.");
+}
+export const INPUT_STATUS_SOURCE = INPUTS_SOURCE.slice(0, inputStatusEnd).replaceAll("export ", "");
+export const INPUT_STATUS_COMPARISON_SOURCE = INPUTS_SOURCE.slice(inputStatusCompare, inputStatusObserve).replaceAll("export ", "");
 
 /** Source embedded in each framework's feature-specific data helper. */
 export const DATA_URL_SOURCE = String.raw`function dataURL(source: string, baseURL: string, parameters: Readonly<Record<string, unknown>>): string {
@@ -97,8 +108,7 @@ export const DECLARED_REFERENCE_TYPE_SOURCE = `export function acceptsDeclaredRe
 }
 
 /** Missing input cannot erase a child's accepted prop unless its type explicitly accepts null. */
-export function acceptsBindingDestination(value: unknown, type: TypeNode | null): boolean {
-  // Null means not present: it is never wrong-typed, and the destination prop takes its default.
+export function acceptsBindingDestination(value: unknown, type: TypeNode | null, _hasDefault = false): boolean {
   return value == null || type !== null && acceptsDeclaredReference(value, type);
 }
 `;

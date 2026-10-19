@@ -11,6 +11,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL("./packages/html-next/src/$1.ts", import.meta.url)),
       },
       {
+        find: /^@nextwebwg\/html-next\/inputs$/,
+        replacement: fileURLToPath(new URL("./packages/html-next/src/component-inputs.ts", import.meta.url)),
+      },
+      {
         // A build's server entry imports the request server by its package name.
         find: /^@nextwebwg\/htmlkit\/server$/,
         replacement: fileURLToPath(new URL("./packages/htmlkit/src/server.ts", import.meta.url)),

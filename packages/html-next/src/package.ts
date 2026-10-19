@@ -65,7 +65,7 @@ async function addStaticModuleGraph(
 
 function generatedDefinition(definition: ComponentDefinition, controller: string | undefined): ComponentDefinition {
   if (controller === undefined) return definition;
-  return Object.freeze({ ...definition, controller: `../${controller}` });
+  return { ...definition, [definition.module === undefined ? "controller" : "module"]: `../${controller}` };
 }
 
 function packageEntry(definitions: readonly ComponentDefinition[], controllers: ReadonlyMap<string, string>): string {
@@ -73,7 +73,7 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     `  ${JSON.stringify(tag)}: () => import(${JSON.stringify(`../${path}`)}), // controller ${index + 1}`
   );
   return [
-    'import { getComponentHost, holdController, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
+    'import { activateModule, getComponentHost, holdController, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     "",
     `export const definitions = ${JSON.stringify(definitions)};`,
     "const controllerImports = {",
@@ -89,13 +89,14 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     "      const load = controllerImports[definition.contract.tag];",
     "      if (load == null) return;",
     "      const host = getComponentHost(element);",
-    "      if (initialized.has(host)) return;",
+    "      if (definition.module === undefined && initialized.has(host)) return;",
     "      let disposed = false; let cleanup;",
     "      const module = load();",
     "      // Requests from inside this root wait until the controller has run, or failed to load.",
     "      const release = holdController(element);",
     "      module.then(value => {",
-    "        if (disposed || initialized.has(host)) return;",
+    "        if (disposed || definition.module === undefined && initialized.has(host)) return;",
+    "        if (definition.module !== undefined) { try { return activateModule(value, host); } finally { release(); } }",
     "        initialized.add(host);",
     "        try { return value.default(host); } finally { release(); }",
     "      }).then(value => {",
@@ -168,14 +169,14 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
       const definition = Object.freeze({ ...parsed, source: Object.freeze({ file: `./${source}` }) });
       if (names.has(definition.contract.tag)) throw new Error(`Duplicate package component <${definition.contract.tag}>.`);
       names.add(definition.contract.tag);
-      const controller = parsed.controller === undefined
+      const controller = (parsed.module ?? parsed.controller) === undefined
         ? undefined
-        : componentPath(resolve(dirname(sourcePath), parsed.controller));
-      definitions.push(controller === undefined ? definition : Object.freeze({ ...definition, controller: `./${controller}` }));
+        : componentPath(resolve(dirname(sourcePath), (parsed.module ?? parsed.controller)!));
+      definitions.push(controller === undefined ? definition : { ...definition, [parsed.module === undefined ? "controller" : "module"]: `./${controller}` });
       if (controller !== undefined) {
         controllers.set(definition.contract.tag, controller);
         await addStaticModuleGraph(
-          resolve(dirname(sourcePath), parsed.controller!),
+          resolve(dirname(sourcePath), (parsed.module ?? parsed.controller)!),
           controller,
           files,
           moduleSources,
@@ -292,7 +293,8 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     components: definitions.map((definition) => ({
       tag: definition.contract.tag,
       source: definition.source.file,
-      controller: controllers.get(definition.contract.tag) ?? null,
+      controller: definition.module === undefined ? controllers.get(definition.contract.tag) ?? null : null,
+      ...(definition.module === undefined ? {} : { module: controllers.get(definition.contract.tag) }),
     })),
     passThrough: (config.passThrough ?? []).map((edge) => edge.target).sort(),
     controllerModules: [...moduleDependencies].sort(([left], [right]) => left.localeCompare(right))

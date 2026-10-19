@@ -161,7 +161,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
         for (const [tag, href] of builtins) if (new RegExp(`<${tag}[\\s/>]`).test(source)) source += `\n<link rel="component" href="${href}">`;
         const parsed = layerURLs.has(url) ? applicationResource(source, url) : parseComponentResource(source, url);
         if ("configuration" in parsed) resources.set(url, parsed);
-        const imports = [...parsed.dependencies, ...parsed.definitions.flatMap(definition => definition.controller === undefined ? [] : [definition.controller])];
+        const imports = [...parsed.dependencies, ...parsed.definitions.flatMap(definition => (definition.module ?? definition.controller) === undefined ? [] : [(definition.module ?? definition.controller)!])];
         for (const specifier of imports) {
           if (/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier) || Object.keys(map.imports).some(key => specifier.startsWith(key))) continue;
           const resolved = await server.environments.client!.pluginContainer.resolveId(specifier, fileURLToPath(url));
@@ -190,7 +190,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     }
     const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: withoutSettings(node.definition),
       styles: compileComponentStylesForBuild(node.definition.css, node.definition),
-      ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }) }));
+      ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
+      ...(node.module === undefined ? {} : { module: fileURLToPath(node.module.url) }) }));
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
       module: () => module(layer), origin: origin(layer) })) };
   };

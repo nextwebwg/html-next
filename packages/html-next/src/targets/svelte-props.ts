@@ -48,9 +48,9 @@ export function retainedBindingInput(initialize: (value: unknown) => void, fallb
   return (read, initial, type) => {
     if (read === undefined) { initialized = false; const input = initial(); return retain(input.value, input.raw, input.html); }
     const candidate = read();
-    const accepted = typeof candidate !== "symbol" && acceptsBindingDestination(candidate.value, type);
+    const accepted = typeof candidate !== "symbol" && acceptsBindingDestination(candidate.value, type, fallback !== null && fallback !== undefined);
     if (!initialized) {
-      if (accepted && (type === null || parse(candidate.value, type, "$").ok)) retain(candidate.value, candidate.value ?? null, false);
+      if (accepted && (candidate.value === null || type === null || parse(candidate.value, type, "$").ok)) retain(candidate.value, candidate.value ?? null, false);
       else if (typeof candidate === "symbol") previous = initial();
       else {
         const raw = candidate.attribute;

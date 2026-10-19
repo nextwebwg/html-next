@@ -60,10 +60,16 @@ export {
   clearControllerCache,
   loadController,
   loadControllerModule,
+  loadComponentModule,
+  activateModule,
+  type ComponentModule,
+  type Connect,
+  type ConnectionContext,
   type Controller,
   type ControllerModule,
 } from "./controller.js";
 export { DataResource } from "./data.js";
+export { componentInputs, type ComponentInputs, type InputSource, type InputSnapshot, type InputStatus, type InputFailure, type InputEvaluation } from "./inputs.js";
 export { RequestEvent, type RequestEventInit, type RequestOptions, type Responder, type ResponderInit } from "./requests.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 export type * from "./graph.js";

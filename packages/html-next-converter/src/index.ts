@@ -95,7 +95,7 @@ export interface ConversionEntry {
 
 export interface ConversionOutput {
   readonly path: string;
-  readonly kind: "component" | "controller" | "helper" | "style" | "entry" | "inventory";
+  readonly kind: "component" | "controller" | "module" | "helper" | "style" | "entry" | "inventory";
   readonly source?: string;
 }
 
@@ -124,6 +124,8 @@ export interface ConversionManifest {
     readonly artifact: string;
     /** The copied controller module the component imports, if it has one. */
     readonly controller?: string;
+    /** The copied component module with named connection exports, if declared. */
+    readonly module?: string;
   }[];
 }
 
@@ -485,9 +487,10 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       // The controller and its relative imports are copied beside the component, which imports them.
       const controllerFiles = new Map<string, GeneratedArtifact>();
       let controller: string | undefined;
-      if (node.controller !== undefined) {
+      const edge = node.module ?? node.controller;
+      if (edge !== undefined) {
         try {
-          controller = await addControllerGraph(node.controller.url, node.trustRoot, `${options.target}/controllers/${tag}`, controllerFiles, sourceFiles);
+          controller = await addControllerGraph(edge.url, node.trustRoot, `${options.target}/${node.module === undefined ? "controllers" : "modules"}/${tag}`, controllerFiles, sourceFiles);
         } catch (error) {
           throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error), getDiagnosticLocation(node.definition));
         }
@@ -505,7 +508,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           stylesheets: [],
         } : {}),
         source: Object.freeze({ file: definitionURL }),
-        ...(controller === undefined ? {} : { controller: relativeImport(componentPath, controller) }),
+        ...(controller === undefined ? {} : { [node.module === undefined ? "controller" : "module"]: relativeImport(componentPath, controller) }),
       });
       // A state is published only for the readers the build knows of, unless every state is public.
       const published = options.publicState === true ? undefined : publishedStates(node.definition, definitions);
@@ -531,7 +534,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
             helpers.add(name);
             return relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
           },
-          ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
+          ...((node.definition.module ?? node.definition.controller) === undefined ? {} : { controllerSpecifier: node.definition.module ?? node.definition.controller }),
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
           publishedStates: published,
           slotsByTag,
@@ -543,7 +546,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           styleSpecifier: relativeImport(componentPath, "svelte/style/style.js"),
           hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),
           connectionSpecifier: relativeImport(componentPath, "svelte/connection.svelte.ts").replace(/\.ts$/, ""),
-          ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
+          ...((node.definition.module ?? node.definition.controller) === undefined ? {} : { controllerSpecifier: node.definition.module ?? node.definition.controller }),
           reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
           renderSpecifier: relativeImport(componentPath, "svelte/render.svelte.ts").replace(/\.ts$/, ""),
           importSpecifier,
@@ -574,7 +577,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           renderSpecifier: reactHelperSpecifier("render"),
           requestsSpecifier: reactHelperSpecifier("requests"),
           headSpecifier: reactHelperSpecifier("head"),
-          ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
+          ...((node.definition.module ?? node.definition.controller) === undefined ? {} : { controllerSpecifier: node.definition.module ?? node.definition.controller }),
         })).component;
       } catch (error) {
         if (error instanceof HtmlDiagnosticError) {
@@ -607,10 +610,12 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       if (svelteConversion !== undefined) for (const helper of svelteConversion.helpers) neededHelpers.add(helper);
       for (const helper of helpers) neededHelpers.add(helper);
       for (const file of controllerFiles.values()) {
-        claim(file, "controller", source);
-        if (options.target === "react" && /\.(?:js|mjs|cjs)$/.test(file.path)) {
+        claim(file, node.module === undefined ? "controller" : "module", source);
+        if (/\.(?:js|mjs|cjs)$/.test(file.path)) {
           const declarationPath = file.path.replace(/\.mjs$/, ".d.mts").replace(/\.cjs$/, ".d.cts").replace(/\.js$/, ".d.ts");
-          claim({ path: declarationPath, content: "declare const controller: unknown;\nexport default controller;\n" }, "helper", source);
+          if (!controllerFiles.has(declarationPath)) claim({ path: declarationPath, content: node.module === undefined
+            ? "declare const controller: unknown;\nexport default controller;\n"
+            : "export declare const connect: unknown;\n" }, "helper", source);
         }
       }
       manifestComponents.push(Object.freeze({
@@ -618,7 +623,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         tag,
         source,
         artifact: component.path,
-        ...(controller === undefined ? {} : { controller }),
+        ...(controller === undefined ? {} : { [node.module === undefined ? "controller" : "module"]: controller }),
       }));
     } catch (error) { recover(error); }
   }

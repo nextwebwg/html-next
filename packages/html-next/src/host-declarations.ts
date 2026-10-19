@@ -13,7 +13,7 @@ import type { ComponentDefinition } from "./template.js";
  */
 export async function writeHostDeclarations(graph: ComponentGraph): Promise<readonly string[]> {
   return writeHostFiles([...graph.nodes.values()].flatMap((node) =>
-    node.controller === undefined || node.imported === true ? [] : [{ url: node.url, definition: node.definition }]),
+    (node.module ?? node.controller) === undefined || node.imported === true ? [] : [{ url: node.url, definition: node.definition }]),
   new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition] as const)));
 }
 
@@ -24,7 +24,7 @@ export async function writeHostFiles(
 ): Promise<readonly string[]> {
   const paths: string[] = [];
   for (const { url, definition } of components) {
-    if (definition.controller === undefined || !url.startsWith("file:")) continue;
+    if ((definition.module ?? definition.controller) === undefined || !url.startsWith("file:")) continue;
     const path = fileURLToPath(new URL(`${definition.contract.tag}.host.d.ts`, url));
     if (path.split(sep).includes("node_modules")) continue;
     const content = generateHostTypes(definition, definitions);

@@ -4,7 +4,6 @@
  */
 
 import { isNativeEvent } from "./freeze.js";
-import { compileExpression } from "./expression.js";
 import { parseHtmlLiteral } from "./structured-input.js";
 import { boundFailures, type ValueBounds } from "./value-constraints.js";
 import type { ConstrainedType, TypedResult, TypeIssue, TypeIssueReason } from "./type-system.js";
@@ -25,9 +24,8 @@ export function plainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-const readStructuredExpression = (source: string) => compileExpression(source).ast;
 function structuredInput(value: unknown): unknown {
-  return parseHtmlLiteral(value, readStructuredExpression);
+  return parseHtmlLiteral(value);
 }
 
 export function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {

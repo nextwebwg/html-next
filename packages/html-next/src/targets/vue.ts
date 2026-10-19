@@ -28,7 +28,7 @@ import { compileComponentStylesForVue, componentStateNames, VUE_ROOT_ATTRIBUTE }
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import type { PropContract } from "../types.js";
-import { targetComponent } from "./backend.js";
+import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { conformingScalarStates, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
@@ -52,8 +52,8 @@ export const VUE_HEAD_SPECIFIER = "./head";
 export function importsVueHead(source: string): boolean {
   return new RegExp(`from ['"]${VUE_HEAD_SPECIFIER}['"]`).test(source);
 }
-import { category, Lowering, mayProduceInvalidResult, present, provenSlotProp, slotPropStatic, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
-import { handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
+import { category, inputScope, Lowering, mayProduceInvalidResult, present, provenSlotProp, slotPropStatic, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
+import { destinationTypeCheck, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "shallowRef", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
@@ -64,6 +64,8 @@ const RESERVED = new Set([
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
+  "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
+  "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
   "SanitizedHtml", "RetainedInlineText", "inlineTextSegment",
   "String", "Boolean", "Number", "Math", "Object", "Array", "Symbol", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
@@ -135,17 +137,19 @@ function literalPropBinding(name: string, value: string, props: Readonly<Record<
   return `:${name}=${bound(parsed.ok ? JSON.stringify(parsed.value) : `${quote(value)} as any`)}`;
 }
 
-function writableTarget(path: readonly WritablePathSegment[], scope: Scope, lowering: Lowering): string {
+function writableTarget(path: readonly WritablePathSegment[], scope: Scope, lowering: Lowering, optional = false): string {
   const [root, ...rest] = path;
   const base = scope.code.get(String(root));
   if (base === undefined) fail("HT031", `\`${String(root)}\` is not a writable state path.`);
   return base + rest.map((segment) =>
-    typeof segment === "object" ? `[${lowering.value(segment.expression, scope)}]`
-    : typeof segment === "string" && /^[A-Za-z_$][\w$]*$/.test(segment) ? `.${segment}`
-    : `[${JSON.stringify(segment)}]`).join("");
+    typeof segment === "object" ? `${optional ? "?." : ""}[${lowering.value(segment.expression, scope)}]`
+    : typeof segment === "string" && /^[A-Za-z_$][\w$]*$/.test(segment) ? `${optional ? "?." : "."}${segment}`
+    : `${optional ? "?." : ""}[${JSON.stringify(segment)}]`).join("");
 }
 
 interface Context {
+  readonly availability: ReadonlyMap<string, string>;
+  readonly observe: (scope: Scope) => Scope;
   readonly definition: ComponentDefinition;
   /** Slot declarations in the linked component graph, keyed by receiving tag. */
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
@@ -179,6 +183,8 @@ interface Context {
   usesSlotPropChecks?: boolean;
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
+  usesInputStatus?: boolean;
+  usesInputExpressions?: boolean;
   usesRetainedInlineText: boolean;
   /** Inside a preformatted element, where Vue keeps whitespace between elements. */
   preformatted: boolean;
@@ -536,9 +542,17 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
     const value = ast(flow.expressionPlan, flow.expr);
     const { flow: _flow, ...body } = node;
     const alias = localIdentifier(flow.alias, context);
-    const accepted = flow.expressionPlan === undefined ? undefined : guardedBinding(flow.expressionPlan, names, context, (scope) => lowering.value(value, scope), true);
-    const values = accepted === undefined ? `[${lowering.value(value, names.template)}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
-    return `<template v-for=${bound(`${alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, typeOf(value, names.template), alias]]), context)}</template>`;
+    const accepted = flow.binding !== undefined || flow.expressionPlan === undefined ? undefined : guardedBinding(flow.expressionPlan, names, context, (scope) => lowering.value(value, scope), true);
+    if (flow.binding !== undefined) context.usesInputStatus = true;
+    const computed = (context.definition.declarations ?? []).some(declaration => declaration.kind === "computed" && declaration.name === flow.binding?.name);
+    const computedStatus = context.availability.get(flow.binding?.name ?? "") ?? (computed ? names.template.code.get(flow.binding!.name)?.replace(/\.get\(\)$/, ".status()") : undefined);
+    const read = flow.binding === undefined ? lowering.value(value, names.template)
+      : Object.hasOwn(context.definition.contract.props, flow.binding.name)
+        ? `inputStatus(${quote(flow.binding.name)}, ${flow.binding.handlesError})`
+        : computedStatus !== undefined ? `requireInputStatus(${computedStatus}, ${flow.binding.handlesError})`
+        : `requireInputStatus((${lowering.value(value, names.template)}) === undefined ? UNRESOLVED_INPUT : READY_INPUT, ${flow.binding.handlesError})`;
+    const values = accepted === undefined ? `[${read}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
+    return `<template v-for=${bound(`${alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, flow.aliasType === undefined ? typeOf(value, names.template) : present(flow.aliasType), alias]]), context)}</template>`;
   }
   if (flow?.kind === "match") {
     if (node.name !== "template") return renderElement(elementMatchRoot(node), names, context, false);
@@ -615,6 +629,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   const classes: string[] = [];
   const styles: string[] = [];
+  const bindingInputs: string[] = [];
+  const inputSnapshots: { readonly name: string; readonly source: string }[] = [];
   const reflected = isRoot && !component
     ? Object.entries(context.definition.contract.props).map(([propName]) => {
       const attributeName = propAttribute(context.definition.contract.tag, propName);
@@ -668,6 +684,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       styles.push(`${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
+      const available = attribute.writablePath.slice(0, -1).map((_, index) => `${writableTarget(attribute.writablePath!.slice(0, index + 1), names.template, lowering)} != null && `).join("");
       if (nativeControl && ["value", "checked"].includes(attribute.name)) {
         const event = node.name === "select" || node.name === "input" && attribute.name === "checked" ||
           node.name === "input" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "type" && ["checkbox", "radio", "file"].includes(entry.value))
@@ -680,14 +697,15 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
           // Only an <input> binds checked, so the radio guard reads it as one.
           ? `(($event.currentTarget as HTMLInputElement).type !== 'radio' || ($event.currentTarget as HTMLInputElement).checked) && (${writable} = ${read})`
           : `${writable} = ${read}`;
-        attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: ${quote(attribute.name as "value" | "checked")}, value: ${writable}, ${authoredDefault(attribute.name as "value" | "checked")} }`)}`);
-        attributes.push(`@${event}=${bound(update)}`);
+        const value = ast(attribute.expressionPlan, attribute.expression);
+        attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: ${quote(attribute.name as "value" | "checked")}, value: ${lowering.value(value, names.template)}, ${authoredDefault(attribute.name as "value" | "checked")} }`)}`);
+        attributes.push(`@${event}=${bound(`${available}(${update})`)}`);
       } else {
         const value = ast(attribute.expressionPlan, attribute.expression);
         attributes.push(`:${svgAttributeName(attribute.name)}.attr=${bound(lowering.attribute(value, names.template, attribute.name))}`);
         const revert = revertSource(context.definition, attribute.writablePath, (segment) => lowering.value(segment.expression, names.template));
         const read = `((($event.currentTarget as Element & { value?: any }).value ?? ($event.currentTarget as Element).getAttribute('value')) as any)`;
-        attributes.push(`@input=${bound(`${writable} = ${revert === undefined ? read : `(${read} ?? ${revert})`}`)}`);
+        attributes.push(`@input=${bound(`${available}(${writable} = ${revert === undefined ? read : `(${read} ?? ${revert})`})`)}`);
       }
     } else if (isRoot && context.model && attribute.name === "value") {
       // The model supplies the root's value (below).
@@ -699,12 +717,36 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         nativeAttribute && attribute.name === "checked" && category(typeOf(value, scope).type) === "boolean"
           ? `${lowering.condition(value, scope)} ? true : undefined`
           : lowering.attribute(value, scope, attribute.name);
+      const propName = component ? Object.keys(context.propContractsByTag?.get(node.name) ?? {}).find(name =>
+        name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+      const observed = context.observe(names.template);
+      if (propName !== undefined && plan !== undefined && value.kind !== "id" && plan.dependencies.some(path => {
+        const root = path.split(".")[0]!;
+        return observed.code.get(root) !== names.template.code.get(root);
+      })) {
+        context.usesInputStatus = true; context.usesInputExpressions = true;
+        const input = context.identifiers.take("boundInput", "Snapshot");
+        const guard = expressionGuard(plan, names.template, context.definition, names.locals, lowering);
+        const read = lowering.value(value, observed);
+        inputSnapshots.push({ name: input, source: `evaluateInput(() => (${guard === undefined ? read : `((${guard}) ? ${read} : Symbol.for("html-next.invalid-result"))`}) as any, READY_INPUT)` });
+        bindingInputs.push(`${quote(propName)}: () => ${input}`);
+        attributes.push(`:${propName}=${bound(`${input}.value`)}`);
+        continue;
+      }
       const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) =>
         component ? lowering.value(value, scope) : attributeValueFor(scope));
       const adjusted = component ? attribute.name : svgAttributeName(attribute.name);
+      if (propName !== undefined && value.kind === "id") {
+        const read = names.template.code.get(value.name);
+        const prop = Object.hasOwn(context.definition.contract.props, value.name) && (read === `checkedProps.${value.name}` || read === `checkedProps[${quote(value.name)}]`);
+        const computed = (context.definition.declarations ?? []).some(declaration => declaration.kind === "computed" && declaration.name === value.name);
+        const availability = observed.code.get(value.name) !== read ? context.availability.get(value.name) : undefined;
+        if (prop || availability !== undefined || computed && read?.endsWith(".get()")) bindingInputs.push(`${quote(propName)}: () => ({ value: ${guarded ?? lowering.value(value, names.template)}, status: ${availability ?? (prop ? `inputStatus(${quote(value.name)}, true)` : read!.replace(/\.get\(\)$/, ".status()"))} })`);
+      }
       attributes.push(`:${adjusted}${nativeAttribute || adjusted !== attribute.name ? ".attr" : ""}=${bound(guarded ?? (component ? lowering.value(value, names.template) : attributeValueFor(names.template)))}`);
     }
   }
+  if (bindingInputs.length > 0) attributes.push(`v-bind=${bound(`{ [BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} } }`)}`);
   if (classes.length > 0) attributes.push(`:class=${bound(`{ ${classes.join(", ")} }`)}`);
   if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
   for (const event of node.events ?? []) {
@@ -782,7 +824,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     ? node.attributes.find((attribute) => attribute.kind === "property" && attribute.name === "value")
     : undefined;
   const selectedValue = selectBinding?.kind === "attribute" && selectBinding.writablePath !== undefined
-    ? writableTarget(selectBinding.writablePath, names.template, lowering)
+    ? lowering.value(ast(selectBinding.expressionPlan, selectBinding.expression), names.template)
     : selectProperty?.kind === "property"
       ? `String(${lowering.value(ast(selectProperty.expressionPlan, selectProperty.expression), names.template)})`
       : "model";
@@ -802,8 +844,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     ? `<SelectedOptions :value=${bound(selectedValue)} :multiple=${bound(selectedMultiple)} :native-property=${bound(selectProperty !== undefined && !twoWayControl ? "true" : "false")}${isRoot && context.model && !twoWayControl && selectProperty === undefined ? " :optional-value=\"true\"" : ""}>${renderedChildren}</SelectedOptions>`
     : renderedChildren;
   // An empty component closes itself, as Vue's style guide has it.
-  if (component && children === "") return `${open.slice(0, -1)} />`;
-  return `${open}${children}</${name}>`;
+  const markup = component && children === "" ? `${open.slice(0, -1)} />` : `${open}${children}</${name}>`;
+  return inputSnapshots.reduceRight((body, input) => `<template v-for=${bound(`${input.name} in [${input.source}]`)}>${body}</template>`, markup);
 }
 
 function handlerSource(handler: HandlerDeclaration, name: string, names: Names, events: readonly EventDeclaration[], context: Context): string {
@@ -818,7 +860,13 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
     const guard = step.guard === undefined ? "" : `if (${mayProduceInvalidResult(step.guard.ast, local.script)
       ? `${lowering.value(step.guard.ast, local.script)} !== Symbol.for("html-next.invalid-result") && ` : ""}${lowering.condition(step.guard.ast, local.script)}) `;
     if (step.kind === "set") {
-      const target = writableTarget(step.writablePath, local.script, lowering);
+      const nested = step.writablePath.length > 1;
+      // Capture the existing owner before a checked setter closure; missing owners are not created.
+      const destination = nested ? context.identifiers.take("destination", "Target") : "";
+      if (nested) lines.push(`  ${guard}{ const ${destination} = ${writableTarget(step.writablePath.slice(0, -1), local.script, lowering, true)}; if (${destination} != null) {`);
+      const target = nested ? writableTarget([destination, step.writablePath.at(-1)!], { ...local.script, code: new Map([...local.script.code, [destination, destination]]) }, lowering)
+        : writableTarget(step.writablePath, local.script, lowering);
+      const prefix = nested ? "" : guard;
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
       const proven = !mayBeInvalid && provenWrite(step, context.definition);
@@ -828,12 +876,13 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const destinationCheck = proven ? undefined : refusing(handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, "value", local.script, lowering));
       if (destinationCheck === undefined && !mayBeInvalid) {
-        lines.push(`  ${guard}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${written}`};`);
+        lines.push(`  ${prefix}${(proven ? increment(step, context.definition, target) : undefined) ?? `${target} = ${written}`};`);
       } else {
         // A state's ref takes the write itself; a path below it is written through a setter.
         const to = /^[\w$]+\.value$/.test(target) ? target.slice(0, -".value".length) : `(next) => (${target} = next)`;
-        lines.push(`  ${guard}${lowering.use("write")}(${to}, ${written}${writeCheck(destinationCheck, context.definition, handler, step)});`);
+        lines.push(`  ${prefix}${lowering.use("write")}(${to}, ${written}${writeCheck(destinationCheck, context.definition, handler, step)});`);
       }
+      if (nested) lines.push("  } }");
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
@@ -909,17 +958,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
   const propType = (prop: (typeof target.props)[number]): string =>
     parameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, parameters);
-  // A null prop is not present, so it takes its default, as an undefined one does (types#null-and-missing-values).
-  const suppliedProp = (name: string): string => "default" in contract.props[name]!
-    ? `(props[${quote(name)}] ?? ${JSON.stringify(contract.props[name]!.default)})` : `props[${quote(name)}]`;
-  const selectedNode = (prop: (typeof target.props)[number]): string =>
+  const selectedNode = (prop: (typeof target.props)[number], values?: string): string =>
     prop.contract.select === undefined
       ? JSON.stringify(normalizeType(prop.contract.type))
       : `selectedPropNode(${contract.props[prop.contract.select.from] === undefined
         ? `${stateNames.get(states.find((state) => state.name === prop.contract.select!.from)!)}.value`
-        : `checkedProp<unknown>(${suppliedProp(prop.contract.select.from)}, ${JSON.stringify(normalizeType(contract.props[prop.contract.select.from]!.type))}, ${contract.props[prop.contract.select.from]!.required}, ${quote(prop.contract.select.from)}, acceptedProps)`}, ${JSON.stringify(prop.contract.select.options)})`;
+        : values === undefined ? `propInputs.value<unknown>(${quote(prop.contract.select.from)}, props[${quote(prop.contract.select.from)}], props[BINDING_INPUTS_PROP])` : `${values}[${quote(prop.contract.select.from)}]`}, ${JSON.stringify(prop.contract.select.options)})`;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
+  const seeded = states.filter(state => state.initializer !== undefined);
   const hasStateSelected = target.props.some((prop) => prop.contract.select !== undefined &&
     contract.props[prop.contract.select.from] === undefined);
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
@@ -997,7 +1044,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   for (const value of computedValues) {
     const name = identifiers.take(value.name, "Computed");
     stateNames.set(value, name);
-    define(value.name, name, `${name}.value`, value.expression === undefined ? UNKNOWN : typeOf(value.expression.ast, script));
+    const inferred = value.expression === undefined ? UNKNOWN : typeOf(value.expression.ast, script);
+    define(value.name, `${name}.get()`, `${name}.get()`, { ...inferred, nullable: true, null: true });
   }
   const contextNames = new Map(contexts.map((declaration) => [declaration, identifiers.take(declaration.as ?? declaration.name, "Context")]));
   for (const declaration of contexts) {
@@ -1026,12 +1074,18 @@ export function generateVue(definition: ComponentDefinition, version: string, op
 
   const styles = compileComponentStylesForVue(definition.css, definition, undefined, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
-  const controlled = definition.controller !== undefined;
+  const controlled = (definition.module ?? definition.controller) !== undefined;
   const dispatches = events.length > 0 || controlled;
   const headed = declaresHead(definition);
   const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed;
+  const availability = new Map([...seeded.map(state => [state.name, `declarationStatus(${quote(state.name)})`] as const),
+    ...contexts.map(context => [context.as ?? context.name, `declarationStatus(${quote(context.as ?? context.name)})`] as const)]);
   const context: Context = {
+    availability,
     definition,
+    observe: source => inputScope(source, (name, read) => read !== templateScope.code.get(name) ? undefined
+      : Object.hasOwn(contract.props, name) ? `inputStatus(${quote(name)}, true)`
+        : availability.get(name) ?? (computedValues.some(value => value.name === name) ? read.replace(/\.get\(\)$/, ".status()") : undefined)),
     ...(options.slotsByTag === undefined ? {} : { slotsByTag: options.slotsByTag }),
     ...(options.propContractsByTag === undefined ? {} : { propContractsByTag: options.propContractsByTag }),
     lowering,
@@ -1060,8 +1114,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const rootWith = template.flow?.kind === "with" ? template.flow : undefined;
   const rootWithValue = rootWith === undefined ? undefined : ast(rootWith.expressionPlan, rootWith.expr);
   const rootWithName = rootWith === undefined ? undefined : identifiers.take("rootWith", "");
+  if (rootWith?.binding !== undefined) context.usesInputStatus = true;
   const rootNames: Names = rootWith === undefined ? names : (() => {
-    const local = withLocal(names, [[rootWith.alias, typeOf(rootWithValue!, names.template)]]);
+    const local = withLocal(names, [[rootWith.alias, rootWith.aliasType === undefined ? typeOf(rootWithValue!, names.template) : present(rootWith.aliasType)]]);
     return {
       ...local,
       template: { ...local.template, code: new Map([...local.template.code, [rootWith.alias, rootWithName!] as const]) },
@@ -1104,19 +1159,20 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const optionalType = (source: string, required: boolean): string => required ? source
     : `${source.includes(" extends ") ? `(${source})` : source} | undefined`;
   const propDefinitions = target.props.map((prop) =>
-    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${propType(prop)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : prop.contract.required ? "" : ", default: null"} },`);
+    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${propType(prop)}> },`);
+  if (target.props.length > 0) propDefinitions.push("  [BINDING_INPUTS_PROP]: { type: null as unknown as PropType<InputBindings> },");
   if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${optionalType(propType(modelProp), false)}> },`);
   // Each request is a function prop that answers it, and an event form (`@mention-query`) that hears it.
   const requestPropDefinitions = target.requests.flatMap((request) => [
     `  ${propKey(request.propName)}: { type: null as unknown as PropType<${responderType(request)} | null>, default: null },`,
     `  ${propKey(request.callbackName)}: { type: null as unknown as PropType<(${requestListenerType(request)}) | null>, default: null },`,
   ]);
-  const checkedPropSources = target.props.map((prop) => {
+  const checkedPropSources = propInputOrder(target.props).map((prop) => {
     const type = prop.contract.select === undefined
       ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
-    const checked = `checkedProp<${type}>(${suppliedProp(prop.name)}, ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps)`;
+    const checked = `propInputs.value<${type}${prop.contract.required ? "" : " | null"}>(${quote(prop.name)}, props[${quote(prop.name)}], props[BINDING_INPUTS_PROP])`;
     const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
     return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
       : `  ${propKey(prop.name)}: ${value},`;
@@ -1174,12 +1230,25 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const stateSource = (declaration: ReactiveDeclaration): string => {
     const name = stateNames.get(declaration)!;
     const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
-    if (declaration.kind === "computed") {
+    if (declaration.kind === "computed" || declaration.initializer !== undefined) {
+      const observed = inputScope(script, (name, read) => Object.hasOwn(contract.props, name) ? `propInputs.status(${quote(name)})`
+        : availability.get(name) ?? (computedValues.some(value => value.name === name) ? read.replace(/\.get\(\)$/, ".status()")
+          : states.some(state => state.name === name) || contexts.some(context => (context.as ?? context.name) === name)
+            ? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)` : undefined));
+      if (declaration.initializer !== undefined) {
+        const expression = lowering.value(declaration.initializer.ast, observed);
+        const guard = expressionGuard(declaration.initializer, script, definition, undefined, lowering);
+        const node = declarationTypeNode(declaration.type, declaration.shape);
+        const accepts = node === undefined ? "true" : destinationTypeCheck(node, "next");
+        return `const ${name} = initializedState<${node === undefined ? "unknown" : typeScript(present(node))}>(() => evaluateInput(() => { ${guard === undefined ? "" : `if (!(${guard})) return Symbol.for("html-next.invalid-result"); `}return ${expression}; }), (next: unknown) => ${accepts}, copyStateSeed, () => ${lowering.use("warnUnless")}(false, ${quote(`initializer:${declaration.name}`)}, ${quote(`State \`${declaration.name}\` does not satisfy its declared type.`)}));`;
+      }
+      const expression = declaration.expression === undefined ? "undefined" : lowering.value(declaration.expression.ast, observed);
       const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition, undefined, lowering);
       const retains = declaration.expression !== undefined && mayProduceInvalidResult(declaration.expression.ast, script);
-      if (retains) return `let ${name}Previous: any = null;\nconst ${name} = cycleCheckedComputed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}const next: any = ${initial}; if (next === Symbol.for("html-next.invalid-result")) return ${name}Previous; return ${name}Previous = next; });`;
-      if (guard !== undefined) return `let ${name}Previous: any;\nconst ${name} = cycleCheckedComputed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${initial}; });`;
-      return `const ${name} = cycleCheckedComputed(() => ${initial});`;
+      const make = `(read) => { const value = cycleCheckedComputed(read); return { get: () => value.value }; }`;
+      const type = typeScript(script.types.get(declaration.name)!);
+      if (retains || guard !== undefined) return `let ${name}Previous: ${type} = null;\nconst ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => { ${guard === undefined ? "" : `if (!(${guard})) return Symbol.for("html-next.invalid-result") as any; `}return ${expression} as any; }, ${make}, next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${name}Previous : (${name}Previous = next));`;
+      return `const ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, ${make});`;
     }
     const type = script.types.get(declaration.name)!;
     // Scalars infer their own type; structured and unknown initial values declare what they hold.
@@ -1218,13 +1287,18 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       "});",
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) =>
         `${propKey(prop.name)}: ${"default" in prop.contract ? defaultSource(prop.contract.default) : "null"}`).join(", ")} };`,
-      "const checkedProps = computed(() => ({",
+      `const inputTracking = vuePropInputs(acceptedProps, { ${target.props.filter(prop => "default" in prop.contract).map(prop => `${propKey(prop.name)}: ${defaultSource(prop.contract.default)}`).join(", ")} }, (name, value, source, values) => { switch (name) {`,
+      ...target.props.map(prop => `  case ${quote(prop.name)}: return checkPropInput(value, ${selectedNode(prop, "values")}, false, ${!prop.contract.required});`),
+      "  default: return { ok: false }; } }, () => { void checkedProps.value; });",
+      "const propInputs = inputTracking.inputs;",
+      "const checkedProps = computed(() => { void inputTracking.version.value; return ({",
       ...checkedPropSources,
-      "}));",
+      "}); });",
+      "const inputStatus = (name: string, handlesError: boolean) => { void checkedProps.value; void inputTracking.version.value; return requireInputStatus(propInputs.status(name), handlesError); };",
       ...(hasStateSelected ? [] : ["void checkedProps.value;", "watchSyncEffect(() => { void checkedProps.value; });"]),
     ]),
     ...(!reflectsProps ? [] : ["const reflectedProp = useReflectedProp();"]),
-    ...(definition.controller !== undefined && target.props.length > 0 ? [`const ${hydrationInstanceName} = getCurrentInstance();`] : []),
+    ...((definition.module ?? definition.controller) !== undefined && target.props.length > 0 ? [`const ${hydrationInstanceName} = getCurrentInstance();`] : []),
     ...(emits.length === 0 ? [] : ["const emit = defineEmits<{", ...emits, "}>();"]),
     ...(modelProp === undefined ? [] : [
       "const model = computed({",
@@ -1240,15 +1314,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(arms === undefined ? [] : [`const root = ${rootValues.length === 1 ? rootValues[0] : `computed(() => ${rootValues.map((name) => `${name}.value`).join(" ?? ")} ?? null)`};`]),
     ...(arms === undefined ? [] : ["preserveRootFocus(root);"]),
     ...states.map(stateSource),
-    ...(hasStateSelected ? [
-      ...target.props.map((prop) => `void checkedProps.value[${quote(prop.name)}];`),
-      "watchSyncEffect(() => {",
-      ...target.props.map((prop) => `  void checkedProps.value[${quote(prop.name)}];`),
-      "});",
-    ] : []),
     ...data.flatMap(dataSource),
     ...computedValues.map(stateSource),
-    ...(rootWith === undefined ? [] : [`const ${rootWithName} = computed(() => ${lowering.value(rootWithValue!, names.script)});`]),
+    ...(rootWith === undefined ? [] : [`const ${rootWithName} = computed(() => ${rootWith.binding === undefined ? lowering.value(rootWithValue!, names.script)
+      : Object.hasOwn(definition.contract.props, rootWith.binding.name) ? `inputStatus(${quote(rootWith.binding.name)}, ${rootWith.binding.handlesError})`
+        : availability.has(rootWith.binding.name) ? `requireInputStatus(${availability.get(rootWith.binding.name)}, ${rootWith.binding.handlesError})`
+        : computedValues.some(value => value.name === rootWith.binding!.name) ? `requireInputStatus(${names.script.code.get(rootWith.binding.name)!.replace(/\.get\(\)$/, ".status()")}, ${rootWith.binding.handlesError})`
+        : `requireInputStatus((${lowering.value(rootWithValue!, names.script)}) === undefined ? UNRESOLVED_INPUT : READY_INPUT, ${rootWith.binding.handlesError})`});`]),
     ...context.guarded,
     ...states.filter((state) => options.publishedStates?.has(state.name) ?? true).map((state) =>
       `provide(${quote(`html-next:${contract.tag}:${state.name}`)}, ${stateNames.get(state)!});`),
@@ -1256,6 +1328,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       const name = contextNames.get(declaration)!;
       return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
+    ...(availability.size === 0 ? [] : [`const declarationStatuses = { ${[...seeded.map(state => `${quote(state.name)}: () => ${stateNames.get(state)}.status()`),
+      ...contexts.map(context => { const variable = contextNames.get(context)!; return `${quote(context.as ?? context.name)}: () => ${variable}.status?.() ?? (${variable}.value === undefined ? UNRESOLVED_INPUT : READY_INPUT)`; })].join(", ")} } as Record<string, () => typeof READY_INPUT>;`, "const declarationStatus = (name: string) => declarationStatuses[name]!();"]),
+    ...(hasStateSelected ? [
+      ...target.props.map((prop) => `void checkedProps.value[${quote(prop.name)}];`),
+      "watchSyncEffect(() => {",
+      ...target.props.map((prop) => `  void checkedProps.value[${quote(prop.name)}];`),
+      "});",
+    ] : []),
+    ...seeded.map(state => `${stateNames.get(state)}.start();`),
     ...(!(definition.slots ?? []).some((slot) => (slot.props?.length ?? 0) > 0) ? [] : ["const scopedSlotName = useScopedSlotName();"]),
     // Declared slot props type each slot's props for a consumer's slot templates.
     ...(!(definition.slots ?? []).some((slot) => slot.declared !== undefined) ? [] : [`defineSlots<{ ${(definition.slots ?? []).map((slot) => {
@@ -1300,11 +1381,12 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       refs: context.refs,
       state: new Map(states.map((state) => [state.name, stateNames.get(state)!])),
       computed: new Map(computedValues.map((value) => [value.name, stateNames.get(value)!])),
+      availability: new Map([...availability, ...computedValues.map(value => [value.name, `${stateNames.get(value)}.status()`] as const)]),
       data: new Map(data.map((value) => [value.name, dataNames.get(value)!])),
       context: new Map(contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!])),
       hydrationInstanceName,
       scripts: scriptNames.size > 0,
-    }, options.controllerSpecifier ?? definition.controller),
+    }, options.controllerSpecifier ?? (definition.module ?? definition.controller)),
   );
   // `props` is named only when the script reads it; the template reads props by name.
   if (!body.some((line) => /\bprops\b/.test(line) && !line.startsWith("const props = ")) && !/\bprops\b/.test(rootMarkup)) {
@@ -1315,21 +1397,21 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   // The shared module holds what every component's host and dispatcher do the same way.
   const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
-    "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "useReflectedProp", "useScopedSlotName",
+    "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
     "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)),
     ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks ? ["warnUnless"] : []])].sort();
   const vueTypes = target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"];
-  const requestHelpers = definition.controller === undefined ? [] : REQUEST_HELPERS.filter((name) => new RegExp(`\\b${name}\\(`).test(code));
+  const requestHelpers = (definition.module ?? definition.controller) === undefined ? [] : REQUEST_HELPERS.filter((name) => new RegExp(`\\b${name}\\(`).test(code));
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
-    ...(definition.controller !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
+    ...((definition.module ?? definition.controller) !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
       ? [`import { acceptsControllerWrite } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`] : []),
     ...(!context.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
-    ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
+    ...(target.props.length === 0 && !context.usesInputStatus && computedValues.length === 0 && seeded.length === 0 && availability.size === 0 ? [] : [`import { ${target.props.length === 0 ? computedValues.length === 0 && seeded.length === 0 && availability.size === 0 && !context.usesInputExpressions ? "" : "BINDING_INPUTS_PROP, " : "checkedProp, vPropValidity, checkPropInput, vuePropInputs, BINDING_INPUTS_PROP, type InputBindings, "}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computedValues.length === 0 ? "" : ", inputComputed"}${computedValues.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : ", inputRead, inputDefault"}${context.usesInputExpressions || seeded.length > 0 ? ", evaluateInput" : ""}${seeded.length > 0 ? ", copyStateSeed" : ""}${(definition.module ?? definition.controller) === undefined || target.props.length === 0 ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
     ...(target.requests.length === 0 ? [] : [
       ...(requestHelpers.length === 0 ? [] : [
@@ -1378,6 +1460,7 @@ function hostSource(
     readonly refs: ReadonlyMap<string, string>;
     readonly state: ReadonlyMap<string, string>;
     readonly computed: ReadonlyMap<string, string>;
+    readonly availability: ReadonlyMap<string, string>;
     readonly data: ReadonlyMap<string, string>;
     readonly context: ReadonlyMap<string, string>;
     readonly hydrationInstanceName: string;
@@ -1385,7 +1468,7 @@ function hostSource(
   },
   controllerSpecifier?: string,
 ): string[] {
-  if (definition.controller === undefined) return [];
+  if ((definition.module ?? definition.controller) === undefined) return [];
   const { requests } = targetComponent(definition);
   const record = (entries: ReadonlyMap<string, string>): string =>
     `{ ${[...entries].map(([name, identifier]) => name === identifier ? name : `${propKey(name)}: ${identifier}`).join(", ")} }`;
@@ -1393,14 +1476,16 @@ function hostSource(
     declaration.kind === "state" && declarationTypeNode(declaration.type, declaration.shape) !== undefined
       ? [[declaration.name, declarationTypeNode(declaration.type, declaration.shape)]] : []));
   const call = [
-    `useComponentHost(() => import(${quote(definition.controller)}), {`,
+    `useComponentHost(() => import(${quote((definition.module ?? definition.controller)!)}), {`,
     "  root,",
+    ...(definition.module === undefined ? [] : ["  module: true,"]),
     "  dispatch,",
     ...(Object.keys(stateTypes).length === 0 ? [] : [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, (${JSON.stringify(stateTypes)} as Record<string, any>)[name], keys),`]),
     ...controllerInitials(definition, "  "),
-    `  controllerSource: { specifier: ${quote(controllerSpecifier ?? definition.controller!)}, definition: ${quote(definition.source.file)} },`,
+    `  controllerSource: { specifier: ${quote(controllerSpecifier ?? (definition.module ?? definition.controller)!)}, definition: ${quote(definition.source.file)} },`,
     ...(values.props ? [
       "  props: checkedProps,",
+      "  inputs: propInputs, inputTracking,",
       "  propInputs: (name: string) => {",
       `    const incoming = ${values.hydrationInstanceName}?.vnode.props;`,
       "    const kebab = name.replace(/[A-Z]/g, (letter) => '-' + letter.toLowerCase());",
@@ -1417,6 +1502,7 @@ function hostSource(
     ...(values.refs.size === 0 ? [] : [`  refs: ${record(values.refs)},`]),
     ...(values.state.size === 0 ? [] : [`  state: ${record(values.state)},`]),
     ...(values.computed.size === 0 ? [] : [`  computed: ${record(values.computed)},`]),
+    ...(values.availability.size === 0 ? [] : [`  availability: { ${[...values.availability].map(([name, read]) => `${propKey(name)}: () => ${read}`).join(", ")} },`]),
     ...(values.data.size === 0 ? [] : [`  data: ${record(values.data)},`]),
     ...(values.context.size === 0 ? [] : [`  context: ${record(values.context)},`]),
     ...(values.scripts ? ["  scripts: headScripts,"] : []),

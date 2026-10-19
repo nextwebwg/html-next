@@ -1,9 +1,24 @@
 import type { GeneratedArtifact } from "../generate.js";
+import { MODULE_CONNECTION_SOURCE } from "../generated/module-connection-source.js";
 import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
+import { INPUT_STATUS_SOURCE, INPUT_STATUS_COMPARISON_SOURCE } from "./shared-generated.js";
 
 const SOURCE = `import React from "react";
+${INPUT_STATUS_SOURCE}
+${INPUT_STATUS_COMPARISON_SOURCE}
+
+interface InputBookkeeping {
+  status(name: string): unknown;
+  supplied(name: string): boolean;
+  port(reactions: {
+    readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
+    track(name: string, kind: "value" | "status" | "supplied"): void;
+    watch(run: () => void | (() => void)): () => void;
+    untracked<T>(run: () => T): T;
+  }): unknown;
+}
 
 interface Dependency { readonly subscribers: Set<Reaction>; }
 interface Reaction {
@@ -37,6 +52,7 @@ function cycleError(): Error {
 }
 
 ${NATIVE_CONNECTION_SOURCE}
+${MODULE_CONNECTION_SOURCE}
 ${CONTROLLER_STATE_SOURCE}
 ${REQUEST_HOST_SOURCE}
 export interface StateAccess {
@@ -46,15 +62,18 @@ export interface StateAccess {
 }
 
 export interface ComponentHostOptions {
+  readonly inputs?: InputBookkeeping;
   readonly root: React.RefObject<Element | null>;
   readonly definition: string;
   readonly controller: string;
+  readonly module?: boolean;
   readonly props: () => Readonly<Record<string, unknown>>;
   readonly propInputs?: (name: string) => unknown;
   readonly propValidity?: (name: string) => unknown;
   readonly propNames?: readonly string[];
   readonly state: Readonly<Record<string, StateAccess>>;
   readonly computed: Readonly<Record<string, () => unknown>>;
+  readonly availability?: Readonly<Record<string, () => InputStatus>>;
   readonly refs: ReadonlyMap<string, ReadonlySet<Element>>;
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data: Readonly<Record<string, () => unknown>>;
@@ -73,6 +92,7 @@ export interface ComponentHostOptions {
 }
 
 interface ControllerHost {
+  readonly [key: symbol]: unknown;
   readonly root: Element;
   readonly element: Element;
   readonly state: Record<string, unknown>;
@@ -97,6 +117,7 @@ interface ControllerHost {
 }
 
 interface ControllerModule extends Record<string, unknown> {
+  readonly connect?: Connect<ControllerHost>;
   readonly default: (host: ControllerHost) => void | (() => void) | Promise<void | (() => void)>;
 }
 
@@ -105,7 +126,7 @@ function moduleDiagnostic(code: "HJ001" | "HJ002", options: ComponentHostOptions
   const url = new URL(options.controller, base).href;
   const tick = String.fromCharCode(96);
   const message = code === "HJ002"
-    ? "Controller module " + tick + url + tick + " must default-export a function."
+    ? options.module ? "Component module " + tick + url + tick + " export connect must be a function." : "Controller module " + tick + url + tick + " must default-export a function."
     : "Controller module " + tick + url + tick + " failed to load: " + (reason instanceof Error ? reason.message : String(reason)) + ".";
   return Object.assign(new Error(base + ": " + code + ": " + message), {
     name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code, message, source: base }),
@@ -120,7 +141,7 @@ function documentOrder(elements: ReadonlySet<Element>): Element[] {
 /** React owns the DOM; the controller owns only its connection lifetime and local reactions. */
 export function useComponentHost(loader: () => Promise<unknown>, options: ComponentHostOptions): void {
   const latest = React.useRef(options);
-  latest.current = options;
+  React.useLayoutEffect(() => { latest.current = options; });
   const runtime = React.useRef<{
     readonly host: ControllerHost;
     readonly synchronize: () => void;
@@ -171,6 +192,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     let releaseController: (() => void) | undefined;
     const dependencies = new Map<string, Dependency>();
     const readComputed = new Set<string>();
+    const readStatuses = new Set<string>();
+    const previousStatuses = new Map<string, InputStatus>();
     const previousValues = new Map<string, unknown>();
     const dependency = (name: string): Dependency => {
       let result = dependencies.get(name);
@@ -194,6 +217,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         const value = latest.current.computed[name]!();
         if (!Object.is(previousValues.get("state:" + name), value)) notify(dependency("state:" + name));
         previousValues.set("state:" + name, value);
+      }
+      for (const name of readStatuses) {
+        const status = latest.current.availability?.[name]?.() ?? READY_INPUT;
+        if (!sameInputStatus(previousStatuses.get(name), status)) notify(dependency("state:" + name));
+        previousStatuses.set(name, status);
       }
     };
     // A read below a state root depends on its path: \`items.0.name\` on items, items.0 and items.0.name.
@@ -244,6 +272,22 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       },
     }, options.definition);
     const host: ControllerHost = {
+      get [Symbol.for("@nextwebwg/html-next.inputs.v1")]() {
+        return latest.current.inputs?.port({
+          declarations: Object.fromEntries([...Object.keys(options.state), ...Object.keys(options.computed)].map(name => [name, {
+            read: () => host.state[name],
+            status: () => {
+              track(dependency("state:" + name));
+              const status = latest.current.availability?.[name]?.() ?? READY_INPUT;
+              if (!readStatuses.has(name)) { readStatuses.add(name); previousStatuses.set(name, status); }
+              return status;
+            },
+          }])),
+          track: (name, kind) => track(dependency("prop:" + kind + ":" + name)),
+          watch: run => host.effect(run),
+          untracked: run => { const previous = activeReaction; activeReaction = undefined; try { return run(); } finally { activeReaction = previous; } },
+        });
+      },
       get root() {
         track(dependency("root"));
         return (latest.current.root.current ?? root ?? lastRoot)!;
@@ -302,7 +346,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           dependencies: new Set(), stopped: false,
           // Read, it recomputes and notifies its readers only when its value changed; unread, it waits.
           invalidate() {
-            if (dirty) return;
+            if (reaction.stopped || dirty) return;
             dirty = true;
             if (source.subscribers.size === 0) return;
             const previous = cached;
@@ -311,7 +355,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
             if (!Object.is(previous, cached)) notify(source);
           },
         };
-        return { get(): T {
+        return { stop() { reaction.stopped = true; clear(reaction); }, get(): T {
           track(source);
           if (reading) throw cycleError();
           return dirty ? evaluate() : cached;
@@ -386,7 +430,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     }
     if (options.request?.has !== undefined) host.hasResponder = options.request.has(host, own);
     const load = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve().then(loader).then((candidate) => {
-      if (typeof (candidate as { default?: unknown } | null)?.default !== "function") throw moduleDiagnostic("HJ002", latest.current);
+      const loaded = candidate as { default?: unknown; connect?: unknown } | null;
+      if (latest.current.module ? loaded === null || typeof loaded !== "object" || loaded.connect !== undefined && typeof loaded.connect !== "function" : typeof loaded?.default !== "function") throw moduleDiagnostic("HJ002", latest.current);
       return candidate as ControllerModule;
     }).catch((error: unknown) => {
       if (error instanceof Error && "diagnostic" in error) throw error;
@@ -441,15 +486,19 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       if (initialized) {
         for (const effect of effects.values()) effect.execute();
         lifecycle("connect");
-        return;
+        if (!latest.current.module) return;
       }
       // Before the controller first runs, the only connect listener is host.hasResponder's.
-      lifecycle("connect");
+      if (!initialized) lifecycle("connect");
       // Requests from inside this root wait until the controller has run, or failed to load.
       const release = releaseController = holdController(next);
       void load().then(async (module) => {
-        if (!connected || current !== generation || initialized) return;
+        if (!connected || current !== generation || initialized && !latest.current.module) return;
         initialized = true;
+        if (latest.current.module) {
+          try { cleanup = activateModule(module, host, report); } finally { release(); }
+          return;
+        }
         let invoked: ReturnType<ControllerModule["default"]>;
         try { invoked = module.default(host); } finally { release(); }
         const result = await invoked;
@@ -467,6 +516,10 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         values["prop:value:" + name] = current.props()[name];
         values["prop:input:" + name] = current.propInputs?.(name);
         values["prop:validity:" + name] = JSON.stringify(current.propValidity?.(name));
+        if (current.inputs !== undefined) {
+          values["prop:status:" + name] = current.inputs.status(name);
+          values["prop:supplied:" + name] = current.inputs.supplied(name);
+        }
       }
       const replaced = new Set<string>();
       for (const [name, value] of Object.entries(values)) {

@@ -403,7 +403,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", focused: true });
   });
 
-  it("does not invoke a controller whose module resolves after disconnection", async () => {
+  for (const convention of ["controller", "module"] as const) it(`does not invoke ${convention} behavior whose import resolves after disconnection`, async () => {
     const page = await browser.newPage();
     let controllerRequested!: () => void;
     const requested = new Promise<void>((resolve) => { controllerRequested = resolve; });
@@ -414,7 +414,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       if (url.endsWith("/delayed.html")) {
         await route.fulfill({
           contentType: "text/html",
-          body: `<template component="x-delayed" status="early" summary="Delayed." controller="./delayed.js"><main>ready</main></template>`,
+          body: `<template component="x-delayed" status="early" summary="Delayed." ${convention}="./delayed.js"><main>ready</main></template>`,
         });
       } else if (url.endsWith("/delayed.js")) {
         controllerRequested();
@@ -423,7 +423,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           contentType: "text/javascript",
           body:
             `window.moduleLoads = (window.moduleLoads ?? 0) + 1;` +
-            `export default ({ effect }) => {` +
+            `export ${convention === "module" ? "function connect({ effect })" : "default ({ effect }) =>"} {` +
             ` window.controllerRuns = (window.controllerRuns ?? 0) + 1;` +
             ` effect(() => { window.effectRuns = (window.effectRuns ?? 0) + 1; });` +
             `};`,

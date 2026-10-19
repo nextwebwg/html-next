@@ -173,11 +173,13 @@ export async function loadNodeComponents(
       for (const dependency of module.dependencies) await visit(dependency);
     };
     for (const node of graph.nodes.values()) {
-      if (node.controller !== undefined) await visit(node.controller.url);
+      const edge = node.module ?? node.controller;
+      if (edge !== undefined) await visit(edge.url);
     }
   } else {
     for (const node of graph.nodes.values()) {
-      if (node.controller !== undefined) moduleInputs.add(node.controller.url);
+      const edge = node.module ?? node.controller;
+      if (edge !== undefined) moduleInputs.add(edge.url);
     }
   }
 

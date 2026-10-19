@@ -1,6 +1,7 @@
 import { COMPONENT_ATTRIBUTE } from "./component-styles.js";
 import { fail } from "./diagnostics.js";
 import { decodeHydrationValue } from "./hydration-value.js";
+import type { InputStatus } from "./inputs.js";
 
 /**
  * The rendered form's marks (slot ranges, carried projection). The live runtime and compiled
@@ -209,9 +210,17 @@ export const INSTANCE_ATTRIBUTE = "data-html-next-instance";
 
 export interface RenderedInstanceRecord {
   readonly explicit: readonly string[];
-  readonly inputs: Readonly<Record<string, { readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean }>>;
+  readonly inputs: Readonly<Record<string, {
+    readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean;
+    readonly provided?: boolean; readonly producer?: boolean;
+  }>>;
+  readonly availability?: Readonly<Record<string, InputStatus>>;
+  /** Only inputs whose source driver requested change identities need counters. */
+  readonly revisions?: Readonly<Record<string, number>>;
   readonly props: Readonly<Record<string, unknown>>;
   readonly state: Readonly<Record<string, unknown>>;
+  /** One-time state initializers already claimed by a seed or an explicit accepted write. */
+  readonly initialized?: readonly string[];
 }
 
 const renderedInstanceRecords = new WeakMap<Element, Readonly<Record<string, RenderedInstanceRecord>>>();
@@ -237,9 +246,26 @@ export function renderedInstanceRecord(element: Element, tag: string): RenderedI
         record.explicit.some((name) => typeof name !== "string") ||
         [record.inputs, record.props, record.state].some((value) => value === null || typeof value !== "object" || Array.isArray(value)) ||
         Object.values(record.inputs).some((input) => input === null || typeof input !== "object" ||
-          typeof input.present !== "boolean" || input.source !== "html" && input.source !== "value")) {
+          typeof input.present !== "boolean" || input.source !== "html" && input.source !== "value" ||
+          input.provided !== undefined && typeof input.provided !== "boolean" ||
+          input.producer !== undefined && typeof input.producer !== "boolean")) {
         fail("HR010", "Malformed rendered component instance record.");
       }
+      if (record.availability !== undefined) {
+        if (record.availability === null || typeof record.availability !== "object" || Array.isArray(record.availability) ||
+          Object.values(record.availability).some(status => status === null || typeof status !== "object" ||
+            typeof status.ready !== "boolean" || typeof status.pending !== "boolean" || typeof status.stale !== "boolean" ||
+            !status.ready && status.stale || status.error !== null && (typeof status.error !== "object" ||
+              typeof status.error.name !== "string" || typeof status.error.message !== "string"))) {
+          fail("HR010", "Malformed rendered input availability.");
+        }
+      }
+      if (record.revisions !== undefined && (record.revisions === null || typeof record.revisions !== "object" || Array.isArray(record.revisions) ||
+        Object.entries(record.revisions).some(([name, revision]) => !Object.hasOwn(record.props, name) || !Number.isSafeInteger(revision) || revision < 0))) {
+        fail("HR010", "Malformed rendered input revisions.");
+      }
+      if (record.initialized !== undefined && (!Array.isArray(record.initialized) || record.initialized.some(name =>
+        typeof name !== "string" || !Object.hasOwn(record.state, name)))) fail("HR010", "Malformed rendered state initialization ownership.");
     }
     renderedInstanceRecords.set(element, records);
     element.removeAttribute(INSTANCE_ATTRIBUTE);

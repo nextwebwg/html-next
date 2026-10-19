@@ -1,17 +1,19 @@
 import { add, divide, multiply, remainder, subtract } from "./decimal.js";
+import { inputDefault } from "./inputs.js";
 import { isNativeEvent } from "./freeze.js";
 import { parseExpression } from "./expression-parser.js";
 import { formatValue, formattingType } from "./format.js";
 import type { TypeNode } from "./type-system.js";
+import { ABSENT, NONCONFORMING } from "./expression-values.js";
 
 /** A missing read or an operation on missing/typed-invalid data. */
-export const ABSENT = Symbol("absent");
+export { ABSENT } from "./expression-values.js";
 /**
  * The result of evaluating a reference whose value breaks its declared type. Absence means "no
  * value here"; this means "a value that the declaration forbids", which must not reach the DOM or
  * recompute anything. Consumers keep whatever they last had instead.
  */
-export const NONCONFORMING = Symbol("nonconforming");
+export { NONCONFORMING } from "./expression-values.js";
 export type Absent = typeof ABSENT;
 
 export type Value =
@@ -290,9 +292,7 @@ function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope)
   }
   if (fn === "default") {
     if (args.length !== 2) return NONCONFORMING;
-    const value = evalNode(args[0]!, scope);
-    if (value === NONCONFORMING) return NONCONFORMING;
-    return value === ABSENT || value === null ? evalNode(args[1]!, scope) : value;
+    return inputDefault(() => evalNode(args[0]!, scope), () => evalNode(args[1]!, scope), ABSENT);
   }
   if (fn === "concat" || fn === "join") {
     const values: Value[] = [];

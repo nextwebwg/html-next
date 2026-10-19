@@ -6,6 +6,18 @@
 
 ## 1.0.0-alpha.59
 
+### Added
+
+- Live, compiled native and Vue components accept `<state from>` for an editable value initialized from the first available input. Early accepted edits win, record/list seeds are copied, refreshes preserve drafts, and rendered-form adoption retains initialization ownership. React and Svelte state initialization is still in progress.
+- `@nextwebwg/html-next/bindings` supplies selected-input data drivers over the renderer's typed input SDK. `BindingScope` owns reads, cancellation, refresh, subscriptions and scheduling without another accepted-value store. `bindModule` adapts static providers or a passive per-instance `create()` to named browser `connect`, with separate preparation for application hosts. Read snapshots match source, selected input and adopted input revision; handled failures transfer without an automatic duplicate request. See [the driver API](packages/html-next/docs/binding-drivers.md).
+- Binding selectors read declared state, computed values and context aliases through their existing state namespace. The input SDK exposes read-only declaration values and availability alongside writable props, and status-only computed changes notify dependent providers in live, native, React, Vue and Svelte output. Behavior-only binding modules work without a props boundary, keeping passive factory state across reconnects.
+- Live, compiled native, React, Vue and Svelte output renders asynchronous typed props and computed values with `$await`/`$error`/`$else`, including named status and error aliases. Computed values and conditional parent bindings follow the prerequisites each evaluation reads. Fixtures override sources, defaults stay available, and refreshes preserve success DOM. Data drivers can import the renderer-neutral SDK from `@nextwebwg/html-next/inputs`.
+- Component definitions accept `module="./behavior.js"` and a named `connect(host, { signal })` export. The live loader, native output, React, Vue, Svelte, package assembly, Vite integration and HTMLKit resolve the module and run its browser activation on each connection, preserving instance state. Deactivation cancels its signal and releases cleanup, including late async cleanup and connection-owned subscriptions. Server rendering leaves browser behavior unloaded. Generated host declarations include `Connect`; existing `controller` callbacks retain their once-per-instance behavior, and declaring both forms is an error.
+
+### Fixed
+
+- Preserve selected prop coercion from an invocation's HTML bootstrap while carrying typed input availability, keep `default()` fallbacks available, and retain accepted React computed values after invalid expression results.
+
 ### Breaking
 
 - `nullable` is no longer a declaration attribute, on a `<prop>`, a `<state>` or a nested field. A declared value keeps its type, as a reflected attribute such as `tabIndex` does ([Types](https://nextwebwg.org/declarative-components/types#null-and-missing-values)): a prop with a `default`, or a state with a `value`, always reads as its type, and null clears it back to that default or value; a prop or state with neither reads null until it is given one. A declaration with `nullable` is `HC013`, which says to remove it (the live parser warns and reads the declaration without it). To migrate, delete `nullable`; for a field written `required nullable`, delete both, since a missing field reads null.
@@ -54,6 +66,7 @@ To migrate, give each slot an identifier name, `labelAction` for `label-action`,
 
 ### Changed
 
+- The HTMLKit routing and navigation guides explain route groups with ordinary-folder and parenthesized-folder examples showing the resulting URLs, and describe when to use them for shared layouts and navigation headings.
 - `componentRegistry.update` replaces `updateComponentProps` and `updateGeneratedProps` as the one prop channel for code, for live, compiled and framework-attached instances alike, and refuses an undeclared prop with a `TypeError`.
 - `ComponentGraphRegistry` is the graph registry `loadBrowserComponents` and `startBrowserComponents` return, the name `ComponentRegistry` had; `ComponentRegistry` is the document registry's class.
 - The native Vite plugin keeps each component module whose definition registers on evaluation, except a component from an installed package that declares `sideEffects` as `false` or a list, which a build drops when nothing imports its factory.
