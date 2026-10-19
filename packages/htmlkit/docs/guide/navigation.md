@@ -69,9 +69,12 @@ The site's home page has no folder to order, so `hk:order` there is an error.
 
 ## Groups
 
-A [route group](/htmlkit/routes#route-groups), such as `01.(Getting started)/`, keeps its pages
-together in navigation, and their URLs skip it. Its number orders it among the pages and
-folders beside it, as for any folder, and its pages keep their own order inside it:
+A [route group](/htmlkit/routes#route-groups) is a folder with a name in parentheses, such as
+`(Getting started)`. Its pages appear together under that label in navigation. The folder's name
+is left out of their URLs: `app/pages/docs/(Getting started)/intro.html` is served at `/docs/intro/`.
+
+Add a number and a dot before the opening parenthesis, as in `01.(Getting started)/`, to order
+the group among the pages and folders beside it. Its pages keep their own order inside it:
 
 ```text
 app/pages/docs/

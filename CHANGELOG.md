@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.60
+
+### Changed
+
+- Explain route groups with ordinary and parenthesized folder paths side by side, showing exactly which folder name is left out of the URL and how the group appears in navigation.
+
 ## expressmark 0.0.1
 
 - Establish the independently versioned Expressive Markdown package with ESM/types, installed-consumer verification, and a protected release workflow. This is a name reservation with no public API; parsing and writing are not implemented.
