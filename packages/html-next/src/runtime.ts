@@ -3969,9 +3969,12 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
         if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
       });
     };
+    // Indexed reads: a NodeList's iterator costs more than the nodes it visits, and a batch is mostly
+    // text and markers, which `collect` leaves at once.
+    const visit = (nodes: NodeList): void => { for (let at = 0; at < nodes.length; at += 1) collect(nodes[at]!); };
     for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) collect(node);
-      for (const node of mutation.removedNodes) collect(node);
+      visit(mutation.addedNodes);
+      visit(mutation.removedNodes);
     }
     for (const element of changed) synchronize(element);
     // A mutation batch is one update: its head changes apply once, in the same update.
@@ -4734,11 +4737,14 @@ export function observeDocument(
       scopes.push(root);
     } else {
       const removed: Element[] = [];
-      for (const mutation of mutations) {
-        for (const node of mutation.removedNodes) {
+      for (let index = 0; index < mutations.length; index += 1) {
+        const { addedNodes, removedNodes } = mutations[index]!;
+        for (let at = 0; at < removedNodes.length; at += 1) {
+          const node = removedNodes[at]!;
           if (node.nodeType === 1) collectRemoved(node as Element, removed);
         }
-        for (const node of mutation.addedNodes) {
+        for (let at = 0; at < addedNodes.length; at += 1) {
+          const node = addedNodes[at]!;
           if (node.nodeType !== 1) continue;
           scopes.push(node as QueryRoot);
           if (options.onAdded !== undefined) {
