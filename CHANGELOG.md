@@ -11,6 +11,8 @@
 
 - A component whose root is the component it forwards a slot to, such as a relay whose root is a list it passes its scoped `row` slot on to, hydrates from Node output in place, through the live runtime and compiled modules. The single carrier held only the outer component's unrendered content, so the inner one lost the relay's `<template slot>` and hydration reported HR007.
   - A hydration fixture renders that relay in Node and hydrates it in Chromium, Firefox and WebKit, live and through compiled modules.
+- A component that forwards its own slot through an element it projects into a closed slot, `<x-panel><div slot="details"><slot name="details"></slot></div></x-panel>`, serializes the consumer's node once, in its own carrier, as the [Rendered form](https://nextwebwg.org/declarative-components/rendered-form) chapter requires. The inner component's carrier holds the element with the forwarding outlet's marks around an empty range, and hydration puts the node there when the slot opens. Server output copied the node into both carriers, and the marks inside a carrier were written as comments, which Chromium does not read as marks, so hydration through compiled modules failed there.
+  - Hydration fixtures forward through an element into a closed slot, an open one, and a closed one on a shared root, in Chromium, Firefox and WebKit, live and through compiled modules.
 
 ## 1.0.0-alpha.64
 
