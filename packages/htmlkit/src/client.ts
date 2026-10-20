@@ -6,13 +6,28 @@
  * Anything the payload cannot render falls back to the page's static HTML, which the components
  * adopt in place. docs/client-navigation.md records the design.
  */
-import type { adoptRenderedProps, generatedHost, replaceProjectedNode } from "@nextwebwg/html-next/generated-runtime";
+import type { adoptRenderedProps, flushComponent, generatedHost, replaceProjectedNode } from "@nextwebwg/html-next/generated-runtime";
+import type { BindingSnapshot } from "@nextwebwg/html-next/bindings";
+
+/** Consume only this component's read identities; the renderer adopts accepted values itself. */
+export function preparedBinding(root: Element, tag: string): BindingSnapshot | undefined {
+  const text = root.getAttribute("data-htmlkit-bindings");
+  if (text === null) return undefined;
+  const records = JSON.parse(text) as Record<string, BindingSnapshot>;
+  if (!Object.hasOwn(records, tag)) return undefined;
+  const snapshot = records[tag];
+  delete records[tag];
+  if (Object.keys(records).length === 0) root.removeAttribute("data-htmlkit-bindings");
+  else root.setAttribute("data-htmlkit-bindings", JSON.stringify(records));
+  return snapshot;
+}
 
 /** The compiled-runtime functions navigation uses, from the one runtime instance every page module shares. */
 export interface Runtime {
   readonly adoptRenderedProps: typeof adoptRenderedProps;
   readonly replaceProjectedNode: typeof replaceProjectedNode;
   readonly generatedHost: typeof generatedHost;
+  readonly flushComponent: typeof flushComponent;
 }
 export interface ClientOptions {
   readonly base: string;
@@ -25,15 +40,18 @@ type Prefetch = "interaction" | "visible" | "none";
  * A compiled component: its factory, which adopts a server-rendered root given as its third
  * argument, and the invocation attribute each of its props is written as.
  */
+type BindingAdopter = (root: Element, rendered: Element, update: () => void) => void;
 export type Component = readonly [factory: (options: object, html?: Record<string, string>, root?: Element) => Element,
-  props: Readonly<Record<string, string>>];
+  props: Readonly<Record<string, string>>, adoption?: () => Promise<BindingAdopter>];
 /** The JSON that document.ts's pagePayload writes. */
 interface Payload {
-  readonly version: 1;
+  readonly version: 1 | 2;
+  readonly rendered?: { readonly body: string; readonly head: string };
   readonly head: { readonly lang: string; readonly canonical?: string };
   readonly styles: readonly string[];
   readonly modules: readonly string[];
   readonly layers: readonly { readonly component: string; readonly attributes: Readonly<Record<string, string>>;
+    readonly props?: Readonly<Record<string, unknown>>;
     readonly state?: Readonly<Record<string, unknown>> }[];
 }
 
@@ -70,7 +88,7 @@ export function page(runtime: Runtime, options: ClientOptions, pageComponents: R
   document.dispatchEvent(new Event("hk:ready"));
 }
 
-const layer = (root: Document, index: number) => root.getElementById(`hk-layer-${index}`);
+const layer = (root: Document, index: number) => root.querySelector(`[data-hk-layer="${index}"]`) ?? root.getElementById(`hk-layer-${index}`);
 const fresh = (time: number) => performance.now() - time < 30_000;
 const loaded = async (url: string, signal?: AbortSignal): Promise<Response> => {
   const response = await fetch(url, signal === undefined ? {} : { signal });
@@ -87,30 +105,43 @@ interface Rendered { readonly next: Document; readonly layers: readonly Element[
  * layer renders, kept layouts included, so a kept layout gets its new props from its rendering.
  */
 async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
-  if (payload.version !== 1 || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
+  if (![1, 2].includes(payload.version) || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
   const next = document.implementation.createHTMLDocument("");
+  if (payload.version === 2) {
+    if (payload.rendered === undefined) throw new Error("HTMLKit cannot read this prepared page payload.");
+    next.head.innerHTML = payload.rendered.head;
+    next.body.innerHTML = payload.rendered.body;
+  }
   const append = (parent: Element, tag: string, attributes: Readonly<Record<string, string>>) => {
     const element = parent.appendChild(next.createElement(tag));
     for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
     return element;
   };
-  if (payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
+  if (payload.version === 1 && payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
   next.documentElement.lang = payload.head.lang;
+  if (payload.version === 2) {
+    const layers = payload.layers.map((_, index) => {
+      const root = layer(next, index);
+      if (root === null) throw new Error(`HTMLKit cannot find prepared layer ${index}.`);
+      return root;
+    });
+    return { next, layers, adopt: true };
+  }
   // Innermost first: each layer is projected into its layout's `page` slot, as its invocation is on the server.
   const layers: Element[] = [];
   for (let index = payload.layers.length - 1; index >= 0; index -= 1) {
-    const { component: tag, attributes: authored, state } = payload.layers[index]!;
+    const { component: tag, attributes: authored, props, state } = payload.layers[index]!;
     const component = components.get(tag);
     if (component === undefined) throw new Error(`HTMLKit cannot render <${tag}>: no page module defines it.`);
-    const attributes: Record<string, string> = { id: `hk-layer-${index}`, ...index === 0 ? {} : { slot: "page" } };
+    const attributes: Record<string, string> = { id: `hk-layer-${index}`, "data-hk-layer": String(index), ...index === 0 ? {} : { slot: "page" } };
     const html: Record<string, string> = {};
     for (const [name, value] of Object.entries(authored)) {
       const prop = component[1][name];
-      if (prop === undefined) attributes[name] = value; else html[prop] = value;
+      if (prop === undefined) attributes[name] = value; else if (props === undefined) html[prop] = value;
     }
-    const root = component[0]({ attributes, ...layers.length === 0 ? {} : { slots: { page: [layers[0]] } } }, html);
+    const root = component[0]({ ...props, attributes, ...layers.length === 0 ? {} : { slots: { page: [layers[0]] } } }, props === undefined ? html : undefined);
     if (state !== undefined) {
       const host = runtime.generatedHost(root);
       if (host === undefined) throw new Error(`HTMLKit cannot give layer ${index} its state.`);
@@ -289,6 +320,12 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       // Resolved against the page's URL: the next document has no <base>, which base-uri 'none' forbids.
       const modules = [...next.head.querySelectorAll('script[type="module"][src]')].map(script => import(/* @vite-ignore */ new URL(script.getAttribute("src")!, url).href));
       await Promise.all([...loading, ...modules]);
+      const adopting = [];
+      for (let index = 0; index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component"); index += 1) {
+        const tags = layer(document, index)!.getAttribute("data-component")!.split(/\s+/);
+        adopting.push(Promise.all(tags.map(tag => components.get(tag)?.[2]?.())));
+      }
+      const adopters = await Promise.all(adopting);
       const commit = () => {
         signal.throwIfAborted();
         committed = true;
@@ -300,7 +337,13 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         // and controllers, and take the new rendering's props. The page layer is always replaced.
         let index = 0;
         while (index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component")) {
-          runtime.adoptRenderedProps(layer(document, index)!, layers[index]!);
+          const update = () => runtime.adoptRenderedProps(layer(document, index)!, layers[index]!);
+          for (const [at, adoptPrepared] of adopters[index]!.entries()) {
+            const applyCaller = at === 0 ? update : () => {};
+            if (adoptPrepared === undefined) applyCaller();
+            else adoptPrepared(layer(document, index)!, layers[index]!, applyCaller);
+            runtime.flushComponent(layer(document, index)!);
+          }
           index += 1;
         }
         // A page sits in its layout's slot; the layout projects the new page as it did the old one.

@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import { availableParallelism } from "node:os";
+import { once, getEventListeners } from "node:events";
+import { MessageChannel } from "node:worker_threads";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, it } from "vitest";
+import { JSDOM } from "jsdom";
 
+import { renderedInstanceRecord } from "../src/rendered-form.js";
 import { parseComponent } from "../src/source-parser.js";
-import { closeRenderWorkers, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
+import { closeRenderWorkers, createRenderer, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
 
 const counter = parseComponent(`<template component="x-server-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
@@ -13,6 +21,247 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("addresses each component host by tag when definitions share a native root", async () => {
+    const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf><span>{$ownerText}</span></named-leaf></template>');
+    const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article><b>{$leafText}</b><slot></slot></article></template>');
+    const source = `export function prepare({ document, host }) {
+      const root = document.querySelector('#subject');
+      const owner = host(root, 'named-owner'); const leaf = host(root, 'named-leaf');
+      if (!owner || !leaf || owner === leaf || host(root, 'missing')) throw new Error('Named host lookup failed');
+      owner.state.ownerText = 'Owner updated'; leaf.state.leafText = 'Leaf updated';
+    }`;
+    const result = await renderComponents('<named-owner id="subject"></named-owner>', { definitions: [owner, leaf],
+      prepare: { module: "data:text/javascript," + encodeURIComponent(source) } });
+    assert.match(result.html, /<b>Leaf updated<\/b>/);
+    const document = new JSDOM(result.html).window.document;
+    assert.equal(document.querySelector("span")?.textContent, "Owner updated");
+  });
+  const preparation = new URL("./fixtures/server-prepare.mjs", import.meta.url).href;
+  const product = parseComponent(`<template component="x-prepared"><defs>
+    <prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs>
+    <section><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
+    <x-server-counter $await="$product" from:label="$product"></x-server-counter></section></template>`);
+  it("closes one renderer's active and queued work while another renderer completes its private read", async () => {
+    const first = createRenderer({ workers: 1 }); const second = createRenderer({ workers: 1 });
+    const ports = [new MessageChannel(), new MessageChannel(), new MessageChannel()];
+    const started = once(ports[0]!.port1, "message");
+    const closed = ports.slice(0, 2).map(channel => once(channel.port1, "close"));
+    const stopped = assert.rejects(first.render("", { definitions: [], prepare: { module: preparation, port: ports[0]!.port2, data: { wait: true } } }), /exited without a result/);
+    let queued: Promise<void> | undefined;
+    let incoming: Promise<RenderedComponents> | undefined;
+    try {
+      await started;
+      queued = assert.rejects(first.render("", { definitions: [], prepare: { module: preparation, port: ports[1]!.port2, data: { wait: true } } }), /exited without a result/);
+      const requested = new Promise<void>(resolve => ports[2]!.port1.on("message", message => { if (message.event === "read") resolve(); }));
+      incoming = second.render('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter],
+        prepare: { module: preparation, port: ports[2]!.port2, data: { query: "other" } } });
+      void incoming.catch(() => {});
+      await requested;
+      await Promise.all([first.close(), first.close(), stopped, queued, ...closed]);
+      await assert.rejects(first.render("", { definitions: [] }), /renderer is closed/);
+      assert.throws(() => first.setWorkers(2), /renderer is closed/);
+      const rejected = new MessageChannel();
+      try {
+        const rejectedClosed = once(rejected.port1, "close");
+        await assert.rejects(first.render("", { definitions: [], prepare: { module: preparation, port: rejected.port2 } }), /renderer is closed/);
+        await rejectedClosed;
+      } finally { rejected.port1.close(); rejected.port2.close(); }
+      ports[2]!.port1.postMessage("Other application");
+      assert.match((await incoming).html, /<h1>Other application<\/h1>/);
+      assert.match((await second.render('<x-server-counter></x-server-counter>', { definitions: [counter] })).html, /<h2>Counter<\/h2>/);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+      await queued; await incoming?.catch(() => {});
+      for (const channel of ports) { channel.port1.close(); channel.port2.close(); }
+    }
+  });
+  it("owns its native ESM cache until close and imports edited adapters in a fresh renderer", async () => {
+    const first = createRenderer({ workers: 1 }); const second = createRenderer({ workers: 1 });
+    const directory = await mkdtemp(join(tmpdir(), "html-next-renderer-"));
+    const entry = join(directory, "prepare.mjs");
+    const adapter = (value: string) => `export function prepare({ document }) { document.body.append(document.createTextNode(${JSON.stringify(value)})); }`;
+    const options = { definitions: [], prepare: { module: pathToFileURL(entry).href } };
+    try {
+      await writeFile(entry, adapter("First module"));
+      assert.equal((await first.render("", options)).html, "First module");
+      await writeFile(entry, adapter("Edited module"));
+      assert.equal((await first.render("", options)).html, "First module");
+      assert.equal((await second.render("", options)).html, "Edited module");
+      await first.close();
+      assert.equal((await second.render("", options)).html, "Edited module");
+    } finally { await Promise.all([first.close(), second.close()]); await rm(directory, { recursive: true, force: true }); }
+  });
+  it("retires a completed excess worker before assigning queued work after a resize", async () => {
+    const renderer = createRenderer({ workers: 2 });
+    const module = new URL("./fixtures/server-worker-id.mjs", import.meta.url).href;
+    const ports = [new MessageChannel(), new MessageChannel(), new MessageChannel()];
+    const started = ports.map(channel => once(channel.port1, "message"));
+    const options = (index: number) => ({ definitions: [], prepare: { module, port: ports[index]!.port2, data: { id: String(index) } } });
+    const running = [renderer.render("", options(0)), renderer.render("", options(1))];
+    let queued: Promise<RenderedComponents> | undefined;
+    try {
+      const [first, second] = (await Promise.all(started.slice(0, 2))).map(([message]) => message as { threadId: number });
+      assert.notEqual(first!.threadId, second!.threadId);
+      assert.throws(() => renderer.setWorkers(0), RangeError);
+      renderer.setWorkers(1);
+      ports[2]!.port1.on("message", () => ports[2]!.port1.postMessage("Continue"));
+      queued = renderer.render("", options(2));
+      ports[0]!.port1.postMessage("Continue");
+      assert.equal((await running[0]!).html, "0");
+      ports[1]!.port1.postMessage("Continue");
+      assert.equal((await running[1]!).html, "1");
+      const [last] = await started[2]!;
+      assert.equal(last.threadId, second!.threadId);
+      assert.equal((await queued).html, "2");
+    } finally {
+      await renderer.close();
+      await Promise.all([...running, ...queued === undefined ? [] : [queued]].map(promise => promise.catch(() => {})));
+      for (const channel of ports) { channel.port1.close(); channel.port2.close(); }
+    }
+  });
+  it("prepares typed providers in the worker through a private message channel without connecting browser behavior", async () => {
+    const { port1, port2 } = new MessageChannel();
+    const messages: unknown[] = [];
+    const closed = once(port1, "close");
+    port1.on("message", message => { messages.push(message); if (message.event === "read") port1.postMessage("Prepared " + message.query); });
+    const signal = new AbortController().signal;
+    try {
+      const result = await renderComponents('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter], signal,
+        prepare: { module: preparation, data: { query: "A" }, port: port2 } });
+      await closed;
+      assert.match(result.html, /<h1>Prepared A<\/h1>/);
+      assert.match(result.html, /<output>Prepared A<\/output>/);
+      assert.match(result.html, /<h2>Prepared A<\/h2>/);
+      assert.match(result.html, /data-prepared="preparation-test"/);
+      assert.doesNotMatch(result.html, /Waiting\./);
+      assert.deepEqual(messages, [{ event: "start", query: "A" }, { event: "read", query: "A" }, { event: "cleanup", aborted: true }]);
+      assert.equal(getEventListeners(signal, "abort").length, 0);
+    } finally { port1.close(); port2.close(); }
+  });
+  it("cancels queued and noncooperative active renders independently and recovers the worker slot", async () => {
+    setRenderWorkers(1);
+    const { port1, port2 } = new MessageChannel();
+    const active = new AbortController(); const queued = new AbortController();
+    const reason = new Error("Stop active render"); const queuedReason = new Error("Stop queued render");
+    const started = once(port1, "message"); const closed = once(port1, "close");
+    const rendering = renderComponents('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter], signal: active.signal,
+      prepare: { module: preparation, data: { query: "held", wait: true }, port: port2 } });
+    const stopped = assert.rejects(rendering, error => error === reason);
+    try {
+      assert.deepEqual((await started)[0], { event: "start", query: "held" });
+      const queuedPorts = new MessageChannel();
+      try {
+        const queuedClosed = once(queuedPorts.port1, "close");
+        const waiting = renderComponents('<x-server-counter></x-server-counter>', { definitions: [counter], signal: queued.signal,
+          prepare: { module: preparation, data: { query: "queued" }, port: queuedPorts.port2 } });
+        const cancelled = assert.rejects(waiting, error => error === queuedReason);
+        queued.abort(queuedReason); await cancelled; await queuedClosed;
+      } finally { queuedPorts.port1.close(); queuedPorts.port2.close(); }
+      assert.equal(active.signal.aborted, false);
+      active.abort(reason); await stopped; await closed;
+      isolated(await conflicting(4), 4);
+      assert.equal(getEventListeners(active.signal, "abort").length, 0);
+      assert.equal(getEventListeners(queued.signal, "abort").length, 0);
+      await assert.rejects(renderComponents("", { definitions: [], signal: active.signal }), error => error === reason);
+    } finally { active.abort(reason); port1.close(); port2.close(); setRenderWorkers(Math.min(availableParallelism(), 8)); }
+  });
+  it("closes transferred ports after preparation failure or async cleanup failure and keeps rendering", async () => {
+    for (const [data, message] of [[{ fail: true }, "Preparation refused"], [{ cleanupFail: true }, "Cleanup refused"]] as const) {
+      const { port1, port2 } = new MessageChannel();
+      const closed = once(port1, "close");
+      port1.on("message", message => { if (message.event === "read") port1.postMessage("Private result"); });
+      try {
+        await assert.rejects(renderComponents('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter],
+          prepare: { module: preparation, data: { query: "B", ...data }, port: port2 } }), new RegExp(message));
+        await closed;
+        isolated(await conflicting(4), 4);
+      } finally { port1.close(); port2.close(); }
+    }
+    const { port1, port2 } = new MessageChannel();
+    const closed = once(port1, "close");
+    try {
+      await assert.rejects(renderComponents("", { definitions: [], url: "invalid URL", prepare: { module: preparation, port: port2 } }), /Invalid URL/);
+      await closed;
+      isolated(await conflicting(4), 4);
+    } finally { port1.close(); port2.close(); }
+  });
+  it("closes active and queued preparations together without dispatching another job during shutdown", async () => {
+    setRenderWorkers(1);
+    const active = new MessageChannel(); const queued = new MessageChannel();
+    const cancel = new AbortController();
+    const started = once(active.port1, "message");
+    const closed = Promise.all([once(active.port1, "close"), once(queued.port1, "close")]);
+    const rendering = renderComponents("", { definitions: [], prepare: { module: preparation, port: active.port2, data: { wait: true } } });
+    const stopped = assert.rejects(rendering, /exited without a result/);
+    let status = "pending";
+    let waiting: Promise<unknown> | undefined;
+    try {
+      await started;
+      waiting = renderComponents("", { definitions: [], signal: cancel.signal,
+        prepare: { module: preparation, port: queued.port2, data: { wait: true } } }).then(
+        () => { status = "resolved"; }, error => { status = "rejected"; return error; });
+      await closeRenderWorkers(); await stopped;
+      assert.equal(status, "rejected");
+      assert.match(String(await waiting), /exited without a result/);
+      await closed;
+      assert.equal(getEventListeners(cancel.signal, "abort").length, 0);
+      isolated(await conflicting(4), 4);
+    } finally {
+      cancel.abort(); await waiting; await closeRenderWorkers();
+      active.port1.close(); active.port2.close(); queued.port1.close(); queued.port2.close();
+      setRenderWorkers(Math.min(availableParallelism(), 8));
+    }
+  });
+  it("rejects invalid preparation modules and non-cloneable input without retaining a worker slot", async () => {
+    setRenderWorkers(1);
+    try {
+      for (const [source, message] of [
+        ["export default () => {}", "must export a named prepare function"],
+        ["export const prepare = () => 5", "must return cleanup or undefined"],
+        ["throw new Error('Module refused')", "Module refused"],
+      ]) {
+        await assert.rejects(renderComponents("", { definitions: [], prepare: { module: "data:text/javascript," + encodeURIComponent(source!) } }), new RegExp(message!));
+        isolated(await conflicting(4), 4);
+      }
+      for (const aborted of [false, true]) {
+        const { port1, port2 } = new MessageChannel();
+        const closed = once(port1, "close"); const controller = new AbortController();
+        const reason = new Error("Already aborted");
+        if (aborted) controller.abort(reason);
+        try {
+          await assert.rejects(renderComponents("", { definitions: [], signal: controller.signal,
+            prepare: { module: preparation, port: port2, data: () => "Not cloneable" } }),
+            error => aborted ? error === reason : (error as Error).name === "DataCloneError");
+          await closed;
+          assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+          isolated(await conflicting(4), 4);
+        } finally { port1.close(); port2.close(); }
+      }
+    } finally { setRenderWorkers(Math.min(availableParallelism(), 8)); }
+  });
+  it("accepts typed caller props before state initialization and records null separately from omission", async () => {
+    const definition = parseComponent(`<template component="x-initial-props"><defs>
+      <prop name="label" type="string" default="Default">Label.</prop>
+      <state name="draft" type="string" from="$label"></state></defs>
+      <article><h1>{$label}</h1><output>{$draft}</output></article></template>`);
+    const rendered = await renderComponents('<x-initial-props id="typed" label="HTML"></x-initial-props><x-initial-props id="null" label="HTML"></x-initial-props><x-initial-props id="released" label="HTML"></x-initial-props><x-initial-props id="implicit"></x-initial-props>', {
+      definitions: [definition], props: { "#typed": { label: "Typed" }, "#null": { label: null }, "#released": { label: undefined } },
+    });
+    const dom = new JSDOM(rendered.html);
+    try {
+      for (const [id, label, supplied] of [["typed", "Typed", true], ["null", "Default", true], ["released", "Default", false], ["implicit", "Default", false]] as const) {
+        const root = dom.window.document.getElementById(id)!;
+        assert.equal(root.querySelector("h1")!.textContent, label);
+        assert.equal(root.querySelector("output")!.textContent, label);
+        const input = renderedInstanceRecord(root, "x-initial-props")!.inputs.label!;
+        assert.equal(input.provided ?? input.present, supplied);
+        if (id === "null") assert.equal(input.value, null);
+      }
+    } finally { dom.window.close(); }
+    await assert.rejects(renderComponents('<x-initial-props></x-initial-props>', { definitions: [definition], props: { "#missing": { label: "No" } } }), /matches no component/);
+    await assert.rejects(renderComponents('<div id="plain"></div>', { definitions: [definition], props: { "#plain": { label: "No" } } }), /does not identify a component/);
+    await assert.rejects(renderComponents('<x-initial-props id="wrong"></x-initial-props>', { definitions: [definition], props: { "#wrong": { unknown: true } } }), /declares no prop/);
+  });
   it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: '&lt;b&gt;Ada&lt;/b&gt;' }]"></state>

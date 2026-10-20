@@ -31,6 +31,22 @@ afterEach(() => {
 });
 
 describe("selected input provider scopes", () => {
+  it("captures only selected and sampled declarations for a host transfer", async () => {
+    let operation!: BindingOperation;
+    const source = definition.replace('<prop name="id"', '<state name="opaque" type="unknown"></state><state name="query" type="string" value="search"></state><prop name="id"');
+    const { scope, root } = fixture({ value: {
+      input: (props, { state }) => ({ id: props.id, query: state.query }), sample: props => props.sample,
+      load: (input, context) => { operation = context; context.captureInputs!(); return input.id; },
+    } }, {}, "<x-bound></x-bound>", source);
+    getComponentHost(root)!.state.opaque = new Map([["ui", "only"]]);
+    scope.activate(); await scope.settled();
+    const first = operation.captureInputs!();
+    assert.deepEqual(first, { props: { id: 1, sample: "original" }, state: { query: "search" } });
+    (first.props as Record<string, unknown>).id = 999;
+    assert.equal(operation.captureInputs!().props.id, 1);
+    assert.equal(operation.captureInputs!(["enabled"]).props.enabled, true);
+    assert.equal(operation.captureInputs!(["second"]).props.enabled, true, "augmenting a frame preserves previously captured fields");
+  });
   it("preserves host context getters rather than sampling them at construction", async () => {
     let activePort!: ComponentInputs; let contextReads = 0;
     const selected: unknown[] = [];

@@ -2,17 +2,305 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { encodeHydrationValue, decodeHydrationValue } from "../../html-next/src/bindings.js";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { fixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it.each([false, true])("prepares a layout provider when a typed id prop supplies the native root id (delegated: %s)", async delegated => {
+    const root = await retainedProviderFixture(delegated); roots.push(root);
+    const application = await createApplication({ root, services: { read: (id: string) => "Product:" + id } });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain('id="A"');
+      expect(page.body).toContain("<h2>Product:A</h2>");
+    } finally { await application.close(); }
+  });
+  it("recomputes private read inputs and authorizes each real request without exposing private failures", async () => {
+    const root = await privateFixture(); roots.push(root);
+    const source = await readFile(join(root, "app/pages/index.ts"), "utf8");
+    await write(root, "app/pages/index.ts", source.replace("state.query", "state.query.toUpperCase()"));
+    let reads = 0;
+    const application = await createApplication({ root, services: { read(query: string, context: { phase: string; cookies: ReadonlyMap<string, string> }) {
+      reads += 1;
+      if (context.phase === "build") return "Build";
+      if (!context.cookies.has("user")) throw new Response("Sign in", { status: 403 });
+      if (query === "SECRET") throw new Error("DO_NOT_EXPOSE_PRIVATE_DETAILS");
+      return query + ":" + context.cookies.get("user");
+    } } });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const page = await application.render("/");
+      const revision = page.components.find(component => component.definition.contract.tag === "client-page")!.binding!.source;
+      const packet = { version: 1, source: revision, tag: "client-page", name: "label", url: "http://localhost/",
+        inputs: encodeHydrationValue({ props: {}, state: { query: "b" } }) };
+      const send = (body = packet, user = true) => application.fetch(new Request("http://localhost/_htmlkit/read", {
+        method: "POST", headers: { "content-type": "application/json", ...user ? { cookie: "user=Grace" } : {} }, body: JSON.stringify(body),
+      }));
+      const response = await send();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(decodeHydrationValue((await response.json()).value)).toBe("B:Grace");
+      expect((await send(packet, false)).status).toBe(403);
+      expect((await send({ ...packet, inputs: encodeHydrationValue({ props: {}, state: { query: 42 } }) })).status).toBe(400);
+      expect((await send({ ...packet, name: "constructor" })).status).toBe(404);
+      expect((await send({ ...packet, source: "stale" })).status).toBe(409);
+      expect((await send({ ...packet, inputs: ["reference", 999] })).status).toBe(400);
+      expect((await send({ ...packet, url: "https://elsewhere.test/" })).status).toBe(400);
+      expect((await send({ ...packet, inputs: encodeHydrationValue({ props: {}, state: { query: "b", invented: true } }) })).status).toBe(400);
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/read"))).status).toBe(405);
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/read", { method: "POST", headers: { origin: "https://elsewhere.test" }, body: JSON.stringify(packet) }))).status).toBe(403);
+      expect(reads).toBe(3);
+      const failed = await send({ ...packet, inputs: encodeHydrationValue({ props: {}, state: { query: "secret" } }) });
+      expect(failed.status).toBe(500);
+      expect(await failed.text()).not.toContain("DO_NOT_EXPOSE_PRIVATE_DETAILS");
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally { logged.mockRestore(); await application.close(); }
+  });
+  it("aborts parent-owned private work when its server render is cancelled", async () => {
+    const root = await privateFixture(); roots.push(root);
+    let started!: () => void; let stopped!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const cancelled = new Promise<void>(resolve => { stopped = resolve; });
+    const application = await createApplication({ root, services: { read(_query: string, { signal }: { signal: AbortSignal }) {
+      started();
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => { stopped(); reject(signal.reason); }, { once: true }));
+    } } });
+    const abort = new AbortController();
+    const result = application.fetch(new Request("http://localhost/live/?q=hold", { signal: abort.signal }));
+    const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+    try {
+      await reading; abort.abort(); await rejected; await cancelled;
+    } finally { abort.abort(); await application.close(); }
+  });
+  it("closes only its own pending private browser reads", async () => {
+    const root = await privateFixture(); roots.push(root);
+    let started!: () => void; let stopped!: () => void; let complete!: (value: string) => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const cancelled = new Promise<void>(resolve => { stopped = resolve; });
+    const services = { read(query: string, { phase, signal }: { phase: string; signal: AbortSignal }) {
+      if (phase === "build" || query !== "hold") return query;
+      started(); return new Promise<string>(resolve => { complete = resolve; signal.addEventListener("abort", stopped, { once: true }); });
+    } };
+    const application = await createApplication({ root, services });
+    const other = await createApplication({ root, services });
+    try {
+      const source = (await application.render("/")).components.find(component => component.binding !== undefined)!.binding!.source;
+      const result = application.fetch(new Request("http://localhost/_htmlkit/read", { method: "POST", body: JSON.stringify({
+        version: 1, source, tag: "client-page", name: "label", url: "http://localhost/", inputs: encodeHydrationValue({ props: {}, state: { query: "hold" } }),
+      }) }));
+      const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+      await reading; await application.close(); await cancelled; await rejected;
+      complete("Late result");
+      expect((await other.render("/")).body).toContain("<h1>A</h1>");
+    } finally { await Promise.all([application.close(), other.close()]); }
+  });
+  it("runs private readers with real request context and parent-owned services", async () => {
+    const root = await privateFixture(); roots.push(root);
+    const calls: string[] = [];
+    const application = await createApplication({ root, services: { async read(query: string, context: { phase: string; signal: AbortSignal; request: Request }) {
+      context.signal.throwIfAborted();
+      calls.push(context.phase + ':' + query);
+      return context.phase + ':' + query + (context.phase === 'request' ? ':' + context.request.headers.get('x-user') : '');
+    } } });
+    try {
+      expect((await application.render("/")).body).toContain("<h1>build:A</h1>");
+      expect((await application.render("/fixture/")).body).toContain("<h1>Fixture</h1>");
+      const response = await application.fetch(new Request("http://localhost/live/?q=C", { headers: { 'x-user': 'Ada' } }));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("<h1>request:C:Ada</h1>");
+      expect(calls).toEqual(["build:A", "request:C"]);
+    } finally { await application.close(); }
+  });
+  it("distinguishes private registrations for different definitions sharing a tag and common module", async () => {
+    const root = await privateFixture(); roots.push(root);
+    for (const [page, file] of [["index", "one"], ["fixture", "two"]] as const) {
+      const source = await readFile(join(root, `app/pages/${page}.html`), "utf8");
+      await write(root, `app/pages/${page}.html`, `<link rel="component" href="../components/${file}.html">` + source.replace("</main>", "<shared-private></shared-private></main>"));
+      await write(root, `app/components/${file}.html`, `<template component="shared-private" module="../pages/index.ts"><defs>
+        <prop name="label" type="string" required>Label.</prop><state name="query" type="string" value="A"></state></defs><section><p $await="$label">{$label}</p></section></template>`);
+    }
+    const application = await createApplication({ root, services: { read: () => "Prepared" } });
+    try {
+      const first = (await application.render("/")).components.find(component => component.definition.contract.tag === "shared-private")!;
+      const second = (await application.render("/fixture/")).components.find(component => component.definition.contract.tag === "shared-private")!;
+      expect(first.binding!.source).not.toBe(second.binding!.source);
+    } finally { await application.close(); }
+  });
+  it("keeps client companions out of server imports while preserving shared selectors and fixtures", async () => {
+    const root = await environmentFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain("Waiting.");
+      expect(page.components.find(component => component.definition.contract.tag === "client-page")).toMatchObject({ client: join(root, "app/pages/index.client.ts") });
+      expect((await application.render("/only/")).body).toContain("Waiting.");
+      expect((await application.render("/mixed/")).body).toContain("<h1>build:A</h1>");
+      expect((await application.render("/fixture/")).body).toContain("<h1>Fixture</h1>");
+      const live = await application.fetch(new Request("http://localhost/live/?q=C"));
+      expect(live.status).toBe(200);
+      expect(await live.text()).toContain("Waiting.");
+    } finally { await application.close(); }
+  });
+  it("bundles client readers only into the browser graph", async () => {
+    const root = await environmentFixture(); roots.push(root);
+    const result = await buildApplication({ root });
+    expect(result.browserInputs.some(file => file.includes("index.client.ts"))).toBe(true);
+    const directory = join(result.outDir, "_htmlkit/server");
+    const files = await readdir(directory, { recursive: true });
+    for (const file of files.filter(file => file.endsWith(".js"))) {
+      expect(await readFile(join(directory, file), "utf8")).not.toMatch(/CLIENT_GRAPH_ONLY|environmentCreates|@example\/browser-only/);
+    }
+  });
+  for (const query of ["", "?raw", "?url"]) it(`refuses a client companion's transitive import of a private server module${query}`, async () => {
+    const root = await environmentFixture(); roots.push(root);
+    await write(root, "app/lib/secret.server.ts", 'export const secret = "SERVER_GRAPH_SECRET";');
+    await write(root, "app/pages/only.client.ts", `import ${query === "" ? "{ secret }" : "secret"} from "../lib/secret.server.ts${query}"; export const props = { label: { input: () => null, load: () => secret } };`);
+    await expect(buildApplication({ root })).rejects.toThrow(/secret\.server\.ts.*server-only|server-only.*secret\.server\.ts/s);
+  });
+  it("diagnoses ambiguous client companions and honors an explicitly selected client entry", async () => {
+    const root = await environmentFixture(); roots.push(root);
+    await write(root, "app/pages/only.client.js", "export function connect() {};");
+    const application = await createApplication({ root });
+    try {
+      await expect(application.render("/only/")).rejects.toThrow(/ambiguous.*only\.client\.js.*only\.client\.ts/);
+      const source = await readFile(join(root, "app/pages/only.html"), "utf8");
+      await write(root, "app/pages/only.html", source.replace('component="client-only-page"', 'component="client-only-page" module="./only.client.ts"'));
+      const page = await application.render("/only/");
+      expect(page.components.find(component => component.definition.contract.tag === "client-only-page")).toMatchObject({ client: join(root, "app/pages/only.client.ts") });
+      expect(page.body).toContain("Waiting.");
+    } finally { await application.close(); }
+  });
+  it("keeps local type exports out of server preparation", async () => {
+    const root = await universalFixture(); roots.push(root);
+    await write(root, "app/components/browser-only.ts", `import { doc } from "@example/browser-only";
+      interface LocalProps { label: string }
+      type LocalCreate = () => LocalProps;
+      export { LocalProps as props, LocalCreate as create };
+      export function connect(host) { host.root.dataset.browser = doc === host.root.ownerDocument ? "connected" : "wrong"; }`);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain("<h1>build:A</h1>");
+      expect(page.components.find(component => component.definition.contract.tag === "browser-only-node")?.binding).toBeUndefined();
+    } finally { await application.close(); }
+  });
+  it("diagnoses required inputs that have no caller or provider", async () => {
+    const root = await universalFixture(); roots.push(root);
+    const source = await readFile(join(root, "app/pages/index.html"), "utf8");
+    await write(root, "app/pages/index.html", source.replace('<state name="query"', '<prop name="missing" type="string" required>Missing input.</prop><state name="query"'));
+    const application = await createApplication({ root });
+    try { await expect(application.render("/")).rejects.toThrow(/required prop `missing` of <universal-page>/); }
+    finally { await application.close(); }
+  });
+  it("prepares shared component providers for prerender and SSR while bypassing fixtures and browser-only modules", async () => {
+    const root = await universalFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    let preparedModule: string | undefined;
+    try {
+      const page = await application.render("/");
+      preparedModule = page.components.find(component => component.definition.contract.tag === "universal-page")!.binding!.module;
+      expect(existsSync(fileURLToPath(preparedModule))).toBe(true);
+      expect(page.body).toContain("<h1>build:A</h1>");
+      expect(page.body).toContain('value="build:A"');
+      expect(titleOf(page)).toBe("Product build:A");
+      expect(page.body).toContain('<p class="details">build:details:build:A</p>');
+      expect(page.body).toContain('<output class="details-draft">build:details:build:A</output>');
+      expect(page.body).not.toContain('data-connections="1"');
+      expect(page.body).toContain("Browser behavior");
+      const supplied = await application.render("/fixture/");
+      expect(supplied.body).toContain("<h1>Fixture</h1>");
+      expect(supplied.body).toContain('value="Fixture"');
+      const live = await application.fetch(new Request("http://localhost/live/?q=C"));
+      expect(live.status).toBe(200);
+      expect(await live.text()).toContain("<h1>request:C</h1>");
+      const failed = await application.fetch(new Request("http://localhost/live/?q=bad"));
+      expect(failed.status).toBe(200);
+      expect(await failed.text()).toContain('<p class="error">Unavailable product</p>');
+      const delegated = await application.render("/delegated/");
+      expect(delegated.body).toContain("<h1>build:A</h1>");
+      expect(delegated.body).toContain('<strong class="shell-label">build:shell</strong>');
+      const deferred = await application.render("/deferred/");
+      expect(deferred.body).toContain("Waiting.");
+      expect(deferred.body).not.toContain("<h1>");
+    } finally { await application.close(); }
+    expect(existsSync(fileURLToPath(preparedModule!))).toBe(false);
+  });
+  it("reloads transitive provider dependencies for concurrent development requests", async () => {
+    const root = await universalFixture(); roots.push(root);
+    const server = await devApplication({ root, port: 0 });
+    try {
+      expect(await (await fetch(server.url)).text()).toContain("<h1>build:A</h1>");
+      const source = await readFile(join(root, "lib/product.ts"), "utf8");
+      await write(root, "lib/product.ts", source.replace("phase + ':' + query", "'Updated:' + query"));
+      await expect.poll(async () => Promise.all(Array.from({ length: 3 }, async () => (await fetch(server.url)).text())), { timeout: 10_000 })
+        .toEqual(Array.from({ length: 3 }, () => expect.stringContaining("<h1>Updated:A</h1>")));
+    } finally { await Promise.all([server.close(), server.close()]); }
+  }, 60_000);
+  it("resolves a prepared module's package imports from the application", async () => {
+    const root = await universalFixture(); roots.push(root);
+    await write(root, "node_modules/@example/shared-record/package.json", '{"name":"@example/shared-record","type":"module","exports":"./index.js"}');
+    await write(root, "node_modules/@example/shared-record/index.js", 'export const record = name => ({ name });');
+    const source = await readFile(join(root, "lib/product.ts"), "utf8");
+    await write(root, "lib/product.ts", 'import { record } from "@example/shared-record";\n' + source.replace("return { name: phase + ':' + query };", "return record(phase + ':' + query);"));
+    const application = await createApplication({ root });
+    try { expect((await application.render("/")).body).toContain("<h1>build:A</h1>"); }
+    finally { await application.close(); }
+  });
+  it("preserves omitted defaults and supplied null inputs in SSR and navigation payloads", async () => {
+    const root = await bindingFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/defaults/");
+      expect(page.body).toContain("<h1>Default</h1>");
+      expect(page.body).toContain('<output class="count">0</output>');
+      expect(page.body).not.toContain("Nullable waiting.");
+      expect(page.layers.at(-1)).toMatchObject({ attributes: { label: "Default", count: "0" }, props: { nullable: null, count: null } });
+      const payload = await (await application.fetch(new Request("http://localhost/_htmlkit/pages/defaults/payload.json"))).json();
+      expect(payload.layers.at(-1).props).toEqual({ nullable: null, count: null });
+    } finally { await application.close(); }
+  });
+  it("uses HTML navigation when JSON would change a typed caller input", async () => {
+    const root = await app();
+    await write(root, "extra/signed.html", '<template component="signed-page"><defs><prop name="value" type="number" required>Value.</prop></defs><output>{$value}</output></template>');
+    await write(root, "extra/signed.server.ts", 'export const load = () => ({ props: { value: -0 } });');
+    const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/signed.html", server: "extra/signed.server.ts" }] });
+    try {
+      expect((await application.render("/")).body).toContain(">0</output>");
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/pages/payload.json"))).status).toBe(404);
+    } finally { await application.close(); }
+  });
+  it("resolves a component's sibling module without running its browser providers", async () => {
+    const root = await bindingFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.components.find(component => component.definition.contract.tag === "binding-card")?.module).toBe(join(root, "app/components/card.ts"));
+      expect(page.body).toContain("Waiting.");
+      expect(page.body).toContain("Fixture");
+      await write(root, "app/components/card.js", "export function connect() {};");
+      await expect(application.render("/")).rejects.toThrow(/ambiguous.*card\.(?:js|ts)|card\.(?:js|ts).*ambiguous/i);
+      const source = await readFile(join(root, "app/components/card.html"), "utf8");
+      await write(root, "app/components/card.html", source.replace('component="binding-card"', 'component="binding-card" module="./card.ts"'));
+      expect((await application.render("/")).components.find(component => component.definition.contract.tag === "binding-card")?.module).toBe(join(root, "app/components/card.ts"));
+      await write(root, "app/components/card.html", (await readFile(join(root, "app/components/card.html"), "utf8")) + '<template component="card-helper"><small>Helper</small></template>');
+      const carrier = await application.render("/");
+      expect(carrier.components.find(component => component.definition.contract.tag === "binding-card")?.module).toBe(join(root, "app/components/card.ts"));
+      expect(carrier.components.find(component => component.definition.contract.tag === "card-helper")?.module).toBeUndefined();
+      await rm(join(root, "app/components/card.js"));
+      await write(root, "app/components/card.html", source + '<template component="card-helper"><small>Helper</small></template>');
+      await expect(application.render("/")).rejects.toThrow(/several components/);
+    } finally { await application.close(); }
+  });
+
   it("selects one page among helpers and applies named, directory, default, and disabled layouts", async () => {
     const root = await app();
     await rm(join(root, "app/layouts/default.server.ts"));

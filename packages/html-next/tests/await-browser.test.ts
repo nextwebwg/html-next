@@ -30,6 +30,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("await and rendered-i
         const compiled = variant === "expression" ? await compiledFixtures("esm", "", parseComponentResource(source, "await.html").definitions)
           : generateComponent(parseComponent(source), { hydrate: true }).find(artifact => artifact.path === "vanilla/XAwait.js")!.content;
         entries[`compiled-${variant}`] = `${compiled}\nexport { getComponentHost, componentInputs, serializeRenderedForm, componentRegistry } from ${JSON.stringify(runtime)};
+        export { adoptRenderedProps } from ${JSON.stringify(new URL("../src/generated-runtime.ts", import.meta.url).pathname)};
         export function boot() {
           const existing = document.querySelector('main section');
           const root = ${variant === "expression" ? 'factories["x-await"]' : "createXAwait"}({}, undefined, existing ?? undefined);
@@ -55,6 +56,41 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("await and rendered-i
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
     for (const mode of ["live", "compiled"]) {
+    it(`${name} ${mode} keeps a retained producer value when the new caller rendering omits it`, async () => {
+      const browser = await engine.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`${source}<main><x-await></x-await></main>`);
+        await page.addScriptTag({ path: bundles.get(mode === "live" ? mode : "compiled-direct")! });
+        const result = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: typeof import("../src/live.js") & { boot(): void } }).HtmlRuntime;
+          runtime.boot();
+          const root = document.querySelector("section")!;
+          const port = runtime.componentInputs(runtime.getComponentHost(root)!);
+          const product = port.source("product");
+          const status = { ready: true, pending: false, error: null, stale: false };
+          const settle = async () => { for (let index = 0; index < 12; index += 1) await Promise.resolve(); };
+          const rendered = () => {
+            const template = document.createElement("template");
+            template.innerHTML = runtime.serializeRenderedForm(root.parentElement!);
+            return template.content.querySelector("section")!;
+          };
+          product.publish({ value: { name: "Prepared" }, status }); await settle();
+          const next = rendered();
+          product.publish({ value: { name: "Live" }, status }); await settle();
+          runtime.adoptRenderedProps(root, next); await settle();
+          const retained = root.querySelector("h2")?.textContent;
+          runtime.componentRegistry.update(root, { product: { name: "Caller" } }); await settle();
+          const fixture = rendered();
+          runtime.componentRegistry.update(root, { product: undefined });
+          product.publish({ value: { name: "Resumed" }, status }); await settle();
+          runtime.adoptRenderedProps(root, fixture); await settle();
+          return [retained, root.querySelector("h2")?.textContent, port.supplied("product"),
+            product.publish({ value: { name: "Refused" }, status })];
+        });
+        assert.deepEqual(result, ["Live", "Caller", true, false]);
+      } finally { await browser.close(); }
+    });
     it(`${name} ${mode} initializes an independent draft and exposes its availability to a driver`, async () => {
       const browser = await engine.launch({ headless: true });
       try {

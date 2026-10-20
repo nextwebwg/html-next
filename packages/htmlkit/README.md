@@ -40,7 +40,7 @@ pnpm build:docs-proof
 node dist/cli.js preview ../../.context/htmlkit-docs-proof
 ```
 
-The basic application exercises routes, loaders, state, and controllers without documentation
+The basic application exercises routes, loaders, state, and component modules without documentation
 features. The docs proof converts this repository's Markdown guides and generates a component
 reference, code display, heading anchors, search navigation, a theme, and an interactive example.
 Its Markdown dependency and theme live in the consumer, outside the platform runtime and published

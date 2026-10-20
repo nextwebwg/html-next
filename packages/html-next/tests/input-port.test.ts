@@ -3,7 +3,7 @@ import { JSDOM } from "jsdom";
 import { afterEach, describe, it, vi } from "vitest";
 import { componentInputs, READY_INPUT, type InputSnapshot, type InputStatus } from "../src/inputs.js";
 import { parseComponent } from "../src/source-parser.js";
-import { componentRegistry, getComponentHost, lowerDocument, registerComponentDefinitions, serializeRenderedForm } from "../src/runtime.js";
+import { adoptRenderedProps, componentRegistry, getComponentHost, lowerDocument, registerComponentDefinitions, serializeRenderedForm } from "../src/runtime.js";
 
 const pending: InputStatus = { ready: false, pending: true, error: null, stale: false };
 const failed: InputStatus = { ready: false, pending: false, error: { name: "NetworkError", message: "Offline" }, stale: false };
@@ -28,6 +28,41 @@ const settle = async () => { for (let i = 0; i < 4; i += 1) await Promise.resolv
 afterEach(() => { for (const window of windows.splice(0)) window.window.close(); vi.unstubAllGlobals(); });
 
 describe("renderer input source port", () => {
+  it("leaves producer values under source ownership when a parent rendering omits their caller input", async () => {
+    const current = create(); const product = current.inputs.source("product");
+    product.publish({ value: { name: "Live" }, status: READY_INPUT }); await settle();
+    const prepared = create(); prepared.inputs.source("product").publish({ value: { name: "Prepared" }, status: READY_INPUT });
+    const fresh = () => {
+      const template = current.document.createElement("template");
+      template.innerHTML = serializeRenderedForm(prepared.document.body);
+      return template.content.querySelector("section")!;
+    };
+    adoptRenderedProps(current.root, fresh()); await settle();
+    assert.deepEqual(current.inputs.read("product"), { name: "Live" });
+    assert.equal(current.inputs.supplied("product"), false);
+    componentRegistry.update(current.root, { product: { name: "Fixture" } });
+    adoptRenderedProps(current.root, fresh()); await settle();
+    assert.equal(current.inputs.supplied("product"), false, "an omitted caller input still releases a previous caller fixture");
+    assert.equal(product.publish({ value: { name: "Resumed" }, status: READY_INPUT }), true);
+    componentRegistry.update(prepared.root, { product: { name: "Server fixture" } });
+    adoptRenderedProps(current.root, fresh()); await settle();
+    assert.deepEqual(current.inputs.read("product"), { name: "Server fixture" });
+    assert.equal(product.publish({ value: { name: "Refused" }, status: READY_INPUT }), false);
+  });
+  it("validates producer output against the current state-selected prop type", async () => {
+    const { inputs, host, root } = create(`<template component="x-input"><defs>
+      <state name="mode" type="keyword" values="text, number" value="number"></state>
+      <prop name="result">Result.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      </defs><section><output $await="$result">{$result}</output><p $else>Waiting.</p></section></template>`);
+    const result = inputs.source("result");
+    assert.equal(result.publish({ value: 3, status: READY_INPUT }), true);
+    await settle(); assert.equal(root.querySelector("output")?.textContent, "3");
+    assert.equal(result.publish({ value: "3", status: READY_INPUT }), false);
+    host.state.mode = "text"; await settle();
+    assert.equal(result.publish({ value: "Text", status: READY_INPUT }), true);
+    assert.equal(result.publish({ value: 4, status: READY_INPUT }), false);
+    await settle(); assert.equal(root.querySelector("output")?.textContent, "Text");
+  });
   it("captures actual reads and their failures without leaking nested observation scopes", () => {
     const { inputs } = create();
     const product = inputs.source("product");

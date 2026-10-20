@@ -1,6 +1,8 @@
 import type { ComponentDefinition } from "@nextwebwg/html-next";
 
 export interface ApplicationOptions {
+  /** Parent-owned private-reader services. The caller owns their creation and shutdown. */
+  readonly services?: unknown;
   readonly root?: string;
   /** Absolute URL path prefix, for example /docs/. */
   readonly base?: string;
@@ -379,9 +381,17 @@ export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
   readonly controller?: string;
   readonly module?: string;
+  /** App-owned browser companion, evaluated only in the browser graph. */
+  readonly client?: string;
+  /** App-owned private reader module; never part of the browser import graph. */
+  readonly server?: string;
+  /** The server bundle and matching browser completion identity of a prop-provider module. */
+  readonly binding?: { readonly module: string; readonly source: string; readonly client?: boolean; readonly readers?: readonly string[] };
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
+  /** Automatic prop providers were prepared in this graph; navigation adopts its rendered form. */
+  readonly prepared?: boolean;
   /** 200, 404 for the not-found page, 500 for the error page, or a redirect's status. */
   readonly status: number;
   readonly pathname: string;
@@ -399,6 +409,8 @@ export interface RenderedLayer {
   readonly component: string;
   /** The invocation's prop attributes, in their HTML form, defaults included. */
   readonly attributes: Readonly<Record<string, string>>;
+  /** Typed caller inputs, excluding omitted/undefined props. Absent in older payloads. */
+  readonly props?: Readonly<Record<string, unknown>>;
   /** The loader's initial state, when it returned one. */
   readonly state?: Readonly<Record<string, unknown>>;
 }
@@ -442,10 +454,12 @@ export interface ServerApplication {
   readonly base: string;
   /** Not a method of `this`, so a runtime can be handed it, as in Deno.serve(application.fetch). */
   readonly fetch: (request: Request) => Promise<Response>;
+  close(): Promise<void>;
 }
 export interface BuildResult { readonly outDir: string; readonly routes: readonly string[]; readonly browserInputs: readonly string[]; }
 export interface ServerOptions extends ApplicationOptions { readonly host?: string; readonly port?: number; }
 export interface StartOptions {
+  readonly services?: unknown;
   /** The build output, dist unless given. */
   readonly outDir?: string;
   readonly host?: string;

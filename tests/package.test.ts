@@ -141,12 +141,43 @@ describe("workspace package contracts", () => {
       expect(existsSync(join(installedRoot, entry.types))).toBe(true);
     }
     const nodeEntry = join(consumer, "node-exports.mjs");
+    writeFileSync(join(consumer, "prepare.mjs"), `import { bindModule } from "@nextwebwg/html-next/bindings";
+export async function prepare({ document, host, flush, signal, data }) {
+  const binding = bindModule({ props: { product: { input: () => data.product, load: value => Promise.resolve(value) } },
+    connect() { throw new Error("Packaged SSR connected browser behavior"); } });
+  const scope = await binding.prepare(host(document.querySelector('#prepared')), { phase: 'request', signal, source: 'installed' });
+  await flush();
+  return () => scope.dispose();
+}
+`);
     writeFileSync(
       nodeEntry,
       `${publicExports
         .filter((path) => path !== "./browser")
         .map((path) => `import ${JSON.stringify(specifier(path))};`)
-        .join("\n")}\nconst { renderComponents } = await import("@nextwebwg/html-next/server");\nconst { parseComponent, add, subtract, multiply, divide } = await import("@nextwebwg/html-next");\nconst compiled = await import("@nextwebwg/html-next/generated-runtime");\nif (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");\nconst rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });\nif (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");\nprocess.stdout.write("ok");\n`,
+        .join("\n")}
+const { renderComponents, createRenderer } = await import("@nextwebwg/html-next/server");
+const { parseComponent, add, subtract, multiply, divide } = await import("@nextwebwg/html-next");
+const compiled = await import("@nextwebwg/html-next/generated-runtime");
+if (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");
+const rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });
+if (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");
+const prepared = await renderComponents('<x-prepared id="prepared"></x-prepared>', {
+  definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs><p>{$draft}</p></template>')],
+  prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Installed preparation' } }
+});
+if (!prepared.html.includes('<p') || !prepared.html.includes('>Installed preparation</p>')) throw new Error('Packaged preparation failed');
+const owner = createRenderer({ workers: 1 });
+try {
+  owner.setWorkers(2);
+  const scoped = await owner.render('<x-prepared id="prepared"></x-prepared>', {
+    definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop></defs><p>{$product}</p></template>')],
+    prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Owned preparation' } }
+  });
+  if (!scoped.html.includes('>Owned preparation</p>')) throw new Error('Packaged renderer ownership failed');
+} finally { await owner.close(); }
+process.stdout.write("ok");
+`,
     );
     expect(
       execFileSync(process.execPath, [nodeEntry], { cwd: consumer, encoding: "utf8" }),
@@ -157,7 +188,13 @@ describe("workspace package contracts", () => {
       typeEntry,
       `${publicExports.map((path, index) =>
         `import * as publicExport${index} from ${JSON.stringify(specifier(path))};`
-      ).join("\n")}\nexport const resolved = [${publicExports.map((_, index) => `publicExport${index}`).join(", ")}];\n`,
+      ).join("\n")}\nexport const resolved = [${publicExports.map((_, index) => `publicExport${index}`).join(", ")}];\n` +
+      'import type { ServerPreparation, ServerPreparationContext, ServerRenderOptions, ServerRenderer } from "@nextwebwg/html-next/server";\n' +
+      'export const preparation: ServerPreparation = async (context: ServerPreparationContext) => { await context.flush(); return () => { context.port?.close(); }; };\n' +
+      'export const renderOptions: ServerRenderOptions = { definitions: [], signal: new AbortController().signal, prepare: { module: "file:///prepare.mjs", data: { value: 1 } } };\n' +
+      'export function closeRenderer(renderer: ServerRenderer) { renderer.setWorkers(1); return renderer.close(); }\n' +
+      'import { bindModule, type BindingAdoption } from "@nextwebwg/html-next/bindings";\n' +
+      'export function adoptBindings(host: { props: object }, adoption: BindingAdoption) { bindModule({}).adopt(host, adoption); }\n',
     );
     execFileSync(
       "corepack",
@@ -357,7 +394,7 @@ describe("workspace package contracts", () => {
     expect(JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).dependencies[componentsPackage]).not.toContain("workspace:");
     expect(readFileSync(join(installed, "LICENSE"), "utf8")).toBe(repositoryLicense);
     const entry = join(consumer, "platform-types.ts");
-    writeFileSync(entry, 'import { defineConfig, type Application, type EndpointHandler, type LoadContext, type LoaderResult, type Middleware, type RouteInput } from "@nextwebwg/htmlkit"; import type { ServerApplication } from "@nextwebwg/htmlkit/server"; export const config = defineConfig({ routes: [] satisfies RouteInput[] }); export type PublicTypes = [Application, LoadContext, LoaderResult, EndpointHandler, Middleware, ServerApplication];');
+    writeFileSync(entry, 'import { defineConfig, type Application, type ComponentBindingModule, type EndpointHandler, type LoadContext, type LoaderResult, type Middleware, type RouteInput, type ServerReader, type ServerReaders, type ServerReadContext } from "@nextwebwg/htmlkit"; import type { ServerApplication } from "@nextwebwg/htmlkit/server"; export const config = defineConfig({ routes: [] satisfies RouteInput[] }); export const reader = { load: (id, context) => context.phase === "build" ? id : context.cookies.get("user") ?? id } satisfies ServerReader<string, string>; export type PublicTypes = [Application, ComponentBindingModule, LoadContext, LoaderResult, EndpointHandler, Middleware, ServerApplication, ServerReaders, ServerReadContext];');
     execFileSync("corepack", ["pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", entry], { cwd: root, shell: useCommandShell });
 
     // The built server runs on Node from the installed packages; a resolve hook fails if anything loads Vite.

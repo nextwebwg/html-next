@@ -11,8 +11,14 @@ The owner's direction was Nuxt-like routing, with Next.js as a second reference,
 data payloads with the whole-HTML fetch as the fallback. Pages ship their components compiled to
 direct DOM code (`generateComponent(…, { hydrate: true })`), not the live runtime. The implementation
 is `src/client.ts` (shared by every page module), `browserSources` in `src/browser.ts`, `pagePayload`
-in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functions:
-`adoptRenderedProps`, `replaceProjectedNode`, and `generatedHost`.
+in `src/document.ts`, and `@nextwebwg/html-next/generated-runtime` functions:
+`adoptRenderedProps`, `replaceProjectedNode`, `generatedHost`, and `flushComponent`.
+
+Each payload layer carries the loader's typed `props` alongside its HTML `attributes`. The typed
+inputs retain explicit nulls and omit undefined values, so a declared default remains implicit
+unless the loader supplied the prop. Fresh browser factories and retained layouts use this same
+ownership. Attribute-only payloads remain readable. When JSON cannot carry props or state exactly,
+navigation uses the server HTML and its component continuation records.
 
 ## Native audit
 
@@ -34,7 +40,7 @@ in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functio
 | Fetch the next page's data or HTML | `fetch`, `Response.json()`, `DOMParser` | All |
 | Load the next page's components | dynamic `import()`; the module map shares one runtime instance | All |
 | Render without running anything | An inert document from `document.implementation.createHTMLDocument()` | All |
-| Adopt server DOM and connect controllers | Compiled components bind server nodes in place; the document's one `MutationObserver` connects them | All |
+| Adopt server DOM and connect modules | Compiled components bind server nodes in place; the document's one `MutationObserver` connects them | All |
 | Prefetch without running anything | `fetch` for data; `<link rel="modulepreload">` and `<link rel="prefetch">` for code and styles | modulepreload: all; prefetch: Chromium and Firefox |
 | Links on screen, at idle | `IntersectionObserver`, `requestIdleCallback` (a timer where missing) | IntersectionObserver: all; requestIdleCallback: Chromium and Firefox |
 | Touch intent | `touchstart` (passive) | All |
@@ -71,14 +77,24 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    navigation once. Pages that share a component share its compiled module, so a tag keeps one
    factory per document; a page that defines a tag differently throws, as HTML Next's `HR001` does,
    which falls back to a document load.
-2. **Which layers persist, and their new props.** Layers are the `hk-layer-N` roots. From the
+2. **Which layers persist, and their new props.** Layers carry `data-hk-layer="N"`; older output's
+   `hk-layer-N` IDs also remain readable. An authored `id` does not identify the layer. From the
    outermost, a layer whose root renders the same component (`data-component`) as the next page's
    layer at that depth persists. The page layer is always replaced, and so is everything below the
-   first layer that differs. A persisted layer keeps its DOM, state, and controller, but its loader
+   first layer that differs. A persisted layer keeps its DOM, state, and module instance, but its loader
    may compute new props, such as `<hk-nav>`'s `current` item. `adoptRenderedProps(element, rendered)`
    reads the props of the layer's new rendering (a root its factory made, or a server root's
    continuation record) and applies them through the compiled prop channel, as the live runtime's
    function of that name does.
+   Producer-owned inputs are omitted from that caller update. For provider-bearing layouts, the page
+   registry lazily loads the existing binding adapter before the commit; the synchronous commit offers
+   compatible values and read identities from the new renderer record through that adapter's input
+   sources. A current attempt for the same selected input wins over a cached server baseline. No
+   factory or connection restarts, local state stays intact, and dependent outputs use the existing
+   native input/status tracking rather than a second value store.
+   Components sharing that layout's root use their own tagged hosts and preparation. Between offers,
+   `flushComponent` drains the existing component schedulers from outer owner to inner delegates,
+   so forwarded inputs reflect retained browser state and the new caller props before selection.
 3. **Replacing the page inside a kept layout.** The page is projected into its layout's `page` slot.
    HTML Next records projected nodes when it hydrates, so a plain `replaceWith` left the layout
    projecting the old page: the new page missed `data-slotted` (so the layout's `:slotted()` styles
@@ -146,6 +162,12 @@ links on screen.
 
 ### Rendering a payload
 
+Pages with automatically prepared component providers use payload version 2: the server-rendered
+body and component head accompany the layer metadata and assets. The browser parses that inert
+markup and adopts it with the existing HTML Next continuation records. This preserves prepared
+values, draft seeds and matching read identities when a fresh page is inserted. Version 1 remains
+the factory path for pages without these providers:
+
 1. Import the page's module, which registers its compiled components. A component that conflicts
    with one the document has throws here, before anything renders.
 2. Make each layer with its component's factory, from the payload's invocation attributes as
@@ -155,7 +177,7 @@ links on screen.
    construction and connects when it enters the document.
 3. Swap as before: kept layouts take the new props through `adoptRenderedProps`, and the first
    changed layer replaces the old one through `replaceProjectedNode`. The new layers connect there,
-   so controllers run once and declared reads start. Server HTML from the fallback is adopted in
+   so named `connect` hooks start for their activation and browser reads resume. Server HTML from the fallback is adopted in
    place, as the first page was.
 
 Every layer renders, kept layouts included: the kept layouts' new props come from their fresh
@@ -249,7 +271,7 @@ already loaded:
 Navigation time on the docs proof between two guide pages that share a layout, measured with the
 live-runtime delivery: the median of 20, on
 `htmlkit preview` over loopback, with both modules already loaded. Client navigation is click to
-`navigatesuccess`, which includes the fetch, styles, rendering, swap, and controller connection.
+`navigatesuccess`, which includes the fetch, styles, rendering, swap, and module connection.
 Document navigation is the new document's navigation start to `DOMContentLoaded`, which excludes
 unloading the old one. The HTML column forces the fallback, so it includes a failed payload request.
 The machine was under heavy load; repeated runs varied by a few milliseconds.
@@ -274,5 +296,5 @@ navigation here.
   the same response, in a `replace` navigation to its URL, which aborts the submission's; that
   navigation reads the body first, since the abort ends it. A response that can't render in place
   reloads the submission's URL with `GET`, so a form is never sent twice.
-- Links that controllers add after a navigation are not watched for visibility; they still prefetch
+- Links that component modules add after a navigation are not watched for visibility; they still prefetch
   on interaction.

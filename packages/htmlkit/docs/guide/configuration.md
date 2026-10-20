@@ -54,7 +54,7 @@ layout; a folder's `_layout.html` nests inside it ([nested layouts](/htmlkit/rou
 import { site } from '@/lib/site.ts';
 ```
 
-It works in component links, controllers, stylesheet `@import`s, and loader imports. The built-in
+It works in component links, component modules, stylesheet `@import`s, and loader imports. The built-in
 components `<hk-nav>`, `<hk-breadcrumbs>`, and `<hk-pager>` need no link at all; the `hk-` prefix is
 reserved for them.
 
@@ -304,7 +304,7 @@ components declare. It allows the scripts the site needs and nothing else:
 script-src 'self' https://js.stripe.com 'sha256-…'; object-src 'none'; base-uri 'none'
 ```
 
-- `'self'` for HTMLKit's own modules, the page's controllers, and same-origin declared scripts.
+- `'self'` for HTMLKit's own modules, the page's component modules, and same-origin declared scripts.
 - The origin of each [declared script](/htmlkit/routes#declared-scripts) any page, layout, or
   component of the site names, such as `https://js.stripe.com` for a checkout page that declares
   Stripe.js.

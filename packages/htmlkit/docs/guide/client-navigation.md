@@ -21,8 +21,9 @@ pages share, and swaps in the new page. There's nothing to set up.
 
 | Part of the page | When you move to another page |
 | --- | --- |
-| A layout both pages use | Stays, with its state and controller. An open menu stays open. |
+| A layout both pages use | Stays, with its state and module instance. An open menu stays open. |
 | That layout's props | Update from its loader. `<hk-nav>` marks the new page current. |
+| That layout's providers | A changed selected input adopts compatible prepared data without repeating the read. An existing read for the same input stays current. |
 | The page, and any layout only one page uses | Replaced. A fresh page starts from its loader's state. |
 | `<title>`, description, and other head declarations | Update to the new page's in one step, also inside a view transition. |
 | Declared scripts | Stay loaded. A script the next page declares loads once; none runs twice. |
@@ -31,6 +32,11 @@ pages share, and swaps in the new page. There's nothing to set up.
 
 Screen readers hear the new page's title. Back, forward, and reload work as usual, and every URL
 still loads directly.
+
+Provider adoption keeps edited drafts and does not reconnect a retained layout. Its current browser
+values, subscriptions, pending reads, and handled failures remain authoritative for the same selected
+input, so returning to cached prerendered HTML does not replace newer live data. Change a selected
+input or explicitly refresh when the data should be read again.
 
 ## Links that load the whole page
 

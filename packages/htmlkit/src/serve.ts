@@ -81,9 +81,12 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const css = await Promise.all(globalStylesheets(options, config.root).map(file => realpath(file).catch(() => file)));
   let watchReady!: () => void;
   const watching = new Promise<void>(done => { watchReady = done; });
+  let application: Application;
+  let refreshing: Promise<void> | undefined;
   const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base, resolve: { alias: rootAlias(config.root) },
     mode: "development", plugins: [browserPlugin(sources), {
       name: "htmlkit-watch-ready", configureServer(server) { server.watcher.once("ready", watchReady); },
+      async closeBundle() { await refreshing?.catch(() => {}); await application?.close(); },
     }], optimizeDeps: { noDiscovery: true, include: [] },
     server: { host: options.host ?? "127.0.0.1", port: options.port ?? 3000,
       // Page-wide stylesheets may live outside the root, as a plugin's own stylesheet does.
@@ -109,14 +112,14 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
       console.warn(`HTMLKit: ${report.page} ${report.blocks ? "blocked" : "would block"} ${report.blocked} under ${report.directive}. To allow it, add to htmlkit.config.ts: ${report.line}`);
     });
   }
-  let application: Application;
   try { application = await createApplication(options, vite, assets, csp); }
   catch (error) { await vite.close(); throw error; }
   // What page plugins read, wherever it lives, joins the watched root.
   vite.watcher.add([...application.watchFiles]);
-  let dirty = false;
+  let revision = 0;
+  let current = 0;
   const change = () => {
-    dirty = true;
+    revision += 1;
     // ModuleGraph also owns loader dependencies and transitive controller imports.
     vite.moduleGraph.invalidateAll();
     const environment = vite.environments.ssr;
@@ -129,10 +132,21 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
     const payload = pathname.startsWith(config.base + "_htmlkit/pages/");
     void (async () => {
-      if (dirty) {
-        application = await createApplication(options, vite, assets, csp); vite.watcher.add([...application.watchFiles]); dirty = false;
-        sources.clear();
-        if (csp !== false) sources.set(reporter, policyReporter);
+      if (current !== revision) {
+        refreshing ??= (async () => {
+          while (current !== revision) {
+            const wanted = revision;
+            const next = await createApplication(options, vite, assets, csp);
+            const previous = application;
+            application = next;
+            vite.watcher.add([...application.watchFiles]);
+            current = wanted;
+            sources.clear();
+            if (csp !== false) sources.set(reporter, policyReporter);
+            await previous.close();
+          }
+        })().finally(() => { refreshing = undefined; });
+        await refreshing;
       }
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
@@ -160,5 +174,6 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const address = vite.httpServer?.address();
   if (address === undefined || address === null || typeof address === "string") { await vite.close(); throw new HtmlKitError("Dev server did not obtain a TCP port."); }
   const host = options.host ?? "127.0.0.1";
-  return { url: `http://${host.includes(":") ? `[${host}]` : host}:${address.port}${config.base}`, close: () => vite.close() };
+  let closing: Promise<void> | undefined;
+  return { url: `http://${host.includes(":") ? `[${host}]` : host}:${address.port}${config.base}`, close: () => closing ??= vite.close() };
 }

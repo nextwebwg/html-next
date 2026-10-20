@@ -1,16 +1,95 @@
 import { existsSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
 import { readdir, readFile, rm } from "node:fs/promises";
-import { availableParallelism } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { closeRenderWorkers, setRenderWorkers } from "../../html-next/src/server.js";
 import { buildApplication, createApplication, readManifest, startApplication } from "../src/index.js";
-import { fixture, write } from "./fixture.js";
+import { fixture, privateFixture, universalFixture, write } from "./fixture.js";
+
+it("keeps built private readers on the server while serving browser reads for prerendered components", async () => {
+  const root = await privateFixture(); roots.push(root);
+  await write(root, "app/pages/index.server.ts", `export const props = { label: { load(query, context) {
+    const privateCode = "PRIVATE_READER_SERVER_CODE";
+    if (query === "private-marker") return privateCode;
+    return (context.phase === "build" ? "Build" : context.cookies.get("user") || "Guest") + ":" + query;
+  } } };`);
+  const { outDir } = await buildApplication({ root });
+  const publicFiles = (await readdir(join(outDir, "_htmlkit"))).filter(file => file.endsWith(".js"));
+  expect(publicFiles.length).toBeGreaterThan(0);
+  for (const file of publicFiles) expect(await readFile(join(outDir, "_htmlkit", file), "utf8")).not.toContain("PRIVATE_READER_SERVER_CODE");
+  const serverFiles = (await readdir(join(outDir, "_htmlkit/server"))).filter(file => file.endsWith(".js"));
+  const privateFiles = await Promise.all(serverFiles.map(async file => [file, await readFile(join(outDir, "_htmlkit/server", file), "utf8")] as const));
+  const privateFile = privateFiles.find(([, source]) => source.includes("PRIVATE_READER_SERVER_CODE"))?.[0];
+  expect(privateFile).toBeDefined();
+  const payload = JSON.parse(await readFile(join(outDir, "_htmlkit/pages/payload.json"), "utf8"));
+  const rendered = await readFile(join(outDir, "index.html"), "utf8");
+  expect(rendered).toContain("Build:A");
+  const escaped = /data-htmlkit-bindings="([^"]+)"/.exec(rendered)![1]!.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  const source = JSON.parse(escaped)["client-page"].source as string;
+  expect(JSON.stringify(payload)).not.toContain("PRIVATE_READER_SERVER_CODE");
+  const server = await startApplication({ outDir, port: 0 });
+  try {
+    const response = await fetch(server.url + "_htmlkit/read", { method: "POST", headers: { "content-type": "application/json", cookie: "user=Ada" }, body: JSON.stringify({
+      version: 1, source, tag: "client-page", name: "label", url: server.url,
+      inputs: ["json", { props: {}, state: { query: "B" } }],
+    }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ value: ["value", "Ada:B"] });
+    expect((await fetch(server.url + "_htmlkit/server/" + privateFile)).status).toBe(404);
+  } finally { await server.close(); }
+}, 120_000);
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+
+for (const delivery of ["application", "start"] as const) {
+  it(`${delivery} owns provider workers independently and can restart the same application`, async () => {
+    const root = await universalFixture(); roots.push(root);
+    let accepted!: (response: ServerResponse) => void;
+    const reading = new Promise<ServerResponse>(resolve => { accepted = resolve; });
+    const backend = createServer((_request, response) => accepted(response));
+    await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+    const address = backend.address();
+    if (address === null || typeof address === "string") throw new Error("Expected a TCP listener.");
+    await write(root, "lib/product.ts", `export function create() { return { props: { product: {
+      input: (_, { state }) => state.query,
+      async load(query, { phase, signal }) {
+        return { name: query === "hold" ? await (await fetch(${JSON.stringify(`http://127.0.0.1:${address.port}`)}, { signal })).text() : phase + ":" + query };
+      }
+    } } }; }`);
+    const outDir = delivery === "start" ? (await buildApplication({ root })).outDir : undefined;
+    const open = async () => {
+      if (delivery === "application") {
+        const application = await createApplication({ root });
+        return { close: () => application.close(), fetch: (query: string) => application.fetch(new Request(`http://localhost/live/?q=${query}`)) };
+      }
+      const server = await startApplication({ outDir: outDir!, port: 0, renderWorkers: 1 });
+      return { close: () => server.close(), fetch: (query: string) => fetch(`${server.url}live/?q=${query}`) };
+    };
+    const first = await open(); const second = await open();
+    let pending: Promise<Response> | undefined;
+    try {
+      expect(await (await first.fetch("first")).text()).toContain("<h1>request:first</h1>");
+      pending = second.fetch("hold");
+      const response = await reading;
+      await first.close();
+      response.end("Other application");
+      const completed = await pending;
+      expect(completed.status).toBe(200);
+      expect(await completed.text()).toContain("<h1>Other application</h1>");
+      expect(await (await second.fetch("second")).text()).toContain("<h1>request:second</h1>");
+      const restarted = await open();
+      try { expect(await (await restarted.fetch("restart")).text()).toContain("<h1>request:restart</h1>"); }
+      finally { await restarted.close(); }
+    } finally {
+      backend.closeAllConnections();
+      await Promise.all([first.close(), second.close(), new Promise<void>((resolve, reject) => backend.close(error => error ? reject(error) : resolve()))]);
+      await pending?.catch(() => {});
+    }
+  }, 120_000);
+}
 
 /** The basic fixture plus server-rendered pages, endpoints, and middleware. */
 async function serverApp(): Promise<string> {
@@ -236,22 +315,18 @@ describe("request-time rendering", () => {
   it("answers with the error page when a render worker ends mid-render, and renders the next request on a new one", async () => {
     const root = await fixture();
     roots.push(root);
-    await write(root, "app/pages/live.html", '<template component="live-page"><defs><meta name="hk:render" content="server"><title>Live</title></defs><p>Live</p></template>');
-    // The page's loader is the last one, so its render is under way by the next macrotask.
-    await write(root, "app/pages/live.server.ts", "export const load = () => { globalThis.endRenderWorkers?.(); return {}; };");
+    await write(root, "app/pages/live.html", '<template component="live-page"><defs><meta name="hk:render" content="server"><title>Live</title><prop name="label" type="string">Label.</prop><state name="query" type="string" value="Live"></state></defs><section><p $await="$label">{$label}</p></section></template>');
+    await write(root, "app/pages/live.server.ts", 'export const load = ({ url }) => ({ state: { query: url.searchParams.has("crash") ? "crash" : "Live" } });');
+    await write(root, "app/pages/live.ts", 'export const props = { label: { input: (_, { state }) => state.query, load: (query, { phase }) => { if (phase === "request" && query === "crash") process.exit(1); return query; } } };');
     const { outDir } = await buildApplication({ root });
     const server = await startApplication({ outDir, port: 0, renderWorkers: 2 });
-    const hooks = globalThis as { endRenderWorkers?: (() => void) | undefined };
     try {
       const url = server.url + "live/";
-      hooks.endRenderWorkers = () => { hooks.endRenderWorkers = undefined; setImmediate(() => void closeRenderWorkers()); };
-      const lost = await fetch(url);
+      const lost = await fetch(url + "?crash");
       expect([lost.status, await lost.text()]).toEqual([500, expect.stringContaining("<h1>Internal Server Error</h1>")]);
       const next = await fetch(url);
       expect([next.status, (await next.text()).includes("<p")]).toEqual([200, true]);
     } finally {
-      hooks.endRenderWorkers = undefined;
-      setRenderWorkers(Math.min(availableParallelism(), 8));
       await server.close();
     }
   }, 120_000);

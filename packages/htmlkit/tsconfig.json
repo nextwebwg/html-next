@@ -20,6 +20,12 @@
       ],
       "@nextwebwg/html-next/runtime": [
         "../html-next/src/runtime.ts"
+      ],
+      "@nextwebwg/html-next/inputs": [
+        "../html-next/src/component-inputs.ts"
+      ],
+      "@nextwebwg/html-next/bindings": [
+        "../html-next/src/bindings.ts"
       ]
     }
   },

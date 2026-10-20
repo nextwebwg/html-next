@@ -1,14 +1,358 @@
 import { readFile, rm } from "node:fs/promises";
 import { chromium, firefox, webkit } from "playwright";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { buildApplication, devApplication, previewApplication, type ApplicationServer } from "../src/index.js";
+import { buildApplication, devApplication, previewApplication, startApplication, type ApplicationServer } from "../src/index.js";
 import { buildDocsProof } from "../examples/docs/proof.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { fixture, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, write } from "./fixture.js";
+
+for (const delegated of [false, true]) for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} ${delegated ? "delegated " : ""}retained layout providers`, () => {
+    let root: string; let server: ApplicationServer; const requests: string[] = [];
+    beforeAll(async () => {
+      root = await retainedProviderFixture(delegated);
+      const services = { read(id: string, { phase }: { phase: string }) {
+        if (phase === "request") requests.push(id);
+        return phase + ":" + id;
+      } };
+      if (delivery === "built") server = await startApplication({ outDir: (await buildApplication({ root, services })).outDir, services, port: 0 });
+      else server = await devApplication({ root, services, port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} adopts fresh layout preparation while keeping drafts and instance identity`, async () => {
+        requests.length = 0;
+        const browser = await engine.launch({ headless: true });
+        try {
+          const page = await browser.newPage(); let reads = 0; const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          page.on("request", request => { if (new URL(request.url()).pathname === "/_htmlkit/read") reads += 1; });
+          expect(await (await fetch(server.url)).text()).toContain(">build:A</h2>");
+          await page.goto(server.url);
+          await page.waitForLoadState("networkidle");
+          expect(errors).toEqual([]);
+          await expect.poll(() => page.locator("main").getAttribute("data-connections")).toBe("1");
+          expect(await page.locator("h2").textContent()).toBe("build:A");
+          await page.evaluate(() => Reflect.set(window, "retainedShell", document.querySelector("main")));
+          await page.getByRole("textbox", { name: "Draft" }).fill("Edited");
+          await page.getByRole("link", { name: "Second", exact: true }).click();
+          await page.getByRole("heading", { name: "Second", exact: true }).waitFor();
+          await expect.poll(() => page.locator("main").textContent()).toContain("build:B");
+          expect(await page.getByRole("textbox", { name: "Draft" }).inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "retainedShell") === document.querySelector("main"))).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "retainedCreates"))).toBe(1);
+          expect(reads).toBe(0);
+          expect(requests).toEqual([]);
+          await page.getByRole("link", { name: "First", exact: true }).click();
+          await page.getByRole("heading", { name: "First", exact: true }).waitFor();
+          await expect.poll(() => page.locator("h2").textContent()).toBe("build:A");
+          await page.getByRole("button", { name: "Refresh", exact: true }).click();
+          await expect.poll(() => page.locator("h2").textContent()).toBe("request:A");
+          await page.getByRole("link", { name: "Same input", exact: true }).click();
+          await page.getByRole("heading", { name: "Same input", exact: true }).waitFor();
+          expect(await page.locator("h2").textContent()).toBe("request:A");
+          expect(await page.getByRole("textbox", { name: "Draft" }).inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "retainedCreates"))).toBe(1);
+          expect(await page.locator("main").getAttribute("data-connections")).toBe("1");
+          expect(reads).toBe(1);
+          expect(requests).toEqual(["A"]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} private component readers`, () => {
+    let root: string; let server: ApplicationServer; const calls: string[] = [];
+    beforeAll(async () => {
+      root = await privateFixture();
+      await rm(join(root, "app/pages/index.client.ts"));
+      const source = await readFile(join(root, "app/pages/index.html"), "utf8");
+      await write(root, "app/pages/override.html", source.replace('component="client-page"', 'component="private-override-page"'));
+      await write(root, "app/pages/override.ts", 'export * from "./index.ts";');
+      await write(root, "app/pages/override.server.ts", 'export * from "./index.server.ts";');
+      await write(root, "app/pages/override.client.ts", 'export const props = { label: { load: query => "client:" + query } };');
+      await write(root, "app/pages/typed.html", `<template component="private-typed-page"><defs><meta name="hk:layout" content="none">
+        <state name="mode" type="keyword" values="text, number" value="number"></state><state name="query" type="number" value="1"></state>
+        <prop name="label">Result.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+        <handler name="next"><set name="query" value="2"></set></handler></defs><main>
+        <h1 $await="$label">{$label}</h1><p $error="problem">{$problem.message}</p><p $else>Waiting.</p><button on:click="next">Next</button></main></template>`);
+      await write(root, "app/pages/typed.ts", 'export const props = { label: { input: (_, { state }) => state.query } };');
+      await write(root, "app/pages/typed.server.ts", 'export const props = { label: { load: query => query } };');
+      const services = { read(query: string, context: { phase: string; cookies: ReadonlyMap<string, string> }) {
+        calls.push(context.phase + ":" + query);
+        if (context.phase === "request" && !context.cookies.has("user")) throw new Response("Sign in", { status: 403 });
+        return context.phase + ":" + query;
+      } };
+      if (delivery === "built") {
+        const { outDir } = await buildApplication({ root, services, base: "/private/" });
+        server = await startApplication({ outDir, services, port: 0 });
+      } else server = await devApplication({ root, services, base: "/private/", port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} adopts private preparation and uses fresh authenticated requests for changes`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.locator("h1").textContent()).toBe("build:A");
+          const context = await browser.newContext();
+          await context.addCookies([{ name: "user", value: "Ada", url: server.url }]);
+          const page = await context.newPage(); const errors: string[] = []; let requests = 0;
+          page.on("pageerror", error => errors.push(error.message));
+          page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/_htmlkit/read")) requests += 1; });
+          await page.goto(server.url);
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(requests).toBe(0);
+          await page.locator("input").fill("Edited");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("request:B");
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          expect(requests).toBe(1);
+          await page.goto(server.url + "fixture/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("Fixture");
+          expect(requests).toBe(1);
+          await page.goto(server.url + "override/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("client:B");
+          expect(requests).toBe(1);
+          await page.goto(server.url + "live/?q=C");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("request:C");
+          expect(requests).toBe(1);
+          await context.clearCookies();
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.getByText("Sign in", { exact: true }).count()).toBe(1);
+          expect(requests).toBe(2);
+          expect(await (await fetch(server.url + "typed/")).text()).toContain(">1</h1>");
+          await page.goto(server.url + "typed/");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("1");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("2");
+          expect(requests).toBe(3);
+          expect(calls).toContain("request:B");
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} client companion modules`, () => {
+    let root: string; let server: ApplicationServer;
+    beforeAll(async () => {
+      root = await environmentFixture();
+      if (delivery === "built") {
+        const { outDir } = await buildApplication({ root });
+        server = await startApplication({ outDir, port: 0 });
+      } else server = await devApplication({ root, port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} composes browser readers and behavior with retained instance ownership`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.getByText("Waiting.", { exact: true }).count()).toBe(1);
+          const page = await browser.newPage(); const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(server.url);
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:A");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.clientConnections === "1");
+          expect(await page.locator("main").getAttribute("data-common-connections")).toBe("1");
+          expect(await page.evaluate(() => Reflect.get(window, "environmentCreates"))).toBe(1);
+          await page.locator("input").fill("Edited");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:B");
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          await page.evaluate(() => { const root = document.querySelector("main")!; Reflect.set(window, "clientRoot", root); root.remove(); });
+          await expect.poll(() => page.evaluate(() => Reflect.get(window, "environmentHooks"))).toEqual(["common-connect", "client-connect", "client-stop", "common-stop"]);
+          await page.evaluate(() => document.body.prepend(Reflect.get(window, "clientRoot")));
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.clientConnections === "2");
+          expect(await page.locator("main").getAttribute("data-common-connections")).toBe("2");
+          expect(await page.evaluate(() => Reflect.get(window, "environmentCreates"))).toBe(1);
+          expect(await page.evaluate(() => Reflect.get(window, "environmentReads"))).toEqual(["A", "B"]);
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          await page.goto(server.url + "mixed/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.mixed === "connected");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "mixedReads"))).toBeUndefined();
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("client:B");
+          expect(await page.evaluate(() => Reflect.get(window, "mixedReads"))).toEqual(["B"]);
+          await page.goto(server.url + "only/");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("only:A");
+          await page.goto(server.url + "fixture/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.clientConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("Fixture");
+          expect(await page.evaluate(() => Reflect.get(window, "environmentReads"))).toBeUndefined();
+          await page.goto(server.url + "live/?q=C");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:C");
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} universal component providers`, () => {
+    let root: string;
+    let server: ApplicationServer;
+    beforeAll(async () => {
+      root = await universalFixture();
+      if (delivery === "built") {
+        const result = await buildApplication({ root });
+        server = await startApplication({ outDir: result.outDir, port: 0 });
+      } else server = await devApplication({ root, port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} adopts prepared data once, retains drafts and renders fresh navigations from their preparation`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.locator("h1").textContent()).toBe("build:A");
+          expect(await unscripted.title()).toBe("Product build:A");
+          const page = await browser.newPage(); const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(server.url);
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.locator("input").inputValue()).toBe("build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          expect(await page.locator(".details").textContent()).toBe("build:details:build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "detailReads"))).toBeUndefined();
+          await page.evaluate(() => Reflect.set(window, "detailsRoot", document.querySelector('[data-component="product-details"]')));
+          await page.locator("input").fill("Edited");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:B");
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toEqual(["B"]);
+          await expect.poll(() => page.locator(".details").textContent()).toBe("browser:details:browser:B");
+          expect(await page.locator(".details-draft").textContent()).toBe("build:details:build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "detailsRoot") === document.querySelector('[data-component="product-details"]'))).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "detailReads"))).toEqual(["browser:B"]);
+          await page.goto(server.url + "live/?q=C");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("request:C");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          await page.goto(server.url + "fixture/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("Fixture");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          const payload = await (await fetch(server.url + "_htmlkit/pages/payload.json")).json();
+          expect(payload.rendered.body).toContain("<h1>build:A</h1>");
+          await page.evaluate(() => Reflect.set(window, "universalMarker", true));
+          await page.getByRole("link", { name: "Home", exact: true }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "universalMarker"))).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          await page.goto(server.url + "delegated/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.locator(".shell-label").textContent()).toBe("build:shell");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          await unscripted.goto(server.url + "deferred/");
+          expect(await unscripted.getByText("Waiting.", { exact: true }).count()).toBe(1);
+          await page.addInitScript(() => { Reflect.set(window, "holdUniversal", true); });
+          await page.goto(server.url + "deferred/");
+          await page.waitForFunction(() => typeof Reflect.get(window, "releaseUniversal") === "function");
+          expect(await page.getByText("Waiting.", { exact: true }).count()).toBe(1);
+          expect(await page.locator("main").evaluate(element => Reflect.get(element, "validity").valueMissing)).toBe(true);
+          await page.locator("input").fill("Early draft");
+          await page.evaluate(() => Reflect.get(window, "releaseUniversal")());
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:A");
+          expect(await page.locator("input").inputValue()).toBe("Early draft");
+          expect(await page.locator("main").evaluate(element => Reflect.get(element, "validity").valid)).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toEqual(["A"]);
+          await expect.poll(() => page.locator(".details").textContent()).toBe("browser:details:browser:A");
+          expect(await page.evaluate(() => Reflect.get(window, "detailReads"))).toEqual(["browser:A"]);
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} component provider modules`, () => {
+    let root: string;
+    let server: ApplicationServer;
+    beforeAll(async () => {
+      root = await bindingFixture();
+      if (delivery === "built") await buildApplication({ root, base: "/bindings/" });
+      server = await (delivery === "built" ? previewApplication : devApplication)({ root, base: "/bindings/", port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} binds providers, bypasses fixtures and retains local drafts across reconnection`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.getByText("Waiting.", { exact: true }).count()).toBe(1);
+          expect(await unscripted.locator("h2").allTextContents()).toEqual(["Fixture"]);
+          await unscripted.goto(server.url + "defaults/");
+          expect(await unscripted.locator("h1").textContent()).toBe("Default");
+          expect(await unscripted.locator(".nullable").textContent()).toBe("");
+          expect(await unscripted.locator(".count").textContent()).toBe("0");
+          const page = await browser.newPage(); const errors: string[] = [];
+          page.setDefaultTimeout(5_000);
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(server.url);
+          const cards = page.locator('[data-component="binding-card"]');
+          await expect.poll(() => cards.first().locator("h2").textContent()).toBe("Product A");
+          await expect.poll(() => page.locator('[data-component="binding-label"] output').textContent()).toBe("Label only");
+          await expect.poll(() => page.locator('[data-component="plain-behavior"]').getAttribute("data-plain")).toBe("connected");
+          expect(await cards.last().locator("h2").textContent()).toBe("Fixture");
+          expect(await page.evaluate(() => Reflect.get(window, "bindingReads"))).toEqual(["A"]);
+          await cards.first().locator("input").fill("Edited");
+          await cards.first().locator("button").click();
+          await expect.poll(() => cards.first().locator("h2").textContent()).toBe("Product B");
+          expect(await cards.first().locator("input").inputValue()).toBe("Edited");
+          await page.evaluate(() => { const subject = document.querySelector('[data-component="binding-card"]')!; Reflect.set(window, "bindingSubject", subject); subject.remove(); });
+          await page.waitForFunction(() => Reflect.get(window, "bindingSubject").dataset.stops === "1");
+          await page.evaluate(() => document.querySelector("main")!.prepend(Reflect.get(window, "bindingSubject")));
+          await expect.poll(() => cards.first().getAttribute("data-connections")).toBe("2");
+          expect(await cards.first().locator("input").inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "bindingReads"))).toEqual(["A", "B"]);
+          // Fresh navigation and SSR adoption preserve caller ownership, including null with a default.
+          await page.evaluate(() => Reflect.set(window, "navigationMarker", document.querySelector(".shell")));
+          await page.getByRole("link", { name: "Default inputs" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("Provider");
+          expect(await page.evaluate(() => Reflect.get(window, "navigationMarker") === document.querySelector(".shell"))).toBe(true);
+          expect(await page.locator(".shell-value").textContent()).toBe("Shell");
+          expect(await page.locator(".shell-draft").textContent()).toBe("First");
+          expect(await page.locator(".nullable").textContent()).toBe("");
+          expect(await page.locator(".count").textContent()).toBe("0");
+          expect(await page.locator("input").inputValue()).toBe("Default");
+          expect(await page.evaluate(() => Reflect.get(window, "defaultReads"))).toEqual(["label"]);
+          await page.goto(server.url + "defaults/");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("Provider");
+          expect(await page.locator(".nullable").textContent()).toBe("");
+          expect(await page.locator(".count").textContent()).toBe("0");
+          expect(await page.locator("input").inputValue()).toBe("Default");
+          expect(await page.evaluate(() => Reflect.get(window, "defaultReads"))).toEqual(["label"]);
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application adoption", () => {
   let root: string;
@@ -152,6 +496,15 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.getByRole("button", { name: "Increment", exact: true }).click();
       await expect.poll(() => page.locator("output").textContent()).toBe("2");
+      await page.evaluate(() => {
+        const counter = document.querySelector('[data-component="proof-counter"]')!;
+        Reflect.set(window, "retainedCounter", counter);
+        Reflect.set(window, "retainedCounterParent", counter.parentElement);
+        counter.remove();
+      });
+      await page.evaluate(() => Reflect.get(window, "retainedCounterParent").append(Reflect.get(window, "retainedCounter")));
+      await page.getByRole("button", { name: "Increment", exact: true }).click();
+      await expect.poll(() => page.locator("output").textContent()).toBe("4");
       await page.getByRole("button", { name: "Toggle theme" }).click();
       await expect.poll(() => page.locator('[data-component="proof-shell"]').evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(20, 38, 56)");
       await page.getByRole("searchbox").fill("quick-start");

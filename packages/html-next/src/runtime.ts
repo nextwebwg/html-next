@@ -34,7 +34,7 @@ import {
 } from "./expression.js";
 import { kebabCase, propAttribute } from "./names.js";
 import {
-  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
+  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
   currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
@@ -950,7 +950,10 @@ function readInvocation(
   }
   for (const [name, input] of Object.entries(frameworkProps ?? {})) {
     const prop = contract.props[name];
-    if (prop !== undefined && input !== undefined) incoming[name] = { value: input, source: "value", attributePresent: false };
+    if (prop !== undefined) {
+      if (input === undefined) delete incoming[name];
+      else incoming[name] = { value: input, source: "value", attributePresent: false };
+    }
   }
 
   const bindings = pendingInvocationBindings.get(invocation)?.filter(binding => binding.tag === contract.tag) ?? [];
@@ -3623,6 +3626,7 @@ function lowerRenderedComponents(
   registry: DocumentRegistry,
   committed: readonly PreparedInvocation[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
+  props?: DocumentRenderingOptions["props"],
 ): Element[] {
   const lowered: Element[] = [];
   let batch = committed;
@@ -3653,7 +3657,9 @@ function lowerRenderedComponents(
         root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
         shouldLower?.(element, definition, false) === false
       ) continue;
-      const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners));
+      const values = props?.get(element);
+      if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
+      const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners), values);
       prepared.push(invocation);
       pendingOwners.set(element, invocation.instance);
       recordUnrendered(invocation, unrendered);
@@ -3731,6 +3737,7 @@ function lowerScopes(
   root: Document,
   scopes: readonly QueryRoot[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
+  props?: DocumentRenderingOptions["props"],
 ): LoweredScopes {
   const registry = registryFor(root);
   const discovered = new Set<Element>();
@@ -3775,7 +3782,9 @@ function lowerScopes(
       shouldLower?.(element, definition, hydration) === false
     ) return false;
     if (hydration) restoreSerializedFormDefaults(element);
-    const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners));
+    const values = props?.get(element);
+    if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
+    const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners), values);
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
     if (!hydration) recordUnrendered(invocation, unrendered);
@@ -3827,7 +3836,7 @@ function lowerScopes(
     lowered.push(element);
     roots.add(element);
   }
-  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower)) {
+  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower, props)) {
     lowered.push(element);
     roots.add(element);
   }
@@ -3842,13 +3851,15 @@ function lowerScopes(
 export interface DocumentRenderingOptions {
   /** Render the declarative baseline without starting reads or connecting browser lifecycle. */
   readonly connect?: boolean;
+  /** Typed caller inputs for invocations in this pass, before one-time state initialization. */
+  readonly props?: ReadonlyMap<Element, Readonly<Record<string, unknown>>>;
 }
 
 export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
   const state = documentState(root);
   const wasStatic = state.staticRendering;
   state.staticRendering = options.connect === false;
-  const result = lowerScopes(root, [root]);
+  const result = lowerScopes(root, [root], undefined, options.props);
   if (wasStatic && !state.staticRendering) {
     for (const element of result.roots) {
       const instance = runtimeInstance(element);
@@ -4146,7 +4157,8 @@ export function replaceProjectedNode(current: ChildNode, next: ChildNode): void 
  * Carries a fresh server rendering's props onto a live instance that a framework keeps, through
  * the same channel as `componentRegistry.update`: `rendered` is that component's root in the new
  * server output, not yet hydrated. The instance keeps its DOM, state, and controller; props the
- * rendering left implicit return to their defaults.
+ * rendering left implicit return to their defaults when caller-owned. Producer-owned inputs stay
+ * with their source; a binding adapter may separately adopt compatible prepared output.
  */
 export function adoptRenderedProps(element: Element, rendered: Element): void {
   const instance = runtimeInstance(element);
@@ -4154,8 +4166,10 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
   if (instance === undefined || record === undefined) {
     fail("HR005", "The rendered element records no props for this element's component.");
   }
-  applyComponentProps(instance, Object.fromEntries(Object.keys(instance.definition.contract.props)
-    .map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+  applyComponentProps(instance, renderedCallerProps(record, Object.keys(instance.definition.contract.props), name => {
+    const input = untracked(() => instance.propInputs[name]!.get());
+    return input.producer === true && input.provided !== true;
+  }));
 }
 
 /**
@@ -4237,8 +4251,9 @@ function publishSourceInput(instance: RuntimeInstance, name: string, snapshot: I
   let value: unknown = prop.default === undefined ? null : prop.default;
   if (snapshot.status.ready) {
     const candidate = snapshot.value === null ? value : snapshot.value;
-    const type = selectedPropType(instance.definition.contract, prop, Object.fromEntries(
-      Object.keys(instance.definition.contract.props).map(key => [key, key === name ? candidate : instance.scope.get(key)])));
+    const type = selectedPropType(instance.definition.contract, prop, prop.select === undefined ? {} : {
+      [prop.select.from]: prop.select.from === name ? candidate : instance.scope.get(prop.select.from),
+    });
     if (type === null) return false;
     const accepted = candidate === null && !prop.required
       ? { ok: true as const, value: null } : parseTypedValue(candidate, type, name, "value");
@@ -4408,10 +4423,16 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   for (const delegate of instance.delegates) disconnectRuntimeInstance(delegate);
 }
 
-/** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
-export function getComponentHost(element: Element): ComponentHost | undefined {
-  const instance = runtimeInstance(element);
-  if (instance === undefined) return compiledHandle(element)?.H;
+/** Returns a lowered root's lifecycle host, optionally selecting a component sharing that root. */
+export function getComponentHost(element: Element, tag?: string): ComponentHost | undefined {
+  const owner = runtimeInstance(element);
+  if (owner === undefined) {
+    const handle = compiledHandle(element);
+    return (tag === undefined || handle?.S.g === tag ? handle : handle?.D?.find(entry => entry.S.g === tag))?.H;
+  }
+  const instance = tag === undefined || owner.definition.contract.tag === tag ? owner
+    : owner.delegates.find(entry => entry.definition.contract.tag === tag);
+  if (instance === undefined) return undefined;
   if (instance.host !== undefined) return instance.host;
   const writable = new Set(
     (instance.definition.declarations ?? [])

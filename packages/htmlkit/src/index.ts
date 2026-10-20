@@ -2,6 +2,8 @@ export { createApplication } from "./application.js";
 export { buildApplication, readManifest } from "./build.js";
 export { devApplication, previewApplication } from "./serve.js";
 export { startApplication } from "./server.js";
+export type { ServerReader, ServerReaders, ServerReadContext } from "./private-readers.js";
+export type { ComponentBindingDefinition, ComponentBindingModule } from "./component-module.js";
 export { discoverRoutes } from "./routes.js";
 export { HtmlKitError, loadConfig } from "./config.js";
 import type { ApplicationOptions } from "./types.js";

@@ -223,6 +223,20 @@ export interface RenderedInstanceRecord {
   readonly initialized?: readonly string[];
 }
 
+/** Caller inputs for a kept instance: null retains caller ownership; omission leaves an active producer alone. */
+export function renderedCallerProps(
+  record: Pick<RenderedInstanceRecord, "explicit" | "inputs" | "props">,
+  names: readonly string[],
+  sourceOwned?: (name: string) => boolean,
+): Record<string, unknown> {
+  return Object.fromEntries(names.flatMap(name => {
+    const input = record.inputs[name];
+    const supplied = input?.provided ?? (input === undefined ? record.explicit.includes(name) : input.present && !input.producer);
+    if (!supplied && sourceOwned?.(name)) return [];
+    return [[name, supplied ? input?.value === null ? null : record.props[name] : undefined]];
+  }));
+}
+
 const renderedInstanceRecords = new WeakMap<Element, Readonly<Record<string, RenderedInstanceRecord>>>();
 
 export function renderedInstanceRecord(element: Element, tag: string): RenderedInstanceRecord | undefined {

@@ -7,7 +7,7 @@ import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
 import { buildApplication, type BuildResult } from "../../src/index.js";
 import { escapeHTML } from "../../src/document.js";
 
-const counter = `<template component="proof-counter" controller="./counter.ts"><defs>
+const counter = `<template component="proof-counter" module="./counter.ts"><defs>
 <prop name="step" type="number" default="1">Increment amount.</prop>
 <state name="count" type="number" value="0"></state></defs>
 <section><button type="button" $ref="increment">Increment</button> <output>{$count}</output></section>
@@ -33,7 +33,7 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
   const navigation = [{ label: "Overview", href: base }, ...guides.map(file => ({ label: basename(file, ".md"), href: `${base}guide/${file === "index.md" ? "" : basename(file, ".md") + "/"}` })),
     { label: "Counter reference", href: base + "reference/counter/" }];
   await write("package.json", '{"name":"htmlkit-docs-proof","private":true,"type":"module"}\n');
-  await write("app/layouts/default.html", `<template component="proof-shell" controller="./shell.ts"><defs>
+  await write("app/layouts/default.html", `<template component="proof-shell" module="./shell.ts"><defs>
     <prop name="links" type="list(object({ label: string, href: string }))" required>Navigation</prop>
     <state name="dark" type="boolean" value="false"></state><title>HTMLKit documentation proof</title><meta name="description" content="HTML Next application documentation."></defs>
     <main><header><strong>HTMLKit</strong><button type="button" $ref="theme">Toggle theme</button></header>
@@ -45,20 +45,20 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
       .columns { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 3rem; max-width: 80rem; margin: 2rem auto; } input, button { font: inherit; padding: .4rem; } ul { padding-left: 1rem; } a { color: #2785d7; }
       @media (max-width: 640px) { .columns { display: block; } }</style></template>`);
   await write("app/layouts/default.server.ts", `export const load = () => ({ props: { links: ${JSON.stringify(navigation)} } });`);
-  await write("app/layouts/shell.ts", `export default function(host) {
+  await write("app/layouts/shell.ts", `export function connect(host) {
     const theme = () => { host.state.dark = !host.state.dark; };
     const search = () => { const query = host.refs.search.value.toLowerCase(); for (const item of host.root.querySelectorAll('nav li')) item.hidden = !item.textContent.toLowerCase().includes(query); };
     host.refs.theme.addEventListener('click', theme); host.refs.search.addEventListener('input', search);
     return () => { host.refs.theme.removeEventListener('click', theme); host.refs.search.removeEventListener('input', search); };
   }`);
   await write("app/components/counter.html", counter);
-  await write("app/components/counter.ts", `export default function(host) {
+  await write("app/components/counter.ts", `export function connect(host) {
     const click = () => { host.state.count += host.props.step.value; };
     host.refs.increment.addEventListener('click', click);
     return () => host.refs.increment.removeEventListener('click', click);
   }`);
   await write("app/pages/index.html", `<template component="page-proof-home"><defs><title>Overview · HTMLKit</title><meta name="description" content="An application platform exercised by documentation."></defs><article><h1>Application platform, exercised by documentation</h1>
-    <p>This consumer builds existing Markdown guides, component metadata, searchable navigation, a theme controller, and a working HTML Next example.</p>
+    <p>This consumer builds existing Markdown guides, component metadata, searchable navigation, a theme module, and a working HTML Next example.</p>
     <p>HTMLKit supplies routing, loaders, rendering, and delivery. This application owns its content and presentation.</p></article></template>`);
   for (const file of guides) {
     const slug = basename(file, ".md");

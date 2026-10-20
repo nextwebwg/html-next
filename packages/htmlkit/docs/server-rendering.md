@@ -27,6 +27,21 @@ or `server`. This is a tooling implementation design, not a component-language s
 - `createNavigation` answers `navigation()`, `navigationTree()`, `breadcrumbs()`, and `pager()` from
   routes and the concrete page URLs.
 
+Private component readers reuse this pipeline at `POST <base>_htmlkit/read`, after middleware and
+the existing same-origin check. The application registry maps an opaque source revision and tag to
+the component definition, common module and private reader module. The handler validates a transferred
+declaration frame, recomputes common selectors and validates the result before returning it. This
+frame carries public inputs, never authorization claims. Private readers receive the real request
+and explicitly supplied services, and authorize each operation themselves.
+
+During prerendering and SSR, provider preparation stays in the DOM worker while private readers run
+in the parent process through the renderer's transferred MessagePort. Request and service functions
+never cross that boundary. Native abort signals cancel reads when rendering ends or the owning
+application closes; late completion cannot publish. The same binding preparation, accepted values
+and read identities reach browser adoption, so the first client render does not repeat private work.
+The build records private readers used by prerendered pages too, since later browser updates need
+the request server even when the page's HTML is a file.
+
 Two applications supply the rest of a `Pipeline`:
 
 ```text
@@ -42,6 +57,8 @@ Request
   through Vite's module runner and each route's component graph through `loadNodeComponents`. A
   prerendered page renders at its canonical `origin` URL, as the build renders it.
 - The build writes `_htmlkit/server/entry.js`, whose default export is `serverApplication`'s result.
+  Its `create(options)` export makes an independently owned application; `startApplication` uses it
+  for each listener and closes that application's renderer when the listener closes.
   The entry carries the server data as JSON: path-free routes, the navigation catalog, head scripts,
   redirects, and each server route's component definitions, head metadata, and browser assets. Vite
   builds the server-rendered pages' loaders, the endpoints, and the middleware to
@@ -65,9 +82,9 @@ requests with different cookies at once and checks neither sees the other's.
 
 ### Render workers
 
-HTML Next's `renderComponents` renders in a pool of long-lived workers, the number of available
-CPUs up to 8 unless `setRenderWorkers(count)` sets another (`htmlkit --render-workers`, or
-`startApplication({ renderWorkers })`). Each worker renders one request at a time and the others
+Each HTMLKit application owns an HTML Next `createRenderer()` pool of long-lived workers, the number
+of available CPUs up to 8 unless `setRenderWorkers(count)` sets another before construction
+(`htmlkit --render-workers`, or `startApplication({ renderWorkers })`). Each worker renders one request at a time and the others
 wait in a queue. Every render gets:
 
 - its own JSDOM window and document, created for the render and closed after it;
@@ -79,7 +96,7 @@ wait in a queue. Every render gets:
 
 A worker keeps only what loading its modules creates: jsdom, the HTML Next runtime, the
 `Intl.DurationFormat` polyfill, the projected-slot parser the runtime installs once, and the
-runtime's static tables, such as SVG attribute names. It caches no definitions, documents, or
+runtime's static tables, such as SVG attribute names, plus imported common provider modules. It caches no definitions, documents, or
 rendered output. HTML Next's request-isolation test renders requests with conflicting definitions
 of one tag and conflicting state, concurrently and in sequence, on one worker and on three. A worker
 that fails or exits rejects the render it was doing, which a server answers with its error page, and
@@ -99,7 +116,34 @@ every request. The guide says so beside the request API.
 HTML Next type validation, attribute serialization, and rendered continuation records. Head
 declarations bind through HTML Next's parser and renderer like any other binding, and the server
 renderer serializes and escapes the elements it writes. Browser entries import the page's compiled components and their
-controllers, never server loaders or their imports.
+browser modules, never server loaders or their imports.
+
+### Component provider preparation
+
+HTMLKit discovers named `props`/`create` exports without evaluating behavior-only modules. Vite
+bundles eligible common modules under its cache for development and prerendering, and into the
+private server output for request-time rendering. Native package imports resolve from the application.
+The application closes its renderer before removing its own temporary bundles; it leaves Vite's
+cache and other applications' artifacts alone.
+
+The renderer's preparation adapter receives the native document, typed component hosts, the render's
+abort signal, and `flush()` to drain the existing reactive renderer. Tag-specific host lookup handles
+components that share one native root. The adapter calls the binding library's `prepare()` in build
+or request phase and never calls browser `connect`. Additional component roots revealed by prepared
+data are prepared in turn. Typed values, input status and state travel in HTML Next continuation
+records. HTMLKit adds only source revisions and selected-read identities for matching browser adoption.
+
+Prepared pages use a rendered-form navigation payload so a fresh navigation adopts the prepared
+baseline, just as an initial document does. Pages without automatic providers keep the factory
+payload. Neither format transfers private loader data.
+
+Client companions enter only the browser graph. Common provider configuration can omit a reader
+when a client companion supplies it: server preparation marks that provider for browser execution
+without importing the client module. Fully client-only modules leave their required values unavailable
+in server output; their ordinary constraint validity remains missing until the browser supplies them.
+Known caller values and common readers still pass through the same typed checks. The built server
+carries client component tags, never client module imports. Browser imports of `.server` modules are
+rejected, including transitive imports and raw/URL imports.
 
 ## Cost
 
@@ -125,7 +169,7 @@ adds a parsed cookie map and nothing else. Native anchors and the Navigation API
 client navigation renders each page from its module and data payload, whose URL carries the page's
 query, or its server document ([client-navigation.md](./client-navigation.md)). HTML Next provides
 named-slot composition, typed props and state, isolated DOM rendering, rendered continuation
-serialization, adoption, controller connection and disposal, and browser read resumption. Vite
+serialization, adoption, module activation and cleanup, and browser read resumption. Vite
 supplies module resolution, TypeScript transformation, asset bundling, and development watching.
 
 The platform layer is application policy: file and registered route discovery and matching, layout

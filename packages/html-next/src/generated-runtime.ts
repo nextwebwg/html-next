@@ -15,7 +15,7 @@ import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue, holdControl } from "./controls.js";
 import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
-import { currentProjection, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
+import { currentProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
 import type { RenderedInstanceRecord } from "./rendered-form.js";
 import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
@@ -1630,8 +1630,17 @@ export function adoptInvoke(
 }
 
 /** A compiled root's host, as `getComponentHost` gives it, for code that holds the root. */
-export function generatedHost(element: Element): { readonly root: Element; readonly state: Record<string, unknown> } | undefined {
-  return ((element as RuntimeElement)[lifecycleKey]?.h as { H?: { readonly root: Element; readonly state: Record<string, unknown> } } | undefined)?.H;
+export function generatedHost(element: Element, tag?: string): { readonly root: Element; readonly state: Record<string, unknown> } | undefined {
+  const owner = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  const instance = tag === undefined || owner?.S.g === tag ? owner : owner?.D?.find(entry => entry.S.g === tag);
+  return (instance as { H?: { readonly root: Element; readonly state: Record<string, unknown> } } | undefined)?.H;
+}
+
+/** Drain existing reactive work before an application offers preparation to a retained delegate. */
+export function flushComponent(element: Element): void {
+  const owner = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  owner?.q.flush();
+  for (const delegate of owner?.D ?? []) delegate.q.flush();
 }
 
 /**
@@ -1647,7 +1656,8 @@ export function replaceProjectedNode(current: ChildNode, next: ChildNode): void 
 /**
  * Carries a fresh rendering's props onto a compiled root a page keeps, through the prop channel, as
  * the live runtime's `adoptRenderedProps` does: `rendered` is that component's root in the new
- * rendering, made by its factory or rendered by a server. Props it left implicit return to their defaults.
+ * rendering, made by its factory or rendered by a server. Omitted caller-owned inputs return to
+ * their defaults; producer-owned inputs remain with their source.
  */
 export function adoptRenderedProps(element: Element, rendered: Element): void {
   const kept = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
@@ -1655,10 +1665,10 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
   if (kept === undefined || props === undefined) return;
   const names = Object.keys(props.D.props);
   const fresh = ((rendered as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined)?.B;
-  const record = fresh !== undefined ? { explicit: [...fresh.x], props: Object.fromEntries(names.map((name, index) => [name, fresh.v[fresh.n.length + index]])) }
+  const record = fresh !== undefined ? { explicit: [...fresh.x], inputs: fresh.i, props: Object.fromEntries(names.map((name, index) => [name, fresh.v[fresh.n.length + index]])) }
     : renderedInstanceRecord(rendered, kept.S.g);
   if (record === undefined) fail("HR005", "The rendered element records no props for this element's component.");
-  props.u!(Object.fromEntries(names.map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+  props.u!(renderedCallerProps(record, names, name => props.i[name]!.producer === true && props.i[name]!.provided !== true));
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */

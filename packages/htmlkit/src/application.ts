@@ -1,10 +1,11 @@
-import { dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 import { compileComponentStylesForBuild, parseComponentResource, type ComponentDefinition } from "@nextwebwg/html-next";
 import { loadNodeComponents } from "@nextwebwg/html-next/node-loader";
+import { createRenderer } from "@nextwebwg/html-next/server";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
 import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
@@ -12,7 +13,10 @@ import { sitePolicy } from "./csp.js";
 import { authoredHead, documentHTML, redirectPage, type PageAssets } from "./document.js";
 import { breadth, discover, discoverServerFiles, matchRoute, parameter, redirectTable, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition, withoutSettings } from "./resource.js";
-import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
+import { createProviderModules } from "./providers.js";
+import { serverReaders } from "./private-readers.js";
+import { privateReadResponse, type PrivateReadRegistration } from "./private-api.js";
+import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, requestReadContext, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
 import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
 
@@ -89,6 +93,17 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   }
   const module = async (layer: RouteLayer): Promise<ServerModule> => layer.server === undefined ? {} :
     typeof layer.server === "string" ? await environment.runner.import(layer.server) as ServerModule : layer.server;
+  const renderer = createRenderer();
+  const privateLifetime = new AbortController();
+  const privateSources = new Map<string, PrivateReadRegistration>();
+  const providers = createProviderModules(config.root, {
+    cacheDir: server.config.cacheDir,
+    async resolve(specifier, importer) {
+      const resolved = await server.environments.client!.pluginContainer.resolveId(specifier, importer);
+      return resolved === null || resolved.external ? undefined : resolved.id.split("?")[0];
+    },
+    watch: file => { server.watcher.add(file); },
+  });
   // Diagnostics name a loader's file, or its component when a plugin supplies the loader module.
   const origin = (layer: RouteLayer): string => typeof layer.server === "string" ? layer.server : layer.component;
 
@@ -188,10 +203,70 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     for (const definition of definitions.slice(0, -1)) {
       if (!definition.slots?.some(slot => slot.name === "page")) throw new HtmlKitError('Layout requires a slot named "page".', definition.source.file);
     }
-    const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: withoutSettings(node.definition),
-      styles: compileComponentStylesForBuild(node.definition.css, node.definition),
-      ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
-      ...(node.module === undefined ? {} : { module: fileURLToPath(node.module.url) }) }));
+    const carriers = new Map<string, { count: number; explicit: boolean }>();
+    for (const node of loaded.nodes.values()) {
+      const carrier = carriers.get(node.url) ?? { count: 0, explicit: false };
+      carrier.count += 1;
+      carrier.explicit ||= node.module !== undefined || node.controller !== undefined;
+      carriers.set(node.url, carrier);
+    }
+    const siblings = new Map<string, Promise<string | undefined>>();
+    const sibling = (file: string, suffix = ""): string | undefined => {
+      const stem = file.slice(0, -extname(file).length) + suffix;
+      const candidates = [stem + ".js", stem + ".ts"].filter(path => existsSync(path));
+      if (candidates.length > 1) throw new HtmlKitError(`${suffix === "" ? "Component" : suffix === ".client" ? "Client" : "Server"} sibling module is ambiguous: ${candidates.map(path => basename(path)).join(", ")}; ${suffix === "" ? "select one with an explicit module attribute" : `keep one ${suffix.slice(1)} companion`}.`, file);
+      return candidates[0];
+    };
+    const companion = (url: string): Promise<string | undefined> => {
+      let found = siblings.get(url);
+      if (found !== undefined) return found;
+      found = (async () => {
+        const carrier = carriers.get(url)!;
+        if (carrier.count > 1 && carrier.explicit) return undefined;
+        const file = fileURLToPath(url);
+        const found = sibling(file);
+        if (found === undefined) return undefined;
+        if (carrier.count > 1) {
+          throw new HtmlKitError("A sibling module is ambiguous for a file declaring several components; set module on the template it belongs to.", file);
+        }
+        return found;
+      })();
+      siblings.set(url, found);
+      return found;
+    };
+    const components = await providers.resolve(await Promise.all([...loaded.nodes.values()].map(async node => {
+      let module = node.module === undefined
+        ? node.controller !== undefined || node.imported || !node.url.startsWith("file:") ? undefined : await companion(node.url)
+        : fileURLToPath(node.module.url);
+      let client: string | undefined;
+      let privateModule: string | undefined;
+      let readers: readonly string[] | undefined;
+      if (node.controller === undefined && !node.imported && node.url.startsWith("file:")) {
+        const carrier = carriers.get(node.url)!;
+        if (module !== undefined && /\.client\.[jt]s$/.test(module)) { client = module; module = undefined; }
+        else if (module !== undefined || !carrier.explicit) {
+          client = sibling(module ?? fileURLToPath(node.url), ".client");
+          if (client !== undefined && module === undefined && carrier.count > 1) throw new HtmlKitError("A client sibling is ambiguous for a file declaring several components; set module on the template it belongs to.", fileURLToPath(node.url));
+        }
+        const candidate = sibling(module ?? fileURLToPath(node.url), ".server");
+        if (candidate !== undefined && (module !== undefined || carrier.count === 1)) {
+          const found = serverReaders(await environment.runner.import(candidate), candidate);
+          if (found !== undefined && Object.keys(found).length > 0) {
+            if (module === undefined) throw new HtmlKitError("Private readers require a common module containing their input selectors.", candidate);
+            privateModule = candidate; readers = Object.keys(found);
+          }
+        }
+      }
+      return { definition: withoutSettings(node.definition), styles: compileComponentStylesForBuild(node.definition.css, node.definition),
+        ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
+        ...(client === undefined ? {} : { client }),
+        ...(privateModule === undefined ? {} : { server: privateModule }), ...(readers === undefined ? {} : { privateReaderNames: readers }),
+        ...(module === undefined ? {} : { module }) };
+    })));
+    for (const component of components) if (component.server !== undefined && component.binding !== undefined) privateSources.set(component.binding.source, {
+      definition: component.definition, common: () => environment.runner.import(component.module!),
+      readers: async () => serverReaders(await environment.runner.import(component.server!), component.server!)!,
+    });
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
       module: () => module(layer), origin: origin(layer) })) };
   };
@@ -226,7 +301,12 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const { route, params } = matched ?? { route: fallback!, params: {} };
     const { layers, definitions, components } = await graph(route);
     const rendered = await renderRoute({ base: config.base, canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, layers,
-      definitions, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
+      definitions, providers: Object.fromEntries(components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag, component.binding]])),
+      clientModules: components.filter(component => component.client !== undefined).map(component => component.definition.contract.tag),
+      services: options.services,
+      privateReaders: Object.fromEntries(components.flatMap(component => component.server === undefined ? [] : [[component.definition.contract.tag,
+        async () => serverReaders(await environment.runner.import(component.server!), component.server!)!]])),
+      render: renderer.render, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
       ...(action === undefined ? {} : { action }) });
     if (rendered.kind === "redirect") return redirected(url.pathname, rendered.location, rendered.status, rendered.headers);
     if (rendered.kind === "notFound") {
@@ -235,14 +315,15 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       return { ...page, headers: rendered.headers };
     }
     return { status: failure?.status ?? (matched === undefined ? 404 : rendered.status), pathname: url.pathname, body: rendered.body, css: rendered.css, head: rendered.head,
-      html: documentHTML(rendered.body, rendered.head), components, layers: rendered.layers, headers: rendered.headers };
+      html: documentHTML(rendered.body, rendered.head), components, layers: rendered.layers, headers: rendered.headers,
+      ...(rendered.prepared === undefined ? {} : { prepared: rendered.prepared }) };
   };
   /**
    * A failure answers with app/error.html and a safe message; the error itself goes to the console. The
    * development server, which supplies the module server, shows the error instead.
    */
   const failed = async (error: unknown, request: Request): Promise<Response> => {
-    const report = (error: unknown) => { if (!ownsServer || request.signal.aborted) throw error; console.error(error); };
+    const report = (error: unknown) => { if (!ownsServer || request.signal.aborted || privateLifetime.signal.aborted) throw error; console.error(error); };
     report(error);
     const { pathname } = new URL(request.url);
     // A failed page has no payload, so the browser loads its document, the error page.
@@ -254,6 +335,11 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   };
   const pipeline: Pipeline<ApplicationRoute> = {
     base: config.base, routes, endpoints,
+    read(request) {
+      request = new Request(request, { signal: AbortSignal.any([request.signal, privateLifetime.signal]) });
+      return privateReadResponse(request, config.base, privateSources, url => requestReadContext(request, url, config.base,
+        matchRoute(routes, url.pathname, config.base)?.params ?? {}, options.services));
+    },
     redirects: new Map([...redirects].map(([from, location]) => [from, { location, status: 308 as const }])),
     endpoint: async route => await environment.runner.import(route.file) as EndpointModule,
     ...(middleware === undefined ? {} : { middleware: async () => {
@@ -308,7 +394,11 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     },
     // Not a method of `this`: runtimes are handed the function itself, as in Deno.serve(application.fetch).
     fetch: request => respond(pipeline, request).catch((error: unknown) => failed(error, request)),
-    async close() { if (ownsServer) await server.close(); },
+    async close() {
+      privateLifetime.abort();
+      try { await Promise.all([renderer.close(), ...ownsServer ? [server.close()] : []]); }
+      finally { await providers.close(); }
+    },
   };
   return { application, graph, catalog: concreteRoutes, policy: site };
 }

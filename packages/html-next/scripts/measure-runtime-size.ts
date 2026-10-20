@@ -148,7 +148,9 @@ const staticGenerated = await generatedFixture("static-card", 7_878);
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
 // +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
 // which the bundle does not include.
-const reactiveGenerated = await generatedFixture("reactive-counter", 7_804);
+// +1 B gzip after caller-input adoption reuse: the fixture has identical module contributions and
+// uncompressed size; only minified local identifiers change. The adoption helper is tree-shaken.
+const reactiveGenerated = await generatedFixture("reactive-counter", 7_805);
 // +1.0–1.1 KB on prop fixtures: the typed input SDK, accepted caller ownership, and status-only
 // publication use compiled prop checks and the existing scheduler. Components without props
 // do not import the SDK. The dedicated await fixture protects actual status/error lowering.

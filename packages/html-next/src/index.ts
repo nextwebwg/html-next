@@ -1,4 +1,4 @@
-export { defineContract, serializePropTarget } from "./contract-platform.js";
+export { defineContract, serializePropTarget, selectedPropType } from "./contract-platform.js";
 export { add, divide, multiply, subtract } from "./decimal.js";
 export { getDiagnosticLocation, HtmlDiagnosticAggregateError, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type DiagnosticLocation, type HtmlDiagnostic } from "./diagnostics.js";
 export {

@@ -1,6 +1,17 @@
 # Changelog
 
-## 1.0.0-alpha.62
+## 1.0.0-alpha.63
+
+### Added
+
+- HTMLKit prepares private `.server` component readers with parent-owned request context and services, then serves subsequent browser reads through the built request server. Common selectors and policies remain shared; client readers can override browser work while adopting private SSR data. Private code stays out of public bundles, each request validates its typed inputs and recomputes its selector, and render cancellation or application shutdown aborts owned reads.
+- HTMLKit's basic and documentation examples use component modules with named `connect` exports, including reconnecting a retained counter without losing its state. Guides describe common, client, private, and supplied data through the same typed props.
+- HTMLKit resolves a component's sibling `.js` or `.ts` module and connects its exported prop providers through the binding library. Browser-only providers work on prerendered pages, supplied values bypass reads, and retained component instances keep their drafts and provider scopes across reconnection. Explicit module pointers and legacy controllers retain their existing behavior; ambiguous companions name the files that need an explicit choice.
+- Node rendering accepts typed caller props before initializing component state. HTMLKit preserves those inputs through prerendering, hydration and client navigation while retaining the HTML attribute form for older payload consumers.
+- Application adapters can prepare data against typed hosts inside Node render workers and use a transferred message port for private reads. Render cancellation removes queued jobs or stops the assigned worker; ordinary completion and failures close the render's port and await its cleanup.
+- Applications can own a renderer and its ESM cache with `createRenderer()`. Closing or resizing one renderer leaves other applications running; the existing global render functions use the same pool implementation.
+- HTMLKit prepares common component providers during prerendering and request-time rendering, then adopts their typed values and read identities without repeating the initial browser read. Prepared navigation payloads retain that baseline; behavior-only modules stay out of server preparation. Development reloads and server shutdown retire only their application's workers and temporary bundles.
+- HTMLKit resolves browser-only `.client.js`/`.client.ts` companions. Client readers retain shared selectors and policy, may run without a common module, and reuse SSR data before later browser reads. Common and client hooks share activation ownership and clean up in reverse order; client imports stay out of the built server.
 
 ### Fixed
 
@@ -9,6 +20,14 @@
 - An optional object field that is null is a missing one in every target, as the [Types](https://nextwebwg.org/declarative-components/types#null-and-missing-values) chapter defines. Vue, React and Svelte props and the compiled guards rejected a whole prop such as `{ activeCell: { … }, hoveredCell: null }`, which the live runtime accepted. A prop a wrong-typed field rejects reports itself invalid (`aria-invalid`), as before.
 
 A browser test renders a list whose rows bind a prop through `$each`, a bare boolean attribute and an object prop with a null optional field and with a wrong-typed one, in the live runtime, compiled Vanilla output and converted Vue (type-checked with vue-tsc), React and Svelte components.
+
+- HTMLKit typechecks and prepares providers against workspace input-port sources before package build output exists.
+- Live input producers validate output against the current state-selected prop type, matching compiled components and allowing private server preparation of those inputs.
+- Retained HTMLKit layouts adopt compatible prepared provider results without repeating browser reads or resetting drafts. Existing browser attempts for the same input stay current, including live values and failures. A typed `id` prop no longer breaks HTMLKit's layer lookup or required-provider preparation.
+- Components sharing a retained layout's native root adopt their own prepared results after forwarded inputs propagate through the existing reactive scheduler.
+- HTMLKit lets configured providers supply required props before diagnosing missing inputs, including reads deferred to the browser, while preserving errors for unrelated unsupplied required inputs. Type-only local exports do not turn browser behavior into a server provider, and source execution recognizes module URLs with loader query strings.
+- Omitted prop defaults remain eligible for providers. Explicit null inputs stay caller-owned, use declared defaults when present, and retain that ownership when a layout persists across navigation.
+- Static prop serialization applies declared defaults to null inputs, including zero and false defaults.
 
 ## 1.0.0-alpha.61
 

@@ -2,7 +2,7 @@ import { defineContractWithNativeCheck } from "./contract.js";
 import { getDomInterface } from "./platform.js";
 import type { ComponentContract, DefineContractOptions } from "./types.js";
 
-export { serializePropTarget } from "./contract.js";
+export { serializePropTarget, selectedPropType } from "./contract.js";
 
 /** Defines a contract using the build-time DOM interface inventory. */
 export function defineContract(

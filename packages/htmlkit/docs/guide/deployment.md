@@ -10,7 +10,8 @@ eyebrow: HTMLKit
 `htmlkit build` writes everything a deployment needs to `dist/`: each prerendered page as a file,
 the browser bundles, and a request server for the pages, endpoints, and middleware that run on each
 request. A site of prerendered pages deploys to any static host. A site that renders pages on request,
-or has endpoints or middleware, runs `htmlkit start`, or the same server on Deno or Bun.
+or has endpoints, middleware, or private component readers, runs `htmlkit start`, or the same server
+on Deno or Bun.
 
 ## Prerendered and server pages
 
@@ -41,7 +42,7 @@ bundles, and the development server renders each as the build will.
 
 ## Static hosts
 
-When every page is prerendered and there are no endpoints or middleware, upload `dist/` to any static
+When every page is prerendered and there are no endpoints, middleware, or private browser reads, upload `dist/` to any static
 host, such as GitHub Pages, Netlify, or an S3 bucket:
 
 - Set the host's "page not found" response to `404.html`, your

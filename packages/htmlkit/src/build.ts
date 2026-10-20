@@ -11,7 +11,7 @@ import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type 
 import { checkLinks } from "./links.js";
 import { matchRoute, redirectTable } from "./routes.js";
 import type { ServerData, ServerPage } from "./server.js";
-import type { ApplicationOptions, ApplicationRoute, RenderedPolicy, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
+import type { ApplicationOptions, ApplicationRoute, BrowserDefinition, RenderedPolicy, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -53,10 +53,11 @@ export async function readManifest(outDir: string): Promise<BuildManifest> {
  * Write _htmlkit/server: entry.js, whose default export answers requests, and the loaders, endpoints,
  * and middleware it imports. Prerendered pages need none of their code there; their files serve them.
  */
-async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, policy, internals, serverGraphs }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, policy, internals, serverGraphs, components }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
   readonly policy: RenderedPolicy | undefined;
   readonly stage: string; readonly redirects: readonly ManifestRedirect[]; readonly scripts: readonly string[];
   readonly internals: Awaited<ReturnType<typeof createApplicationInternals>>;
+  readonly components: readonly BrowserDefinition[];
   readonly serverGraphs: readonly { readonly route: ApplicationRoute; readonly graph: RouteGraph; readonly assets: PageAssets }[] }): Promise<void> {
   const { application } = internals;
   const inputs: Record<string, string> = {};
@@ -73,16 +74,25 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
   let error: ServerData["error"];
   for (const { route, graph, assets } of serverGraphs) {
     const layers = [...route.layouts, route];
-    const page: ServerPage = { definitions: graph.definitions, assets, layers: graph.layers.map((layer, i) => {
-      const loader = layers[i]!.server;
-      if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
-      return { definition: layer.definition, ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
-    }) };
+    const page: ServerPage = { definitions: graph.definitions, assets,
+      clientModules: graph.components.filter(component => component.client !== undefined).map(component => component.definition.contract.tag),
+      providers: Object.fromEntries(graph.components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag,
+        { module: module(component.module!, "provider"), source: component.binding.source, ...component.binding.client === undefined ? {} : { client: component.binding.client },
+          ...component.binding.readers === undefined ? {} : { readers: component.binding.readers } }]])),
+      layers: graph.layers.map((layer, i) => {
+        const loader = layers[i]!.server;
+        if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
+        return { definition: layer.definition, ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
+      }) };
     if (route === application.error) error = { ...page, route: path(route) };
     else pages[application.routes.indexOf(route)] = page;
   }
   const catalog = await internals.catalog();
-  const data: ServerData = { version: 2, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
+  const readers = Object.fromEntries(components.flatMap(component => component.server === undefined || component.binding === undefined ? [] : [[component.binding.source, {
+    definition: component.definition, common: module(component.module!, "provider"), server: module(component.server, "reader"),
+  }]]));
+  const data: ServerData = { version: 3, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
+    readers,
     routes: application.routes.map(path),
     catalog: [...catalog].map(([path, route]) => [path, application.routes.indexOf(route)] as const),
     endpoints: application.endpoints.map(endpoint => ({ ...endpoint, file: source(endpoint.file), module: module(endpoint.file, "api") })),
@@ -92,8 +102,8 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "entry.js"), "// The build's request server: `htmlkit start` serves it, and its default export's fetch answers requests on any runtime.\n" +
     'import { serverApplication } from "@nextwebwg/htmlkit/server";\n' +
-    `export default await serverApplication(import.meta.url, JSON.parse(${JSON.stringify(JSON.stringify(data))}), {\n` +
-    Object.keys(inputs).map(id => `  ${JSON.stringify(id)}: () => import(${JSON.stringify(`./${id}.js`)}),\n`).join("") + "});\n");
+    `export function create(options) { return serverApplication(import.meta.url, JSON.parse(${JSON.stringify(JSON.stringify(data))}), {\n` +
+    Object.keys(inputs).map(id => `  ${JSON.stringify(id)}: () => import(${JSON.stringify(`./${id}.js`)}),\n`).join("") + "}, options); }\nexport default await create();\n");
 }
 
 export async function buildApplication(input: ApplicationOptions = {}): Promise<BuildResult> {
@@ -231,7 +241,8 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
       await writeFile(join(stage, "robots.txt"), rules + sitemap);
     }
-    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, policy, internals, serverGraphs: serverGraphs.map(({ route, graph }, i) =>
+    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, policy, internals,
+      components: [...pages.flatMap(page => page.components), ...serverGraphs.flatMap(({ graph }) => graph.components)], serverGraphs: serverGraphs.map(({ route, graph }, i) =>
       ({ route, graph, assets: bundled(pages.length + i, route.pattern).assets })) });
     const routes = delivery.map(page => page.pathname);
     const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };

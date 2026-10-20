@@ -27,12 +27,14 @@ import { parseComponent } from "@nextwebwg/html-next";
 import { renderComponents } from "@nextwebwg/html-next/server";
 
 const counter = parseComponent(`<template component="x-counter"><defs>
+  <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><button type="button" on:click="increment"><span $value="$count"></span></button></template>`);
+</defs><button type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
 
 const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],
+  props: { "#counter": { label: "Visits" } },
   state: { "#counter": { count: 5 } },
 });
 ```
@@ -47,6 +49,13 @@ with `registerComponentDefinitions()` from `@nextwebwg/html-next/runtime`, then 
 or `observeDocument()`. Hydration adopts the rendered roots; clicking the example counter changes 5
 to 6. A graph from `loadNodeComponents()` supplies definitions through its non-shadowed nodes.
 
+`props` addresses authored invocations before lowering. Values pass through the renderer's typed
+prop boundary before `<state from>` initializes. A supplied `null` uses the declared default while
+retaining caller ownership; `undefined` releases the prop, including an invocation's literal input.
+Omitted props keep their invocation values or implicit defaults. Inputs must name declared props;
+a selector that matches no invocation is an error. Values cross the worker boundary through
+Node's structured clone.
+
 `state` addresses lowered component roots, so selectors should use stable authored IDs. Each value
 must name declared state. Node output matches the browser's declarative baseline before connection:
 props, initial state, computeds, template output and projected slots. Declared reads remain in their
@@ -60,6 +69,81 @@ component links, or bundle the controller imports alongside runtime registration
 `registerComponentDefinitions()` alone registers data; it does not import JavaScript modules.
 The runtime's `lowerDocument(document, { connect: false })` renders the same static baseline in a
 browser. Ordinary `lowerDocument()` or `observeDocument()` connects its reads afterward.
+
+## Application-owned preparation
+
+The Node renderer can load an application adapter after initial props and state. This adapter
+uses the worker's actual typed hosts; it does not connect browser behavior or require a component
+to export another lifecycle hook.
+
+```js
+// prepare.js
+import { bindModule } from "@nextwebwg/html-next/bindings";
+import * as card from "./card.js";
+
+export async function prepare({ document, host, signal }) {
+  const binding = bindModule(card);
+  const scope = await binding.prepare(host(document.querySelector("#card")), {
+    phase: "request", signal, source: "card-build-1",
+  });
+  return () => scope.dispose();
+}
+```
+
+Pass its absolute ESM URL as `prepare.module`:
+
+```js
+const result = await renderComponents('<product-card id="card"></product-card>', {
+  definitions,
+  prepare: { module: new URL("./prepare.js", import.meta.url).href },
+  signal: request.signal,
+});
+```
+
+The exported `ServerPreparationContext` supplies `document`, `host(element)`, the render-owned
+`signal`, cloned `data`, an optional Node `MessagePort`, and `flush()`. Await `flush()` before
+inspecting DOM or hosts introduced by provider output; the renderer also flushes before and after
+the adapter. A returned cleanup may be asynchronous. On completion or failure, the render signal
+aborts before cleanup, then the document closes. An adapter that throws before returning cleanup
+must release resources it already acquired.
+
+An optional `prepare.port` is transferred to this render and closed on every exit, including
+queued cancellation and clone refusal. Application code can retain its peer to service private
+reads without sending request objects or functions into the worker. Preparing accepted values
+and transferring binding completion identities are separate host responsibilities: browser
+adapters use matching source revisions and binding snapshots to avoid duplicate initial reads.
+
+An already aborted signal rejects immediately. Cancelling a queued render leaves active work
+alone; cancelling an active render terminates its worker, including noncooperative preparation.
+Termination closes native worker resources but cannot run JavaScript cleanup in the terminated
+thread. Other workers continue, and the pool starts a replacement when needed. Abort listeners
+are removed when a job settles. Preparation module namespaces follow native ESM caching within
+each worker; changed application modules need a new module URL or a fresh renderer lifetime.
+
+Use `createRenderer()` when an application owns the lifetime of its adapters and module cache:
+
+```js
+import { createRenderer } from "@nextwebwg/html-next/server";
+
+const renderer = createRenderer({ workers: 2 });
+try {
+  const result = await renderer.render(html, options);
+  // Serve the rendered output.
+} finally {
+  await renderer.close();
+}
+```
+
+Each renderer owns its workers, queued requests and ESM namespaces. Closing it rejects its queued
+and active requests, awaits its terminating workers, and rejects later renders; other renderers
+continue. Repeated `close()` calls await the same shutdown. `setWorkers(count)` resizes this
+renderer, retiring excess workers as they finish before assigning more queued work.
+
+Without `workers`, a new renderer inherits the current `setRenderWorkers()` setting. That global
+function controls the default pool used by `renderComponents()`; an existing scoped renderer keeps
+its own setting. `closeRenderWorkers()` closes the default pool's current work while allowing later
+calls to `renderComponents()` to start fresh workers. Application-owned renderers let development
+reconstruct module caches and remove temporary adapters after their workers have exited.
 
 ## Platform audit and implementation boundary
 

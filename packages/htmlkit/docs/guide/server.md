@@ -60,7 +60,7 @@ export const DELETE: EndpointHandler = async (request, { params }) => {
 - A method the file doesn't export answers 405, with an `Allow` header listing the ones it does.
 - Parameters follow [page parameters](/htmlkit/routes#dynamic-pages): `[id]` is a segment, and
   `[...path]` and `[[...path]]` are lists of segments.
-- A component's controller reads an endpoint with `fetch('/api/todos')`.
+- A component's browser reader or connection hook reads an endpoint with `fetch('/api/todos')`.
 - A static build has no server, so endpoints answer only under `htmlkit dev` and `htmlkit start`.
 
 ## Middleware

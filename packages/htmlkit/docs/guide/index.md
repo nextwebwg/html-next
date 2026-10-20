@@ -10,9 +10,11 @@ pager: false
 # Build websites from HTML components.
 
 HTMLKit turns a folder of [HTML Next](/html-next/) components into a website. Each file in
-`app/pages` is a page, layouts wrap pages, and small server files load their data. Pages render at
+`app/pages` is a page and layouts wrap pages. Components receive typed props from ordinary values,
+shared providers, browser readers, or private server readers. Pages render at
 build time or on each request, and `app/api` files answer requests with JSON or anything else.
-`htmlkit build` writes a static site you can host anywhere, and a server that `htmlkit start` runs.
+`htmlkit build` writes prerendered pages and a server that `htmlkit start` runs. Pages whose browser
+reads use only public sources can also deploy to a static host.
 
 ## Get started
 
