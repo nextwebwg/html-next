@@ -40,7 +40,7 @@ navigation uses the server HTML and its component continuation records.
 | Fetch the next page's data or HTML | `fetch`, `Response.json()`, `DOMParser` | All |
 | Load the next page's components | dynamic `import()`; the module map shares one runtime instance | All |
 | Render without running anything | An inert document from `document.implementation.createHTMLDocument()` | All |
-| Adopt server DOM and connect controllers | Compiled components bind server nodes in place; the document's one `MutationObserver` connects them | All |
+| Adopt server DOM and connect modules | Compiled components bind server nodes in place; the document's one `MutationObserver` connects them | All |
 | Prefetch without running anything | `fetch` for data; `<link rel="modulepreload">` and `<link rel="prefetch">` for code and styles | modulepreload: all; prefetch: Chromium and Firefox |
 | Links on screen, at idle | `IntersectionObserver`, `requestIdleCallback` (a timer where missing) | IntersectionObserver: all; requestIdleCallback: Chromium and Firefox |
 | Touch intent | `touchstart` (passive) | All |
@@ -80,7 +80,7 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
 2. **Which layers persist, and their new props.** Layers are the `hk-layer-N` roots. From the
    outermost, a layer whose root renders the same component (`data-component`) as the next page's
    layer at that depth persists. The page layer is always replaced, and so is everything below the
-   first layer that differs. A persisted layer keeps its DOM, state, and controller, but its loader
+   first layer that differs. A persisted layer keeps its DOM, state, and module instance, but its loader
    may compute new props, such as `<hk-nav>`'s `current` item. `adoptRenderedProps(element, rendered)`
    reads the props of the layer's new rendering (a root its factory made, or a server root's
    continuation record) and applies them through the compiled prop channel, as the live runtime's
@@ -167,7 +167,7 @@ the factory path for pages without these providers:
    construction and connects when it enters the document.
 3. Swap as before: kept layouts take the new props through `adoptRenderedProps`, and the first
    changed layer replaces the old one through `replaceProjectedNode`. The new layers connect there,
-   so controllers run once and declared reads start. Server HTML from the fallback is adopted in
+   so named `connect` hooks start for their activation and browser reads resume. Server HTML from the fallback is adopted in
    place, as the first page was.
 
 Every layer renders, kept layouts included: the kept layouts' new props come from their fresh
@@ -261,7 +261,7 @@ already loaded:
 Navigation time on the docs proof between two guide pages that share a layout, measured with the
 live-runtime delivery: the median of 20, on
 `htmlkit preview` over loopback, with both modules already loaded. Client navigation is click to
-`navigatesuccess`, which includes the fetch, styles, rendering, swap, and controller connection.
+`navigatesuccess`, which includes the fetch, styles, rendering, swap, and module connection.
 Document navigation is the new document's navigation start to `DOMContentLoaded`, which excludes
 unloading the old one. The HTML column forces the fallback, so it includes a failed payload request.
 The machine was under heavy load; repeated runs varied by a few milliseconds.
@@ -286,5 +286,5 @@ navigation here.
   the same response, in a `replace` navigation to its URL, which aborts the submission's; that
   navigation reads the body first, since the abort ends it. A response that can't render in place
   reloads the submission's URL with `GET`, so a form is never sent twice.
-- Links that controllers add after a navigation are not watched for visibility; they still prefetch
+- Links that component modules add after a navigation are not watched for visibility; they still prefetch
   on interaction.

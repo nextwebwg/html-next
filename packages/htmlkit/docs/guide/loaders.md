@@ -11,6 +11,13 @@ Components receive data through their typed props. A component module can provid
 prerendering, request-time rendering, and browser updates. A page loader can also supply ordinary
 values before rendering; supplied values bypass that prop's provider.
 
+| Source | First render | Later browser reads |
+| --- | --- | --- |
+| Common `.js` or `.ts` provider | Prerendered or rendered on request | The same provider runs in the browser. |
+| `.client` reader | Loading branch, unless a common or private reader prepared data | The client reader runs in the browser. |
+| `.server` reader with a common selector | Prerendered or rendered on request | The request server runs the private reader; an optional client reader overrides this. |
+| Supplied prop value | The supplied value | No provider read while the caller owns that prop. |
+
 ## Component providers in the browser
 
 Put a JavaScript or TypeScript module beside a component with the same name. Its `props` export
@@ -397,13 +404,13 @@ from the outside in, then the page's. Each receives the `data` of the ones befor
 ## In the browser
 
 HTMLKit sends the rendered HTML, then a script per page with the page's components compiled to
-direct DOM code. They take over that HTML in place: controllers connect and browser data reads
+direct DOM code. They take over that HTML in place: modules connect and browser data reads
 start, without re-rendering, and whatever a reader typed before the script ran stays. A page ships
 only the HTML Next code its components use. After that, links to other pages render in place; see
 [Moving between pages](/htmlkit/client-navigation).
 
-- A component's controller can be TypeScript: write `controller="./counter.js"` next to
-  `counter.ts`, and HTMLKit compiles it. Run `tsc` separately to check types.
+- A component module can be TypeScript: write `module="./counter.ts"`, and HTMLKit compiles it.
+  Export a named `connect` for browser behavior. Run `tsc` separately to check types.
 - Component styles become regular stylesheets that load before the page is shown.
 - Files in `public/` are copied unchanged, and a symbolic link there is an error. `_htmlkit/` and `404.html` are reserved names, and so is
   `robots.txt` when the [`robots` option](/htmlkit/configuration#search-engines) is set.

@@ -203,7 +203,7 @@ The outermost layout is chosen in this order: `hk:layout`, then the `pages` entr
 `layoutDefaults`, then the `layout` option, then `app/layouts/default.html`. Pages added through the
 `routes` option are outside the page tree, so they take only their own `layouts`.
 
-During client navigation, the layouts two pages share stay in place, with their state and controllers,
+During client navigation, the layouts two pages share stay in place, with their state and module instances,
 and take the new page's loader props. Going from `/docs/guide/intro/` to `/docs/guide/setup/` keeps
 all three layouts; going to `/blog/` keeps only `default`.
 
@@ -355,11 +355,11 @@ it:
 
 HTML Next inserts one `<script>` for each URL, once per document, when a component that declares
 it connects (`eager`, the default), comes near the viewport (`lazy`), or calls `load()` from its
-controller (`manual`). A server-rendered or prerendered page carries a `<link rel="preload">` for
+module (`manual`). A server-rendered or prerendered page carries a `<link rel="preload">` for
 each eager script, and client navigation never runs a script twice. A declared script's `src` is an
 absolute URL, a root-relative path to a file in `public/`, or a bare name the application's import
 map resolves. `$stripe.pending`, `$stripe.ok`, and `$stripe.error` read its status, and the
-controller waits for `host.scripts.stripe.ready`
+connection hook waits for `host.scripts.stripe.ready`
 ([declared scripts](https://nextwebwg.org/declarative-components/components#declared-scripts)).
 
 Settings that start with `hk:` configure HTMLKit. They are `<meta>` entries in the component's

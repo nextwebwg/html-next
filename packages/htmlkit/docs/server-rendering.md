@@ -116,7 +116,7 @@ every request. The guide says so beside the request API.
 HTML Next type validation, attribute serialization, and rendered continuation records. Head
 declarations bind through HTML Next's parser and renderer like any other binding, and the server
 renderer serializes and escapes the elements it writes. Browser entries import the page's compiled components and their
-controllers, never server loaders or their imports.
+browser modules, never server loaders or their imports.
 
 ### Component provider preparation
 
@@ -169,7 +169,7 @@ adds a parsed cookie map and nothing else. Native anchors and the Navigation API
 client navigation renders each page from its module and data payload, whose URL carries the page's
 query, or its server document ([client-navigation.md](./client-navigation.md)). HTML Next provides
 named-slot composition, typed props and state, isolated DOM rendering, rendered continuation
-serialization, adoption, controller connection and disposal, and browser read resumption. Vite
+serialization, adoption, module activation and cleanup, and browser read resumption. Vite
 supplies module resolution, TypeScript transformation, asset bundling, and development watching.
 
 The platform layer is application policy: file and registered route discovery and matching, layout

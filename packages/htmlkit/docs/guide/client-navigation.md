@@ -21,7 +21,7 @@ pages share, and swaps in the new page. There's nothing to set up.
 
 | Part of the page | When you move to another page |
 | --- | --- |
-| A layout both pages use | Stays, with its state and controller. An open menu stays open. |
+| A layout both pages use | Stays, with its state and module instance. An open menu stays open. |
 | That layout's props | Update from its loader. `<hk-nav>` marks the new page current. |
 | The page, and any layout only one page uses | Replaced. A fresh page starts from its loader's state. |
 | `<title>`, description, and other head declarations | Update to the new page's in one step, also inside a view transition. |

@@ -440,6 +440,15 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.getByRole("button", { name: "Increment", exact: true }).click();
       await expect.poll(() => page.locator("output").textContent()).toBe("2");
+      await page.evaluate(() => {
+        const counter = document.querySelector('[data-component="proof-counter"]')!;
+        Reflect.set(window, "retainedCounter", counter);
+        Reflect.set(window, "retainedCounterParent", counter.parentElement);
+        counter.remove();
+      });
+      await page.evaluate(() => Reflect.get(window, "retainedCounterParent").append(Reflect.get(window, "retainedCounter")));
+      await page.getByRole("button", { name: "Increment", exact: true }).click();
+      await expect.poll(() => page.locator("output").textContent()).toBe("4");
       await page.getByRole("button", { name: "Toggle theme" }).click();
       await expect.poll(() => page.locator('[data-component="proof-shell"]').evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(20, 38, 56)");
       await page.getByRole("searchbox").fill("quick-start");
