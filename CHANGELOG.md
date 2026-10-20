@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.66
+
+### Fixed
+
+- HTMLKit's client navigation to a page that defines a component differently from one the document already has, such as an archived docs version's own `<demo-counter>`, loads that page as a document without logging an error ([Client navigation](packages/htmlkit/docs/client-navigation.md)). Navigation fetched the page's HTML after the conflict, logged it twice, and reloaded. Any page that cannot render in place now loads as a document in place of the committed history entry, at its top or fragment; the reload kept the previous page's scroll position.
+  - A browser test navigates between a current and an archived page set that each define `<demo-counter>`, in Chromium, Firefox and WebKit: each set stays in place within itself, the other set loads as a document at the top with no console error or warning, and back and forward cross between the two documents.
+
 ## 1.0.0-alpha.65
 
 ### Breaking

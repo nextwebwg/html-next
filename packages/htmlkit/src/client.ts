@@ -57,6 +57,10 @@ interface Payload {
 
 const components = new Map<string, Component>();
 let started = false;
+/** A page that defines a tag differently from this document. Only a document of its own can show it. */
+class Conflict extends Error {}
+/** Marks the document navigation a page that cannot render in place gets, which HTMLKit leaves native. */
+const documentLoad = Symbol("HTMLKit document load");
 
 /**
  * Adopts the server-rendered components within `root`, outermost first: each adopts the components its
@@ -74,9 +78,9 @@ function adopt(root: ParentNode): void {
 /** Each page module calls this once, when it is first imported. */
 export function page(runtime: Runtime, options: ClientOptions, pageComponents: Readonly<Record<string, Component>>): void {
   // A document keeps one component per tag, as HTML Next's registry does (HR001). A page that
-  // redefines a tag fails here, before its DOM is inserted, and loads as a document instead.
+  // redefines a tag fails here, when navigation imports its module, before anything renders, and loads as a document instead.
   for (const [tag, component] of Object.entries(pageComponents)) {
-    if ((components.get(tag)?.[0] ?? component[0]) !== component[0]) throw new Error(`HTMLKit: <${tag}> already has another definition in this document.`);
+    if ((components.get(tag)?.[0] ?? component[0]) !== component[0]) throw new Conflict(`HTMLKit: <${tag}> already has another definition in this document.`);
   }
   for (const [tag, component] of Object.entries(pageComponents)) components.set(tag, component);
   if (started) return;
@@ -296,10 +300,11 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     const handed = redirected?.url === url.href ? redirected.page : undefined;
     redirected = undefined;
     try {
-      // The payload carries data, not markup; a page it cannot render loads from its HTML.
+      // The payload carries data, not markup; a page it cannot render loads from its HTML. A page
+      // whose definitions conflict with this document's would conflict there too.
       const { next, layers, adopt: hydrate } = await (handed !== undefined ? handed :
         event.formData !== null ? submit(url, form, event.sourceElement, event.formData, signal) : payload(url, signal).catch(error => {
-        if (signal.aborted) throw error;
+        if (signal.aborted || error instanceof Conflict) throw error;
         console.warn("HTMLKit renders this page from its HTML:", error);
         return html(url, signal);
       }));
@@ -366,10 +371,12 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     } catch (error) {
       if (!committed) for (const sheet of sheets) sheet.remove();
       if (signal.aborted) return;
-      // Anything this document cannot render in place loads as a document instead. A submission's
-      // URL loads with GET, so a failed render never sends its form twice.
-      console.error(error);
-      location.reload();
+      // Anything this document cannot render in place loads as a document instead, in place of the
+      // committed entry, so it starts at the top or its fragment as a document load does; a reload would
+      // keep this page's scroll position. A submission's URL loads with GET, so a failed render never
+      // sends its form twice. A conflicting definition is expected: the new document has its own registry.
+      if (!(error instanceof Conflict)) console.error(error);
+      void navigation.navigate(url.href, { history: "replace", info: documentLoad });
     }
   };
 
@@ -387,7 +394,7 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
     const form = event.formData === null ? undefined : source instanceof HTMLFormElement ? source : (source as HTMLButtonElement | null)?.form ?? undefined;
     // Reloads, downloads, fragment and history.pushState changes, and other documents stay native.
     // Modified clicks and link and form targets open other browsing contexts without this event.
-    if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null ||
+    if (!event.canIntercept || event.navigationType === "reload" || event.downloadRequest !== null || event.info === documentLoad ||
       !local(url, form ?? source) || event.destination.sameDocument && (event.navigationType !== "traverse" || url.pathname + url.search === rendered)) return;
     // After the swap, a new entry scrolls to its fragment or the top, back and forward return to
     // where the entry was left, and focus resets as after a document load.
