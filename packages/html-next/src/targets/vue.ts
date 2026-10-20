@@ -743,7 +743,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       attributes.push(`:${adjusted}${nativeAttribute || adjusted !== attribute.name ? ".attr" : ""}=${bound(guarded ?? (component ? lowering.value(value, names.template) : attributeValueFor(names.template)))}`);
     }
   }
-  if (bindingInputs.length > 0) attributes.push(`v-bind=${bound(`{ [BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} } }`)}`);
+  const inputs = bindingInputs.length === 0 ? undefined : `[BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} }`;
+  // A delegated root's inputs join its consumer's attributes: Vue rejects a second object `v-bind`.
+  if (inputs !== undefined && !isRoot) attributes.push(`v-bind=${bound(`{ ${inputs} }`)}`);
   if (classes.length > 0) attributes.push(`:class=${bound(`{ ${classes.join(", ")} }`)}`);
   if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
   for (const event of node.events ?? []) {
@@ -768,7 +770,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     // The consumer's attributes win over the template's literals and lose to its bindings, as in
     // the runtime; Vue combines class and style itself.
     const tag = context.definition.contract.tag;
-    literals.push("v-bind=\"nativeAttrs($attrs)\"");
+    literals.push(inputs === undefined ? "v-bind=\"nativeAttrs($attrs)\"" : `v-bind=${bound(`{ ...nativeAttrs($attrs), ${inputs} }`)}`);
     if (context.validityValues !== undefined) {
       attributes.push(`v-prop-validity=${bound(`{ contract: propValidityContract, values: ${context.validityValues} }`)}`);
     }
@@ -1287,8 +1289,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ...requestPropDefinitions,
       "});",
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) =>
-        `${propKey(prop.name)}: ${"default" in prop.contract ? defaultSource(prop.contract.default) : "null"}`).join(", ")} };`,
-      `const inputTracking = vuePropInputs(acceptedProps, { ${target.props.filter(prop => "default" in prop.contract).map(prop => `${propKey(prop.name)}: ${defaultSource(prop.contract.default)}`).join(", ")} }, (name, value, source, values) => { switch (name) {`,
+        `${propKey(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} };`,
+      `const inputTracking = vuePropInputs(acceptedProps, { ${target.props.filter(prop => "default" in prop.contract).map(prop => `${propKey(prop.name)}: ${JSON.stringify(prop.contract.default)}`).join(", ")} }, (name, value, source, values) => { switch (name) {`,
       ...target.props.map(prop => `  case ${quote(prop.name)}: return checkPropInput(value, ${selectedNode(prop, "values")}, true, ${!prop.contract.required});`),
       "  default: return { ok: false }; } }, () => { void checkedProps.value; });",
       "const propInputs = inputTracking.inputs;",
@@ -1446,11 +1448,6 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   if (styles.css !== "") lines.push("", "<style scoped>", styles.css, "</style>");
   const source = `${lines.join("\n").replace(/\n{3,}/g, "\n\n").replace(/(?<=<script setup lang="ts">\n)\n/, "").replace(/\n\n(?=<\/script>)/, "\n")}\n`;
   return formatVue(source, `${componentName(contract.tag)}.vue`);
-}
-
-function defaultSource(value: unknown): string {
-  // Vue requires factories for object and array defaults.
-  return value !== null && typeof value === "object" ? `() => (${JSON.stringify(value)})` : JSON.stringify(value);
 }
 
 /** The controller host shares namespace and connection behavior across components. */

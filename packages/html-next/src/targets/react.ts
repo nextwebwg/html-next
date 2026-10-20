@@ -784,12 +784,16 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     for (const child of node.children) {
       if (child.kind !== "element") { defaults.push(child); continue; }
       const assigned = child.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
-      if (assigned?.kind !== "literal") { defaults.push(child); continue; }
+      // `slot=""` names the default slot, as no `slot` does.
+      if (assigned?.kind !== "literal" || assigned.value === "") { defaults.push(child); continue; }
       const group = slots.get(assigned.value) ?? [];
       group.push(child);
       slots.set(assigned.value, group);
     }
-    componentChildren = defaults;
+    // A slot's first `<template slot>` is its whole content, and the slot renders that template's children.
+    const defaultCarrier = defaults.find((child): child is ElementNode => child.kind === "element" && child.name === "template"
+      && child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot"));
+    componentChildren = defaultCarrier?.children ?? defaults;
     if (slots.size > 0) bindings.push(`slots={{ ${[...slots].map(([name, children]) => {
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
       const contracts = state.slotsByTag?.get(node.name);
@@ -803,8 +807,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         };
         if (carrier !== undefined) return `${quote(name)}: (${alias}: Record<string, any>) => <>${carrier.children.map((child) => renderNode(child, projectedScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
       }
-      // A slot's first `<template slot>` is its whole content, as in the live runtime.
-      const content = carrier === undefined ? children : [carrier];
+      const content = carrier === undefined ? children : carrier.children;
       return `${quote(name)}: ${content.length === 0 ? "undefined" : `<>${content.map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`}`;
     }).join(", ")} }}`);
   }

@@ -150,6 +150,28 @@ export function serverMark(node: Node): ServerMark | undefined {
   return match === null ? undefined : { target: match[1]!, attributes: pseudoAttributes(match[2] ?? "") };
 }
 
+/**
+ * The server range `start` opens for `slot`, read from its siblings. A consumer's `<template slot>`
+ * that forwards to its own outlet renders after the consumer hydrated, so the outlet finds its range here.
+ */
+export function serverRangeAt(start: Node, slot: string): HydrationRange | undefined {
+  const mark = serverMark(start);
+  if (mark?.attributes.get("slot") !== slot) return undefined;
+  if (mark.target === "marker") return { slot, fallback: false, markers: [start], content: [] };
+  if (mark.target !== "start") return undefined;
+  const content: Node[] = [];
+  let nesting = 1;
+  for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
+    const inner = serverMark(node);
+    if (inner?.target === "start") nesting += 1;
+    else if (inner?.target === "end" && --nesting === 0) {
+      return { slot, fallback: mark.attributes.has("fallback"), scoped: mark.attributes.has("scoped"), markers: [start, node], content };
+    }
+    content.push(node);
+  }
+  return undefined;
+}
+
 /** The slot ranges a server-rendered root owns, in document order, and its carried projection. */
 export function serverRanges(root: Element, consume = true, tag?: string): { ranges: HydrationRange[]; carried: Node[] } | undefined {
   const ranges: HydrationRange[] = [];
