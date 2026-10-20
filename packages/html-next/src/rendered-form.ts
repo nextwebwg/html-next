@@ -178,6 +178,15 @@ export function serverRangeAt(start: Node, slot: string): HydrationRange | undef
   return undefined;
 }
 
+/** The nodes a server carrier held, which hydration puts in place only where their slots render them. */
+const carriedRoots = new WeakSet<Node>();
+
+/** Whether `node` came from a server carrier, as a forwarding outlet inside carried content does. */
+export function fromCarrier(node: Node): boolean {
+  for (let current: Node | null = node; current !== null; current = current.parentNode) if (carriedRoots.has(current)) return true;
+  return false;
+}
+
 /** The slot ranges a server-rendered root owns, in document order, and its carried projection. */
 export function serverRanges(root: Element, consume = true, tag?: string): { ranges: HydrationRange[]; carried: Node[] } | undefined {
   const ranges: HydrationRange[] = [];
@@ -226,6 +235,7 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
     child instanceof HTMLTemplateElement && !inRanges.has(child) && child.getAttribute("carrier") === owner);
   if (ranges.length === 0 && carrier === undefined) return undefined;
   const carried: Node[] = [];
+  for (const child of carrier?.content.childNodes ?? []) carriedRoots.add(child);
   if (carrier !== undefined && consume) {
     for (const child of Array.from(carrier.content.childNodes)) carried.push(root.ownerDocument.adoptNode(child));
     carrier.remove();

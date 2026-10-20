@@ -34,7 +34,7 @@ import {
 } from "./expression.js";
 import { kebabCase, propAttribute } from "./names.js";
 import {
-  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRangeAt, serverRanges,
+  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
   currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
@@ -2857,6 +2857,13 @@ function renderSlot(
       const adopted = renderScoped(hydrating.content);
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
+    if (hydrating.markers.length === 2 && fromCarrier(hydrating.markers[0]!)) {
+      // An outlet forwarded into a carrier: its marks are there, and this component's nodes are in its own carrier.
+      const content = currentProjection(assigned);
+      for (const candidate of content) markProjectedRoot(candidate);
+      (hydrating.markers[1] as ChildNode).before(...content);
+      return [hydrating.markers[0]!, ...content, hydrating.markers[1]!];
+    }
     for (const candidate of hydrating.content) markProjectedRoot(candidate);
     const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(hydrating.content) : undefined;
     if (regions !== undefined) {
@@ -2930,6 +2937,10 @@ export function serializeRenderedForm(container: Element): string {
   const clone = container.cloneNode(true) as Element;
   const originals = [container, ...Array.from(container.querySelectorAll("*"))];
   const copies = [clone, ...Array.from(clone.querySelectorAll("*"))];
+  const carriers: { root: Element; tag: string; nodes: readonly Node[] }[] = [];
+  /** Each unrendered consumer node's carrier, by index. */
+  const carriedBy = new Map<Node, number>();
+  const written: DocumentFragment[] = [];
   originals.forEach((original, index) => {
     const copy = copies[index]!;
     if (original instanceof HTMLInputElement && copy instanceof HTMLInputElement) {
@@ -2976,13 +2987,29 @@ export function serializeRenderedForm(container: Element): string {
       : compiled === undefined ? [] : [compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, entry.J?.map(([node]) => node)]);
     for (const [tag, recorded] of owners) {
       const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node));
-      if (unrendered.length === 0) continue;
-      const carrier = clone.ownerDocument.createElement("template");
-      carrier.setAttribute("carrier", tag);
-      for (const node of unrendered) carrier.content.append(node.cloneNode(true));
-      copy.append(carrier);
+      for (const node of unrendered) if (!carriedBy.has(node)) carriedBy.set(node, carriers.length);
+      carriers.push({ root: copy, tag, nodes: unrendered });
     }
   });
+  // Each consumer node appears in one carrier: its consumer's component, the first to list it, since an
+  // outer component precedes the components it projects into. A forwarding outlet's copy keeps its marks.
+  for (const [index, { root, tag, nodes }] of carriers.entries()) {
+    const others = [...carriedBy].flatMap(([node, owner]) => owner === index ? [] : [node]);
+    // ponytail: scans the other carried nodes per copied subtree; a page holds few unrendered nodes.
+    const copyOwn = (node: Node): Node => {
+      if (!others.some((other) => node.contains(other))) return node.cloneNode(true);
+      const copy = node.cloneNode(false);
+      for (const child of node.childNodes) if (!others.includes(child)) copy.appendChild(copyOwn(child));
+      return copy;
+    };
+    const kept = nodes.filter((node) => carriedBy.get(node) === index);
+    if (kept.length === 0) continue;
+    const carrier = clone.ownerDocument.createElement("template");
+    carrier.setAttribute("carrier", tag);
+    for (const node of kept) carrier.content.append(copyOwn(node));
+    root.append(carrier);
+    written.push(carrier.content);
+  }
   // Compiled keyed rows are their element, without item markers (owner decision 2a). Hydration
   // adopts rows by their markers, so a region whose first child is not one gets them back here.
   const regions = clone.ownerDocument.createTreeWalker(clone, 128 /* SHOW_COMMENT */);
@@ -3003,17 +3030,20 @@ export function serializeRenderedForm(container: Element): string {
   let prefix = "html-next:serialized-mark:";
   const existingMarkup = clone.innerHTML;
   while (existingMarkup.includes(prefix)) prefix += ":";
-  const walker = clone.ownerDocument.createTreeWalker(clone, 64 | 128 /* SHOW_PROCESSING_INSTRUCTION | SHOW_COMMENT */);
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const mark = serverMark(node);
-    if (mark === undefined || !["start", "end", "marker"].includes(mark.target)) continue;
-    if ((mark.target === "start" || mark.target === "marker") && !mark.attributes.has("slot")) continue;
-    const attributes = [...mark.attributes].map(([name, value]) =>
-      `${name}="${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`).join(" ");
-    marks.push(`<?${mark.target}${attributes === "" ? "" : ` ${attributes}`}?>`);
-    const placeholder = clone.ownerDocument.createComment(`${prefix}${marks.length - 1}`);
-    node.parentNode!.replaceChild(placeholder, node);
-    walker.currentNode = placeholder;
+  // A carrier's content holds marks too, such as a forwarding outlet's, and a tree walk does not enter it.
+  for (const root of [clone, ...written]) {
+    const walker = clone.ownerDocument.createTreeWalker(root, 64 | 128 /* SHOW_PROCESSING_INSTRUCTION | SHOW_COMMENT */);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const mark = serverMark(node);
+      if (mark === undefined || !["start", "end", "marker"].includes(mark.target)) continue;
+      if ((mark.target === "start" || mark.target === "marker") && !mark.attributes.has("slot")) continue;
+      const attributes = [...mark.attributes].map(([name, value]) =>
+        `${name}="${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`).join(" ");
+      marks.push(`<?${mark.target}${attributes === "" ? "" : ` ${attributes}`}?>`);
+      const placeholder = clone.ownerDocument.createComment(`${prefix}${marks.length - 1}`);
+      node.parentNode!.replaceChild(placeholder, node);
+      walker.currentNode = placeholder;
+    }
   }
   return clone.innerHTML.replace(new RegExp(`<!--${prefix}(\\d+)-->`, "g"), (source, index: string) => marks[Number(index)] ?? source);
 }

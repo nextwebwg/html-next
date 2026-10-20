@@ -94,6 +94,10 @@ export const definitions = [
   `<template component="ssr-scoped-relay"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs>
     <ssr-scoped><template slot="row"><slot name="row" from:item="$item"></slot></template></ssr-scoped></template>`,
   `<template component="ssr-scoped-relay-page"><article><ssr-scoped-relay><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-relay></article></template>`,
+  `<template component="ssr-eager-forward"><defs><state name="open" type="boolean" value="false"></state>
+    <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
+    <article><button type="button" on:click="toggle">Toggle</button><ssr-forward-panel from:open="$open"><div slot="details"><slot name="details"></slot></div></ssr-forward-panel></article></template>`,
+  `<template component="ssr-eager-relay"><ssr-forward-panel><div slot="details"><slot name="details"></slot></div></ssr-forward-panel></template>`,
   `<template component="ssr-row-flows"><defs>
     <state name="items" type="list(object({ label: string, href: string, tags: list(string) }))" value="[]"></state>
     <handler name="change"><set name="items" expr:value="[{ label: 'group', href: '', tags: [] }, { label: 'link', href: '/a/', tags: ['x'] }]"></set></handler>
@@ -155,6 +159,9 @@ export const cases = [
   { name: "a lazy slot forwarded to the inner slot of the same name, closed", html: '<ssr-forward id="subject"><b slot="details">Forwarded</b></ssr-forward>', state: {} },
   { name: "a scoped slot forwarded to the inner slot of the same name", html: '<ssr-scoped-forward-page id="subject"></ssr-scoped-forward-page>', state: {} },
   { name: "a scoped slot forwarded by a component whose root is the receiving component", html: '<ssr-scoped-relay-page id="subject"></ssr-scoped-relay-page>', state: {} },
+  { name: "a slot forwarded through an element into a closed slot of the same name", html: '<ssr-eager-forward id="subject"><b slot="details">Forwarded</b></ssr-eager-forward>', state: {} },
+  { name: "a slot forwarded through an element into an open slot of the same name", html: '<ssr-eager-forward id="subject"><b slot="details">Forwarded</b></ssr-eager-forward>', state: { open: true } },
+  { name: "a slot forwarded through an element into a closed slot on a shared root", html: '<ssr-eager-relay id="subject"><b slot="details">Forwarded</b></ssr-eager-relay>', state: {} },
   { name: "control flow in rows reading the row's item", html: '<ssr-row-flows id="subject"></ssr-row-flows>',
     state: { items: [{ label: "link", href: "/a/", tags: ["x", "y"] }, { label: "group", href: "", tags: ["z"] }] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
