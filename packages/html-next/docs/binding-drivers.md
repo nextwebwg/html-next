@@ -86,7 +86,11 @@ try {
 
 Preparation never calls the module's `connect`. This primitive does not load companion files, cross a worker boundary, or implement an HTTP endpoint. Those responsibilities belong to the application host.
 
-The returned preparation handle exposes `snapshot()` and `dispose()`. Dispose it in `finally`, including when serializing the renderer record fails.
+The returned preparation handle exposes `names`, `snapshot()` and `dispose()`. `names` lists configured
+output props, including deferred reads and excluding disabled providers. An application host can use
+it to distinguish a required input owned by a provider from an input with no supplier. This does not
+make a pending value available or change the component's constraint validity. Dispose the preparation
+in `finally`, including when serializing the renderer record fails.
 
 On browser adoption, pass the instance's transferred state through `bindModule(source, { browser: host => ({ source: buildRevision, snapshot: stateFor(host) }) })`. Matching source revisions, selected inputs and renderer input revisions avoid duplicate reads, including handled failures. An intervening accepted fixture write invalidates the read identity even if it is released before the driver starts. Snapshots contain read identities and public failures, not another copy of accepted output data.
 

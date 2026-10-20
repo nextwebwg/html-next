@@ -9,11 +9,12 @@ import { collectSharedStylesheets, compileComponentGraphStylesForBuild, generate
 const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/generated-runtime"));
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]generated-runtime\.js$/, "/src/generated-runtime.ts");
 // Workspace source execution can test the same entry before packages have been built.
-const runtime = import.meta.url.endsWith(".ts") && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
+const source = fileURLToPath(import.meta.url).endsWith(".ts");
+const runtime = source && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
 const packagedBindings = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/bindings"));
 const sourceBindings = packagedBindings.replace(/[/\\]dist[/\\]bindings\.js$/, "/src/bindings.ts");
-const bindings = import.meta.url.endsWith(".ts") && existsSync(sourceBindings) ? sourceBindings : packagedBindings;
-const client = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./client.ts" : "./client.js", import.meta.url));
+const bindings = source && existsSync(sourceBindings) ? sourceBindings : packagedBindings;
+const client = fileURLToPath(new URL(source ? "./client.ts" : "./client.js", import.meta.url));
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
   const sources = new Map<string, string>();

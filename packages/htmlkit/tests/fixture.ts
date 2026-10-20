@@ -113,23 +113,34 @@ export async function universalFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-universal-"));
   await write(root, "package.json", '{"name":"htmlkit-universal-fixture","private":true,"type":"module"}');
   for (const [file, tag, settings] of [["index", "universal-page", ""], ["fixture", "universal-fixture", ""],
-    ["live", "universal-live", '<meta name="hk:render" content="server">'], ["delegated", "universal-delegated", ""]]) {
+    ["live", "universal-live", '<meta name="hk:render" content="server">'], ["delegated", "universal-delegated", ""], ["deferred", "universal-deferred", ""]]) {
     const rootTag = file === "delegated" ? "universal-shell" : "main";
-    await write(root, `app/pages/${file}.html`, `<link rel="component" href="../components/browser-only.html">
+    await write(root, `app/pages/${file}.html`, `<link rel="component" href="../components/browser-only.html"><link rel="component" href="../components/details.html">
       ${file === "delegated" ? '<link rel="component" href="../components/shell.html">' : ""}
-      <template component="${tag}" module="./index.ts"><defs><meta name="hk:layout" content="none">${settings}
-      <prop name="product" type="object({ name: string })">Product.</prop>
+      <template component="${tag}" module="./${file === "deferred" ? "deferred" : "index"}.ts"><defs><meta name="hk:layout" content="none">${settings}
+      <prop name="product" type="object({ name: string })" required>Product.</prop>
       <state name="query" type="string" value="A"></state><state name="draft" type="string" from="$product.name"></state>
       <handler name="next"><set name="query" value="B"></set></handler><title>Product {$product.name}</title></defs>
-      <${rootTag}><h1 $await="$product">{$product.name}</h1><p class="error" $error="problem">{$problem.message}</p><p $else>Waiting.</p>
+      <${rootTag}><template $await="$product"><h1>{$product.name}</h1>
+      <product-details from:product-name="$product.name"></product-details></template><p class="error" $error="problem">{$problem.message}</p><p $else>Waiting.</p>
       <input bind:value="$draft"><button type="button" on:click="next">Next</button><browser-only-node></browser-only-node>
       <a href="/">Home</a><a href="/fixture/">Fixture</a><a href="/live/">Live</a></${rootTag}></template>`);
   }
   await write(root, "app/pages/index.ts", 'export * from "@/lib/provider-entry.ts";');
+  await write(root, "app/pages/deferred.ts", `import { create as common } from './index.ts';
+    export function create() {
+      const definition = common();
+      return { ...definition, props: { product: { ...definition.props.product, initial: 'browser',
+        async load(...args) {
+          if (window.holdUniversal) await new Promise(resolve => { window.releaseUniversal = resolve; });
+          return definition.props.product.load(...args);
+        }
+      } } };
+    }`);
   await write(root, "lib/provider-entry.ts", 'export * from "./provider-cycle.ts";');
   await write(root, "lib/provider-cycle.ts", 'export * from "./provider-entry.ts"; export { create } from "./product.ts";');
   await write(root, "lib/product.ts", `export function create() {
-    return { props: { product: { input: (_props, { state }) => state.query, async load(query, { phase, signal }) {
+    return { props: { product: { keepPrevious: true, input: (_props, { state }) => state.query, async load(query, { phase, signal }) {
       signal.throwIfAborted(); await Promise.resolve();
       if (phase === 'browser') (window.universalReads ||= []).push(query);
       if (query === 'bad') throw new Error('Unavailable product');
@@ -144,6 +155,18 @@ export async function universalFixture(): Promise<string> {
   await write(root, "app/components/browser-only.ts", 'import { doc } from "@example/browser-only"; export type props = { label: string }; export type { props as create }; export default function create() { return doc; } export function connect(host) { host.root.dataset.browser = doc === host.root.ownerDocument ? "connected" : "wrong"; }');
   await write(root, "app/components/shell.html", '<template component="universal-shell"><defs><prop name="label" type="string">Label.</prop></defs><main><strong class="shell-label" $await="$label">{$label}</strong><slot></slot></main></template>');
   await write(root, "app/components/shell.ts", 'export const props = { label: { input: () => null, load: (_, { phase }) => phase + ":shell" } };');
+  await write(root, "app/components/details.html", `<template component="product-details"><defs>
+    <prop name="productName" type="string" required>Product name.</prop><prop name="details" type="string" required>Details.</prop>
+    <state name="draft" type="string" from="$details"></state></defs><aside>
+    <p class="details" $await="$details">{$details}</p><p $else>Loading details.</p><output class="details-draft">{$draft}</output></aside></template>`);
+  await write(root, "app/components/details.ts", `export const props = { details: {
+    input: ({ productName }) => productName,
+    async load(name, { phase }) {
+      await Promise.resolve();
+      if (phase === 'browser') (window.detailReads ||= []).push(name);
+      return phase + ':details:' + name;
+    }
+  } };`);
   return root;
 }
 

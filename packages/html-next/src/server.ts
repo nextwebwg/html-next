@@ -104,7 +104,7 @@ class RenderPool {
   }
 
   #start(): RenderWorker {
-    const source = import.meta.url.endsWith(".ts");
+    const source = new URL(import.meta.url).pathname.endsWith(".ts");
     const entry = new URL(source ? "./server-worker.ts" : "./server-worker.js", import.meta.url);
     // Node 22 needs the TypeScript loader registered inside the worker before importing its entry.
     const workerEntry = source ? new URL(`data:text/javascript,${encodeURIComponent(

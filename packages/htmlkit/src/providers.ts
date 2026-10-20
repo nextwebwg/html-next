@@ -14,8 +14,11 @@ interface ModuleHost {
 }
 
 function surface(file: string, source: string): { provider: boolean; stars: readonly string[] } {
-  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest);
-  if (parsed.isDeclarationFile) return { provider: false, stars: [] };
+  if (/\.d\.[cm]?ts$/i.test(file)) return { provider: false, stars: [] };
+  // Use compiler erasure rather than mistaking an exported local type for a runtime value.
+  const emitted = ts.transpileModule(source, { fileName: file,
+    compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.Preserve } }).outputText;
+  const parsed = ts.createSourceFile(file, emitted, ts.ScriptTarget.Latest);
   const names = new Set(["props", "create"]);
   const binding = (name: ts.BindingName): boolean => ts.isIdentifier(name) ? names.has(name.text)
     : name.elements.some(element => ts.isBindingElement(element) && binding(element.name));
@@ -23,20 +26,18 @@ function surface(file: string, source: string): { provider: boolean; stars: read
   const stars: string[] = [];
   for (const statement of parsed.statements) {
     if (ts.isExportDeclaration(statement)) {
-      if (statement.isTypeOnly) continue;
       const clause = statement.exportClause;
       if (clause === undefined) {
         if (statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)) stars.push(statement.moduleSpecifier.text);
-      } else if (ts.isNamedExports(clause)) provider ||= clause.elements.some(element => !element.isTypeOnly && names.has(element.name.text));
+      } else if (ts.isNamedExports(clause)) provider ||= clause.elements.some(element => names.has(element.name.text));
       else provider ||= names.has(clause.name.text);
       continue;
     }
     const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
     if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ||
-      modifiers.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword || modifier.kind === ts.SyntaxKind.DeclareKeyword)) continue;
+      modifiers.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword)) continue;
     if (ts.isVariableStatement(statement)) provider ||= statement.declarationList.declarations.some(declaration => binding(declaration.name));
-    else if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement) || ts.isEnumDeclaration(statement) ||
-      ts.isModuleDeclaration(statement) || ts.isImportEqualsDeclaration(statement)) provider ||= statement.name !== undefined && names.has(statement.name.text);
+    else if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) provider ||= statement.name !== undefined && names.has(statement.name.text);
   }
   return { provider, stars };
 }

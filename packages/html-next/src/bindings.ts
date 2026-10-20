@@ -217,6 +217,9 @@ export class BindingScope {
     }
   }
 
+  /** Configured outputs, including deferred reads and excluding disabled providers. */
+  get names(): readonly string[] { return [...this.#records.keys()]; }
+
   activate(port = this.#port, signal = this.#options.signal): void {
     if (this.#disposed) throw new TypeError("This binding scope has been disposed.");
     if (this.#active) return;
@@ -608,6 +611,8 @@ export interface BoundModuleOptions<H extends BindingHost> {
 }
 /** A completed preparation's transfer identities and its remaining ownership. */
 export interface BindingPreparation {
+  /** Outputs owned by this preparation, including reads deferred to the browser. */
+  readonly names: readonly string[];
   snapshot(): BindingSnapshot;
   dispose(): void;
 }
@@ -683,7 +688,7 @@ export function bindModule<H extends BindingHost>(module: BindingModule<H>, opti
       if (preparation.signal?.aborted) throw preparation.signal.reason;
       if (Object.keys(configured).length === 0) {
         if (preparation.source !== undefined && (typeof preparation.source !== "string" || preparation.source.trim() === "")) throw new TypeError("A binding source revision must be a nonempty string.");
-        return { snapshot: () => {
+        return { names: [], snapshot: () => {
           if (preparation.source === undefined) throw new TypeError("A source revision is required to transfer binding completion identities.");
           return { source: preparation.source, reads: {} };
         }, dispose: () => {} };

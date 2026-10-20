@@ -41,6 +41,7 @@ describe("binding module adapter", () => {
       } };
     } });
     const prepared = await adapter.prepare(host, { phase: "request", source: "build-a" });
+    assert.deepEqual(prepared.names, []);
     assert.deepEqual(prepared.snapshot(), { source: "build-a", reads: {} });
     prepared.dispose();
     assert.equal(host.state.count, 0);
@@ -79,10 +80,10 @@ describe("binding module adapter", () => {
     const { host, port } = fixture(); let creates = 0;
     const adapter = bindModule({ create: () => {
       creates += 1; let reads = 0;
-      return { props: { value: { input: props => props.id, load: () => ++reads } }, connect: () => { throw new Error("Browser only"); } };
+      return { props: { value: { input: props => props.id, load: () => ++reads }, second: false as const }, connect: () => { throw new Error("Browser only"); } };
     } });
     const scope = await adapter.prepare(host, { phase: "request", source: "build-a" });
-    try { assert.equal(port.read("value"), 1); assert.equal(scope.snapshot().source, "build-a"); }
+    try { assert.equal(port.read("value"), 1); assert.equal(scope.snapshot().source, "build-a"); assert.deepEqual(scope.names, ["value"]); }
     finally { scope.dispose(); }
     const next = await adapter.prepare(host, { phase: "build" }); releases.push(() => next.dispose());
     assert.equal(port.read("value"), 2);

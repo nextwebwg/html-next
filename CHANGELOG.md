@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- HTMLKit lets configured providers supply required props before diagnosing missing inputs, including reads deferred to the browser, while preserving errors for unrelated unsupplied required inputs. Type-only local exports do not turn browser behavior into a server provider, and source execution recognizes module URLs with loader query strings.
 - Omitted prop defaults remain eligible for providers. Explicit null inputs stay caller-owned, use declared defaults when present, and retain that ownership when a layout persists across navigation.
 - Static prop serialization applies declared defaults to null inputs, including zero and false defaults.
 

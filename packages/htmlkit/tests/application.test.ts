@@ -14,6 +14,28 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("keeps local type exports out of server preparation", async () => {
+    const root = await universalFixture(); roots.push(root);
+    await write(root, "app/components/browser-only.ts", `import { doc } from "@example/browser-only";
+      interface LocalProps { label: string }
+      type LocalCreate = () => LocalProps;
+      export { LocalProps as props, LocalCreate as create };
+      export function connect(host) { host.root.dataset.browser = doc === host.root.ownerDocument ? "connected" : "wrong"; }`);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain("<h1>build:A</h1>");
+      expect(page.components.find(component => component.definition.contract.tag === "browser-only-node")?.binding).toBeUndefined();
+    } finally { await application.close(); }
+  });
+  it("diagnoses required inputs that have no caller or provider", async () => {
+    const root = await universalFixture(); roots.push(root);
+    const source = await readFile(join(root, "app/pages/index.html"), "utf8");
+    await write(root, "app/pages/index.html", source.replace('<state name="query"', '<prop name="missing" type="string" required>Missing input.</prop><state name="query"'));
+    const application = await createApplication({ root });
+    try { await expect(application.render("/")).rejects.toThrow(/required prop `missing` of <universal-page>/); }
+    finally { await application.close(); }
+  });
   it("prepares shared component providers for prerender and SSR while bypassing fixtures and browser-only modules", async () => {
     const root = await universalFixture(); roots.push(root);
     const application = await createApplication({ root });
@@ -25,6 +47,8 @@ describe("application platform", () => {
       expect(page.body).toContain("<h1>build:A</h1>");
       expect(page.body).toContain('value="build:A"');
       expect(titleOf(page)).toBe("Product build:A");
+      expect(page.body).toContain('<p class="details">build:details:build:A</p>');
+      expect(page.body).toContain('<output class="details-draft">build:details:build:A</output>');
       expect(page.body).not.toContain('data-connections="1"');
       expect(page.body).toContain("Browser behavior");
       const supplied = await application.render("/fixture/");
@@ -39,6 +63,9 @@ describe("application platform", () => {
       const delegated = await application.render("/delegated/");
       expect(delegated.body).toContain("<h1>build:A</h1>");
       expect(delegated.body).toContain('<strong class="shell-label">build:shell</strong>');
+      const deferred = await application.render("/deferred/");
+      expect(deferred.body).toContain("Waiting.");
+      expect(deferred.body).not.toContain("<h1>");
     } finally { await application.close(); }
     expect(existsSync(fileURLToPath(preparedModule!))).toBe(false);
   });

@@ -101,6 +101,11 @@ Common providers run in application-owned render workers. Modules are cached for
 so keep per-component mutable values inside passive `create()` closures rather than module variables.
 Closing the application or reloading development sources retires its workers and temporary bundles.
 
+A provider may supply a `required` prop, including one deferred with `initial: 'browser'`. While the
+value is unavailable, `$await` selects its loading or error branch; ordinary constraint validity still
+reports a missing required value. A required page or layout input with neither a caller value nor a
+configured provider is an application error.
+
 ## Page and layout loaders
 
 Put a `.server.ts` file next to a page with the same name. Its `load()` runs at build time (and on

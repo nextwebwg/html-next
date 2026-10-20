@@ -21,7 +21,7 @@ export interface BundleResult {
 
 /** Vite's build and dev APIs both use NODE_ENV. Keep each production build in its own realm. */
 function inWorker(workerData: { readonly browser: BrowserBuild } | { readonly server: ServerBuild }, signal?: AbortSignal): Promise<BundleResult> {
-  const source = import.meta.url.endsWith(".ts");
+  const source = new URL(import.meta.url).pathname.endsWith(".ts");
   const entry = new URL(source ? "./bundle-worker.ts" : "./bundle-worker.js", import.meta.url);
   const workerEntry = source ? new URL(`data:text/javascript,${encodeURIComponent(
     `import { tsImport } from ${JSON.stringify(import.meta.resolve("tsx/esm/api"))}; await tsImport(${JSON.stringify(entry.href)}, ${JSON.stringify(import.meta.url)});`,

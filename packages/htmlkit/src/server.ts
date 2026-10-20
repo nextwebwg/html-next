@@ -147,14 +147,15 @@ class Redirect {
 class NotFound { readonly status = 404; }
 
 /** A loader's props as invocation attributes, in their HTML form, defaults included. */
-function invocationAttributes(definition: ComponentDefinition, result: LoaderResult): Record<string, string> {
+function invocationAttributes(definition: ComponentDefinition, result: LoaderResult, deferred?: string[]): Record<string, string> {
   const props = result.props ?? {};
   for (const name of Object.keys(props)) {
     if (!Object.hasOwn(definition.contract.props, name)) throw new HtmlKitError(`Undeclared prop ${name}.`, definition.source.file);
   }
   const attributes: Record<string, string> = {};
   for (const [name, contract] of Object.entries(definition.contract.props)) {
-    serializePropTarget(contract, props[name], name, definition.contract.tag);
+    if (deferred !== undefined && contract.required && props[name] === undefined && contract.default === undefined) deferred.push(name);
+    else serializePropTarget(contract, props[name], name, definition.contract.tag);
     // The contract target describes lowering onto native DOM. Invocation attributes carry
     // the public prop name; writing the target name here silently loses remapped props.
     const provided = props[name] == null ? contract.default ?? props[name] : props[name];
@@ -289,7 +290,8 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     }
     submitted = result as Readonly<Record<string, unknown>>;
   }
-  for (const layer of layers) {
+  const required: { tag: string; selector: string; names: string[] }[] = [];
+  for (const [index, layer] of layers.entries()) {
     signal.throwIfAborted();
     const loaded = await layer.module();
     const context = contextOf(layer);
@@ -311,7 +313,9 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     results.push(result);
     parent = Object.freeze({ ...parent, ...result.data });
     // Checked against the layer's own component, which a prop's diagnostic names.
-    attributes.push(invocationAttributes(layer.definition, result));
+    const names: string[] | undefined = input.providers?.[layer.definition.contract.tag] === undefined ? undefined : [];
+    attributes.push(invocationAttributes(layer.definition, result, names));
+    if (names !== undefined && names.length > 0) required.push({ tag: layer.definition.contract.tag, selector: `#hk-layer-${index}`, names });
   }
   const state: Record<string, Readonly<Record<string, unknown>>> = {};
   const props: Record<string, Readonly<Record<string, unknown>>> = {};
@@ -335,7 +339,7 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const modules = input.providers ?? {};
   const output = await (input.render ?? renderComponents)(body, { definitions: input.definitions, url: url.href, state, props, signal,
     ...Object.keys(modules).length === 0 ? {} : { prepare: { module: preparationModule,
-      data: { modules, phase: input.request === undefined ? "build" : "request" } } },
+      data: { modules, required, phase: input.request === undefined ? "build" : "request" } } },
     head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
   signal.throwIfAborted();
   const { policy } = input;
