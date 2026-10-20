@@ -157,7 +157,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
       const rendered = await renderComponents('<ssr-lazy-page id="subject"></ssr-lazy-page>',
         { definitions, state: { "#subject": { label: "server" } } });
       // The closed slot's template is serialized as it was, in the carrier: nothing rendered, nothing to fetch.
-      assert.ok(rendered.html.includes('<?carrier?><template><template slot="details"></template></template>'), rendered.html);
+      assert.ok(rendered.html.includes('<template carrier="ssr-lazy-toggle"><template slot="details"></template></template>'), rendered.html);
       assert.doesNotMatch(rendered.html, /lazy\.png|<b>/);
       const browser = await browserType.launch({ headless: true });
       try {

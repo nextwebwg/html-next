@@ -91,6 +91,9 @@ export const definitions = [
   `<template component="ssr-scoped-forward"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs>
     <div><ssr-scoped><template slot="row"><slot name="row" from:item="$item"></slot></template></ssr-scoped></div></template>`,
   `<template component="ssr-scoped-forward-page"><article><ssr-scoped-forward><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-forward></article></template>`,
+  `<template component="ssr-scoped-relay"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs>
+    <ssr-scoped><template slot="row"><slot name="row" from:item="$item"></slot></template></ssr-scoped></template>`,
+  `<template component="ssr-scoped-relay-page"><article><ssr-scoped-relay><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-relay></article></template>`,
   `<template component="ssr-row-flows"><defs>
     <state name="items" type="list(object({ label: string, href: string, tags: list(string) }))" value="[]"></state>
     <handler name="change"><set name="items" expr:value="[{ label: 'group', href: '', tags: [] }, { label: 'link', href: '/a/', tags: ['x'] }]"></set></handler>
@@ -151,6 +154,7 @@ export const cases = [
   { name: "a lazy slot forwarded to the inner slot of the same name, open", html: '<ssr-forward id="subject"><b slot="details">Forwarded</b></ssr-forward>', state: { open: true } },
   { name: "a lazy slot forwarded to the inner slot of the same name, closed", html: '<ssr-forward id="subject"><b slot="details">Forwarded</b></ssr-forward>', state: {} },
   { name: "a scoped slot forwarded to the inner slot of the same name", html: '<ssr-scoped-forward-page id="subject"></ssr-scoped-forward-page>', state: {} },
+  { name: "a scoped slot forwarded by a component whose root is the receiving component", html: '<ssr-scoped-relay-page id="subject"></ssr-scoped-relay-page>', state: {} },
   { name: "control flow in rows reading the row's item", html: '<ssr-row-flows id="subject"></ssr-row-flows>',
     state: { items: [{ label: "link", href: "/a/", tags: ["x", "y"] }, { label: "group", href: "", tags: ["z"] }] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },

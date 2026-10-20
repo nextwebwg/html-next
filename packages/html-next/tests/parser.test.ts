@@ -135,6 +135,11 @@ describe("parseComponent", () => {
     expectDiagnostic("HT010", `<template component="x-old"><defs><prop name="label" type="string">Label.</prop></defs><output :aria-label="label"></output></template>`);
   });
 
+  it("reserves carrier on a <template> for server output", () => {
+    expectDiagnostic("HT027", `<template component="x-carrier"><div><template carrier="x-carrier"><b>Hi</b></template></div></template>`);
+    expectDiagnostic("HT027", `<template component="x-carrier"><x-other><template slot="body" carrier=""><b>Hi</b></template></x-other></template>`);
+  });
+
   it("accepts bracketed numeric indexes in authored expressions", () => {
     const definition = parseComponent(`<template component="x-index"><defs>
       <state name="items" type="list(string)" value="['Ada']"></state>

@@ -1,13 +1,11 @@
 /**
- * Platform assumptions behind the proposal's style scoping (nextwebwg.org/html-next/styling) and
- * rendered-form carrier (nextwebwg.org/html-next/rendered-form), checked in every engine:
+ * Platform assumptions behind the proposal's style scoping (nextwebwg.org/html-next/styling), checked
+ * in every engine:
  *
  * - native `@scope` matches a component's region, excludes nested components and projected
  *   content, and lets a condition before `:scope` reach outside while the subject stays inside;
  * - the browser can parse a component style block once three pseudo-classes are renamed into valid
- *   selectors, and the Object Model can route and rewrite the rules, so no CSS parser is needed;
- * - a `<?carrier?>` mark survives parsing and serialization as a processing instruction or as the
- *   comment an engine produces instead.
+ *   selectors, and the Object Model can route and rewrite the rules, so no CSS parser is needed.
  *
  * The compile step below is the design under test, written inline; the runtime's implementation
  * must keep these results.
@@ -197,33 +195,6 @@ describe.skipIf(!enabled)("compiled SVG scope boundaries", () => {
           assert.deepEqual(await read(), expected, `${engine} ${target}: move back`);
         }
       }
-    });
-  });
-});
-
-describe.skipIf(!enabled)("platform assumptions for the rendered-form carrier", () => {
-  it("reads a <?carrier?> mark as a processing instruction or the comment the engine produces", async () => {
-    await inEachEngine(`<!doctype html><div id="ssr"><article data-component="x-card"><p>own</p><?carrier?><template><b slot="title">Hidden</b>Body</template></article></div>`, async (page, engine) => {
-      const result = await page.evaluate(() => {
-        const isMark = (node: Node | null) => node?.nodeType === Node.PROCESSING_INSTRUCTION_NODE
-          ? (node as ProcessingInstruction).target === "carrier"
-          : node?.nodeType === Node.COMMENT_NODE && /^\?carrier(?:\s|\?|$)/.test((node as Comment).data);
-        const carrier = (root: Element) => Array.from(root.children).find((child) =>
-          child.localName === "template" && isMark(child.previousSibling)) as HTMLTemplateElement | undefined;
-        const parsed = document.querySelector("#ssr article")!;
-        const again = document.createElement("div");
-        again.innerHTML = parsed.outerHTML;
-        const decoy = document.createElement("div");
-        decoy.innerHTML = '<article data-component="x-card"><template><i>own template</i></template></article>';
-        return {
-          found: carrier(parsed)?.content.querySelector('[slot="title"]')?.textContent ?? null,
-          afterRoundTrip: carrier(again.firstElementChild!)?.content.querySelector('[slot="title"]')?.textContent ?? null,
-          unmarkedIgnored: carrier(decoy.firstElementChild!) === undefined,
-        };
-      });
-      assert.equal(result.found, "Hidden", `${engine}: carrier found after parsing`);
-      assert.equal(result.afterRoundTrip, "Hidden", `${engine}: carrier found after serialization`);
-      assert.equal(result.unmarkedIgnored, true, `${engine}: an unmarked template is not the carrier`);
     });
   });
 });
