@@ -11,6 +11,17 @@
 - In converted React components, a consumer's `<template slot>` renders its children in the slot rather than an inert `<template>` element, and `<template slot="">` fills the default slot.
 - In converted Vue components, a component whose root is another component with a bound prop compiles: its binding inputs join the root's attributes in one `v-bind`, which Vue requires. A list or object prop default is the value itself, so `default="['a', 'b']"` renders two rows instead of none.
 
+### Performance
+
+- Toggling content for a named slot with fallback is faster in compiled output. A toggle now switches between the content and the fallback, as the slot's [rendered form](https://nextwebwg.org/declarative-components/rendered-form) requires.
+  - The lifecycle observer reads each mutation's nodes by index instead of through a `NodeList` iterator. The live runtime's observer reads them the same way.
+  - The fallback switch walks its regions and nodes directly.
+  - `measure:slot-updates` takes ms per toggle, as medians of 9 fresh-page samples per side, in three fresh-process runs at load under 3. Against b1b0b39d, the last main the PR was rebased onto before measuring:
+    - Compiled: named 0.283–0.295 → 0.188–0.223 (0.66–0.75×), default 0.12–0.13 → 0.095–0.10 (0.77–0.79×), the hand-written two-`$if` equivalent 0.265–0.273 → 0.18–0.223 (0.67–0.84×), and plain `$if` 0.07–0.08, unchanged within noise (0.97–1.10×).
+    - Live runtime: named, default, pair and plain all 0.91–1.01×.
+  - Against the release before named slots switched to fallback (ecf8ba7), compiled named is 1.47–1.50× (0.122–0.125 → 0.18–0.188). That release left the fallback in place, so a toggle did less DOM work. It now costs the same as the same DOM work written as two `$if`s, 0.185–0.205, so the remaining cost is inherent. Live named is 1.18–1.25× ecf8ba7 and costs less than its two-`$if` equivalent (0.35–0.37 against 0.59–0.61).
+  - Size: every compiled fixture grows 7 to 23 B gzip, and the direct js-framework-benchmark entry grows 5 B.
+
 ## 1.0.0-alpha.63
 
 ### Added

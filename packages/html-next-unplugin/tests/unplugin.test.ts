@@ -359,7 +359,8 @@ describe("HTML Next unplugin", () => {
     // +4 B from identifier allocation beside computed-availability exports, which this entry omits.
     // +60 B: optional seeded-state hooks; the one-time initializer itself is absent here.
     // +151 B after composing main's declared-value reset behavior.
-    assert.ok(gzip <= 9_365, `direct benchmark entry is ${gzip} B gzip-6`);
+    // +5 B: the lifecycle observer reads each mutation's nodes by index, faster than a NodeList's iterator.
+    assert.ok(gzip <= 9_370, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

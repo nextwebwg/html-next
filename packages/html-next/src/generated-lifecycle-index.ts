@@ -80,9 +80,12 @@ function indexedCoordinatorFor(root: Document) {
         if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
       }
     };
+    // Indexed reads: a NodeList's iterator costs more than the nodes it visits, and a batch is mostly
+    // text and markers, which `collect` leaves at once.
+    const visit = (nodes: NodeList): void => { for (let at = 0; at < nodes.length; at += 1) collect(nodes[at]!); };
     for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) collect(node);
-      for (const node of mutation.removedNodes) collect(node);
+      visit(mutation.addedNodes);
+      visit(mutation.removedNodes);
     }
     for (const element of changed) synchronize(element);
   });

@@ -101,13 +101,19 @@ export function switchFallback(open: Node, regions: readonly (readonly [Node, No
   const content = mark.data.replace(' fallback=""', "");
   const shown = content.replace(/(slot="[^"]*")/, '$1 fallback=""');
   let showing = mark.data !== content;
+  const first = regions[0]![0];
   const sync = (): void => {
-    const empty = regions.every(([start, end]) => start.nextSibling === end);
+    let empty = true;
+    for (let index = 0; empty && index < regions.length; index += 1) empty = regions[index]![0].nextSibling === regions[index]![1];
     if (empty === showing) return;
     showing = empty;
     mark.data = empty ? shown : content;
-    if (empty) (regions[0]![0] as ChildNode).before(...fallback);
-    else for (const node of fallback) node.parentNode?.removeChild(node);
+    const parent = first.parentNode;
+    for (let index = 0; index < fallback.length; index += 1) {
+      const node = fallback[index]!;
+      if (empty) parent?.insertBefore(node, first);
+      else node.parentNode?.removeChild(node);
+    }
   };
   for (const [start] of regions) regionListeners.set(start, sync);
 }
