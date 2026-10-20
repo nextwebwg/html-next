@@ -8,7 +8,52 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { fixture, write } from "./fixture.js";
+import { bindingFixture, fixture, write } from "./fixture.js";
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} component provider modules`, () => {
+    let root: string;
+    let server: ApplicationServer;
+    beforeAll(async () => {
+      root = await bindingFixture();
+      if (delivery === "built") await buildApplication({ root, base: "/bindings/" });
+      server = await (delivery === "built" ? previewApplication : devApplication)({ root, base: "/bindings/", port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} binds providers, bypasses fixtures and retains local drafts across reconnection`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.getByText("Waiting.", { exact: true }).count()).toBe(1);
+          expect(await unscripted.locator("h2").allTextContents()).toEqual(["Fixture"]);
+          const page = await browser.newPage(); const errors: string[] = [];
+          page.setDefaultTimeout(5_000);
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(server.url);
+          const cards = page.locator('[data-component="binding-card"]');
+          await expect.poll(() => cards.first().locator("h2").textContent()).toBe("Product A");
+          await expect.poll(() => page.locator('[data-component="binding-label"] output').textContent()).toBe("Label only");
+          await expect.poll(() => page.locator('[data-component="plain-behavior"]').getAttribute("data-plain")).toBe("connected");
+          expect(await cards.last().locator("h2").textContent()).toBe("Fixture");
+          expect(await page.evaluate(() => Reflect.get(window, "bindingReads"))).toEqual(["A"]);
+          await cards.first().locator("input").fill("Edited");
+          await cards.first().locator("button").click();
+          await expect.poll(() => cards.first().locator("h2").textContent()).toBe("Product B");
+          expect(await cards.first().locator("input").inputValue()).toBe("Edited");
+          await page.evaluate(() => { const subject = document.querySelector('[data-component="binding-card"]')!; Reflect.set(window, "bindingSubject", subject); subject.remove(); });
+          await page.waitForFunction(() => Reflect.get(window, "bindingSubject").dataset.stops === "1");
+          await page.evaluate(() => document.querySelector("main")!.prepend(Reflect.get(window, "bindingSubject")));
+          await expect.poll(() => cards.first().getAttribute("data-connections")).toBe("2");
+          expect(await cards.first().locator("input").inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "bindingReads"))).toEqual(["A", "B"]);
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application adoption", () => {
   let root: string;

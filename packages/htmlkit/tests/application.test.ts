@@ -6,13 +6,36 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { fixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, fixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("resolves a component's sibling module without running its browser providers", async () => {
+    const root = await bindingFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.components.find(component => component.definition.contract.tag === "binding-card")?.module).toBe(join(root, "app/components/card.ts"));
+      expect(page.body).toContain("Waiting.");
+      expect(page.body).toContain("Fixture");
+      await write(root, "app/components/card.js", "export function connect() {};");
+      await expect(application.render("/")).rejects.toThrow(/ambiguous.*card\.(?:js|ts)|card\.(?:js|ts).*ambiguous/i);
+      const source = await readFile(join(root, "app/components/card.html"), "utf8");
+      await write(root, "app/components/card.html", source.replace('component="binding-card"', 'component="binding-card" module="./card.ts"'));
+      expect((await application.render("/")).components.find(component => component.definition.contract.tag === "binding-card")?.module).toBe(join(root, "app/components/card.ts"));
+      await write(root, "app/components/card.html", (await readFile(join(root, "app/components/card.html"), "utf8")) + '<template component="card-helper"><small>Helper</small></template>');
+      const carrier = await application.render("/");
+      expect(carrier.components.find(component => component.definition.contract.tag === "binding-card")?.module).toBe(join(root, "app/components/card.ts"));
+      expect(carrier.components.find(component => component.definition.contract.tag === "card-helper")?.module).toBeUndefined();
+      await rm(join(root, "app/components/card.js"));
+      await write(root, "app/components/card.html", source + '<template component="card-helper"><small>Helper</small></template>');
+      await expect(application.render("/")).rejects.toThrow(/several components/);
+    } finally { await application.close(); }
+  });
+
   it("selects one page among helpers and applies named, directory, default, and disabled layouts", async () => {
     const root = await app();
     await rm(join(root, "app/layouts/default.server.ts"));

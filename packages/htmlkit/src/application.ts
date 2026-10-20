@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -188,10 +188,41 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     for (const definition of definitions.slice(0, -1)) {
       if (!definition.slots?.some(slot => slot.name === "page")) throw new HtmlKitError('Layout requires a slot named "page".', definition.source.file);
     }
-    const components: BrowserDefinition[] = [...loaded.nodes.values()].map(node => ({ definition: withoutSettings(node.definition),
-      styles: compileComponentStylesForBuild(node.definition.css, node.definition),
-      ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
-      ...(node.module === undefined ? {} : { module: fileURLToPath(node.module.url) }) }));
+    const carriers = new Map<string, { count: number; explicit: boolean }>();
+    for (const node of loaded.nodes.values()) {
+      const carrier = carriers.get(node.url) ?? { count: 0, explicit: false };
+      carrier.count += 1;
+      carrier.explicit ||= node.module !== undefined || node.controller !== undefined;
+      carriers.set(node.url, carrier);
+    }
+    const siblings = new Map<string, Promise<string | undefined>>();
+    const companion = (url: string): Promise<string | undefined> => {
+      let found = siblings.get(url);
+      if (found !== undefined) return found;
+      found = (async () => {
+        const carrier = carriers.get(url)!;
+        if (carrier.count > 1 && carrier.explicit) return undefined;
+        const file = fileURLToPath(url);
+        const stem = file.slice(0, -extname(file).length);
+        const candidates = [stem + ".js", stem + ".ts"].filter(path => existsSync(path));
+        if (candidates.length > 1) throw new HtmlKitError(`Component sibling module is ambiguous: ${candidates.map(path => basename(path)).join(", ")}; select one with an explicit module attribute.`, file);
+        if (candidates.length === 0) return undefined;
+        if (carrier.count > 1) {
+          throw new HtmlKitError("A sibling module is ambiguous for a file declaring several components; set module on the template it belongs to.", file);
+        }
+        return candidates[0];
+      })();
+      siblings.set(url, found);
+      return found;
+    };
+    const components: BrowserDefinition[] = await Promise.all([...loaded.nodes.values()].map(async node => {
+      const module = node.module === undefined
+        ? node.controller !== undefined || node.imported || !node.url.startsWith("file:") ? undefined : await companion(node.url)
+        : fileURLToPath(node.module.url);
+      return { definition: withoutSettings(node.definition), styles: compileComponentStylesForBuild(node.definition.css, node.definition),
+        ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
+        ...(module === undefined ? {} : { module }) };
+    }));
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
       module: () => module(layer), origin: origin(layer) })) };
   };

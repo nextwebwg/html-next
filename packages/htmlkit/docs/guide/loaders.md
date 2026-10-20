@@ -1,11 +1,76 @@
 ---
 title: Loading data
 order: 2
-blurb: loaders · props · what reaches the browser
+blurb: component providers · loaders · public values
 eyebrow: HTMLKit
 ---
 
 # Loading data
+
+Components receive data through their typed props. A page loader supplies values before HTMLKit
+renders the page. A component module can supply values in the browser, including on a prerendered page.
+
+## Component providers in the browser
+
+Put a JavaScript or TypeScript module beside a component with the same name. Its `props` export
+provides values for the component's declared props:
+
+```text
+app/components/
+  product-card.html
+  product-card.js
+```
+
+```html
+<!-- app/components/product-card.html -->
+<template component="product-card">
+  <defs>
+    <prop name="productId" type="string">Lookup key.</prop>
+    <prop name="product" type="object({ name: string })">Displayed product.</prop>
+  </defs>
+  <article>
+    <h2 $await="$product">{$product.name}</h2>
+    <p $error="problem">{$problem.message}</p>
+    <p $else>Loading product…</p>
+  </article>
+</template>
+```
+
+```js
+// app/components/product-card.js
+export const props = {
+  product: {
+    initial: 'browser',
+    input: ({ productId }) => productId,
+    async load(id, { fetch, signal }) {
+      const response = await fetch(`/api/products/${encodeURIComponent(id)}`, { signal });
+      if (!response.ok) throw new Error('Product unavailable');
+      return response.json();
+    },
+  },
+};
+```
+
+`initial: 'browser'` leaves the loading branch in prerendered HTML and starts the read when the
+component connects in the browser. The selector reads ordinary typed props; changing `productId`
+starts a current read and cancels the previous one. A supplied value bypasses the provider, so a
+fixture needs no lookup key or network mock:
+
+```html
+<product-card product-id="42"></product-card>
+<product-card product='{"name":"Preview product"}'></product-card>
+```
+
+An optional named `connect(host, { signal })` export adds browser behavior. It runs on each
+connection and can return cleanup. A passive `create()` factory can instead return `{ props, connect }`
+for per-instance closures; it does not start requests or browser work. Data reads belong in `load`.
+
+An explicit `module="./behavior.js"` selects that module instead of a same-name companion.
+If both `.js` and `.ts` companions exist, select one explicitly. A file declaring several components
+also uses explicit module pointers rather than attaching one companion to every component.
+Existing `controller` components keep their legacy lifecycle.
+
+## Page and layout loaders
 
 Put a `.server.ts` file next to a page with the same name. Its `load()` runs at build time (and on
 each request in development), or on each request for a page that

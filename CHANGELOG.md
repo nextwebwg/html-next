@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.62
+
+### Added
+
+- HTMLKit resolves a component's sibling `.js` or `.ts` module and connects its exported prop providers through the binding library. Browser-only providers work on prerendered pages, supplied values bypass reads, and retained component instances keep their drafts and provider scopes across reconnection. Explicit module pointers and legacy controllers retain their existing behavior; ambiguous companions name the files that need an explicit choice.
+
 ## 1.0.0-alpha.61
 
 ### Added

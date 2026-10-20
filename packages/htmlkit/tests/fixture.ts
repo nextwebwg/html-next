@@ -62,6 +62,36 @@ export async function fixture(): Promise<string> {
   return root;
 }
 
+/** Ordinary component providers, with an explicit value standing in for one instance's data. */
+export async function bindingFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "htmlkit-bindings-"));
+  await write(root, "package.json", '{"name":"htmlkit-bindings-fixture","private":true,"type":"module"}');
+  await write(root, "app/pages/index.html", `<link rel="component" href="../components/card.html">
+    <link rel="component" href="../components/label.html"><link rel="component" href="../components/behavior.html">
+    <template component="binding-page"><defs><meta name="hk:layout" content="none"></defs>
+    <main><binding-card></binding-card><binding-card product="Fixture"></binding-card><binding-label></binding-label><plain-behavior></plain-behavior></main></template>`);
+  await write(root, "app/components/card.html", `<template component="binding-card"><defs>
+    <prop name="product" type="string">Product.</prop>
+    <state name="query" type="string" value="A"></state><state name="draft" type="string" from="$product"></state>
+    <handler name="next"><set name="query" value="B"></set></handler></defs>
+    <article><h2 $await="$product">{$product}</h2><p $else>Waiting.</p>
+    <input bind:value="$draft"><button type="button" on:click="next">Next</button></article></template>`);
+  await write(root, "app/components/card.ts", `export const props = { product: {
+    initial: 'browser', input: (_props, { state }) => state.query,
+    load(query) { (window.bindingReads ||= []).push(query); return 'Product ' + query; }
+  } };
+  export function connect(host) {
+    host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1);
+    return () => { host.root.dataset.stops = String(Number(host.root.dataset.stops || 0) + 1); };
+  }`);
+  await write(root, "app/components/label.html", `<template component="binding-label"><defs><prop name="label" type="string">Label.</prop></defs>
+    <aside><output $await="$label">{$label}</output><p $else>Label waiting.</p></aside></template>`);
+  await write(root, "app/components/label.js", `export const props = { label: { initial: 'browser', input: () => null, load: () => 'Label only' } };`);
+  await write(root, "app/components/behavior.html", '<template component="plain-behavior"><footer>Behavior only</footer></template>');
+  await write(root, "app/components/behavior.js", 'export function connect(host) { host.root.dataset.plain = "connected"; }');
+  return root;
+}
+
 /** A rendered head's title text, as HTML. */
 export function titleOf(page: { readonly head: { readonly html: string } }): string | undefined {
   return /<title[^>]*>([^<]*)<\/title>/.exec(page.head.html)?.[1];

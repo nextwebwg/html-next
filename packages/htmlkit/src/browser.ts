@@ -10,6 +10,9 @@ const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]generated-runtime\.js$/, "/src/generated-runtime.ts");
 // Workspace source execution can test the same entry before packages have been built.
 const runtime = import.meta.url.endsWith(".ts") && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
+const packagedBindings = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/bindings"));
+const sourceBindings = packagedBindings.replace(/[/\\]dist[/\\]bindings\.js$/, "/src/bindings.ts");
+const bindings = import.meta.url.endsWith(".ts") && existsSync(sourceBindings) ? sourceBindings : packagedBindings;
 const client = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./client.ts" : "./client.js", import.meta.url));
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
@@ -50,6 +53,20 @@ export function browserSources(components: readonly BrowserDefinition[], options
   const invocations = new Map(components.map(({ definition }) => [definition.contract.tag, { module: componentId(definition), definition }]));
   for (const component of components) {
     const reads: string[] = [];
+    const moduleId = component.module === undefined ? undefined : componentId(component.definition) + ".module.js";
+    if (moduleId !== undefined) {
+      // Native ESM caches this namespace; the binding library retains each host's passive instance.
+      // A behavior-only module does not download or activate the provider engine.
+      sources.set(moduleId, `import * as behavior from ${JSON.stringify(component.module)};
+let adapter;
+export const connect = "props" in behavior || "create" in behavior
+  ? (host, context) => {
+    adapter ??= import(${JSON.stringify(bindings)}).then(({ bindModule }) => bindModule(behavior));
+    return adapter.then(module => module.connect(host, context));
+  }
+  : Reflect.get(behavior, "connect");
+`);
+    }
     // Declared reads resolve as the page's URLs: a root-relative source under the deployment base, a
     // relative one as the asset Vite emits for it.
     const declarations = component.definition.declarations?.map((declaration) => {
@@ -65,7 +82,7 @@ export function browserSources(components: readonly BrowserDefinition[], options
     });
     const definition = { ...component.definition, ...declarations === undefined ? {} : { declarations },
       ...component.controller === undefined ? {} : { controller: component.controller },
-      ...component.module === undefined ? {} : { module: component.module } };
+      ...moduleId === undefined ? {} : { module: moduleId } };
     let module = generateComponent(definition, { invocations, hydrate: true })
       .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)!.content
       .replace('"@nextwebwg/html-next/generated-runtime"', JSON.stringify(runtime))
