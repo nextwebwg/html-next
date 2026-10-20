@@ -1,4 +1,4 @@
-import type { ComponentContract, PropContract, PropType, ScriptContract } from "./types.js";
+import type { ComponentContract, PropContract, PropType, PropValue, ScriptContract } from "./types.js";
 import type { CompiledExpression, WritablePath } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 
@@ -269,6 +269,8 @@ export interface SlotNode {
     readonly expressionPlan: CompiledExpression;
     /** The declared type a bound value must conform to; a static or default value already does. */
     readonly type?: PropType;
+    /** A bound prop's declared default, which a null or rejected value takes. */
+    readonly default?: PropValue;
   }[];
   readonly fallback?: readonly TemplateNode[];
 }

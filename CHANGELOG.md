@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.64
+
+### Fixed
+
+- A bound slot prop that is `null`, or that its declared type rejects, takes the prop's declared `default`, or `null` without one ([Giving slot props on an outlet](https://nextwebwg.org/declarative-components/components#slot-prop-outlets)). This is the rule a component prop follows when it clears to its `default`. A rejected value still warns `HR007`. The rule applies in the live runtime, compiled output, Vue, React and Svelte. Before, a rejected bound value was absent, and a `null` value with a declared default was given as `null`.
+  - The slot-prop parity test adds a slot with a `string` prop and an `unknown` prop, each with a default. It renders a rejected value, a `null` value and a missing field in all five targets, in Chromium, Firefox and WebKit, with development and production bundles.
+
 ## 1.0.0-alpha.63
 
 ### Added

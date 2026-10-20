@@ -1,7 +1,7 @@
 import { parseFragment } from "parse5";
 
 import type { ComponentDefinition, ElementNode, TemplateAttribute, TemplateNode } from "../template.js";
-import type { PropContract, PropType } from "../types.js";
+import type { PropContract, PropType, PropValue } from "../types.js";
 import { isPreformattedElement } from "../language.js";
 import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
@@ -118,6 +118,18 @@ export function slotPropCheckSource(definition: { readonly source: { readonly fi
   const name = slot === undefined ? "The default slot" : `Slot \`${slot}\``;
   const message = `${file}: HR007: ${name} prop \`${prop}\` does not satisfy its declared type \`${formatType(normalized)}\`.`;
   return `(value: any): boolean => value != null && typeof value !== "symbol" && warnUnless(acceptsSlotProp(value, ${JSON.stringify(normalized)}), ${quote(`${file}#${definition.contract.tag}:slot:${slot ?? ""}:${prop}`)}, ${quote(message)})`;
+}
+
+/**
+ * What a bound slot prop gives its consumer, as a one-argument function's source, or undefined when it
+ * gives its value as it is: a null value, and one its declared type rejects (which warns HR007), take the
+ * declared default, or null without one. `keepSymbols` passes an invalid result through for the caller to retain.
+ */
+export function slotPropValueSource(definition: { readonly source: { readonly file: string }; readonly contract: { readonly tag: string } },
+  slot: string | undefined, prop: { readonly name: string; readonly type?: PropType; readonly default?: PropValue }, keepSymbols = false): string | undefined {
+  const fallback = prop.default === undefined ? "null" : JSON.stringify(prop.default);
+  if (prop.type === undefined) return prop.default === undefined ? undefined : `(value: any): any => value == null ? ${fallback} : value`;
+  return `(value: any): any => ${keepSymbols ? `typeof value === "symbol" || ` : ""}(${slotPropCheckSource(definition, slot, prop.name, prop.type)})(value) ? value : ${fallback}`;
 }
 
 /** The props module's full value check, imported under the name slot prop checks call it by. */

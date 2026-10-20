@@ -31,7 +31,7 @@ import type { PropContract } from "../types.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { conformingScalarStates, controllerInitials, revertSource, withRevert } from "./state-roots.js";
-import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, svgAttributeName, typeSource } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -518,23 +518,20 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
     const slotName = quote(node.name ?? "");
     const name = scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
       : node.name === undefined ? "" : ` name=${quote(node.name)}`;
-    // A bound value its declared type does not accept is not given, so the consumer reads it as absent.
-    const unchecked = (prop: NonNullable<SlotNode["props"]>[number]): boolean =>
-      prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, names.template));
-    const props = (node.props ?? []).filter(unchecked)
-      .map((prop) => ` :${prop.name}=${bound(lowering.value(prop.expressionPlan.ast, names.template))}`).join("");
-    const checked = (node.props ?? []).flatMap((prop) => {
-      if (unchecked(prop) || prop.type === undefined) return [];
-      context.usesSlotPropChecks = true;
-      const accept = context.identifiers.take("slotProp", "");
-      // Its declared type says what a consumer reads; a value that does not conform is left out, so the props are not that type.
-      context.guarded.push(`const ${accept}Check = ${slotPropCheckSource(context.definition, node.name, prop.name, prop.type)};`,
-        `const ${accept} = (value: unknown): any => ${accept}Check(value) ? { ${quote(prop.name)}: value } : {};`);
-      return [`...${accept}(${lowering.value(prop.expressionPlan.ast, names.template)})`];
-    });
-    const spread = checked.length === 0 ? "" : ` v-bind=${bound(`{ ${checked.join(", ")} }`)}`;
+    // A null value, and one its declared type rejects, takes the prop's default, or null; a value whose
+    // static type is the declared one needs no check.
+    const props = (node.props ?? []).map((prop) => {
+      const value = lowering.value(prop.expressionPlan.ast, names.template);
+      const proven = prop.type !== undefined && provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, names.template));
+      const source = proven ? undefined : slotPropValueSource(context.definition, node.name, prop);
+      if (source === undefined) return ` :${prop.name}=${bound(value)}`;
+      if (prop.type !== undefined) context.usesSlotPropChecks = true;
+      const given = context.identifiers.take("slotProp", "");
+      context.guarded.push(`const ${given} = ${source};`);
+      return ` :${prop.name}=${bound(`${given}(${value})`)}`;
+    }).join("");
     const fallback = renderChildren(node.fallback ?? [], names, context);
-    return fallback === "" ? `<slot${name}${props}${spread} />` : `<slot${name}${props}${spread}>${fallback}</slot>`;
+    return fallback === "" ? `<slot${name}${props} />` : `<slot${name}${props}>${fallback}</slot>`;
   }
   const flow = node.flow;
   if (flow?.kind === "each") return renderEachNode(node, flow, names, context);

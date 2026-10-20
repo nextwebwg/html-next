@@ -17,10 +17,10 @@ import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 /**
  * A bound slot prop is checked in full against its declared type, as a prop's input is
  * (https://nextwebwg.org/declarative-components/types): a closed object rejects an undeclared field,
- * a missing required field and a field of the wrong type. A rejected value is not given to the
- * consumer, which reads it as absent, and warns HR007 once, naming the slot and the prop, the same
- * in every target and in development and production builds. A value that stops conforming is
- * absent too; it does not keep the last one that conformed.
+ * a missing required field and a field of the wrong type. A rejected value warns HR007 once, naming
+ * the slot and the prop, and the consumer reads the prop's default, or absent without one, the same
+ * in every target and in development and production builds. A value that stops conforming does too;
+ * it does not keep the last one that conformed. A null value takes the default without a warning.
  */
 const list = (tag: string, row: string, later?: string) => `<template component="${tag}" status="early" summary="List."><defs>
   <slot name="row"><prop name="row" type="object" required>The row.<prop name="id" required type="string">Id.</prop><prop name="label" required type="string">Label.</prop></prop></slot>
@@ -28,10 +28,16 @@ const list = (tag: string, row: string, later?: string) => `<template component=
   ${later === undefined ? "" : `<handler name="change"><set name="rows" expr:value="[{ id: 'a', label: 'A' }, ${later}]"></set></handler>`}</defs>
   <div><ul class="${tag}"><slot $each="r of $rows" $key="$loop.index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
 const cases = { extra: "{ id: 'b', label: 'B', index: 1 }", missing: "{ id: 'b' }", wrong: "{ id: 2, label: 'B' }", later: "{ id: 'b', label: 'B' }" } as const;
-const page = `${Object.keys(cases).map((name) => `<link rel="component" href="./${name}.html">`).join("")}
+const page = `${[...Object.keys(cases), "defaults"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
 <template component="x-page" status="early" summary="Page."><main>${Object.keys(cases).map((name) =>
-  `<x-${name}><template slot="row"><li $value="$row.label"></li></template></x-${name}>`).join("")}</main></template>`;
-const files: Readonly<Record<string, string>> = { ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
+  `<x-${name}><template slot="row"><li $value="$row.label"></li></template></x-${name}>`).join("")}
+  <x-defaults><template slot="row"><li><b $value="$label"></b><i $value="$note"></i></li></template></x-defaults></main></template>`;
+// A default fills a rejected value and a null or missing one, typed or `unknown`.
+const defaults = `<template component="x-defaults" status="early" summary="Defaults."><defs>
+  <slot name="row"><prop name="label" type="string" default="Fallback">Label.</prop><prop name="note" type="unknown" default="n">Note.</prop></slot>
+  <state type="list(unknown)" name="rows" value="[{ label: 'A', note: 'x' }, { label: 3 }, { label: null, note: null }]"></state></defs>
+  <div><ul class="x-defaults"><slot $each="r of $rows" $key="$loop.index" name="row" from:label="$r.label" from:note="$r.note"></slot></ul></div></template>`;
+const files: Readonly<Record<string, string>> = { "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const htmlNextSource = fileURLToPath(new URL("../../html-next/src/", import.meta.url));
@@ -124,15 +130,16 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
               await page.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents());
             }
             const rows = () => page.evaluate(() => Array.from(document.querySelectorAll("ul"), (list) => [list.className, Array.from(list.children, (row) => row.textContent)]));
-            await page.waitForFunction(() => document.querySelectorAll("li").length === 8);
-            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", "B"]]]);
-            assert.equal(warnings.length, 3);
+            const filled = ["x-defaults", ["Ax", "Fallbackn", "Fallbackn"]];
+            await page.waitForFunction(() => document.querySelectorAll("li").length === 11);
+            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", "B"]], filled]);
+            assert.equal(warnings.length, 4);
             await page.click("button");
             await page.waitForFunction(() => document.querySelector(".x-later")!.textContent === "A");
-            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", ""]]]);
+            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", ""]], filled]);
             const message = "HR007: Slot `row` prop `row` does not satisfy its declared type `object({ id: string, label: string })`.";
-            assert.deepEqual(warnings.map((warning) => [warning.match(/extra|missing|wrong|later/i)?.[0].toLowerCase(), warning.slice(warning.indexOf("HR007"))]).sort(),
-              Object.keys(cases).sort().map((name) => [name, message]));
+            assert.deepEqual(warnings.map((warning) => [warning.match(/extra|missing|wrong|later|defaults/i)?.[0].toLowerCase(), warning.slice(warning.indexOf("HR007"))]).sort(),
+              [...Object.keys(cases).map((name) => [name, message]), ["defaults", "HR007: Slot `row` prop `label` does not satisfy its declared type `string`."]].sort());
             assert.deepEqual(errors, []);
           } finally {
             await browser.close();
