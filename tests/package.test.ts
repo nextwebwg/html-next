@@ -156,7 +156,7 @@ export async function prepare({ document, host, flush, signal, data }) {
         .filter((path) => path !== "./browser")
         .map((path) => `import ${JSON.stringify(specifier(path))};`)
         .join("\n")}
-const { renderComponents } = await import("@nextwebwg/html-next/server");
+const { renderComponents, createRenderer } = await import("@nextwebwg/html-next/server");
 const { parseComponent, add, subtract, multiply, divide } = await import("@nextwebwg/html-next");
 const compiled = await import("@nextwebwg/html-next/generated-runtime");
 if (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");
@@ -167,6 +167,15 @@ const prepared = await renderComponents('<x-prepared id="prepared"></x-prepared>
   prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Installed preparation' } }
 });
 if (!prepared.html.includes('<p') || !prepared.html.includes('>Installed preparation</p>')) throw new Error('Packaged preparation failed');
+const owner = createRenderer({ workers: 1 });
+try {
+  owner.setWorkers(2);
+  const scoped = await owner.render('<x-prepared id="prepared"></x-prepared>', {
+    definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop></defs><p>{$product}</p></template>')],
+    prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Owned preparation' } }
+  });
+  if (!scoped.html.includes('>Owned preparation</p>')) throw new Error('Packaged renderer ownership failed');
+} finally { await owner.close(); }
 process.stdout.write("ok");
 `,
     );
@@ -180,9 +189,10 @@ process.stdout.write("ok");
       `${publicExports.map((path, index) =>
         `import * as publicExport${index} from ${JSON.stringify(specifier(path))};`
       ).join("\n")}\nexport const resolved = [${publicExports.map((_, index) => `publicExport${index}`).join(", ")}];\n` +
-      'import type { ServerPreparation, ServerPreparationContext, ServerRenderOptions } from "@nextwebwg/html-next/server";\n' +
+      'import type { ServerPreparation, ServerPreparationContext, ServerRenderOptions, ServerRenderer } from "@nextwebwg/html-next/server";\n' +
       'export const preparation: ServerPreparation = async (context: ServerPreparationContext) => { await context.flush(); return () => { context.port?.close(); }; };\n' +
-      'export const renderOptions: ServerRenderOptions = { definitions: [], signal: new AbortController().signal, prepare: { module: "file:///prepare.mjs", data: { value: 1 } } };\n',
+      'export const renderOptions: ServerRenderOptions = { definitions: [], signal: new AbortController().signal, prepare: { module: "file:///prepare.mjs", data: { value: 1 } } };\n' +
+      'export function closeRenderer(renderer: ServerRenderer) { renderer.setWorkers(1); return renderer.close(); }\n',
     );
     execFileSync(
       "corepack",

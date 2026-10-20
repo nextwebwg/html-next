@@ -120,6 +120,31 @@ thread. Other workers continue, and the pool starts a replacement when needed. A
 are removed when a job settles. Preparation module namespaces follow native ESM caching within
 each worker; changed application modules need a new module URL or a fresh renderer lifetime.
 
+Use `createRenderer()` when an application owns the lifetime of its adapters and module cache:
+
+```js
+import { createRenderer } from "@nextwebwg/html-next/server";
+
+const renderer = createRenderer({ workers: 2 });
+try {
+  const result = await renderer.render(html, options);
+  // Serve the rendered output.
+} finally {
+  await renderer.close();
+}
+```
+
+Each renderer owns its workers, queued requests and ESM namespaces. Closing it rejects its queued
+and active requests, awaits its terminating workers, and rejects later renders; other renderers
+continue. Repeated `close()` calls await the same shutdown. `setWorkers(count)` resizes this
+renderer, retiring excess workers as they finish before assigning more queued work.
+
+Without `workers`, a new renderer inherits the current `setRenderWorkers()` setting. That global
+function controls the default pool used by `renderComponents()`; an existing scoped renderer keeps
+its own setting. `closeRenderWorkers()` closes the default pool's current work while allowing later
+calls to `renderComponents()` to start fresh workers. Application-owned renderers let development
+reconstruct module caches and remove temporary adapters after their workers have exited.
+
 ## Platform audit and implementation boundary
 
 Node supplies ESM, workers, structured cloning, Fetch and microtask scheduling, but no native HTML

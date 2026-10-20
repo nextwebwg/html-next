@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { availableParallelism } from "node:os";
 import { once, getEventListeners } from "node:events";
 import { MessageChannel } from "node:worker_threads";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, it } from "vitest";
 import { JSDOM } from "jsdom";
 
 import { renderedInstanceRecord } from "../src/rendered-form.js";
 import { parseComponent } from "../src/source-parser.js";
-import { closeRenderWorkers, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
+import { closeRenderWorkers, createRenderer, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
 
 const counter = parseComponent(`<template component="x-server-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
@@ -22,6 +26,84 @@ describe("Node component rendering", () => {
     <prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs>
     <section><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
     <x-server-counter $await="$product" from:label="$product"></x-server-counter></section></template>`);
+  it("closes one renderer's active and queued work while another renderer completes its private read", async () => {
+    const first = createRenderer({ workers: 1 }); const second = createRenderer({ workers: 1 });
+    const ports = [new MessageChannel(), new MessageChannel(), new MessageChannel()];
+    const started = once(ports[0]!.port1, "message");
+    const closed = ports.slice(0, 2).map(channel => once(channel.port1, "close"));
+    const stopped = assert.rejects(first.render("", { definitions: [], prepare: { module: preparation, port: ports[0]!.port2, data: { wait: true } } }), /exited without a result/);
+    let queued: Promise<void> | undefined;
+    let incoming: Promise<RenderedComponents> | undefined;
+    try {
+      await started;
+      queued = assert.rejects(first.render("", { definitions: [], prepare: { module: preparation, port: ports[1]!.port2, data: { wait: true } } }), /exited without a result/);
+      const requested = new Promise<void>(resolve => ports[2]!.port1.on("message", message => { if (message.event === "read") resolve(); }));
+      incoming = second.render('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter],
+        prepare: { module: preparation, port: ports[2]!.port2, data: { query: "other" } } });
+      void incoming.catch(() => {});
+      await requested;
+      await Promise.all([first.close(), first.close(), stopped, queued, ...closed]);
+      await assert.rejects(first.render("", { definitions: [] }), /renderer is closed/);
+      assert.throws(() => first.setWorkers(2), /renderer is closed/);
+      const rejected = new MessageChannel();
+      try {
+        const rejectedClosed = once(rejected.port1, "close");
+        await assert.rejects(first.render("", { definitions: [], prepare: { module: preparation, port: rejected.port2 } }), /renderer is closed/);
+        await rejectedClosed;
+      } finally { rejected.port1.close(); rejected.port2.close(); }
+      ports[2]!.port1.postMessage("Other application");
+      assert.match((await incoming).html, /<h1>Other application<\/h1>/);
+      assert.match((await second.render('<x-server-counter></x-server-counter>', { definitions: [counter] })).html, /<h2>Counter<\/h2>/);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+      await queued; await incoming?.catch(() => {});
+      for (const channel of ports) { channel.port1.close(); channel.port2.close(); }
+    }
+  });
+  it("owns its native ESM cache until close and imports edited adapters in a fresh renderer", async () => {
+    const first = createRenderer({ workers: 1 }); const second = createRenderer({ workers: 1 });
+    const directory = await mkdtemp(join(tmpdir(), "html-next-renderer-"));
+    const entry = join(directory, "prepare.mjs");
+    const adapter = (value: string) => `export function prepare({ document }) { document.body.append(document.createTextNode(${JSON.stringify(value)})); }`;
+    const options = { definitions: [], prepare: { module: pathToFileURL(entry).href } };
+    try {
+      await writeFile(entry, adapter("First module"));
+      assert.equal((await first.render("", options)).html, "First module");
+      await writeFile(entry, adapter("Edited module"));
+      assert.equal((await first.render("", options)).html, "First module");
+      assert.equal((await second.render("", options)).html, "Edited module");
+      await first.close();
+      assert.equal((await second.render("", options)).html, "Edited module");
+    } finally { await Promise.all([first.close(), second.close()]); await rm(directory, { recursive: true, force: true }); }
+  });
+  it("retires a completed excess worker before assigning queued work after a resize", async () => {
+    const renderer = createRenderer({ workers: 2 });
+    const module = new URL("./fixtures/server-worker-id.mjs", import.meta.url).href;
+    const ports = [new MessageChannel(), new MessageChannel(), new MessageChannel()];
+    const started = ports.map(channel => once(channel.port1, "message"));
+    const options = (index: number) => ({ definitions: [], prepare: { module, port: ports[index]!.port2, data: { id: String(index) } } });
+    const running = [renderer.render("", options(0)), renderer.render("", options(1))];
+    let queued: Promise<RenderedComponents> | undefined;
+    try {
+      const [first, second] = (await Promise.all(started.slice(0, 2))).map(([message]) => message as { threadId: number });
+      assert.notEqual(first!.threadId, second!.threadId);
+      assert.throws(() => renderer.setWorkers(0), RangeError);
+      renderer.setWorkers(1);
+      ports[2]!.port1.on("message", () => ports[2]!.port1.postMessage("Continue"));
+      queued = renderer.render("", options(2));
+      ports[0]!.port1.postMessage("Continue");
+      assert.equal((await running[0]!).html, "0");
+      ports[1]!.port1.postMessage("Continue");
+      assert.equal((await running[1]!).html, "1");
+      const [last] = await started[2]!;
+      assert.equal(last.threadId, second!.threadId);
+      assert.equal((await queued).html, "2");
+    } finally {
+      await renderer.close();
+      await Promise.all([...running, ...queued === undefined ? [] : [queued]].map(promise => promise.catch(() => {})));
+      for (const channel of ports) { channel.port1.close(); channel.port2.close(); }
+    }
+  });
   it("prepares typed providers in the worker through a private message channel without connecting browser behavior", async () => {
     const { port1, port2 } = new MessageChannel();
     const messages: unknown[] = [];

@@ -70,94 +70,158 @@ interface Job {
   readonly reject: (error: unknown) => void;
   transferred: boolean;
 }
-interface RenderWorker { readonly worker: Worker; job?: Job | undefined }
+interface RenderWorker { readonly worker: Worker; job?: Job | undefined; stopping: boolean }
 
-/** Up to 8 workers by default: each holds its own jsdom and runtime in memory. */
-let size = Math.min(availableParallelism(), 8);
-const workers = new Set<RenderWorker>();
-const queue: Job[] = [];
-
-/**
- * How many render workers renderComponents keeps, at least 1. The default is the number of available
- * CPUs, up to 8. A smaller count takes effect as workers finish their renders.
- */
-export function setRenderWorkers(count: number): void {
+function workerCount(count: number): number {
   if (!Number.isInteger(count) || count < 1) throw new RangeError("Render workers must be a whole number of at least 1.");
-  size = count;
-  dispatch();
+  return count;
 }
 
-/** End every render worker. Renders in progress reject; the next render starts new workers. */
-export async function closeRenderWorkers(): Promise<void> {
-  const stopped = [...workers];
-  workers.clear();
-  for (const job of queue.splice(0)) job.reject(new Error("Component rendering worker exited without a result (renderer closed)."));
-  for (const entry of stopped) {
-    entry.job?.reject(new Error("Component rendering worker exited without a result (renderer closed)."));
-    entry.job = undefined;
+class RenderPool {
+  #size: number;
+  readonly #workers = new Set<RenderWorker>();
+  readonly #queue: Job[] = [];
+
+  constructor(count: number) { this.#size = workerCount(count); }
+  get size(): number { return this.#size; }
+
+  resize(count: number): void { this.#size = workerCount(count); this.#dispatch(); }
+
+  async close(): Promise<void> {
+    const stopped = [...this.#workers];
+    for (const job of this.#queue.splice(0)) job.reject(new Error("Component rendering worker exited without a result (renderer closed)."));
+    for (const entry of stopped) {
+      entry.job?.reject(new Error("Component rendering worker exited without a result (renderer closed)."));
+      entry.job = undefined;
+    }
+    await Promise.all(stopped.map(entry => this.#stop(entry)));
   }
-  await Promise.all(stopped.map(entry => entry.worker.terminate()));
-}
 
-function start(): RenderWorker {
-  const source = import.meta.url.endsWith(".ts");
-  const entry = new URL(source ? "./server-worker.ts" : "./server-worker.js", import.meta.url);
-  // Node 22 needs the TypeScript loader registered inside the worker before importing its entry.
-  // A JavaScript bootstrap avoids depending on native TypeScript support in the supported LTS range.
-  const workerEntry = source ? new URL(`data:text/javascript,${encodeURIComponent(
-    `import { tsImport } from ${JSON.stringify(import.meta.resolve("tsx/esm/api"))}; await tsImport(${JSON.stringify(entry.href)}, ${JSON.stringify(import.meta.url)});`,
-  )}`) : entry;
-  // Packaged workers are ordinary ESM. Do not inherit caller loader or --input-type flags.
-  const pooled: RenderWorker = { worker: new Worker(workerEntry, { execArgv: [] }) };
-  const { worker } = pooled;
-  // An idle worker never keeps the process alive; a busy one does, until its render answers.
-  worker.unref();
-  worker.on("message", (reply: ServerRenderReply) => {
-    const job = pooled.job;
-    pooled.job = undefined;
+  #stop(entry: RenderWorker): Promise<number> {
+    entry.stopping = true;
+    entry.worker.ref();
+    return entry.worker.terminate();
+  }
+
+  #start(): RenderWorker {
+    const source = import.meta.url.endsWith(".ts");
+    const entry = new URL(source ? "./server-worker.ts" : "./server-worker.js", import.meta.url);
+    // Node 22 needs the TypeScript loader registered inside the worker before importing its entry.
+    const workerEntry = source ? new URL(`data:text/javascript,${encodeURIComponent(
+      `import { tsImport } from ${JSON.stringify(import.meta.resolve("tsx/esm/api"))}; await tsImport(${JSON.stringify(entry.href)}, ${JSON.stringify(import.meta.url)});`,
+    )}`) : entry;
+    // Packaged workers are ordinary ESM. Do not inherit caller loader or --input-type flags.
+    const pooled: RenderWorker = { worker: new Worker(workerEntry, { execArgv: [] }), stopping: false };
+    const { worker } = pooled;
     worker.unref();
-    if (job !== undefined) {
-      if ("result" in reply) job.resolve(reply.result);
-      else job.reject(reply.error.diagnostic === undefined
-        ? Object.assign(new Error(reply.error.message), { name: reply.error.name })
-        : new HtmlDiagnosticError(reply.error.diagnostic));
-    }
-    dispatch();
-  });
-  // A worker that fails or exits is replaced by the next render; its own render rejects.
-  const lost = (error: Error) => {
-    if (!workers.delete(pooled)) return;
-    pooled.job?.reject(error);
-    pooled.job = undefined;
-    dispatch();
-  };
-  worker.once("error", lost);
-  worker.once("exit", (code) => lost(new Error(`Component rendering worker exited without a result (code ${code}).`)));
-  workers.add(pooled);
-  return pooled;
-}
+    worker.on("message", (reply: ServerRenderReply) => {
+      const job = pooled.job;
+      pooled.job = undefined;
+      if (!pooled.stopping) worker.unref();
+      if (job !== undefined) {
+        if ("result" in reply) job.resolve(reply.result);
+        else job.reject(reply.error.diagnostic === undefined
+          ? Object.assign(new Error(reply.error.message), { name: reply.error.name })
+          : new HtmlDiagnosticError(reply.error.diagnostic));
+      }
+      this.#dispatch();
+    });
+    worker.once("error", error => {
+      pooled.stopping = true;
+      worker.ref();
+      pooled.job?.reject(error);
+      pooled.job = undefined;
+    });
+    worker.once("exit", code => {
+      this.#workers.delete(pooled);
+      pooled.job?.reject(new Error(`Component rendering worker exited without a result (code ${code}).`));
+      pooled.job = undefined;
+      this.#dispatch();
+    });
+    this.#workers.add(pooled);
+    return pooled;
+  }
 
-/** Give each queued render to an idle worker, starting workers up to the pool size. */
-function dispatch(): void {
-  while (queue.length > 0) {
-    let idle = [...workers].find((entry) => entry.job === undefined);
-    if (idle === undefined && workers.size < size) idle = start();
-    if (idle === undefined) return;
-    const job = queue.shift()!;
-    idle.job = job;
-    idle.worker.ref();
-    try {
-      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node Worker has no origin argument.
-      idle.worker.postMessage(job.request, job.request.prepare?.port === undefined ? [] : [job.request.prepare.port]);
-      job.transferred = true;
-    } catch (error) {
-      idle.job = undefined;
-      idle.worker.unref();
-      job.reject(error);
+  #dispatch(): void {
+    let retained = [...this.#workers].filter(entry => !entry.stopping).length;
+    for (const entry of this.#workers) {
+      if (retained <= this.#size) break;
+      if (!entry.stopping && entry.job === undefined) { void this.#stop(entry); retained -= 1; }
+    }
+    while (this.#queue.length > 0) {
+      let idle = [...this.#workers].find(entry => !entry.stopping && entry.job === undefined);
+      if (idle === undefined && this.#workers.size < this.#size) idle = this.#start();
+      if (idle === undefined) return;
+      const job = this.#queue.shift()!;
+      idle.job = job;
+      idle.worker.ref();
+      try {
+        // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node Worker has no origin argument.
+        idle.worker.postMessage(job.request, job.request.prepare?.port === undefined ? [] : [job.request.prepare.port]);
+        job.transferred = true;
+      } catch (error) {
+        idle.job = undefined;
+        idle.worker.unref();
+        job.reject(error);
+      }
     }
   }
-  // Beyond a smaller size, idle workers end.
-  for (const entry of workers) if (workers.size > size && entry.job === undefined) { workers.delete(entry); void entry.worker.terminate(); }
+
+  render(html: string, options: ServerRenderOptions): Promise<RenderedComponents> {
+    const { signal, ...request } = options;
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) { request.prepare?.port?.close(); reject(signal.reason); return; }
+      const finish = (): void => {
+        signal?.removeEventListener("abort", abort);
+        if (!job.transferred) job.request.prepare?.port?.close();
+      };
+      const job: Job = { request: { ...request, html }, transferred: false,
+        resolve: result => { finish(); resolve(result); }, reject: error => { finish(); reject(error); } };
+      const abort = (): void => {
+        const index = this.#queue.indexOf(job);
+        if (index >= 0) this.#queue.splice(index, 1);
+        const assigned = [...this.#workers].find(entry => entry.job === job);
+        if (assigned !== undefined) { assigned.job = undefined; void this.#stop(assigned); }
+        job.reject(signal!.reason);
+        this.#dispatch();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      this.#queue.push(job);
+      this.#dispatch();
+    });
+  }
+}
+
+const defaultPool = new RenderPool(Math.min(availableParallelism(), 8));
+
+/** How many workers renderComponents keeps. A smaller count takes effect as renders finish. */
+export function setRenderWorkers(count: number): void { defaultPool.resize(count); }
+
+/** End the default pool's queued and active work. Its next render starts fresh workers. */
+export async function closeRenderWorkers(): Promise<void> { await defaultPool.close(); }
+
+export interface ServerRenderer {
+  render(html: string, options: ServerRenderOptions): Promise<RenderedComponents>;
+  setWorkers(count: number): void;
+  /** End this renderer and its native module caches; later renders reject. */
+  close(): Promise<void>;
+}
+
+/** Own a renderer lifetime independently of other applications and the reusable default pool. */
+export function createRenderer(options: { readonly workers?: number } = {}): ServerRenderer {
+  const pool = new RenderPool(options.workers ?? defaultPool.size);
+  let closing: Promise<void> | undefined;
+  return {
+    render(html, request) {
+      if (closing !== undefined) { request.prepare?.port?.close(); return Promise.reject(new Error("Component renderer is closed.")); }
+      return pool.render(html, request);
+    },
+    setWorkers(count) {
+      if (closing !== undefined) throw new Error("Component renderer is closed.");
+      pool.resize(count);
+    },
+    close() { return closing ??= pool.close(); },
+  };
 }
 
 /**
@@ -167,29 +231,5 @@ function dispatch(): void {
  * the render; definitions and state arrive as structured clones. Workers share only loaded modules.
  */
 export function renderComponents(html: string, options: ServerRenderOptions): Promise<RenderedComponents> {
-  const { signal, ...request } = options;
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { request.prepare?.port?.close(); reject(signal.reason); return; }
-    const finish = (): void => {
-      signal?.removeEventListener("abort", abort);
-      if (!job.transferred) job.request.prepare?.port?.close();
-    };
-    const job: Job = { request: { ...request, html }, transferred: false,
-      resolve: result => { finish(); resolve(result); }, reject: error => { finish(); reject(error); } };
-    const abort = (): void => {
-      const index = queue.indexOf(job);
-      if (index >= 0) queue.splice(index, 1);
-      const assigned = [...workers].find(entry => entry.job === job);
-      if (assigned !== undefined) {
-        workers.delete(assigned);
-        assigned.job = undefined;
-        void assigned.worker.terminate();
-      }
-      job.reject(signal!.reason);
-      dispatch();
-    };
-    signal?.addEventListener("abort", abort, { once: true });
-    queue.push(job);
-    dispatch();
-  });
+  return defaultPool.render(html, options);
 }
