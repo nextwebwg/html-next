@@ -39,8 +39,9 @@ type Prefetch = "interaction" | "visible" | "none";
  * A compiled component: its factory, which adopts a server-rendered root given as its third
  * argument, and the invocation attribute each of its props is written as.
  */
+type BindingAdopter = (root: Element, rendered: Element, update: () => void) => void;
 export type Component = readonly [factory: (options: object, html?: Record<string, string>, root?: Element) => Element,
-  props: Readonly<Record<string, string>>];
+  props: Readonly<Record<string, string>>, adoption?: () => Promise<BindingAdopter>];
 /** The JSON that document.ts's pagePayload writes. */
 interface Payload {
   readonly version: 1 | 2;
@@ -86,7 +87,7 @@ export function page(runtime: Runtime, options: ClientOptions, pageComponents: R
   document.dispatchEvent(new Event("hk:ready"));
 }
 
-const layer = (root: Document, index: number) => root.getElementById(`hk-layer-${index}`);
+const layer = (root: Document, index: number) => root.querySelector(`[data-hk-layer="${index}"]`) ?? root.getElementById(`hk-layer-${index}`);
 const fresh = (time: number) => performance.now() - time < 30_000;
 const loaded = async (url: string, signal?: AbortSignal): Promise<Response> => {
   const response = await fetch(url, signal === undefined ? {} : { signal });
@@ -133,7 +134,7 @@ async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
     const { component: tag, attributes: authored, props, state } = payload.layers[index]!;
     const component = components.get(tag);
     if (component === undefined) throw new Error(`HTMLKit cannot render <${tag}>: no page module defines it.`);
-    const attributes: Record<string, string> = { id: `hk-layer-${index}`, ...index === 0 ? {} : { slot: "page" } };
+    const attributes: Record<string, string> = { id: `hk-layer-${index}`, "data-hk-layer": String(index), ...index === 0 ? {} : { slot: "page" } };
     const html: Record<string, string> = {};
     for (const [name, value] of Object.entries(authored)) {
       const prop = component[1][name];
@@ -318,6 +319,12 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       // Resolved against the page's URL: the next document has no <base>, which base-uri 'none' forbids.
       const modules = [...next.head.querySelectorAll('script[type="module"][src]')].map(script => import(/* @vite-ignore */ new URL(script.getAttribute("src")!, url).href));
       await Promise.all([...loading, ...modules]);
+      const adopting = [];
+      for (let index = 0; index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component"); index += 1) {
+        const tag = layer(document, index)!.getAttribute("data-component")!.split(" ")[0]!;
+        adopting.push(components.get(tag)?.[2]?.());
+      }
+      const adopters = await Promise.all(adopting);
       const commit = () => {
         signal.throwIfAborted();
         committed = true;
@@ -329,7 +336,11 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         // and controllers, and take the new rendering's props. The page layer is always replaced.
         let index = 0;
         while (index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component")) {
-          runtime.adoptRenderedProps(layer(document, index)!, layers[index]!);
+          const root = layer(document, index)!;
+          const update = () => runtime.adoptRenderedProps(root, layers[index]!);
+          const adoptPrepared = adopters[index];
+          if (adoptPrepared === undefined) update();
+          else adoptPrepared(root, layers[index]!, update);
           index += 1;
         }
         // A page sits in its layout's slot; the layout projects the new page as it did the old one.

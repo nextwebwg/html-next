@@ -1647,7 +1647,8 @@ export function replaceProjectedNode(current: ChildNode, next: ChildNode): void 
 /**
  * Carries a fresh rendering's props onto a compiled root a page keeps, through the prop channel, as
  * the live runtime's `adoptRenderedProps` does: `rendered` is that component's root in the new
- * rendering, made by its factory or rendered by a server. Props it left implicit return to their defaults.
+ * rendering, made by its factory or rendered by a server. Omitted caller-owned inputs return to
+ * their defaults; producer-owned inputs remain with their source.
  */
 export function adoptRenderedProps(element: Element, rendered: Element): void {
   const kept = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
@@ -1658,7 +1659,7 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
   const record = fresh !== undefined ? { explicit: [...fresh.x], inputs: fresh.i, props: Object.fromEntries(names.map((name, index) => [name, fresh.v[fresh.n.length + index]])) }
     : renderedInstanceRecord(rendered, kept.S.g);
   if (record === undefined) fail("HR005", "The rendered element records no props for this element's component.");
-  props.u!(renderedCallerProps(record, names));
+  props.u!(renderedCallerProps(record, names, name => props.i[name]!.producer === true && props.i[name]!.provided !== true));
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */

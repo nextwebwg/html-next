@@ -4,7 +4,7 @@ import { afterEach, describe, it, vi } from "vitest";
 import { bindModule, type BindingConnection, type BindingModule, type BindingPreparation } from "../src/bindings.js";
 import { componentInputs } from "../src/inputs.js";
 import { activateModule } from "../src/module-connection.js";
-import { componentRegistry, getComponentHost, lowerDocument, registerComponentDefinitions } from "../src/runtime.js";
+import { adoptRenderedProps, componentRegistry, getComponentHost, lowerDocument, registerComponentDefinitions, serializeRenderedForm } from "../src/runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const windows: JSDOM[] = [];
@@ -21,6 +21,20 @@ function fixture() {
   return { host, root, port: componentInputs(host) };
 }
 const tick = async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); };
+async function preparedValue(id = 2, options: { readonly dependent?: boolean; readonly failure?: boolean } = {}) {
+  const rendered = fixture();
+  componentRegistry.update(rendered.root, { id });
+  const adapter = bindModule({ props: {
+    ...options.dependent ? { second: { input: (props: { value: number }) => props.value, load: (value: number) => value + 1 } } : {},
+    value: { input: props => props.id, load: id => { if (options.failure) throw new Error("Offline"); return id * 100; } },
+  } });
+  const preparation = await adapter.prepare(rendered.host, { phase: "request", source: "build-a" });
+  releases.push(() => preparation.dispose());
+  const template = rendered.root.ownerDocument.createElement("template");
+  template.innerHTML = serializeRenderedForm(rendered.root.ownerDocument.body);
+  return { rendered: template.content.querySelector("section")!, snapshot: preparation.snapshot(),
+    inputs: Object.fromEntries(preparation.names.map(name => [name, { value: rendered.port.read(name), status: rendered.port.status(name) }])) };
+}
 afterEach(() => {
   for (const release of releases.splice(0)) release();
   for (const dom of windows.splice(0)) dom.window.close();
@@ -28,6 +42,109 @@ afterEach(() => {
 });
 
 describe("binding module adapter", () => {
+  it("adopts prepared values into a retained instance without another read or connection", async () => {
+    const { host, root, port } = fixture(); let reads = 0; let creates = 0; let connections = 0;
+    const adapter = bindModule({ create() {
+      creates += 1;
+      return { props: { value: { input: props => props.id, load: id => { reads += 1; return id * 10; } } }, connect() { connections += 1; } };
+    } }, { browser: { source: "build-a" } });
+    releases.push(activateModule(adapter, host)); await tick();
+    assert.equal(port.read("value"), 10);
+    const prepared = await preparedValue();
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    await tick();
+    assert.equal(port.read("value"), 200);
+    assert.deepEqual([reads, creates, connections], [1, 1, 1]);
+  });
+
+  it("preserves an intervening same-input stream publication and its live connection", async () => {
+    const { host, root, port } = fixture(); let reads = 0; let subscriptions = 0;
+    let publish!: (value: number) => boolean;
+    const adapter = bindModule({ props: { value: { input: props => props.id, load() { reads += 1; return 10; },
+      subscribe(_input, operation) { subscriptions += 1; publish = operation.publish; },
+    } } }, { browser: { source: "build-a" } });
+    releases.push(activateModule(adapter, host)); await tick();
+    assert.equal(publish(15), true);
+    const prepared = await preparedValue(1);
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    await tick();
+    assert.equal(port.read("value"), 15);
+    assert.deepEqual([reads, subscriptions], [1, 1]);
+    assert.equal(publish(16), true);
+    await tick(); assert.equal(port.read("value"), 16);
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    await tick(); assert.equal(port.read("value"), 16, "a cached server baseline must also preserve a live result published before navigation");
+  });
+
+  it("adopts before the first activation without constructing a second factory", async () => {
+    const { host, root, port } = fixture(); let reads = 0; let creates = 0;
+    const adapter = bindModule({ create() { creates += 1; return { props: { value: {
+      input: props => props.id, load() { reads += 1; return 10; },
+    } } }; } }, { browser: { source: "build-a" } });
+    const prepared = await preparedValue();
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    assert.equal(port.read("value"), 200);
+    releases.push(activateModule(adapter, host)); await tick();
+    assert.equal(port.read("value"), 200);
+    assert.deepEqual([reads, creates], [0, 1]);
+  });
+
+  it("keeps caller fixtures and current selectors in control of prepared values", async () => {
+    const { host, root, port } = fixture(); let reads = 0;
+    const adapter = bindModule({ props: { value: { input: props => props.id, load: id => { reads += 1; return id * 10; } } } }, { browser: { source: "build-a" } });
+    releases.push(activateModule(adapter, host)); await tick();
+    const prepared = await preparedValue();
+    adapter.adopt(host, { ...prepared, update: () => componentRegistry.update(root, { id: 2, value: 9 }) });
+    await tick(); assert.equal(port.read("value"), 9); assert.equal(reads, 1);
+    assert.equal(port.supplied("value"), true);
+    adapter.adopt(host, { ...prepared, update: () => componentRegistry.update(root, { id: 3, value: undefined }) });
+    await tick(); assert.equal(port.read("value"), 30); assert.equal(reads, 2);
+    adapter.adopt(host, { ...prepared, snapshot: { ...prepared.snapshot, source: "another-build" },
+      update: () => componentRegistry.update(root, { id: 2 }) });
+    await tick(); assert.equal(port.read("value"), 20); assert.equal(reads, 3);
+  });
+
+  it("keeps a current browser read for the same input running", async () => {
+    const { host, root, port } = fixture(); let reads = 0; let complete!: (value: number) => void; let signal!: AbortSignal;
+    const adapter = bindModule({ props: { value: { input: props => props.id, load(_id, operation) {
+      reads += 1; signal = operation.signal; return new Promise<number>(resolve => { complete = resolve; });
+    } } } }, { browser: { source: "build-a" } });
+    releases.push(activateModule(adapter, host)); await tick();
+    const prepared = await preparedValue(1);
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    await tick(); assert.equal(port.status("value").pending, true); assert.equal(signal.aborted, false);
+    complete(11); await tick();
+    assert.equal(port.read("value"), 11); assert.equal(reads, 1);
+  });
+
+  it("adopts dependent prepared outputs through their native prerequisites regardless of declaration order", async () => {
+    const { host, root, port } = fixture(); const reads: string[] = [];
+    const adapter = bindModule({ props: {
+      second: { input: props => props.value, load: value => { reads.push("second"); return value + 1; } },
+      value: { input: props => props.id, load: id => { reads.push("value"); return id * 10; } },
+    } }, { browser: { source: "build-a" } });
+    releases.push(activateModule(adapter, host)); await tick();
+    assert.equal(port.read("second"), 11);
+    const prepared = await preparedValue(2, { dependent: true });
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    await tick();
+    assert.deepEqual([port.read("value"), port.read("second")], [200, 201]);
+    assert.deepEqual(reads, ["value", "second"]);
+  });
+
+  it("adopts a handled prepared failure and retries only when explicitly refreshed", async () => {
+    const { host, root, port } = fixture(); let reads = 0; let connection!: BindingConnection;
+    const adapter = bindModule({ props: { value: { input: props => props.id, load: id => { reads += 1; return id * 10; } } },
+      connect(_host, current) { connection = current; },
+    }, { browser: { source: "build-a" } });
+    releases.push(activateModule(adapter, host)); await tick();
+    const prepared = await preparedValue(2, { failure: true });
+    adapter.adopt(host, { ...prepared, update: () => adoptRenderedProps(root, prepared.rendered) });
+    await tick();
+    assert.equal(root.querySelector("p")?.textContent, "Offline"); assert.equal(reads, 1);
+    await connection.refresh("value"); await tick();
+    assert.equal(port.read("value"), 20); assert.equal(reads, 2);
+  });
   it("runs behavior-only modules without requiring an unused typed-input renderer adapter", async () => {
     const host = { props: {}, state: { count: 0 } };
     let creates = 0; let stops = 0;

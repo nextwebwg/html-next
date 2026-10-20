@@ -225,6 +225,30 @@ export async function privateFixture(): Promise<string> {
   return root;
 }
 
+/** Both pages retain one layout whose private provider selects a route-supplied typed input. */
+export async function retainedProviderFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "htmlkit-retained-provider-"));
+  await write(root, "package.json", '{"name":"htmlkit-retained-provider-fixture","private":true,"type":"module"}');
+  await write(root, "app/layouts/default.html", `<template component="retained-provider-shell"><defs>
+    <prop name="id" type="string" required>Lookup.</prop><prop name="label" type="string" required>Result.</prop>
+    <state name="draft" type="string" from="$label"></state></defs><main>
+    <h2 $await="$label">{$label}</h2><p $error="problem">{$problem.message}</p><p $else>Waiting.</p>
+    <input aria-label="Draft" bind:value="$draft"><button type="button" $ref="refresh">Refresh</button><slot name="page"></slot></main></template>`);
+  await write(root, "app/layouts/default.ts", `export function create() {
+    if (typeof window !== "undefined") window.retainedCreates = (window.retainedCreates || 0) + 1;
+    return { props: { label: { input: ({ id }) => id } }, connect(host, { signal, refresh }) {
+      host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1);
+      host.refs.refresh.addEventListener("click", () => { void refresh("label"); }, { signal });
+    } };
+  }`);
+  await write(root, "app/layouts/default.server.ts", `export const load = ({ url }) => ({ props: { id: url.pathname.endsWith("/second/") ? "B" : "A" } });
+    export const props = { label: { load: (id, context) => context.services.read(id, context) } };`);
+  await write(root, "app/pages/index.html", '<template component="retained-first"><article><h1>First</h1><a href="/second/" data-hk-prefetch="none">Second</a><a href="/same/" data-hk-prefetch="none">Same input</a></article></template>');
+  await write(root, "app/pages/second.html", '<template component="retained-second"><article><h1>Second</h1><a href="/" data-hk-prefetch="none">First</a></article></template>');
+  await write(root, "app/pages/same.html", '<template component="retained-same"><article><h1>Same input</h1><a href="/" data-hk-prefetch="none">First</a></article></template>');
+  return root;
+}
+
 /** A rendered head's title text, as HTML. */
 export function titleOf(page: { readonly head: { readonly html: string } }): string | undefined {
   return /<title[^>]*>([^<]*)<\/title>/.exec(page.head.html)?.[1];

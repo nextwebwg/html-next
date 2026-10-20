@@ -67,14 +67,27 @@ export function browserSources(components: readonly BrowserDefinition[], options
       const privateModule = `componentModule(behavior, privateReaders(library, ${JSON.stringify(base)}, ${JSON.stringify(component.binding?.source)}, ${JSON.stringify(component.definition.contract.tag)}, ${JSON.stringify(privateNames)}, ${JSON.stringify(Object.fromEntries(Object.entries(component.definition.contract.props).flatMap(([name, prop]) => prop.select === undefined ? [] : [[name, prop.select.from]])))}))`;
       const commonModule = privateNames.length === 0 ? "behavior" : privateModule;
       const composed = component.client === undefined ? commonModule : `componentModule(${commonModule}, environment)`;
-      sources.set(moduleId, `${component.binding === undefined ? "" : `import { preparedBinding } from ${JSON.stringify(client)};\n`}${common}${environment}
-let adapter;
+      sources.set(moduleId, `${component.binding === undefined ? "" : `import { preparedBinding } from ${JSON.stringify(client)};
+import { generatedHost, renderedInstanceRecord, READY_INPUT } from ${JSON.stringify(runtime)};\n`}${common}${environment}
+let adapter, bound;
+const binding = () => adapter ??= import(${JSON.stringify(bindings)}).then(library => bound = library.bindModule(${composed}${options}));
 export const connect = "props" in behavior || "create" in behavior${component.client === undefined ? "" : ' || "props" in environment || "create" in environment'}
-  ? (host, context) => {
-    adapter ??= import(${JSON.stringify(bindings)}).then(library => library.bindModule(${composed}${options}));
-    return adapter.then(module => module.connect(host, context));
-  }
+  ? (host, context) => binding().then(module => module.connect(host, context))
   : ${component.client === undefined ? 'Reflect.get(behavior, "connect")' : 'connectModules(Reflect.get(behavior, "connect"), Reflect.get(environment, "connect"))'};
+${component.binding === undefined ? "" : `
+export async function adoption() {
+  await binding();
+  return (root, rendered, update) => {
+    const snapshot = preparedBinding(rendered, ${JSON.stringify(component.definition.contract.tag)});
+    const record = renderedInstanceRecord(rendered, ${JSON.stringify(component.definition.contract.tag)});
+    if (snapshot === undefined || record === undefined) { update(); return; }
+    const inputs = Object.fromEntries(Object.entries(snapshot.reads).flatMap(([name, read]) =>
+      record.revisions?.[name] !== read.revision || !record.inputs[name]?.producer ? [] :
+        [[name, { value: record.props[name], status: record.availability?.[name] ?? READY_INPUT }]]));
+    bound.adopt(generatedHost(root), { snapshot, inputs, update });
+  };
+}
+`}
 `);
     }
     // Declared reads resolve as the page's URLs: a root-relative source under the deployment base, a
@@ -104,14 +117,16 @@ export const connect = "props" in behavior || "create" in behavior${component.cl
   }
   // Each component's factory and the invocation attribute each prop is written as (application.ts),
   // which client navigation renders a payload's layers with.
-  const registered = components.map(({ definition }, index) => `${JSON.stringify(definition.contract.tag)}: [c${index}, ${JSON.stringify(Object.fromEntries(
-    Object.keys(definition.contract.props).map((name) => [name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase(), name])))}]`);
+  const registered = components.map(({ definition, binding }, index) => `${JSON.stringify(definition.contract.tag)}: [c${index}, ${JSON.stringify(Object.fromEntries(
+    Object.keys(definition.contract.props).map((name) => [name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase(), name])))}${binding === undefined ? "" : `, b${index}`}]`);
   const functions = "adoptRenderedProps, replaceProjectedNode, generatedHost";
   sources.set(entry, `import { ${functions} } from ${JSON.stringify(runtime)};
 import { page } from ${JSON.stringify(client)};
 ${css.map(file => `import ${JSON.stringify(normalizePath(file))};`).join("\n")}
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
 ${components.map(({ definition }, index) => `import { create${definition.contract.name} as c${index} } from ${JSON.stringify(componentId(definition))};`).join("\n")}
+${components.flatMap(({ definition, binding }, index) => binding === undefined ? [] : [`
+const b${index} = () => import(${JSON.stringify(componentId(definition) + ".module.js")}).then(module => module.adoption());`]).join("\n")}
 page({ ${functions} }, ${JSON.stringify(options)}, { ${registered.join(", ")} });
 `);
   return sources;

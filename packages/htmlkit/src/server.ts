@@ -169,8 +169,8 @@ function invocationAttributes(definition: ComponentDefinition, result: LoaderRes
 }
 
 /** The browser builds the same invocation from a page payload (client.ts). */
-function invocation(tag: string, attributes: Readonly<Record<string, string>>, id: string, child: string, nested: boolean): string {
-  return `<${tag} id="${id}"${nested ? ' slot="page"' : ""}${Object.entries(attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>${child}</${tag}>`;
+function invocation(tag: string, attributes: Readonly<Record<string, string>>, index: number, child: string, nested: boolean): string {
+  return `<${tag}${Object.hasOwn(attributes, "id") ? "" : ` id="hk-layer-${index}"`} data-hk-layer="${index}"${nested ? ' slot="page"' : ""}${Object.entries(attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>${child}</${tag}>`;
 }
 
 /** The request's cookies by name; the first of a repeated name wins, as the most specific path comes first. */
@@ -328,7 +328,7 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     const client = input.clientModules?.includes(layer.definition.contract.tag) ?? false;
     const names: string[] | undefined = input.providers?.[layer.definition.contract.tag] === undefined && !client ? undefined : [];
     attributes.push(invocationAttributes(layer.definition, result, names));
-    if (!client && names !== undefined && names.length > 0) required.push({ tag: layer.definition.contract.tag, selector: `#hk-layer-${index}`, names });
+    if (!client && names !== undefined && names.length > 0) required.push({ tag: layer.definition.contract.tag, selector: `[data-hk-layer="${index}"]`, names });
   }
   const state: Record<string, Readonly<Record<string, unknown>>> = {};
   const props: Record<string, Readonly<Record<string, unknown>>> = {};
@@ -337,11 +337,11 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
   let body = "";
   for (let i = layers.length - 1; i >= 0; i--) {
-    const id = `hk-layer-${i}`;
+    const selector = `[data-hk-layer="${i}"]`;
     const layer = rendered[i]!;
-    if (layer.state !== undefined) state[`#${id}`] = layer.state;
-    props[`#${id}`] = Object.fromEntries(Object.keys(layers[i]!.definition.contract.props).map(name => [name, layer.props![name]]));
-    body = invocation(layer.component, layer.attributes, id, body, i > 0);
+    if (layer.state !== undefined) state[selector] = layer.state;
+    props[selector] = Object.fromEntries(Object.keys(layers[i]!.definition.contract.props).map(name => [name, layer.props![name]]));
+    body = invocation(layer.component, layer.attributes, i, body, i > 0);
   }
   // An alias names its page's own URL canonical, and a page in an alias page directory the same page
   // under its directory's own prefix, unless a component on the page declares one.

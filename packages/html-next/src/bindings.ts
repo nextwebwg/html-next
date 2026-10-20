@@ -1,7 +1,7 @@
 /** Selected-input reads over the renderer's existing typed input and reactive boundaries. */
 import { parseDuration } from "./duration.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
-import { componentInputs, READY_INPUT, sameInputStatus, type ComponentInputs, type InputFailure, type InputSource, type InputStatus } from "./inputs.js";
+import { componentInputs, READY_INPUT, sameInputStatus, type ComponentInputs, type InputFailure, type InputSnapshot, type InputSource, type InputStatus } from "./inputs.js";
 export { encodeHydrationValue, decodeHydrationValue, type HydrationValue } from "./hydration-value.js";
 
 export type BindingPhase = "build" | "request" | "browser";
@@ -56,6 +56,12 @@ export interface BindingReadSnapshot {
 export interface BindingSnapshot {
   readonly source: string;
   readonly reads: Readonly<Record<string, BindingReadSnapshot>>;
+}
+export interface BindingAdoption {
+  readonly snapshot: BindingSnapshot;
+  readonly inputs: Readonly<Record<string, InputSnapshot>>;
+  /** Apply caller inputs synchronously, retaining the renderer's normal producer ownership. */
+  readonly update?: () => void;
 }
 export interface BindingScopeOptions {
   readonly phase: BindingPhase;
@@ -127,6 +133,16 @@ function selected(value: unknown): Selected {
 }
 function failure(error: unknown): InputFailure {
   return { name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : String(error) };
+}
+function preparedRead(source: string | undefined, snapshot: BindingSnapshot | undefined, name: string): BindingReadSnapshot | undefined {
+  const seed = source !== undefined && snapshot?.source === source && Object.hasOwn(snapshot.reads ?? {}, name) ? snapshot.reads[name] : undefined;
+  if (seed === undefined) return undefined;
+  if (seed === null || typeof seed !== "object" || typeof seed.input !== "string" ||
+      seed.value !== undefined && typeof seed.value !== "string" || !Number.isSafeInteger(seed.revision) || seed.revision < 0 ||
+      seed.error !== undefined && (seed.error === null || typeof seed.error !== "object" || typeof seed.error.name !== "string" || typeof seed.error.message !== "string")) {
+    throw new TypeError(`Malformed prepared binding ${name}.`);
+  }
+  return { ...seed, ...seed.error === undefined ? {} : { error: { ...seed.error } } };
 }
 function abortable<T>(value: T | PromiseLike<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason);
@@ -213,22 +229,67 @@ export class BindingScope {
       const poll = duration(provider.poll, "poll") ?? 0;
       if (provider.initial === "manual" && poll > 0) throw new TypeError(`Manual binding ${name} cannot also poll.`);
       const timeout = duration(provider.timeout, "timeout");
-      const snapshot = options.snapshot;
-      const seed = options.source !== undefined && snapshot?.source === options.source &&
-        Object.hasOwn(snapshot.reads ?? {}, name) ? snapshot.reads[name] : undefined;
-      if (seed !== undefined && (seed === null || typeof seed !== "object" || typeof seed.input !== "string" ||
-        seed.value !== undefined && typeof seed.value !== "string" || !Number.isSafeInteger(seed.revision) || seed.revision < 0 ||
-        seed.error !== undefined && (seed.error === null || typeof seed.error !== "object" || typeof seed.error.name !== "string" || typeof seed.error.message !== "string"))) {
-        throw new TypeError(`Malformed prepared binding ${name}.`);
-      }
+      const seed = preparedRead(options.source, options.snapshot, name);
       this.#records.set(name, { name, provider, eligible: false, dependencies: new Set(),
-        seed: seed === undefined ? undefined : { ...seed, ...(seed.error === undefined ? {} : { error: { ...seed.error } }) },
+        seed,
         debounce: duration(provider.debounce, "debounce") ?? 0, timeout: timeout === 0 ? undefined : timeout, poll });
     }
   }
 
   /** Configured outputs, including deferred reads and excluding disabled providers. */
   get names(): readonly string[] { return [...this.#records.keys()]; }
+
+  /** Reuse compatible prepared output without restarting the logical instance or its connection. */
+  adopt({ snapshot, inputs, update }: BindingAdoption): void {
+    if (this.#disposed) throw new TypeError("This binding scope has been disposed.");
+    const pending = new Map([...this.#records.values()].flatMap(record => {
+      const seed = preparedRead(this.#options.source, snapshot, record.name);
+      return seed === undefined || !Object.hasOwn(inputs, record.name) ? [] : [[record, seed] as const];
+    }));
+    if (!this.#active) for (const record of this.#records.values()) this.#resume(record);
+    synchronous(update?.(), "A binding adoption update");
+    for (const record of this.#records.values()) if (record.revision !== this.#port.revision(record.name)) {
+      this.#cancel(record);
+      record.loaded = undefined; record.attempted = undefined; record.error = undefined;
+      record.revision = this.#port.revision(record.name);
+    }
+    for (;;) {
+      let progress = false;
+      for (const [record, seed] of pending) {
+        const selection = this.#currentSelection(record, seed.input);
+        if (selection === undefined || record.operation?.key === seed.input) continue;
+        const revision = this.#port.revision(record.name);
+        // The retained instance owns an existing attempt for this input, including live updates and failures.
+        if (record.revision === revision && record.attempted === seed.input) continue;
+        const temporary = record.source === undefined;
+        if (temporary) record.source = this.#port.source(record.name);
+        let accepted: boolean;
+        try { accepted = this.#commit(record, inputs[record.name]!.value, inputs[record.name]!.status); }
+        finally { if (temporary) { record.source!.dispose(); record.source = undefined; } }
+        if (!accepted) continue;
+        this.#cancel(record, record.stream !== undefined && record.stream.key === selection.stream?.input?.key);
+        record.seed = undefined;
+        record.loaded = this.#port.status(record.name).ready ? seed.value : undefined;
+        record.attempted = seed.input; record.error = seed.error;
+        pending.delete(record); progress = true;
+      }
+      if (!progress) break;
+    }
+    for (const record of this.#records.values()) this.#select(record);
+  }
+
+  #resume(record: RecordState): void {
+    const revision = this.#port.revision(record.name);
+    if ((record.loaded !== undefined || record.attempted !== undefined) && (revision === undefined || revision !== record.revision)) {
+      record.loaded = undefined; record.attempted = undefined; record.error = undefined;
+    }
+    record.revision = revision;
+    const seed = record.seed; record.seed = undefined;
+    if (seed !== undefined && seed.revision === revision) {
+      record.loaded = this.#port.status(record.name).ready ? seed.value : undefined;
+      record.attempted = seed.input; record.error = seed.error;
+    }
+  }
 
   activate(port = this.#port, signal = this.#options.signal): void {
     if (this.#disposed) throw new TypeError("This binding scope has been disposed.");
@@ -241,17 +302,7 @@ export class BindingScope {
     try {
       for (const record of this.#records.values()) {
         record.source = port.source(record.name);
-        const revision = port.revision(record.name);
-        if ((record.loaded !== undefined || record.attempted !== undefined) && (revision === undefined || revision !== record.revision)) {
-          record.loaded = undefined; record.attempted = undefined; record.error = undefined;
-        }
-        record.revision = revision;
-        const seed = record.seed; record.seed = undefined;
-        if (seed !== undefined && seed.revision === revision) {
-          record.loaded = record.source.current().status.ready ? seed.value : undefined;
-          record.attempted = seed.input;
-          record.error = seed.error;
-        }
+        this.#resume(record);
       }
       if (signal !== undefined) {
         const abort = (): void => { this.deactivate(signal.reason); };
@@ -474,13 +525,13 @@ export class BindingScope {
     return accepted;
   }
 
-  #cancel(record: RecordState): void {
+  #cancel(record: RecordState, keepStream = false): void {
     const operation = record.operation; record.operation = undefined;
     if (operation !== undefined) record.attempted = undefined;
     operation?.abort.abort();
     if (record.pollTimer !== undefined) clearTimeout(record.pollTimer);
     record.pollTimer = undefined;
-    this.#stopStream(record);
+    if (!keepStream) this.#stopStream(record);
   }
 
   #fail(record: RecordState, error: InputFailure): void {
@@ -650,6 +701,7 @@ export interface BindingPreparation {
  */
 export function bindModule<H extends BindingHost>(module: BindingModule<H>, options: BoundModuleOptions<H> = {}): {
   connect(host: H, context: { readonly signal: AbortSignal }): void | (() => void) | Promise<void | (() => void)>;
+  adopt(host: H, adoption: BindingAdoption): void;
   prepare(host: H, options: Omit<BindingScopeOptions, "phase"> & { readonly phase: "build" | "request" }): Promise<BindingPreparation>;
 } {
   interface Instance { readonly definition: BindingDefinition<H>; scope?: BindingScope; activation?: object | undefined }
@@ -671,7 +723,18 @@ export function bindModule<H extends BindingHost>(module: BindingModule<H>, opti
     return current;
   };
   const providers = (current: Instance): BindingProviders => ({ ...current.definition.props, ...options.overrides });
+  const browserScope = (host: H): BindingScope | undefined => {
+    const current = instance(host);
+    if (Object.keys(providers(current)).length === 0) return undefined;
+    const browser = current.scope === undefined ? typeof options.browser === "function" ? options.browser(host) : options.browser : undefined;
+    return current.scope ??= new BindingScope(componentInputs(host), providers(current), { ...browser, phase: "browser" });
+  };
   return {
+    adopt(host, adoption) {
+      const scope = browserScope(host);
+      if (scope === undefined) synchronous(adoption.update?.(), "A binding adoption update");
+      else scope.adopt(adoption);
+    },
     connect(host, { signal }) {
       if (signal.aborted) throw signal.reason;
       const current = instance(host);
@@ -680,8 +743,7 @@ export function bindModule<H extends BindingHost>(module: BindingModule<H>, opti
         return result !== undefined && typeof result !== "function" ? Promise.resolve(result) : result;
       }
       if (current.activation !== undefined) throw new TypeError("This binding module is already connected.");
-      const browser = current.scope === undefined ? typeof options.browser === "function" ? options.browser(host) : options.browser : undefined;
-      const scope = current.scope ??= new BindingScope(componentInputs(host), providers(current), { ...browser, phase: "browser" });
+      const scope = browserScope(host)!;
       const activation = {};
       current.activation = activation;
       try { scope.activate(componentInputs(host), signal); }

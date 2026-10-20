@@ -94,6 +94,29 @@ in `finally`, including when serializing the renderer record fails.
 
 On browser adoption, pass the instance's transferred state through `bindModule(source, { browser: host => ({ source: buildRevision, snapshot: stateFor(host) }) })`. Matching source revisions, selected inputs and renderer input revisions avoid duplicate reads, including handled failures. An intervening accepted fixture write invalidates the read identity even if it is released before the driver starts. Snapshots contain read identities and public failures, not another copy of accepted output data.
 
+A host retaining an existing component can offer another preparation through `adopt`:
+
+```ts
+bindings.adopt(host, {
+  snapshot: nextReadIdentities,
+  inputs: nextNativeInputSnapshots,
+  update: () => adoptRenderedProps(host.root, nextRenderedRoot),
+});
+```
+
+The application obtains `snapshot` from the new preparation and `inputs` from the matching renderer
+record: each input is its accepted value and availability status. The synchronous `update` applies
+new caller props through the renderer's existing channel. Omission releases a previous caller fixture,
+but leaves a producer's current value alone. HTMLKit supplies this integration automatically.
+
+Adoption reuses the logical instance, factory, connection, and local state. A matching source revision
+and current selected input allow the source to accept prepared output through the typed input SDK.
+Dependent outputs wait for their native prerequisites. An existing browser attempt for the same input
+stays authoritative, including live publications, pending reads, and handled failures; an older server
+baseline cannot replace it. Changing inputs or explicitly refreshing requests new work. A caller-owned
+value or incompatible input prevents adoption. Offering data before activation does not start browser
+behavior or another read.
+
 For a custom host integration, construct `BindingScope` with `componentInputs(host)`, provider definitions, and an explicit phase. `activate` starts ownership, `settled` waits for current reads, `deactivate` retains passive instance data, and `dispose` ends the scope permanently. `settled` does not wait for a subscription's first publication or promise that browser DOM updates have committed. `snapshot` requires an application-supplied source revision.
 
 The input SDK distinguishes writable props (`names`) from readable props and declarations (`readNames`). `read`, `status` and synchronous `capture` can observe those declarations. Source acquisition, caller ownership and accepted-input revisions remain prop operations.

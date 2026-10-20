@@ -192,7 +192,9 @@ process.stdout.write("ok");
       'import type { ServerPreparation, ServerPreparationContext, ServerRenderOptions, ServerRenderer } from "@nextwebwg/html-next/server";\n' +
       'export const preparation: ServerPreparation = async (context: ServerPreparationContext) => { await context.flush(); return () => { context.port?.close(); }; };\n' +
       'export const renderOptions: ServerRenderOptions = { definitions: [], signal: new AbortController().signal, prepare: { module: "file:///prepare.mjs", data: { value: 1 } } };\n' +
-      'export function closeRenderer(renderer: ServerRenderer) { renderer.setWorkers(1); return renderer.close(); }\n',
+      'export function closeRenderer(renderer: ServerRenderer) { renderer.setWorkers(1); return renderer.close(); }\n' +
+      'import { bindModule, type BindingAdoption } from "@nextwebwg/html-next/bindings";\n' +
+      'export function adoptBindings(host: { props: object }, adoption: BindingAdoption) { bindModule({}).adopt(host, adoption); }\n',
     );
     execFileSync(
       "corepack",

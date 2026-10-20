@@ -77,7 +77,8 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    navigation once. Pages that share a component share its compiled module, so a tag keeps one
    factory per document; a page that defines a tag differently throws, as HTML Next's `HR001` does,
    which falls back to a document load.
-2. **Which layers persist, and their new props.** Layers are the `hk-layer-N` roots. From the
+2. **Which layers persist, and their new props.** Layers carry `data-hk-layer="N"`; older output's
+   `hk-layer-N` IDs also remain readable. An authored `id` does not identify the layer. From the
    outermost, a layer whose root renders the same component (`data-component`) as the next page's
    layer at that depth persists. The page layer is always replaced, and so is everything below the
    first layer that differs. A persisted layer keeps its DOM, state, and module instance, but its loader
@@ -85,6 +86,12 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    reads the props of the layer's new rendering (a root its factory made, or a server root's
    continuation record) and applies them through the compiled prop channel, as the live runtime's
    function of that name does.
+   Producer-owned inputs are omitted from that caller update. For provider-bearing layouts, the page
+   registry lazily loads the existing binding adapter before the commit; the synchronous commit offers
+   compatible values and read identities from the new renderer record through that adapter's input
+   sources. A current attempt for the same selected input wins over a cached server baseline. No
+   factory or connection restarts, local state stays intact, and dependent outputs use the existing
+   native input/status tracking rather than a second value store.
 3. **Replacing the page inside a kept layout.** The page is projected into its layout's `page` slot.
    HTML Next records projected nodes when it hydrates, so a plain `replaceWith` left the layout
    projecting the old page: the new page missed `data-slotted` (so the layout's `:slotted()` styles

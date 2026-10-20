@@ -8,7 +8,63 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { bindingFixture, environmentFixture, fixture, privateFixture, universalFixture, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, write } from "./fixture.js";
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} retained layout providers`, () => {
+    let root: string; let server: ApplicationServer; const requests: string[] = [];
+    beforeAll(async () => {
+      root = await retainedProviderFixture();
+      const services = { read(id: string, { phase }: { phase: string }) {
+        if (phase === "request") requests.push(id);
+        return phase + ":" + id;
+      } };
+      if (delivery === "built") server = await startApplication({ outDir: (await buildApplication({ root, services })).outDir, services, port: 0 });
+      else server = await devApplication({ root, services, port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} adopts fresh layout preparation while keeping drafts and instance identity`, async () => {
+        requests.length = 0;
+        const browser = await engine.launch({ headless: true });
+        try {
+          const page = await browser.newPage(); let reads = 0; const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          page.on("request", request => { if (new URL(request.url()).pathname === "/_htmlkit/read") reads += 1; });
+          expect(await (await fetch(server.url)).text()).toContain(">build:A</h2>");
+          await page.goto(server.url);
+          await page.waitForLoadState("networkidle");
+          expect(errors).toEqual([]);
+          await expect.poll(() => page.locator("main").getAttribute("data-connections")).toBe("1");
+          expect(await page.locator("h2").textContent()).toBe("build:A");
+          await page.evaluate(() => Reflect.set(window, "retainedShell", document.querySelector("main")));
+          await page.getByRole("textbox", { name: "Draft" }).fill("Edited");
+          await page.getByRole("link", { name: "Second", exact: true }).click();
+          await page.getByRole("heading", { name: "Second", exact: true }).waitFor();
+          await expect.poll(() => page.locator("main").textContent()).toContain("build:B");
+          expect(await page.getByRole("textbox", { name: "Draft" }).inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "retainedShell") === document.querySelector("main"))).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "retainedCreates"))).toBe(1);
+          expect(reads).toBe(0);
+          expect(requests).toEqual([]);
+          await page.getByRole("link", { name: "First", exact: true }).click();
+          await page.getByRole("heading", { name: "First", exact: true }).waitFor();
+          await expect.poll(() => page.locator("h2").textContent()).toBe("build:A");
+          await page.getByRole("button", { name: "Refresh", exact: true }).click();
+          await expect.poll(() => page.locator("h2").textContent()).toBe("request:A");
+          await page.getByRole("link", { name: "Same input", exact: true }).click();
+          await page.getByRole("heading", { name: "Same input", exact: true }).waitFor();
+          expect(await page.locator("h2").textContent()).toBe("request:A");
+          expect(await page.getByRole("textbox", { name: "Draft" }).inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "retainedCreates"))).toBe(1);
+          expect(await page.locator("main").getAttribute("data-connections")).toBe("1");
+          expect(reads).toBe(1);
+          expect(requests).toEqual(["A"]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
 
 for (const delivery of ["development", "built"] as const) {
   describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} private component readers`, () => {

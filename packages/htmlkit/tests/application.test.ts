@@ -8,13 +8,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodeHydrationValue, decodeHydrationValue } from "../../html-next/src/bindings.js";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { bindingFixture, environmentFixture, fixture, privateFixture, universalFixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("prepares a layout provider when a typed id prop supplies the native root id", async () => {
+    const root = await retainedProviderFixture(); roots.push(root);
+    const application = await createApplication({ root, services: { read: (id: string) => "Product:" + id } });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain('id="A"');
+      expect(page.body).toContain("<h2>Product:A</h2>");
+    } finally { await application.close(); }
+  });
   it("recomputes private read inputs and authorizes each real request without exposing private failures", async () => {
     const root = await privateFixture(); roots.push(root);
     const source = await readFile(join(root, "app/pages/index.ts"), "utf8");

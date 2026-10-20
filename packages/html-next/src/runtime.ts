@@ -4157,7 +4157,8 @@ export function replaceProjectedNode(current: ChildNode, next: ChildNode): void 
  * Carries a fresh server rendering's props onto a live instance that a framework keeps, through
  * the same channel as `componentRegistry.update`: `rendered` is that component's root in the new
  * server output, not yet hydrated. The instance keeps its DOM, state, and controller; props the
- * rendering left implicit return to their defaults.
+ * rendering left implicit return to their defaults when caller-owned. Producer-owned inputs stay
+ * with their source; a binding adapter may separately adopt compatible prepared output.
  */
 export function adoptRenderedProps(element: Element, rendered: Element): void {
   const instance = runtimeInstance(element);
@@ -4165,7 +4166,10 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
   if (instance === undefined || record === undefined) {
     fail("HR005", "The rendered element records no props for this element's component.");
   }
-  applyComponentProps(instance, renderedCallerProps(record, Object.keys(instance.definition.contract.props)));
+  applyComponentProps(instance, renderedCallerProps(record, Object.keys(instance.definition.contract.props), name => {
+    const input = untracked(() => instance.propInputs[name]!.get());
+    return input.producer === true && input.provided !== true;
+  }));
 }
 
 /**
