@@ -6,7 +6,40 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApplication, createApplication, readManifest, startApplication } from "../src/index.js";
-import { fixture, universalFixture, write } from "./fixture.js";
+import { fixture, privateFixture, universalFixture, write } from "./fixture.js";
+
+it("keeps built private readers on the server while serving browser reads for prerendered components", async () => {
+  const root = await privateFixture(); roots.push(root);
+  await write(root, "app/pages/index.server.ts", `export const props = { label: { load(query, context) {
+    const privateCode = "PRIVATE_READER_SERVER_CODE";
+    if (query === "private-marker") return privateCode;
+    return (context.phase === "build" ? "Build" : context.cookies.get("user") || "Guest") + ":" + query;
+  } } };`);
+  const { outDir } = await buildApplication({ root });
+  const publicFiles = (await readdir(join(outDir, "_htmlkit"))).filter(file => file.endsWith(".js"));
+  expect(publicFiles.length).toBeGreaterThan(0);
+  for (const file of publicFiles) expect(await readFile(join(outDir, "_htmlkit", file), "utf8")).not.toContain("PRIVATE_READER_SERVER_CODE");
+  const serverFiles = (await readdir(join(outDir, "_htmlkit/server"))).filter(file => file.endsWith(".js"));
+  const privateFiles = await Promise.all(serverFiles.map(async file => [file, await readFile(join(outDir, "_htmlkit/server", file), "utf8")] as const));
+  const privateFile = privateFiles.find(([, source]) => source.includes("PRIVATE_READER_SERVER_CODE"))?.[0];
+  expect(privateFile).toBeDefined();
+  const payload = JSON.parse(await readFile(join(outDir, "_htmlkit/pages/payload.json"), "utf8"));
+  const rendered = await readFile(join(outDir, "index.html"), "utf8");
+  expect(rendered).toContain("Build:A");
+  const escaped = /data-htmlkit-bindings="([^"]+)"/.exec(rendered)![1]!.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  const source = JSON.parse(escaped)["client-page"].source as string;
+  expect(JSON.stringify(payload)).not.toContain("PRIVATE_READER_SERVER_CODE");
+  const server = await startApplication({ outDir, port: 0 });
+  try {
+    const response = await fetch(server.url + "_htmlkit/read", { method: "POST", headers: { "content-type": "application/json", cookie: "user=Ada" }, body: JSON.stringify({
+      version: 1, source, tag: "client-page", name: "label", url: server.url,
+      inputs: ["json", { props: {}, state: { query: "B" } }],
+    }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ value: ["value", "Ada:B"] });
+    expect((await fetch(server.url + "_htmlkit/server/" + privateFile)).status).toBe(404);
+  } finally { await server.close(); }
+}, 120_000);
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });

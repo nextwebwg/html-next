@@ -16,6 +16,7 @@ const sourceBindings = packagedBindings.replace(/[/\\]dist[/\\]bindings\.js$/, "
 const bindings = source && existsSync(sourceBindings) ? sourceBindings : packagedBindings;
 const client = fileURLToPath(new URL(source ? "./client.ts" : "./client.js", import.meta.url));
 const moduleComposition = fileURLToPath(new URL(source ? "./component-module.ts" : "./component-module.js", import.meta.url));
+const privateClient = fileURLToPath(new URL(source ? "./private-client.ts" : "./private-client.js", import.meta.url));
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
   const sources = new Map<string, string>();
@@ -61,13 +62,16 @@ export function browserSources(components: readonly BrowserDefinition[], options
       // A behavior-only module does not download or activate the provider engine.
       const options = component.binding === undefined ? "" : `, { browser: host => ({ source: ${JSON.stringify(component.binding.source)}, snapshot: preparedBinding(host.root, ${JSON.stringify(component.definition.contract.tag)}) }) }`;
       const common = component.module === undefined ? "const behavior = {};" : `import * as behavior from ${JSON.stringify(component.module)};`;
-      const environment = component.client === undefined ? "" : `\nimport * as environment from ${JSON.stringify(component.client)};\nimport { componentModule, connectModules } from ${JSON.stringify(moduleComposition)};`;
-      const composed = component.client === undefined ? "behavior" : "componentModule(behavior, environment)";
+      const privateNames = component.binding?.readers ?? [];
+      const environment = `${component.client === undefined ? "" : `\nimport * as environment from ${JSON.stringify(component.client)};`}${component.client === undefined && privateNames.length === 0 ? "" : `\nimport { componentModule, connectModules } from ${JSON.stringify(moduleComposition)};`}${privateNames.length === 0 ? "" : `\nimport { privateReaders } from ${JSON.stringify(privateClient)};`}`;
+      const privateModule = `componentModule(behavior, privateReaders(library, ${JSON.stringify(base)}, ${JSON.stringify(component.binding?.source)}, ${JSON.stringify(component.definition.contract.tag)}, ${JSON.stringify(privateNames)}, ${JSON.stringify(Object.fromEntries(Object.entries(component.definition.contract.props).flatMap(([name, prop]) => prop.select === undefined ? [] : [[name, prop.select.from]])))}))`;
+      const commonModule = privateNames.length === 0 ? "behavior" : privateModule;
+      const composed = component.client === undefined ? commonModule : `componentModule(${commonModule}, environment)`;
       sources.set(moduleId, `${component.binding === undefined ? "" : `import { preparedBinding } from ${JSON.stringify(client)};\n`}${common}${environment}
 let adapter;
 export const connect = "props" in behavior || "create" in behavior${component.client === undefined ? "" : ' || "props" in environment || "create" in environment'}
   ? (host, context) => {
-    adapter ??= import(${JSON.stringify(bindings)}).then(({ bindModule }) => bindModule(${composed}${options}));
+    adapter ??= import(${JSON.stringify(bindings)}).then(library => library.bindModule(${composed}${options}));
     return adapter.then(module => module.connect(host, context));
   }
   : ${component.client === undefined ? 'Reflect.get(behavior, "connect")' : 'connectModules(Reflect.get(behavior, "connect"), Reflect.get(environment, "connect"))'};

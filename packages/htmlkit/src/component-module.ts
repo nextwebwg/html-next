@@ -9,7 +9,7 @@ export interface ComponentBindingDefinition<H extends BindingHost = ComponentHos
 export type ComponentBindingModule<H extends BindingHost = ComponentHost> = ComponentBindingDefinition<H> & { readonly create?: never } |
   { readonly create: () => ComponentBindingDefinition<H>; readonly props?: never; readonly connect?: never };
 
-function definition<H extends BindingHost>(module: ComponentBindingModule<H>): ComponentBindingDefinition<H> {
+export function moduleDefinition<H extends BindingHost>(module: ComponentBindingModule<H>): ComponentBindingDefinition<H> {
   if (module.create !== undefined && (typeof module.create !== "function" || module.props !== undefined || module.connect !== undefined)) {
     throw new TypeError("A component module exports create, or props and connect; do not mix the two forms.");
   }
@@ -56,7 +56,7 @@ export function connectModules<H extends BindingHost>(common: BindingDefinition<
 /** HTMLKit composition only; the binding library retains instance, source and activation ownership. */
 export function componentModule<H extends BindingHost>(common: ComponentBindingModule<H> = {}, local: ComponentBindingModule<H> = {}, deferClientReads = false): BindingModule<H> {
   return { create() {
-    const base = definition(common); const environment = definition(local);
+    const base = moduleDefinition(common); const environment = moduleDefinition(local);
     const props: Record<string, Partial<BindingProvider<any, any, any, any>> | false> = { ...base.props };
     for (const [name, patch] of Object.entries(environment.props ?? {})) {
       if (patch !== false && (patch === null || typeof patch !== "object" || Array.isArray(patch))) throw new TypeError(`Binding ${name} must be a provider or false.`);

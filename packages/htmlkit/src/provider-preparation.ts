@@ -5,27 +5,34 @@ import { componentInputs } from "@nextwebwg/html-next/inputs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { componentModule, type ComponentBindingModule } from "./component-module.js";
+import { readChannel } from "./read-channel.js";
 
 const packaged = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/bindings"));
 const source = packaged.replace(/[/\\]dist[/\\]bindings\.js$/, "/src/bindings.ts");
 export const bindingsModule = pathToFileURL(fileURLToPath(import.meta.url).endsWith(".ts") && existsSync(source) ? source : packaged).href;
 export const preparationModule = import.meta.url;
 
-export interface ProviderModule { readonly module: string; readonly source: string; readonly client?: boolean }
+export interface ProviderModule { readonly module: string; readonly source: string; readonly client?: boolean; readonly readers?: readonly string[] }
 export interface ProviderPreparationData {
   readonly phase: "build" | "request";
   readonly modules: Readonly<Record<string, ProviderModule>>;
   readonly required?: readonly { readonly tag: string; readonly selector: string; readonly names: readonly string[] }[];
 }
 
-export async function prepare({ document, host, flush, signal, data: input }: ServerPreparationContext): Promise<() => void> {
+export async function prepare({ document, host, flush, signal, port, data: input }: ServerPreparationContext): Promise<() => void> {
   const data = input as ProviderPreparationData;
-  const { bindModule } = await import(bindingsModule) as typeof import("@nextwebwg/html-next/bindings");
-  const modules = new Map(await Promise.all(Object.entries(data.modules).map(async ([tag, descriptor]) =>
-    [tag, { descriptor, binding: bindModule(componentModule(await import(descriptor.module) as ComponentBindingModule<ComponentHost>, {}, descriptor.client)) }] as const)));
+  const library = await import(bindingsModule) as typeof import("@nextwebwg/html-next/bindings");
+  const remote = port === undefined ? undefined : readChannel(port, library);
+  const modules = new Map(await Promise.all(Object.entries(data.modules).map(async ([tag, descriptor]) => {
+    const props = Object.fromEntries((descriptor.readers ?? []).map(name => [name, { load: (input: unknown, operation: import("@nextwebwg/html-next/bindings").BindingOperation) => {
+      if (remote === undefined) throw new TypeError("Private reader channel was not supplied.");
+      return remote.read(tag, name, input, operation);
+    } }]));
+    return [tag, { descriptor, binding: library.bindModule(componentModule(await import(descriptor.module) as ComponentBindingModule<ComponentHost>, { props }, descriptor.client)) }] as const;
+  })));
   const known = new WeakSet<object>();
   const owned: { host: ComponentHost; tag: string; scope: BindingPreparation }[] = [];
-  const dispose = (): void => { for (const entry of owned.toReversed()) entry.scope.dispose(); };
+  const dispose = (): void => { try { for (const entry of owned.toReversed()) entry.scope.dispose(); } finally { remote?.close(); } };
   try {
     for (;;) {
       let found = false;

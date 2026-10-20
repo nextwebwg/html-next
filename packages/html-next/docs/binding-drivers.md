@@ -97,3 +97,13 @@ On browser adoption, pass the instance's transferred state through `bindModule(s
 For a custom host integration, construct `BindingScope` with `componentInputs(host)`, provider definitions, and an explicit phase. `activate` starts ownership, `settled` waits for current reads, `deactivate` retains passive instance data, and `dispose` ends the scope permanently. `settled` does not wait for a subscription's first publication or promise that browser DOM updates have committed. `snapshot` requires an application-supplied source revision.
 
 The input SDK distinguishes writable props (`names`) from readable props and declarations (`readNames`). `read`, `status` and synchronous `capture` can observe those declarations. Source acquisition, caller ownership and accepted-input revisions remain prop operations.
+
+An application transport can call the operation's optional `captureInputs()` synchronously inside
+`load` to obtain the prop and state declarations read by `input`, `when`, and `sample`. Unread fields
+are excluded, so an unrelated opaque UI value does not prevent a private read. The captured frame
+is detached data; changing a returned copy does not change the component or a later returned copy.
+`captureInputs(additionalNames)` adds declared prerequisites such as a selected type's discriminator
+without discarding earlier captures. Capture all required fields before awaiting. The bindings entry
+also exports the existing `encodeHydrationValue` and `decodeHydrationValue` codec for a host's transfer
+format. These functions do not make a browser frame trustworthy; its receiving application validates
+the frame and authorizes private work independently.

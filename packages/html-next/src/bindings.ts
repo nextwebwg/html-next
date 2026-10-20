@@ -2,15 +2,22 @@
 import { parseDuration } from "./duration.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import { componentInputs, READY_INPUT, sameInputStatus, type ComponentInputs, type InputFailure, type InputSource, type InputStatus } from "./inputs.js";
+export { encodeHydrationValue, decodeHydrationValue, type HydrationValue } from "./hydration-value.js";
 
 export type BindingPhase = "build" | "request" | "browser";
 export type BindingDuration = number | string;
+export interface BindingInputFrame {
+  readonly props: Readonly<Record<string, unknown>>;
+  readonly state: Readonly<Record<string, unknown>>;
+}
 export interface BindingOperation {
   readonly phase: BindingPhase;
   readonly signal: AbortSignal;
   readonly fetch: typeof fetch;
   readonly sample: unknown;
   readonly services: unknown;
+  /** Host transfer metadata; capture synchronously before awaiting. Unread declarations are excluded. */
+  readonly captureInputs?: (additional?: readonly string[]) => BindingInputFrame;
 }
 export interface BindingSubscription extends BindingOperation {
   /** False after cancellation, replacement, a caller override, or type refusal. */
@@ -151,6 +158,7 @@ export class BindingScope {
   #queued = false;
   #reading: RecordState | undefined;
   #sampling = false;
+  readonly #sampleFields = new Map<string, unknown>();
   #removeAbort: (() => void) | undefined;
   #reason: unknown;
   #activation: object | undefined;
@@ -165,6 +173,7 @@ export class BindingScope {
       if (this.#reading === undefined && !this.#sampling) throw new TypeError(`Read ${name} in input, when or sample; load receives its captured input.`);
       this.#reading?.dependencies.add(name);
       const value = this.#port.read(name);
+      if (this.#sampling) this.#sampleFields.set(name, value);
       if (!this.#port.status(name).ready) throw new UnavailableInput(name);
       return value;
     } });
@@ -174,6 +183,7 @@ export class BindingScope {
       if (this.#reading === undefined && !this.#sampling) throw new TypeError(`Read ${name} in input, when or sample; load receives its captured input.`);
       this.#reading?.dependencies.add(name);
       const value = this.#port.read(name);
+      if (this.#sampling) this.#sampleFields.set(name, value);
       if (!this.#port.status(name).ready) throw new UnavailableInput(name);
       return value;
     } });
@@ -481,11 +491,28 @@ export class BindingScope {
     this.#publish(record, retain, false, error, retain && record.loaded !== key);
   }
 
-  #operation(signal: AbortSignal, sample: unknown): BindingOperation {
-    return { phase: this.#options.phase, signal, fetch: this.#fetch, sample, services: this.#options.services };
+  #operation(record: RecordState, signal: AbortSignal, sample: unknown): BindingOperation {
+    const samples = this.#sampleFields.size === 0 ? undefined : new Map(this.#sampleFields);
+    let captured: BindingInputFrame | undefined;
+    let capturedNames: Set<string> | undefined;
+    return { phase: this.#options.phase, signal, fetch: this.#fetch, sample, services: this.#options.services,
+      captureInputs: (additional = []) => {
+        capturedNames ??= new Set();
+        const known = capturedNames;
+        if (captured === undefined || additional.some(name => !known.has(name))) {
+          const fields = [...new Set([...record.dependencies, ...samples?.keys() ?? [], ...additional])].filter(name => !known.has(name)).map(name =>
+            [name, samples?.has(name) ? samples.get(name) : this.#port.read(name)] as const);
+          const updated = selected({ props: { ...captured?.props, ...Object.fromEntries(fields.filter(([name]) => this.#port.names.includes(name))) },
+            state: { ...captured?.state, ...Object.fromEntries(fields.filter(([name]) => !this.#port.names.includes(name))) } }).value as BindingInputFrame;
+          for (const [name] of fields) known.add(name);
+          captured = updated;
+        }
+        return selected(captured).value as BindingInputFrame;
+      } };
   }
 
   #sample(record: RecordState): unknown {
+    this.#sampleFields.clear();
     this.#sampling = true;
     try { return selected(record.provider.sample?.(this.#props, this.#context)).value; }
     finally { this.#sampling = false; }
@@ -509,7 +536,7 @@ export class BindingScope {
         if (record.operation !== operation || !this.#active || this.#port.supplied(record.name) || this.#currentSelection(record, input.key) === undefined) return;
         const sample = this.#sample(record);
         if (record.timeout !== undefined) timer = setTimeout(() => operation.abort.abort(new DOMException(`Binding ${record.name} timed out.`, "TimeoutError")), record.timeout);
-        const value = await abortable(record.provider.load!(structuredClone(input.value), this.#operation(operation.abort.signal, sample)), operation.abort.signal);
+        const value = await abortable(record.provider.load!(structuredClone(input.value), this.#operation(record, operation.abort.signal, sample)), operation.abort.signal);
         if (record.operation !== operation || !this.#active || this.#port.supplied(record.name)) return;
         const current = this.#currentSelection(record, input.key);
         if (current === undefined) return;
@@ -582,7 +609,7 @@ export class BindingScope {
     };
     try {
       const sample = this.#sample(record);
-      const context = { ...this.#operation(stream.abort.signal, sample), publish };
+      const context = { ...this.#operation(record, stream.abort.signal, sample), publish };
       const result = typeof config === "function" ? config(structuredClone(input.value), context) : config.open(structuredClone(input.value), context);
       void Promise.resolve(result).then(accept).catch(error => {
         if (record.stream === stream && this.#active) { stream.waiting = false; stream.abort.abort(); this.#fail(record, failure(error)); }

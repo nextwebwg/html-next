@@ -8,7 +8,89 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { bindingFixture, environmentFixture, fixture, universalFixture, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, universalFixture, write } from "./fixture.js";
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} private component readers`, () => {
+    let root: string; let server: ApplicationServer; const calls: string[] = [];
+    beforeAll(async () => {
+      root = await privateFixture();
+      await rm(join(root, "app/pages/index.client.ts"));
+      const source = await readFile(join(root, "app/pages/index.html"), "utf8");
+      await write(root, "app/pages/override.html", source.replace('component="client-page"', 'component="private-override-page"'));
+      await write(root, "app/pages/override.ts", 'export * from "./index.ts";');
+      await write(root, "app/pages/override.server.ts", 'export * from "./index.server.ts";');
+      await write(root, "app/pages/override.client.ts", 'export const props = { label: { load: query => "client:" + query } };');
+      await write(root, "app/pages/typed.html", `<template component="private-typed-page"><defs><meta name="hk:layout" content="none">
+        <state name="mode" type="keyword" values="text, number" value="number"></state><state name="query" type="number" value="1"></state>
+        <prop name="label">Result.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+        <handler name="next"><set name="query" value="2"></set></handler></defs><main>
+        <h1 $await="$label">{$label}</h1><p $error="problem">{$problem.message}</p><p $else>Waiting.</p><button on:click="next">Next</button></main></template>`);
+      await write(root, "app/pages/typed.ts", 'export const props = { label: { input: (_, { state }) => state.query } };');
+      await write(root, "app/pages/typed.server.ts", 'export const props = { label: { load: query => query } };');
+      const services = { read(query: string, context: { phase: string; cookies: ReadonlyMap<string, string> }) {
+        calls.push(context.phase + ":" + query);
+        if (context.phase === "request" && !context.cookies.has("user")) throw new Response("Sign in", { status: 403 });
+        return context.phase + ":" + query;
+      } };
+      if (delivery === "built") {
+        const { outDir } = await buildApplication({ root, services, base: "/private/" });
+        server = await startApplication({ outDir, services, port: 0 });
+      } else server = await devApplication({ root, services, base: "/private/", port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} adopts private preparation and uses fresh authenticated requests for changes`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.locator("h1").textContent()).toBe("build:A");
+          const context = await browser.newContext();
+          await context.addCookies([{ name: "user", value: "Ada", url: server.url }]);
+          const page = await context.newPage(); const errors: string[] = []; let requests = 0;
+          page.on("pageerror", error => errors.push(error.message));
+          page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/_htmlkit/read")) requests += 1; });
+          await page.goto(server.url);
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(requests).toBe(0);
+          await page.locator("input").fill("Edited");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("request:B");
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          expect(requests).toBe(1);
+          await page.goto(server.url + "fixture/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("Fixture");
+          expect(requests).toBe(1);
+          await page.goto(server.url + "override/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("client:B");
+          expect(requests).toBe(1);
+          await page.goto(server.url + "live/?q=C");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.commonConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("request:C");
+          expect(requests).toBe(1);
+          await context.clearCookies();
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.getByText("Sign in", { exact: true }).count()).toBe(1);
+          expect(requests).toBe(2);
+          expect(await (await fetch(server.url + "typed/")).text()).toContain(">1</h1>");
+          await page.goto(server.url + "typed/");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("1");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("2");
+          expect(requests).toBe(3);
+          expect(calls).toContain("request:B");
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
 
 for (const delivery of ["development", "built"] as const) {
   describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} client companion modules`, () => {

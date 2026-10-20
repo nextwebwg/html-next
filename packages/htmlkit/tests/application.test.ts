@@ -4,16 +4,128 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { encodeHydrationValue, decodeHydrationValue } from "../../html-next/src/bindings.js";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { bindingFixture, environmentFixture, fixture, universalFixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, universalFixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("recomputes private read inputs and authorizes each real request without exposing private failures", async () => {
+    const root = await privateFixture(); roots.push(root);
+    const source = await readFile(join(root, "app/pages/index.ts"), "utf8");
+    await write(root, "app/pages/index.ts", source.replace("state.query", "state.query.toUpperCase()"));
+    let reads = 0;
+    const application = await createApplication({ root, services: { read(query: string, context: { phase: string; cookies: ReadonlyMap<string, string> }) {
+      reads += 1;
+      if (context.phase === "build") return "Build";
+      if (!context.cookies.has("user")) throw new Response("Sign in", { status: 403 });
+      if (query === "SECRET") throw new Error("DO_NOT_EXPOSE_PRIVATE_DETAILS");
+      return query + ":" + context.cookies.get("user");
+    } } });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const page = await application.render("/");
+      const revision = page.components.find(component => component.definition.contract.tag === "client-page")!.binding!.source;
+      const packet = { version: 1, source: revision, tag: "client-page", name: "label", url: "http://localhost/",
+        inputs: encodeHydrationValue({ props: {}, state: { query: "b" } }) };
+      const send = (body = packet, user = true) => application.fetch(new Request("http://localhost/_htmlkit/read", {
+        method: "POST", headers: { "content-type": "application/json", ...user ? { cookie: "user=Grace" } : {} }, body: JSON.stringify(body),
+      }));
+      const response = await send();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(decodeHydrationValue((await response.json()).value)).toBe("B:Grace");
+      expect((await send(packet, false)).status).toBe(403);
+      expect((await send({ ...packet, inputs: encodeHydrationValue({ props: {}, state: { query: 42 } }) })).status).toBe(400);
+      expect((await send({ ...packet, name: "constructor" })).status).toBe(404);
+      expect((await send({ ...packet, source: "stale" })).status).toBe(409);
+      expect((await send({ ...packet, inputs: ["reference", 999] })).status).toBe(400);
+      expect((await send({ ...packet, url: "https://elsewhere.test/" })).status).toBe(400);
+      expect((await send({ ...packet, inputs: encodeHydrationValue({ props: {}, state: { query: "b", invented: true } }) })).status).toBe(400);
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/read"))).status).toBe(405);
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/read", { method: "POST", headers: { origin: "https://elsewhere.test" }, body: JSON.stringify(packet) }))).status).toBe(403);
+      expect(reads).toBe(3);
+      const failed = await send({ ...packet, inputs: encodeHydrationValue({ props: {}, state: { query: "secret" } }) });
+      expect(failed.status).toBe(500);
+      expect(await failed.text()).not.toContain("DO_NOT_EXPOSE_PRIVATE_DETAILS");
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally { logged.mockRestore(); await application.close(); }
+  });
+  it("aborts parent-owned private work when its server render is cancelled", async () => {
+    const root = await privateFixture(); roots.push(root);
+    let started!: () => void; let stopped!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const cancelled = new Promise<void>(resolve => { stopped = resolve; });
+    const application = await createApplication({ root, services: { read(_query: string, { signal }: { signal: AbortSignal }) {
+      started();
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => { stopped(); reject(signal.reason); }, { once: true }));
+    } } });
+    const abort = new AbortController();
+    const result = application.fetch(new Request("http://localhost/live/?q=hold", { signal: abort.signal }));
+    const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+    try {
+      await reading; abort.abort(); await rejected; await cancelled;
+    } finally { abort.abort(); await application.close(); }
+  });
+  it("closes only its own pending private browser reads", async () => {
+    const root = await privateFixture(); roots.push(root);
+    let started!: () => void; let stopped!: () => void; let complete!: (value: string) => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const cancelled = new Promise<void>(resolve => { stopped = resolve; });
+    const services = { read(query: string, { phase, signal }: { phase: string; signal: AbortSignal }) {
+      if (phase === "build" || query !== "hold") return query;
+      started(); return new Promise<string>(resolve => { complete = resolve; signal.addEventListener("abort", stopped, { once: true }); });
+    } };
+    const application = await createApplication({ root, services });
+    const other = await createApplication({ root, services });
+    try {
+      const source = (await application.render("/")).components.find(component => component.binding !== undefined)!.binding!.source;
+      const result = application.fetch(new Request("http://localhost/_htmlkit/read", { method: "POST", body: JSON.stringify({
+        version: 1, source, tag: "client-page", name: "label", url: "http://localhost/", inputs: encodeHydrationValue({ props: {}, state: { query: "hold" } }),
+      }) }));
+      const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+      await reading; await application.close(); await cancelled; await rejected;
+      complete("Late result");
+      expect((await other.render("/")).body).toContain("<h1>A</h1>");
+    } finally { await Promise.all([application.close(), other.close()]); }
+  });
+  it("runs private readers with real request context and parent-owned services", async () => {
+    const root = await privateFixture(); roots.push(root);
+    const calls: string[] = [];
+    const application = await createApplication({ root, services: { async read(query: string, context: { phase: string; signal: AbortSignal; request: Request }) {
+      context.signal.throwIfAborted();
+      calls.push(context.phase + ':' + query);
+      return context.phase + ':' + query + (context.phase === 'request' ? ':' + context.request.headers.get('x-user') : '');
+    } } });
+    try {
+      expect((await application.render("/")).body).toContain("<h1>build:A</h1>");
+      expect((await application.render("/fixture/")).body).toContain("<h1>Fixture</h1>");
+      const response = await application.fetch(new Request("http://localhost/live/?q=C", { headers: { 'x-user': 'Ada' } }));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("<h1>request:C:Ada</h1>");
+      expect(calls).toEqual(["build:A", "request:C"]);
+    } finally { await application.close(); }
+  });
+  it("distinguishes private registrations for different definitions sharing a tag and common module", async () => {
+    const root = await privateFixture(); roots.push(root);
+    for (const [page, file] of [["index", "one"], ["fixture", "two"]] as const) {
+      const source = await readFile(join(root, `app/pages/${page}.html`), "utf8");
+      await write(root, `app/pages/${page}.html`, `<link rel="component" href="../components/${file}.html">` + source.replace("</main>", "<shared-private></shared-private></main>"));
+      await write(root, `app/components/${file}.html`, `<template component="shared-private" module="../pages/index.ts"><defs>
+        <prop name="label" type="string" required>Label.</prop><state name="query" type="string" value="A"></state></defs><section><p $await="$label">{$label}</p></section></template>`);
+    }
+    const application = await createApplication({ root, services: { read: () => "Prepared" } });
+    try {
+      const first = (await application.render("/")).components.find(component => component.definition.contract.tag === "shared-private")!;
+      const second = (await application.render("/fixture/")).components.find(component => component.definition.contract.tag === "shared-private")!;
+      expect(first.binding!.source).not.toBe(second.binding!.source);
+    } finally { await application.close(); }
+  });
   it("keeps client companions out of server imports while preserving shared selectors and fixtures", async () => {
     const root = await environmentFixture(); roots.push(root);
     const application = await createApplication({ root });

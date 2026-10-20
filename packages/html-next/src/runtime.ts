@@ -4247,8 +4247,9 @@ function publishSourceInput(instance: RuntimeInstance, name: string, snapshot: I
   let value: unknown = prop.default === undefined ? null : prop.default;
   if (snapshot.status.ready) {
     const candidate = snapshot.value === null ? value : snapshot.value;
-    const type = selectedPropType(instance.definition.contract, prop, Object.fromEntries(
-      Object.keys(instance.definition.contract.props).map(key => [key, key === name ? candidate : instance.scope.get(key)])));
+    const type = selectedPropType(instance.definition.contract, prop, prop.select === undefined ? {} : {
+      [prop.select.from]: prop.select.from === name ? candidate : instance.scope.get(prop.select.from),
+    });
     if (type === null) return false;
     const accepted = candidate === null && !prop.required
       ? { ok: true as const, value: null } : parseTypedValue(candidate, type, name, "value");

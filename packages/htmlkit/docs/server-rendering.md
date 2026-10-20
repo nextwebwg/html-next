@@ -27,6 +27,21 @@ or `server`. This is a tooling implementation design, not a component-language s
 - `createNavigation` answers `navigation()`, `navigationTree()`, `breadcrumbs()`, and `pager()` from
   routes and the concrete page URLs.
 
+Private component readers reuse this pipeline at `POST <base>_htmlkit/read`, after middleware and
+the existing same-origin check. The application registry maps an opaque source revision and tag to
+the component definition, common module and private reader module. The handler validates a transferred
+declaration frame, recomputes common selectors and validates the result before returning it. This
+frame carries public inputs, never authorization claims. Private readers receive the real request
+and explicitly supplied services, and authorize each operation themselves.
+
+During prerendering and SSR, provider preparation stays in the DOM worker while private readers run
+in the parent process through the renderer's transferred MessagePort. Request and service functions
+never cross that boundary. Native abort signals cancel reads when rendering ends or the owning
+application closes; late completion cannot publish. The same binding preparation, accepted values
+and read identities reach browser adoption, so the first client render does not repeat private work.
+The build records private readers used by prerendered pages too, since later browser updates need
+the request server even when the page's HTML is a file.
+
 Two applications supply the rest of a `Pipeline`:
 
 ```text

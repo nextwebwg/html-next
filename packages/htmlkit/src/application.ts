@@ -14,7 +14,9 @@ import { authoredHead, documentHTML, redirectPage, type PageAssets } from "./doc
 import { breadth, discover, discoverServerFiles, matchRoute, parameter, redirectTable, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition, withoutSettings } from "./resource.js";
 import { createProviderModules } from "./providers.js";
-import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
+import { serverReaders } from "./private-readers.js";
+import { privateReadResponse, type PrivateReadRegistration } from "./private-api.js";
+import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, requestReadContext, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
 import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
 
@@ -92,6 +94,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   const module = async (layer: RouteLayer): Promise<ServerModule> => layer.server === undefined ? {} :
     typeof layer.server === "string" ? await environment.runner.import(layer.server) as ServerModule : layer.server;
   const renderer = createRenderer();
+  const privateLifetime = new AbortController();
+  const privateSources = new Map<string, PrivateReadRegistration>();
   const providers = createProviderModules(config.root, {
     cacheDir: server.config.cacheDir,
     async resolve(specifier, importer) {
@@ -210,7 +214,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const sibling = (file: string, suffix = ""): string | undefined => {
       const stem = file.slice(0, -extname(file).length) + suffix;
       const candidates = [stem + ".js", stem + ".ts"].filter(path => existsSync(path));
-      if (candidates.length > 1) throw new HtmlKitError(`${suffix === "" ? "Component" : "Client"} sibling module is ambiguous: ${candidates.map(path => basename(path)).join(", ")}; ${suffix === "" ? "select one with an explicit module attribute" : "keep one client companion"}.`, file);
+      if (candidates.length > 1) throw new HtmlKitError(`${suffix === "" ? "Component" : suffix === ".client" ? "Client" : "Server"} sibling module is ambiguous: ${candidates.map(path => basename(path)).join(", ")}; ${suffix === "" ? "select one with an explicit module attribute" : `keep one ${suffix.slice(1)} companion`}.`, file);
       return candidates[0];
     };
     const companion = (url: string): Promise<string | undefined> => {
@@ -235,6 +239,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
         ? node.controller !== undefined || node.imported || !node.url.startsWith("file:") ? undefined : await companion(node.url)
         : fileURLToPath(node.module.url);
       let client: string | undefined;
+      let privateModule: string | undefined;
+      let readers: readonly string[] | undefined;
       if (node.controller === undefined && !node.imported && node.url.startsWith("file:")) {
         const carrier = carriers.get(node.url)!;
         if (module !== undefined && /\.client\.[jt]s$/.test(module)) { client = module; module = undefined; }
@@ -242,12 +248,25 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
           client = sibling(module ?? fileURLToPath(node.url), ".client");
           if (client !== undefined && module === undefined && carrier.count > 1) throw new HtmlKitError("A client sibling is ambiguous for a file declaring several components; set module on the template it belongs to.", fileURLToPath(node.url));
         }
+        const candidate = sibling(module ?? fileURLToPath(node.url), ".server");
+        if (candidate !== undefined && (module !== undefined || carrier.count === 1)) {
+          const found = serverReaders(await environment.runner.import(candidate), candidate);
+          if (found !== undefined && Object.keys(found).length > 0) {
+            if (module === undefined) throw new HtmlKitError("Private readers require a common module containing their input selectors.", candidate);
+            privateModule = candidate; readers = Object.keys(found);
+          }
+        }
       }
       return { definition: withoutSettings(node.definition), styles: compileComponentStylesForBuild(node.definition.css, node.definition),
         ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
         ...(client === undefined ? {} : { client }),
+        ...(privateModule === undefined ? {} : { server: privateModule }), ...(readers === undefined ? {} : { privateReaderNames: readers }),
         ...(module === undefined ? {} : { module }) };
     })));
+    for (const component of components) if (component.server !== undefined && component.binding !== undefined) privateSources.set(component.binding.source, {
+      definition: component.definition, common: () => environment.runner.import(component.module!),
+      readers: async () => serverReaders(await environment.runner.import(component.server!), component.server!)!,
+    });
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
       module: () => module(layer), origin: origin(layer) })) };
   };
@@ -284,6 +303,9 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const rendered = await renderRoute({ base: config.base, canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, layers,
       definitions, providers: Object.fromEntries(components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag, component.binding]])),
       clientModules: components.filter(component => component.client !== undefined).map(component => component.definition.contract.tag),
+      services: options.services,
+      privateReaders: Object.fromEntries(components.flatMap(component => component.server === undefined ? [] : [[component.definition.contract.tag,
+        async () => serverReaders(await environment.runner.import(component.server!), component.server!)!]])),
       render: renderer.render, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
       ...(action === undefined ? {} : { action }) });
     if (rendered.kind === "redirect") return redirected(url.pathname, rendered.location, rendered.status, rendered.headers);
@@ -301,7 +323,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
    * development server, which supplies the module server, shows the error instead.
    */
   const failed = async (error: unknown, request: Request): Promise<Response> => {
-    const report = (error: unknown) => { if (!ownsServer || request.signal.aborted) throw error; console.error(error); };
+    const report = (error: unknown) => { if (!ownsServer || request.signal.aborted || privateLifetime.signal.aborted) throw error; console.error(error); };
     report(error);
     const { pathname } = new URL(request.url);
     // A failed page has no payload, so the browser loads its document, the error page.
@@ -313,6 +335,11 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   };
   const pipeline: Pipeline<ApplicationRoute> = {
     base: config.base, routes, endpoints,
+    read(request) {
+      request = new Request(request, { signal: AbortSignal.any([request.signal, privateLifetime.signal]) });
+      return privateReadResponse(request, config.base, privateSources, url => requestReadContext(request, url, config.base,
+        matchRoute(routes, url.pathname, config.base)?.params ?? {}, options.services));
+    },
     redirects: new Map([...redirects].map(([from, location]) => [from, { location, status: 308 as const }])),
     endpoint: async route => await environment.runner.import(route.file) as EndpointModule,
     ...(middleware === undefined ? {} : { middleware: async () => {
@@ -368,6 +395,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     // Not a method of `this`: runtimes are handed the function itself, as in Deno.serve(application.fetch).
     fetch: request => respond(pipeline, request).catch((error: unknown) => failed(error, request)),
     async close() {
+      privateLifetime.abort();
       try { await Promise.all([renderer.close(), ...ownsServer ? [server.close()] : []]); }
       finally { await providers.close(); }
     },

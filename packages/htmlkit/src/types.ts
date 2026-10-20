@@ -1,6 +1,8 @@
 import type { ComponentDefinition } from "@nextwebwg/html-next";
 
 export interface ApplicationOptions {
+  /** Parent-owned private-reader services. The caller owns their creation and shutdown. */
+  readonly services?: unknown;
   readonly root?: string;
   /** Absolute URL path prefix, for example /docs/. */
   readonly base?: string;
@@ -381,8 +383,10 @@ export interface BrowserDefinition {
   readonly module?: string;
   /** App-owned browser companion, evaluated only in the browser graph. */
   readonly client?: string;
+  /** App-owned private reader module; never part of the browser import graph. */
+  readonly server?: string;
   /** The server bundle and matching browser completion identity of a prop-provider module. */
-  readonly binding?: { readonly module: string; readonly source: string; readonly client?: boolean };
+  readonly binding?: { readonly module: string; readonly source: string; readonly client?: boolean; readonly readers?: readonly string[] };
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
@@ -455,6 +459,7 @@ export interface ServerApplication {
 export interface BuildResult { readonly outDir: string; readonly routes: readonly string[]; readonly browserInputs: readonly string[]; }
 export interface ServerOptions extends ApplicationOptions { readonly host?: string; readonly port?: number; }
 export interface StartOptions {
+  readonly services?: unknown;
   /** The build output, dist unless given. */
   readonly outDir?: string;
   readonly host?: string;

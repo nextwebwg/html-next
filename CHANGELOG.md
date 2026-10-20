@@ -4,6 +4,7 @@
 
 ### Added
 
+- HTMLKit prepares private `.server` component readers with parent-owned request context and services, then serves subsequent browser reads through the built request server. Common selectors and policies remain shared; client readers can override browser work while adopting private SSR data. Private code stays out of public bundles, each request validates its typed inputs and recomputes its selector, and render cancellation or application shutdown aborts owned reads.
 - HTMLKit resolves a component's sibling `.js` or `.ts` module and connects its exported prop providers through the binding library. Browser-only providers work on prerendered pages, supplied values bypass reads, and retained component instances keep their drafts and provider scopes across reconnection. Explicit module pointers and legacy controllers retain their existing behavior; ambiguous companions name the files that need an explicit choice.
 - Node rendering accepts typed caller props before initializing component state. HTMLKit preserves those inputs through prerendering, hydration and client navigation while retaining the HTML attribute form for older payload consumers.
 - Application adapters can prepare data against typed hosts inside Node render workers and use a transferred message port for private reads. Render cancellation removes queued jobs or stops the assigned worker; ordinary completion and failures close the render's port and await its cleanup.
@@ -13,6 +14,7 @@
 
 ### Fixed
 
+- Live input producers validate output against the current state-selected prop type, matching compiled components and allowing private server preparation of those inputs.
 - HTMLKit lets configured providers supply required props before diagnosing missing inputs, including reads deferred to the browser, while preserving errors for unrelated unsupplied required inputs. Type-only local exports do not turn browser behavior into a server provider, and source execution recognizes module URLs with loader query strings.
 - Omitted prop defaults remain eligible for providers. Explicit null inputs stay caller-owned, use declared defaults when present, and retain that ownership when a layout persists across navigation.
 - Static prop serialization applies declared defaults to null inputs, including zero and false defaults.

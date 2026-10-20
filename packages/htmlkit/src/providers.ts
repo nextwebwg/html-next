@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -68,7 +68,7 @@ export function createProviderModules(root: string, host: ModuleHost) {
   let batch = 0;
   let closing: Promise<void> | undefined;
   return {
-    async resolve(components: readonly BrowserDefinition[]): Promise<readonly BrowserDefinition[]> {
+    async resolve(components: readonly (BrowserDefinition & { readonly privateReaderNames?: readonly string[] })[]): Promise<readonly BrowserDefinition[]> {
       abort.signal.throwIfAborted();
       const missing = [...new Set(components.flatMap(component => component.module === undefined ? [] : [component.module]))].filter(file => !cache.has(file));
       if (missing.length > 0) {
@@ -97,8 +97,10 @@ export function createProviderModules(root: string, host: ModuleHost) {
       }
       return Promise.all(components.map(async component => {
         const provider = component.module === undefined ? undefined : await cache.get(component.module);
-        return provider === undefined ? component : { ...component, binding: { ...provider, source: `${provider.source}:${component.definition.contract.tag}`,
-          ...component.client === undefined ? {} : { client: true } } };
+        if (provider === undefined && component.server !== undefined) throw new TypeError(`${component.server}: private readers require a common provider module.`);
+        const identity = createHash("sha256").update(`${component.definition.source.file}\0${component.definition.contract.tag}`).digest("hex").slice(0, 16);
+        return provider === undefined ? component : { ...component, binding: { ...provider, source: `${provider.source}:${identity}`,
+          ...component.client === undefined ? {} : { client: true }, ...component.privateReaderNames === undefined ? {} : { readers: component.privateReaderNames } } };
       }));
     },
     close(): Promise<void> {

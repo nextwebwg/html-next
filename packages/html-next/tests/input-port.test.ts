@@ -28,6 +28,20 @@ const settle = async () => { for (let i = 0; i < 4; i += 1) await Promise.resolv
 afterEach(() => { for (const window of windows.splice(0)) window.window.close(); vi.unstubAllGlobals(); });
 
 describe("renderer input source port", () => {
+  it("validates producer output against the current state-selected prop type", async () => {
+    const { inputs, host, root } = create(`<template component="x-input"><defs>
+      <state name="mode" type="keyword" values="text, number" value="number"></state>
+      <prop name="result">Result.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      </defs><section><output $await="$result">{$result}</output><p $else>Waiting.</p></section></template>`);
+    const result = inputs.source("result");
+    assert.equal(result.publish({ value: 3, status: READY_INPUT }), true);
+    await settle(); assert.equal(root.querySelector("output")?.textContent, "3");
+    assert.equal(result.publish({ value: "3", status: READY_INPUT }), false);
+    host.state.mode = "text"; await settle();
+    assert.equal(result.publish({ value: "Text", status: READY_INPUT }), true);
+    assert.equal(result.publish({ value: 4, status: READY_INPUT }), false);
+    await settle(); assert.equal(root.querySelector("output")?.textContent, "Text");
+  });
   it("captures actual reads and their failures without leaking nested observation scopes", () => {
     const { inputs } = create();
     const product = inputs.source("product");

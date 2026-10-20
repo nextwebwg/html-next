@@ -214,6 +214,17 @@ export async function environmentFixture(): Promise<string> {
   return root;
 }
 
+/** Private readers use parent-owned services; their common selectors remain universal. */
+export async function privateFixture(): Promise<string> {
+  const root = await environmentFixture();
+  await write(root, "app/pages/index.server.ts", `import { isMainThread } from 'node:worker_threads';
+    export const props = { label: { async load(query, context) {
+      if (!isMainThread) throw new Error('Private services ran inside a render worker');
+      return context.services.read(query, context);
+    } } };`);
+  return root;
+}
+
 /** A rendered head's title text, as HTML. */
 export function titleOf(page: { readonly head: { readonly html: string } }): string | undefined {
   return /<title[^>]*>([^<]*)<\/title>/.exec(page.head.html)?.[1];

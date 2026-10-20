@@ -153,6 +153,77 @@ reports a missing required value. Server preparation diagnoses a missing page or
 common module has no provider for it. With a client companion, the browser owns its suppliers and
 constraint validation; HTMLKit does not execute browser code to predict those suppliers on the server.
 
+## Private component readers
+
+A `.server.js` or `.server.ts` companion supplies readers that need server-only imports, credentials,
+or application services. Keep the selector and refresh policy in the common module:
+
+```js
+// product-card.js
+export const props = {
+  product: { input: ({ productId }) => productId, keepPrevious: true },
+};
+```
+
+```js
+// product-card.server.js
+import { products } from '@/lib/products.server.js';
+
+export const props = {
+  product: {
+    async load(id, context) {
+      if (context.phase === 'build') return products.publicProduct(id, context.signal);
+      const user = await products.authenticate(context.request);
+      return products.forUser(user, id, context.signal);
+    },
+  },
+};
+```
+
+HTMLKit prepares the private reader before rendering. The browser adopts its result without another
+request. When the selector changes, HTMLKit sends the selected declarations to its request server;
+that server validates them, reruns the common selector, and calls the private reader with the current
+request. A `.client` reader can override later browser reads while retaining the private SSR result.
+Ordinary supplied props bypass all readers, including private ones.
+
+Private reader context includes `phase` (`'build'` or `'request'`), `signal`, `fetch`, `sample`, `services`,
+`url`, `base`, and route `params`. `request` and `cookies` are available only during the request phase;
+reading them during a build throws. Check `phase` before reading or destructuring those properties.
+`sample` is recomputed from the common module's `sample` selector for each operation.
+
+Treat every input from a browser, including page URLs, params, computed values, and sampled fields,
+as untrusted. Authorize each private read using the real request and server-owned information. A
+component input or `when` condition is not an authorization check. Middleware runs for the read's
+`_htmlkit/read` request; it does not run a second time for the page URL carried by that request.
+
+Private `props` exports contain `{ load }` readers. Put `input`, `when`, `sample`, and scheduling
+policy in the common module. Common selectors run synchronously and should depend on the declared
+props and state, rather than mutable connection closures. Private reads are fresh operations, so
+their companion exports no `create` or `connect`. A common factory is materialized afresh when the
+server recomputes a browser request's selector; it is not the retained browser instance. Common and
+client factories still retain their normal per-component lifetime in the browser.
+
+The `.server` file may also export a page's existing `load`, `actions`, and `entries`. A loader-only
+file keeps its existing behavior. An explicit common module selects its companions beside that
+module, as with `.client` files. Server-only code stays in the built server and is never served as an
+asset or imported by browser modules.
+
+A thrown `Response` with status 400 or above deliberately exposes its text to the component's error
+branch. Other failures are logged on the server and expose only a generic message. Private reads
+carry cancellation when the selected input changes, the component deactivates, the request ends, or
+its application closes. Readers should pass `signal` to cancellable work. HTMLKit ignores late
+completion; it cannot forcibly stop arbitrary JavaScript running in an external service.
+
+For application-owned services, pass `services` to `createApplication`, `devApplication`, or
+`buildApplication`, and separately to `startApplication` or a built entry's `create(options)`.
+Functions and service objects stay in the parent process rather than crossing into render workers.
+The caller owns their setup and shutdown. `ServerReader`, `ServerReaders`, and `ServerReadContext`
+are exported types from `@nextwebwg/htmlkit` for annotated private modules.
+
+Pages with private browser reads require the HTMLKit request server even when their HTML is
+prerendered. A static host can serve the initial result, but cannot answer later private reads;
+use a client reader backed by a public API for that deployment.
+
 ## Page and layout loaders
 
 Put a `.server.ts` file next to a page with the same name. Its `load()` runs at build time (and on

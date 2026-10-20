@@ -15,6 +15,9 @@ import { policyHeader } from "./csp.js";
 import { authoredHead, documentHTML, escapeHTML, pagePayload, redirectPage, type PageAssets } from "./document.js";
 import { matchRoute, parameter, redirectLocation, redirectStatuses } from "./routes.js";
 import { preparationModule, type ProviderModule } from "./provider-preparation.js";
+import { privateReadBridge, type ServerReaders } from "./private-readers.js";
+import { privateReadResponse, type PrivateReadRegistration } from "./private-api.js";
+import { serverReaders } from "./private-readers.js";
 import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestRedirect, Middleware, NavigationItem,
   NavigationNode, NavigationQuery, PageAction, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
 
@@ -185,6 +188,12 @@ function parseCookies(header: string | null): ReadonlyMap<string, string> {
   return cookies;
 }
 
+/** A private read is a fresh request operation, never a retained server component instance. */
+export function requestReadContext(request: Request, url: URL, base: string, params: Params, services: unknown) {
+  return { phase: "request" as const, request, url: new URL(url), base, params, services, signal: request.signal,
+    cookies: parseCookies(request.headers.get("cookie")), fetch: globalThis.fetch.bind(globalThis) };
+}
+
 /** A page or layout, ready to render: its component and loader. */
 export interface RenderLayer {
   readonly definition: ComponentDefinition;
@@ -205,6 +214,8 @@ export interface RenderInput {
   readonly definitions: readonly ComponentDefinition[];
   readonly providers?: Readonly<Record<string, ProviderModule>>;
   readonly clientModules?: readonly string[];
+  readonly privateReaders?: Readonly<Record<string, () => Promise<ServerReaders>>>;
+  readonly services?: unknown;
   readonly render?: ServerRenderer["render"];
   readonly scripts: readonly string[];
   /** The site's Content Security Policy, unless csp is false. */
@@ -339,10 +350,13 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     declaration.kind === "link" && declaration.attributes.some(attribute => attribute.kind === "literal" && attribute.name === "rel" && attribute.value.trim().toLowerCase() === "canonical")))
     ? input.canonicalOrigin + own : undefined;
   const modules = input.providers ?? {};
-  const output = await (input.render ?? renderComponents)(body, { definitions: input.definitions, url: url.href, state, props, signal,
+  const bridge = Object.keys(input.privateReaders ?? {}).length === 0 ? undefined : await privateReadBridge(input.privateReaders!, contextOf(layers.at(-1)!), input.services);
+  let output: Awaited<ReturnType<ServerRenderer["render"]>>;
+  try { output = await (input.render ?? renderComponents)(body, { definitions: input.definitions, url: url.href, state, props, signal,
     ...Object.keys(modules).length === 0 ? {} : { prepare: { module: preparationModule,
-      data: { modules, required, phase: input.request === undefined ? "build" : "request" } } },
-    head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
+      ...bridge === undefined ? {} : { port: bridge.port }, data: { modules, required, phase: input.request === undefined ? "build" : "request" } } },
+    head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) }); }
+  finally { bridge?.close(); }
   signal.throwIfAborted();
   const { policy } = input;
   const head: RenderedHead = { html: output.head, ...(lang === undefined ? {} : { lang }), ...(canonical === undefined ? {} : { canonical }),
@@ -380,6 +394,7 @@ export interface Pipeline<Route extends NavigationRoute> {
   readonly endpoints: readonly EndpointRoute[];
   endpoint(route: EndpointRoute): Promise<EndpointModule>;
   readonly middleware?: () => Promise<Middleware>;
+  readonly read?: (request: Request) => Promise<Response>;
   /** A matched page's document or payload. */
   page(route: Route, params: Params, request: Request, payload: boolean): Promise<Response>;
   /** A path no page or endpoint answers. */
@@ -418,6 +433,11 @@ async function route<Route extends NavigationRoute>(app: Pipeline<Route>, reques
   const { pathname } = url;
   // A path starting with // would name another origin; no page lives there.
   if (!pathname.startsWith(app.base) || pathname.startsWith("//")) return app.notFound(request, payload);
+  if (!payload && pathname === app.base + "_htmlkit/read" && app.read !== undefined) {
+    if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+    if (!sameOrigin(request)) return new Response("Cross-origin component reads are refused.", { status: 403 });
+    return app.read(request);
+  }
   // The redirects option precedes pages, with or without the trailing slash.
   const redirect = app.redirects.get(pathname.endsWith("/") ? pathname : pathname + "/");
   if (redirect !== undefined) return pageResponse({ ...redirect, body: "", head: { html: "" }, layers: [] }, request, payload);
@@ -478,6 +498,7 @@ async function answerEndpoint<Route extends NavigationRoute>(app: Pipeline<Route
 
 /** A build's request server data, which the build writes into _htmlkit/server/entry.js. */
 export interface ServerData {
+  readonly readers?: Readonly<Record<string, { readonly definition: ComponentDefinition; readonly common: string; readonly server: string }>>;
   readonly version: 2 | 3;
   readonly base: string;
   readonly redirects: readonly ManifestRedirect[];
@@ -542,12 +563,17 @@ export async function outputPath(output: string, base: string, pathname: string)
  * The application a build's server entry exports: data and module loaders the build wrote, and the
  * output directory two levels above the entry. Prerendered pages and assets come from the output's files.
  */
-export async function serverApplication(entry: string, data: ServerData, modules: Readonly<Record<string, () => Promise<unknown>>>, options: { readonly renderWorkers?: number } = {}): Promise<ServerApplication> {
+export async function serverApplication(entry: string, data: ServerData, modules: Readonly<Record<string, () => Promise<unknown>>>, options: { readonly renderWorkers?: number; readonly services?: unknown } = {}): Promise<ServerApplication> {
   if (data.version !== 2 && data.version !== 3) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
   const output = await realpath(fileURLToPath(new URL("../../", entry)));
   const renderer = createRenderer(options.renderWorkers === undefined ? {} : { workers: options.renderWorkers });
+  const privateLifetime = new AbortController();
   const { base, routes } = data;
   const load = async <Module>(id: string) => await modules[id]!() as Module;
+  const privateSources = new Map<string, PrivateReadRegistration>(Object.entries(data.readers ?? {}).map(([source, reader]) => [source, {
+    definition: reader.definition, common: () => load(reader.common),
+    readers: async () => serverReaders(await load(reader.server), reader.server)!,
+  }]));
   const catalog = new Map(data.catalog.map(([path, index]) => [path, routes[index]!]));
   const navigation = createNavigation(base, routes, () => Promise.resolve(catalog));
   // Files that are never served: the server's own code, and payloads, which answer through their pages.
@@ -566,10 +592,16 @@ export async function serverApplication(entry: string, data: ServerData, modules
     renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions, render: renderer.render,
       providers: Object.fromEntries(Object.entries(page.providers ?? {}).map(([tag, provider]) => [tag, { ...provider, module: new URL(`./${provider.module}.js`, entry).href }])),
       clientModules: page.clientModules ?? [],
+      services: options.services,
+      privateReaders: Object.fromEntries(Object.entries(page.providers ?? {}).flatMap(([tag, provider]) => {
+        const registered = privateSources.get(provider.source);
+        return registered === undefined ? [] : [[tag, registered.readers]];
+      })),
       scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }), ...(action === undefined ? {} : { action }),
       layers: page.layers.map(layer => ({ ...layer, module: () => layer.module === undefined ? Promise.resolve({}) : load<ServerModule>(layer.module) })) });
   // A failure answers with app/error.html, rendered as the build would render it, and a safe message; the error goes to the console.
   const failed = async (error: unknown, request: Request): Promise<Response> => {
+    if (privateLifetime.signal.aborted) throw error;
     if (!request.signal.aborted) console.error(error);
     const { pathname } = new URL(request.url);
     // A failed page has no payload, so the browser loads its document, the error page.
@@ -587,6 +619,11 @@ export async function serverApplication(entry: string, data: ServerData, modules
   };
   const pipeline: Pipeline<NavigationRoute> = {
     base, routes, endpoints: data.endpoints,
+    read(request) {
+      request = new Request(request, { signal: AbortSignal.any([request.signal, privateLifetime.signal]) });
+      return privateReadResponse(request, base, privateSources, url => requestReadContext(request, url, base,
+        matchRoute(routes, url.pathname, base)?.params ?? {}, options.services));
+    },
     redirects: new Map(data.redirects.map(({ from, to, status }) => [from, { location: to, status }])),
     endpoint: route => load<EndpointModule>((route as typeof data.endpoints[number]).module),
     ...(data.middleware === undefined ? {} : { middleware: async () => (await load<{ default: Middleware }>(data.middleware!)).default }),
@@ -621,7 +658,7 @@ export async function serverApplication(entry: string, data: ServerData, modules
   };
   return {
     base,
-    close: () => renderer.close(),
+    close: () => { privateLifetime.abort(); return renderer.close(); },
     async fetch(request) {
       try {
         // Files answer before middleware: a page's directory, and an endpoint's path, go through it.
@@ -677,7 +714,7 @@ export async function startApplication(options: StartOptions = {}): Promise<Appl
   const entry = pathToFileURL(resolve(options.outDir ?? "dist", "_htmlkit/server/entry.js"));
   try { await stat(entry); }
   catch { throw new HtmlKitError("No server entry; run htmlkit build first.", fileURLToPath(entry)); }
-  const loaded = await import(entry.href) as { default: ServerApplication; create?: (options: { readonly renderWorkers?: number }) => Promise<ServerApplication> };
+  const loaded = await import(entry.href) as { default: ServerApplication; create?: (options: { readonly renderWorkers?: number; readonly services?: unknown }) => Promise<ServerApplication> };
   const application = loaded.create === undefined ? loaded.default : await loaded.create(options);
   const server = createHTTPServer((incoming, outgoing) => {
     void (async () => {
