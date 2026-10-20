@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-alpha.62
+
+### Fixed
+
+- In converted Vue components, the input check for a bound component prop on an element with `$each` or `$if` reads the loop's and branch's names: the element's `v-for` or `v-if` wraps the check, which `evaluateInput` evaluated outside it, so `<x-row $each="r of $rows" from:selected="$r.id = $selected">` read `r` before the loop defined it and failed vue-tsc.
+- A bare boolean attribute on a Vue component, `<XFlag decorative />`, is true, as in HTML: Vue passes it as `""`, which the prop check read as false since 1.0.0-alpha.59.
+- An optional object field that is null is a missing one in every target, as the [Types](https://nextwebwg.org/declarative-components/types#null-and-missing-values) chapter defines. Vue, React and Svelte props and the compiled guards rejected a whole prop such as `{ activeCell: { … }, hoveredCell: null }`, which the live runtime accepted. A prop a wrong-typed field rejects reports itself invalid (`aria-invalid`), as before.
+
+A browser test renders a list whose rows bind a prop through `$each`, a bare boolean attribute and an object prop with a null optional field and with a wrong-typed one, in the live runtime, compiled Vanilla output and converted Vue (type-checked with vue-tsc), React and Svelte components.
+
 ## 1.0.0-alpha.61
 
 ### Added

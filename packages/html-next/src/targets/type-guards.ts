@@ -39,7 +39,8 @@ export function typeCheck(type: TypeNode, value: string): string {
       const fields = type.fields.map((field) => {
         const read = `(${value} as Record<string, unknown>)[${quote(field.name)}]`;
         const check = typeCheck(field.type, read);
-        return field.optional ? `(${read} === undefined || ${check})` : check;
+        // An optional field that is null is a missing one (types#null-and-missing-values).
+        return field.optional ? `(${read} == null || ${check})` : check;
       });
       const closed = type.open ? [] : [`Object.keys(${value} as object).every((key) => ${JSON.stringify(type.fields.map((field) => field.name))}.includes(key))`];
       return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})${[...fields, ...closed].map((check) => ` && ${check}`).join("")})`;
