@@ -7,6 +7,20 @@
  * adopt in place. docs/client-navigation.md records the design.
  */
 import type { adoptRenderedProps, generatedHost, replaceProjectedNode } from "@nextwebwg/html-next/generated-runtime";
+import type { BindingSnapshot } from "@nextwebwg/html-next/bindings";
+
+/** Consume only this component's read identities; the renderer adopts accepted values itself. */
+export function preparedBinding(root: Element, tag: string): BindingSnapshot | undefined {
+  const text = root.getAttribute("data-htmlkit-bindings");
+  if (text === null) return undefined;
+  const records = JSON.parse(text) as Record<string, BindingSnapshot>;
+  if (!Object.hasOwn(records, tag)) return undefined;
+  const snapshot = records[tag];
+  delete records[tag];
+  if (Object.keys(records).length === 0) root.removeAttribute("data-htmlkit-bindings");
+  else root.setAttribute("data-htmlkit-bindings", JSON.stringify(records));
+  return snapshot;
+}
 
 /** The compiled-runtime functions navigation uses, from the one runtime instance every page module shares. */
 export interface Runtime {
@@ -29,7 +43,8 @@ export type Component = readonly [factory: (options: object, html?: Record<strin
   props: Readonly<Record<string, string>>];
 /** The JSON that document.ts's pagePayload writes. */
 interface Payload {
-  readonly version: 1;
+  readonly version: 1 | 2;
+  readonly rendered?: { readonly body: string; readonly head: string };
   readonly head: { readonly lang: string; readonly canonical?: string };
   readonly styles: readonly string[];
   readonly modules: readonly string[];
@@ -88,17 +103,30 @@ interface Rendered { readonly next: Document; readonly layers: readonly Element[
  * layer renders, kept layouts included, so a kept layout gets its new props from its rendering.
  */
 async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
-  if (payload.version !== 1 || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
+  if (![1, 2].includes(payload.version) || payload.layers.length === 0) throw new Error("HTMLKit cannot read this page payload.");
   const next = document.implementation.createHTMLDocument("");
+  if (payload.version === 2) {
+    if (payload.rendered === undefined) throw new Error("HTMLKit cannot read this prepared page payload.");
+    next.head.innerHTML = payload.rendered.head;
+    next.body.innerHTML = payload.rendered.body;
+  }
   const append = (parent: Element, tag: string, attributes: Readonly<Record<string, string>>) => {
     const element = parent.appendChild(next.createElement(tag));
     for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
     return element;
   };
-  if (payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
+  if (payload.version === 1 && payload.head.canonical !== undefined) append(next.head, "link", { rel: "canonical", href: payload.head.canonical });
   for (const href of payload.styles) append(next.head, "link", { rel: "stylesheet", href });
   for (const src of payload.modules) append(next.head, "script", { type: "module", src });
   next.documentElement.lang = payload.head.lang;
+  if (payload.version === 2) {
+    const layers = payload.layers.map((_, index) => {
+      const root = layer(next, index);
+      if (root === null) throw new Error(`HTMLKit cannot find prepared layer ${index}.`);
+      return root;
+    });
+    return { next, layers, adopt: true };
+  }
   // Innermost first: each layer is projected into its layout's `page` slot, as its invocation is on the server.
   const layers: Element[] = [];
   for (let index = payload.layers.length - 1; index >= 0; index -= 1) {

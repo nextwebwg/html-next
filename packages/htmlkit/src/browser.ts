@@ -57,11 +57,12 @@ export function browserSources(components: readonly BrowserDefinition[], options
     if (moduleId !== undefined) {
       // Native ESM caches this namespace; the binding library retains each host's passive instance.
       // A behavior-only module does not download or activate the provider engine.
-      sources.set(moduleId, `import * as behavior from ${JSON.stringify(component.module)};
+      const options = component.binding === undefined ? "" : `, { browser: host => ({ source: ${JSON.stringify(component.binding.source)}, snapshot: preparedBinding(host.root, ${JSON.stringify(component.definition.contract.tag)}) }) }`;
+      sources.set(moduleId, `${component.binding === undefined ? "" : `import { preparedBinding } from ${JSON.stringify(client)};\n`}import * as behavior from ${JSON.stringify(component.module)};
 let adapter;
 export const connect = "props" in behavior || "create" in behavior
   ? (host, context) => {
-    adapter ??= import(${JSON.stringify(bindings)}).then(({ bindModule }) => bindModule(behavior));
+    adapter ??= import(${JSON.stringify(bindings)}).then(({ bindModule }) => bindModule(behavior${options}));
     return adapter.then(module => module.connect(host, context));
   }
   : Reflect.get(behavior, "connect");

@@ -20,6 +20,9 @@
       ],
       "@nextwebwg/html-next/runtime": [
         "../html-next/src/runtime.ts"
+      ],
+      "@nextwebwg/html-next/bindings": [
+        "../html-next/src/bindings.ts"
       ]
     }
   },

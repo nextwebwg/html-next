@@ -2,17 +2,67 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { bindingFixture, fixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, fixture, universalFixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("prepares shared component providers for prerender and SSR while bypassing fixtures and browser-only modules", async () => {
+    const root = await universalFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    let preparedModule: string | undefined;
+    try {
+      const page = await application.render("/");
+      preparedModule = page.components.find(component => component.definition.contract.tag === "universal-page")!.binding!.module;
+      expect(existsSync(fileURLToPath(preparedModule))).toBe(true);
+      expect(page.body).toContain("<h1>build:A</h1>");
+      expect(page.body).toContain('value="build:A"');
+      expect(titleOf(page)).toBe("Product build:A");
+      expect(page.body).not.toContain('data-connections="1"');
+      expect(page.body).toContain("Browser behavior");
+      const supplied = await application.render("/fixture/");
+      expect(supplied.body).toContain("<h1>Fixture</h1>");
+      expect(supplied.body).toContain('value="Fixture"');
+      const live = await application.fetch(new Request("http://localhost/live/?q=C"));
+      expect(live.status).toBe(200);
+      expect(await live.text()).toContain("<h1>request:C</h1>");
+      const failed = await application.fetch(new Request("http://localhost/live/?q=bad"));
+      expect(failed.status).toBe(200);
+      expect(await failed.text()).toContain('<p class="error">Unavailable product</p>');
+      const delegated = await application.render("/delegated/");
+      expect(delegated.body).toContain("<h1>build:A</h1>");
+      expect(delegated.body).toContain('<strong class="shell-label">build:shell</strong>');
+    } finally { await application.close(); }
+    expect(existsSync(fileURLToPath(preparedModule!))).toBe(false);
+  });
+  it("reloads transitive provider dependencies for concurrent development requests", async () => {
+    const root = await universalFixture(); roots.push(root);
+    const server = await devApplication({ root, port: 0 });
+    try {
+      expect(await (await fetch(server.url)).text()).toContain("<h1>build:A</h1>");
+      const source = await readFile(join(root, "lib/product.ts"), "utf8");
+      await write(root, "lib/product.ts", source.replace("phase + ':' + query", "'Updated:' + query"));
+      await expect.poll(async () => Promise.all(Array.from({ length: 3 }, async () => (await fetch(server.url)).text())), { timeout: 10_000 })
+        .toEqual(Array.from({ length: 3 }, () => expect.stringContaining("<h1>Updated:A</h1>")));
+    } finally { await Promise.all([server.close(), server.close()]); }
+  }, 60_000);
+  it("resolves a prepared module's package imports from the application", async () => {
+    const root = await universalFixture(); roots.push(root);
+    await write(root, "node_modules/@example/shared-record/package.json", '{"name":"@example/shared-record","type":"module","exports":"./index.js"}');
+    await write(root, "node_modules/@example/shared-record/index.js", 'export const record = name => ({ name });');
+    const source = await readFile(join(root, "lib/product.ts"), "utf8");
+    await write(root, "lib/product.ts", 'import { record } from "@example/shared-record";\n' + source.replace("return { name: phase + ':' + query };", "return record(phase + ':' + query);"));
+    const application = await createApplication({ root });
+    try { expect((await application.render("/")).body).toContain("<h1>build:A</h1>"); }
+    finally { await application.close(); }
+  });
   it("preserves omitted defaults and supplied null inputs in SSR and navigation payloads", async () => {
     const root = await bindingFixture(); roots.push(root);
     const application = await createApplication({ root });

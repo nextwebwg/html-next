@@ -73,16 +73,19 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
   let error: ServerData["error"];
   for (const { route, graph, assets } of serverGraphs) {
     const layers = [...route.layouts, route];
-    const page: ServerPage = { definitions: graph.definitions, assets, layers: graph.layers.map((layer, i) => {
-      const loader = layers[i]!.server;
-      if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
-      return { definition: layer.definition, ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
-    }) };
+    const page: ServerPage = { definitions: graph.definitions, assets,
+      providers: Object.fromEntries(graph.components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag,
+        { module: module(component.module!, "provider"), source: component.binding.source }]])),
+      layers: graph.layers.map((layer, i) => {
+        const loader = layers[i]!.server;
+        if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);
+        return { definition: layer.definition, ...(loader === undefined ? {} : { module: module(loader, "loader") }), origin: source(layer.origin) };
+      }) };
     if (route === application.error) error = { ...page, route: path(route) };
     else pages[application.routes.indexOf(route)] = page;
   }
   const catalog = await internals.catalog();
-  const data: ServerData = { version: 2, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
+  const data: ServerData = { version: 3, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
     routes: application.routes.map(path),
     catalog: [...catalog].map(([path, route]) => [path, application.routes.indexOf(route)] as const),
     endpoints: application.endpoints.map(endpoint => ({ ...endpoint, file: source(endpoint.file), module: module(endpoint.file, "api") })),
@@ -92,8 +95,8 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "entry.js"), "// The build's request server: `htmlkit start` serves it, and its default export's fetch answers requests on any runtime.\n" +
     'import { serverApplication } from "@nextwebwg/htmlkit/server";\n' +
-    `export default await serverApplication(import.meta.url, JSON.parse(${JSON.stringify(JSON.stringify(data))}), {\n` +
-    Object.keys(inputs).map(id => `  ${JSON.stringify(id)}: () => import(${JSON.stringify(`./${id}.js`)}),\n`).join("") + "});\n");
+    `export function create(options) { return serverApplication(import.meta.url, JSON.parse(${JSON.stringify(JSON.stringify(data))}), {\n` +
+    Object.keys(inputs).map(id => `  ${JSON.stringify(id)}: () => import(${JSON.stringify(`./${id}.js`)}),\n`).join("") + "}, options); }\nexport default await create();\n");
 }
 
 export async function buildApplication(input: ApplicationOptions = {}): Promise<BuildResult> {

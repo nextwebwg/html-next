@@ -379,9 +379,13 @@ export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
   readonly controller?: string;
   readonly module?: string;
+  /** The server bundle and matching browser completion identity of a prop-provider module. */
+  readonly binding?: { readonly module: string; readonly source: string };
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
+  /** Automatic prop providers were prepared in this graph; navigation adopts its rendered form. */
+  readonly prepared?: boolean;
   /** 200, 404 for the not-found page, 500 for the error page, or a redirect's status. */
   readonly status: number;
   readonly pathname: string;
@@ -444,6 +448,7 @@ export interface ServerApplication {
   readonly base: string;
   /** Not a method of `this`, so a runtime can be handed it, as in Deno.serve(application.fetch). */
   readonly fetch: (request: Request) => Promise<Response>;
+  close(): Promise<void>;
 }
 export interface BuildResult { readonly outDir: string; readonly routes: readonly string[]; readonly browserInputs: readonly string[]; }
 export interface ServerOptions extends ApplicationOptions { readonly host?: string; readonly port?: number; }

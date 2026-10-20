@@ -21,6 +21,21 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("addresses each component host by tag when definitions share a native root", async () => {
+    const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf><span>{$ownerText}</span></named-leaf></template>');
+    const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article><b>{$leafText}</b><slot></slot></article></template>');
+    const source = `export function prepare({ document, host }) {
+      const root = document.querySelector('#subject');
+      const owner = host(root, 'named-owner'); const leaf = host(root, 'named-leaf');
+      if (!owner || !leaf || owner === leaf || host(root, 'missing')) throw new Error('Named host lookup failed');
+      owner.state.ownerText = 'Owner updated'; leaf.state.leafText = 'Leaf updated';
+    }`;
+    const result = await renderComponents('<named-owner id="subject"></named-owner>', { definitions: [owner, leaf],
+      prepare: { module: "data:text/javascript," + encodeURIComponent(source) } });
+    assert.match(result.html, /<b>Leaf updated<\/b>/);
+    const document = new JSDOM(result.html).window.document;
+    assert.equal(document.querySelector("span")?.textContent, "Owner updated");
+  });
   const preparation = new URL("./fixtures/server-prepare.mjs", import.meta.url).href;
   const product = parseComponent(`<template component="x-prepared"><defs>
     <prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs>

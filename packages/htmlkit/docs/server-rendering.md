@@ -42,6 +42,8 @@ Request
   through Vite's module runner and each route's component graph through `loadNodeComponents`. A
   prerendered page renders at its canonical `origin` URL, as the build renders it.
 - The build writes `_htmlkit/server/entry.js`, whose default export is `serverApplication`'s result.
+  Its `create(options)` export makes an independently owned application; `startApplication` uses it
+  for each listener and closes that application's renderer when the listener closes.
   The entry carries the server data as JSON: path-free routes, the navigation catalog, head scripts,
   redirects, and each server route's component definitions, head metadata, and browser assets. Vite
   builds the server-rendered pages' loaders, the endpoints, and the middleware to
@@ -65,9 +67,9 @@ requests with different cookies at once and checks neither sees the other's.
 
 ### Render workers
 
-HTML Next's `renderComponents` renders in a pool of long-lived workers, the number of available
-CPUs up to 8 unless `setRenderWorkers(count)` sets another (`htmlkit --render-workers`, or
-`startApplication({ renderWorkers })`). Each worker renders one request at a time and the others
+Each HTMLKit application owns an HTML Next `createRenderer()` pool of long-lived workers, the number
+of available CPUs up to 8 unless `setRenderWorkers(count)` sets another before construction
+(`htmlkit --render-workers`, or `startApplication({ renderWorkers })`). Each worker renders one request at a time and the others
 wait in a queue. Every render gets:
 
 - its own JSDOM window and document, created for the render and closed after it;
@@ -79,7 +81,7 @@ wait in a queue. Every render gets:
 
 A worker keeps only what loading its modules creates: jsdom, the HTML Next runtime, the
 `Intl.DurationFormat` polyfill, the projected-slot parser the runtime installs once, and the
-runtime's static tables, such as SVG attribute names. It caches no definitions, documents, or
+runtime's static tables, such as SVG attribute names, plus imported common provider modules. It caches no definitions, documents, or
 rendered output. HTML Next's request-isolation test renders requests with conflicting definitions
 of one tag and conflicting state, concurrently and in sequence, on one worker and on three. A worker
 that fails or exits rejects the render it was doing, which a server answers with its error page, and
@@ -100,6 +102,25 @@ HTML Next type validation, attribute serialization, and rendered continuation re
 declarations bind through HTML Next's parser and renderer like any other binding, and the server
 renderer serializes and escapes the elements it writes. Browser entries import the page's compiled components and their
 controllers, never server loaders or their imports.
+
+### Component provider preparation
+
+HTMLKit discovers named `props`/`create` exports without evaluating behavior-only modules. Vite
+bundles eligible common modules under its cache for development and prerendering, and into the
+private server output for request-time rendering. Native package imports resolve from the application.
+The application closes its renderer before removing its own temporary bundles; it leaves Vite's
+cache and other applications' artifacts alone.
+
+The renderer's preparation adapter receives the native document, typed component hosts, the render's
+abort signal, and `flush()` to drain the existing reactive renderer. Tag-specific host lookup handles
+components that share one native root. The adapter calls the binding library's `prepare()` in build
+or request phase and never calls browser `connect`. Additional component roots revealed by prepared
+data are prepared in turn. Typed values, input status and state travel in HTML Next continuation
+records. HTMLKit adds only source revisions and selected-read identities for matching browser adoption.
+
+Prepared pages use a rendered-form navigation payload so a fresh navigation adopts the prepared
+baseline, just as an initial document does. Pages without automatic providers keep the factory
+payload. Neither format transfers private loader data.
 
 ## Cost
 

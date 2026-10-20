@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",
+    "typescript-compiler": "npm:@typescript/typescript6@6.0.2",
     "vite": "catalog:",
     "parse5": "catalog:"
   },

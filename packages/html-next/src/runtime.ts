@@ -4418,10 +4418,16 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   for (const delegate of instance.delegates) disconnectRuntimeInstance(delegate);
 }
 
-/** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
-export function getComponentHost(element: Element): ComponentHost | undefined {
-  const instance = runtimeInstance(element);
-  if (instance === undefined) return compiledHandle(element)?.H;
+/** Returns a lowered root's lifecycle host, optionally selecting a component sharing that root. */
+export function getComponentHost(element: Element, tag?: string): ComponentHost | undefined {
+  const owner = runtimeInstance(element);
+  if (owner === undefined) {
+    const handle = compiledHandle(element);
+    return (tag === undefined || handle?.S.g === tag ? handle : handle?.D?.find(entry => entry.S.g === tag))?.H;
+  }
+  const instance = tag === undefined || owner.definition.contract.tag === tag ? owner
+    : owner.delegates.find(entry => entry.definition.contract.tag === tag);
+  if (instance === undefined) return undefined;
   if (instance.host !== undefined) return instance.host;
   const writable = new Set(
     (instance.definition.declarations ?? [])

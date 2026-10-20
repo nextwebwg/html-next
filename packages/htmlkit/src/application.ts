@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 
 import { compileComponentStylesForBuild, parseComponentResource, type ComponentDefinition } from "@nextwebwg/html-next";
 import { loadNodeComponents } from "@nextwebwg/html-next/node-loader";
+import { createRenderer } from "@nextwebwg/html-next/server";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
 import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
@@ -12,6 +13,7 @@ import { sitePolicy } from "./csp.js";
 import { authoredHead, documentHTML, redirectPage, type PageAssets } from "./document.js";
 import { breadth, discover, discoverServerFiles, matchRoute, parameter, redirectTable, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition, withoutSettings } from "./resource.js";
+import { createProviderModules } from "./providers.js";
 import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
 import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
@@ -89,6 +91,15 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   }
   const module = async (layer: RouteLayer): Promise<ServerModule> => layer.server === undefined ? {} :
     typeof layer.server === "string" ? await environment.runner.import(layer.server) as ServerModule : layer.server;
+  const renderer = createRenderer();
+  const providers = createProviderModules(config.root, {
+    cacheDir: server.config.cacheDir,
+    async resolve(specifier, importer) {
+      const resolved = await server.environments.client!.pluginContainer.resolveId(specifier, importer);
+      return resolved === null || resolved.external ? undefined : resolved.id.split("?")[0];
+    },
+    watch: file => { server.watcher.add(file); },
+  });
   // Diagnostics name a loader's file, or its component when a plugin supplies the loader module.
   const origin = (layer: RouteLayer): string => typeof layer.server === "string" ? layer.server : layer.component;
 
@@ -215,14 +226,14 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       siblings.set(url, found);
       return found;
     };
-    const components: BrowserDefinition[] = await Promise.all([...loaded.nodes.values()].map(async node => {
+    const components = await providers.resolve(await Promise.all([...loaded.nodes.values()].map(async node => {
       const module = node.module === undefined
         ? node.controller !== undefined || node.imported || !node.url.startsWith("file:") ? undefined : await companion(node.url)
         : fileURLToPath(node.module.url);
       return { definition: withoutSettings(node.definition), styles: compileComponentStylesForBuild(node.definition.css, node.definition),
         ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
         ...(module === undefined ? {} : { module }) };
-    }));
+    })));
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
       module: () => module(layer), origin: origin(layer) })) };
   };
@@ -257,7 +268,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const { route, params } = matched ?? { route: fallback!, params: {} };
     const { layers, definitions, components } = await graph(route);
     const rendered = await renderRoute({ base: config.base, canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, layers,
-      definitions, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
+      definitions, providers: Object.fromEntries(components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag, component.binding]])),
+      render: renderer.render, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
       ...(action === undefined ? {} : { action }) });
     if (rendered.kind === "redirect") return redirected(url.pathname, rendered.location, rendered.status, rendered.headers);
     if (rendered.kind === "notFound") {
@@ -266,7 +278,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       return { ...page, headers: rendered.headers };
     }
     return { status: failure?.status ?? (matched === undefined ? 404 : rendered.status), pathname: url.pathname, body: rendered.body, css: rendered.css, head: rendered.head,
-      html: documentHTML(rendered.body, rendered.head), components, layers: rendered.layers, headers: rendered.headers };
+      html: documentHTML(rendered.body, rendered.head), components, layers: rendered.layers, headers: rendered.headers,
+      ...(rendered.prepared === undefined ? {} : { prepared: rendered.prepared }) };
   };
   /**
    * A failure answers with app/error.html and a safe message; the error itself goes to the console. The
@@ -339,7 +352,10 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     },
     // Not a method of `this`: runtimes are handed the function itself, as in Deno.serve(application.fetch).
     fetch: request => respond(pipeline, request).catch((error: unknown) => failed(error, request)),
-    async close() { if (ownsServer) await server.close(); },
+    async close() {
+      try { await Promise.all([renderer.close(), ...ownsServer ? [server.close()] : []]); }
+      finally { await providers.close(); }
+    },
   };
   return { application, graph, catalog: concreteRoutes, policy: site };
 }

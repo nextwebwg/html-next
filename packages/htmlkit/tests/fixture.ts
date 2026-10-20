@@ -108,6 +108,45 @@ export async function bindingFixture(): Promise<string> {
   return root;
 }
 
+/** Shared providers prepare through the same typed component contract in build, request and browser phases. */
+export async function universalFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "htmlkit-universal-"));
+  await write(root, "package.json", '{"name":"htmlkit-universal-fixture","private":true,"type":"module"}');
+  for (const [file, tag, settings] of [["index", "universal-page", ""], ["fixture", "universal-fixture", ""],
+    ["live", "universal-live", '<meta name="hk:render" content="server">'], ["delegated", "universal-delegated", ""]]) {
+    const rootTag = file === "delegated" ? "universal-shell" : "main";
+    await write(root, `app/pages/${file}.html`, `<link rel="component" href="../components/browser-only.html">
+      ${file === "delegated" ? '<link rel="component" href="../components/shell.html">' : ""}
+      <template component="${tag}" module="./index.ts"><defs><meta name="hk:layout" content="none">${settings}
+      <prop name="product" type="object({ name: string })">Product.</prop>
+      <state name="query" type="string" value="A"></state><state name="draft" type="string" from="$product.name"></state>
+      <handler name="next"><set name="query" value="B"></set></handler><title>Product {$product.name}</title></defs>
+      <${rootTag}><h1 $await="$product">{$product.name}</h1><p class="error" $error="problem">{$problem.message}</p><p $else>Waiting.</p>
+      <input bind:value="$draft"><button type="button" on:click="next">Next</button><browser-only-node></browser-only-node>
+      <a href="/">Home</a><a href="/fixture/">Fixture</a><a href="/live/">Live</a></${rootTag}></template>`);
+  }
+  await write(root, "app/pages/index.ts", 'export * from "@/lib/provider-entry.ts";');
+  await write(root, "lib/provider-entry.ts", 'export * from "./provider-cycle.ts";');
+  await write(root, "lib/provider-cycle.ts", 'export * from "./provider-entry.ts"; export { create } from "./product.ts";');
+  await write(root, "lib/product.ts", `export function create() {
+    return { props: { product: { input: (_props, { state }) => state.query, async load(query, { phase, signal }) {
+      signal.throwIfAborted(); await Promise.resolve();
+      if (phase === 'browser') (window.universalReads ||= []).push(query);
+      if (query === 'bad') throw new Error('Unavailable product');
+      return { name: phase + ':' + query };
+    } } }, connect(host) { host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1); window.universalConnections = (window.universalConnections || 0) + 1; } };
+  }`);
+  await write(root, "app/pages/fixture.server.ts", 'export const load = () => ({ props: { product: { name: "Fixture" } } });');
+  await write(root, "app/pages/live.server.ts", 'export const load = ({ url }) => ({ state: { query: url.searchParams.get("q") ?? "A" } });');
+  await write(root, "app/components/browser-only.html", '<template component="browser-only-node"><aside>Browser behavior</aside></template>');
+  await write(root, "node_modules/@example/browser-only/package.json", '{"name":"@example/browser-only","type":"module","exports":{".":{"browser":"./browser.js"}}}');
+  await write(root, "node_modules/@example/browser-only/browser.js", 'export const doc = document;');
+  await write(root, "app/components/browser-only.ts", 'import { doc } from "@example/browser-only"; export type props = { label: string }; export type { props as create }; export default function create() { return doc; } export function connect(host) { host.root.dataset.browser = doc === host.root.ownerDocument ? "connected" : "wrong"; }');
+  await write(root, "app/components/shell.html", '<template component="universal-shell"><defs><prop name="label" type="string">Label.</prop></defs><main><strong class="shell-label" $await="$label">{$label}</strong><slot></slot></main></template>');
+  await write(root, "app/components/shell.ts", 'export const props = { label: { input: () => null, load: (_, { phase }) => phase + ":shell" } };');
+  return root;
+}
+
 /** A rendered head's title text, as HTML. */
 export function titleOf(page: { readonly head: { readonly html: string } }): string | undefined {
   return /<title[^>]*>([^<]*)<\/title>/.exec(page.head.html)?.[1];

@@ -55,11 +55,13 @@ function exact(value: unknown, seen: Set<object>): boolean {
  * definitions are in its module. Undefined when JSON cannot carry the state exactly; such a page
  * navigates by its HTML instead.
  */
-export function pagePayload(page: Pick<RenderedPage, "status" | "head" | "layers">, assets: PageAssets) {
+export function pagePayload(page: Pick<RenderedPage, "status" | "head" | "layers"> & Partial<Pick<RenderedPage, "body" | "prepared">>, assets: PageAssets) {
   if (page.status !== 200 || !page.layers.every(layer =>
     (layer.state === undefined || exact(layer.state, new Set())) &&
     (layer.props === undefined || exact(layer.props, new Set())))) return undefined;
   const { lang = "en", canonical } = page.head;
-  return { version: 1, head: { lang, ...(canonical === undefined ? {} : { canonical }) },
+  if (page.prepared && page.body === undefined) return undefined;
+  return { version: page.prepared ? 2 : 1, head: { lang, ...(canonical === undefined ? {} : { canonical }) },
+    ...page.prepared ? { rendered: { body: page.body!, head: page.head.html } } : {},
     styles: assets.styles, modules: assets.modules, layers: page.layers };
 }

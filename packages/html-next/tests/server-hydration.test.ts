@@ -55,7 +55,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
                 registerComponentDefinitions(definitions: unknown[]): void;
                 lowerDocument(): number;
                 inspectInstance(element: Element): unknown;
-                getComponentHost(element: Element): { state: Record<string, unknown>; refs: Record<string, Element> } | undefined;
+                getComponentHost(element: Element, tag?: string): { state: Record<string, unknown>; refs: Record<string, Element> } | undefined;
               };
               originalRoot: Element;
               originalNodes: Element[];
@@ -114,13 +114,19 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             // Compiled rows are their element; live keeps item markers around each (owner decision 2a).
             const markup = (box: Element): string => box.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "");
             const after = { server: inspect(server), client: inspect(client), html: [markup(server), markup(client)] };
+            const namedHosts = root.getAttribute("data-component")?.split(" ").includes("ssr-delegate") ? {
+              distinct: runtime.getComponentHost(root, "ssr-delegate") !== runtime.getComponentHost(root, "ssr-counter"),
+              owner: Object.keys(runtime.getComponentHost(root, "ssr-delegate")!.state),
+              count: runtime.getComponentHost(root, "ssr-counter")!.state.count,
+              missing: runtime.getComponentHost(root, "ssr-missing") === undefined,
+            } : null;
             const rowKept = retained === null || Array.from(server.querySelectorAll("li")).includes(retained);
             if (root instanceof HTMLInputElement) {
               root.value = "next";
               root.dispatchEvent(new Event("input", { bubbles: true }));
             }
             await Promise.resolve();
-            return { initial, identity, metadataRemoved, control, after, rowKept, parentBindings,
+            return { initial, identity, metadataRemoved, control, after, rowKept, parentBindings, namedHosts,
               editedState: root instanceof HTMLInputElement ? runtime.getComponentHost(root)?.state.text : null };
           }, { definitionJSON: JSON.stringify(definitions), stateJSON: JSON.stringify(fixture.state),
             earlierPass: "earlierPass" in fixture ? fixture.earlierPass : undefined, compiled: mode === "compiled" });
@@ -130,6 +136,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
           assert.deepEqual(result.after.server, result.after.client);
           assert.deepEqual(result.after.html[0], result.after.html[1]);
           assert.equal(result.rowKept, true);
+          if (fixture.name.includes("delegated roots")) assert.deepEqual(result.namedHosts, { distinct: true, owner: [], count: 1, missing: true });
           if (fixture.name.startsWith("parent bindings")) {
             assert.deepEqual(result.parentBindings, { tag: "a", count: "7", expanded: "true", active: true,
               opacity: "0.5", refFollowsRoot: true, projectionKept: true, noNativeProp: true });

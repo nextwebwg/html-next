@@ -14,7 +14,7 @@ export interface ServerPreparationOptions {
 }
 export interface ServerPreparationContext {
   readonly document: Document;
-  readonly host: (element: Element) => ComponentHost | undefined;
+  readonly host: (element: Element, tag?: string) => ComponentHost | undefined;
   /** Drain existing reactive rendering and lower newly rendered component invocations. */
   readonly flush: () => Promise<void>;
   readonly signal: AbortSignal;

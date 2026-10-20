@@ -8,6 +8,7 @@
 - Node rendering accepts typed caller props before initializing component state. HTMLKit preserves those inputs through prerendering, hydration and client navigation while retaining the HTML attribute form for older payload consumers.
 - Application adapters can prepare data against typed hosts inside Node render workers and use a transferred message port for private reads. Render cancellation removes queued jobs or stops the assigned worker; ordinary completion and failures close the render's port and await its cleanup.
 - Applications can own a renderer and its ESM cache with `createRenderer()`. Closing or resizing one renderer leaves other applications running; the existing global render functions use the same pool implementation.
+- HTMLKit prepares common component providers during prerendering and request-time rendering, then adopts their typed values and read identities without repeating the initial browser read. Prepared navigation payloads retain that baseline; behavior-only modules stay out of server preparation. Development reloads and server shutdown retire only their application's workers and temporary bundles.
 
 ### Fixed
 

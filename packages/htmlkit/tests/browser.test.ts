@@ -1,14 +1,73 @@
 import { readFile, rm } from "node:fs/promises";
 import { chromium, firefox, webkit } from "playwright";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { buildApplication, devApplication, previewApplication, type ApplicationServer } from "../src/index.js";
+import { buildApplication, devApplication, previewApplication, startApplication, type ApplicationServer } from "../src/index.js";
 import { buildDocsProof } from "../examples/docs/proof.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { bindingFixture, fixture, write } from "./fixture.js";
+import { bindingFixture, fixture, universalFixture, write } from "./fixture.js";
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} universal component providers`, () => {
+    let root: string;
+    let server: ApplicationServer;
+    beforeAll(async () => {
+      root = await universalFixture();
+      if (delivery === "built") {
+        const result = await buildApplication({ root });
+        server = await startApplication({ outDir: result.outDir, port: 0 });
+      } else server = await devApplication({ root, port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} adopts prepared data once, retains drafts and renders fresh navigations from their preparation`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.locator("h1").textContent()).toBe("build:A");
+          expect(await unscripted.title()).toBe("Product build:A");
+          const page = await browser.newPage(); const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(server.url);
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.locator("input").inputValue()).toBe("build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          await page.locator("input").fill("Edited");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:B");
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toEqual(["B"]);
+          await page.goto(server.url + "live/?q=C");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("request:C");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          await page.goto(server.url + "fixture/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("Fixture");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          const payload = await (await fetch(server.url + "_htmlkit/pages/payload.json")).json();
+          expect(payload.rendered.body).toContain("<h1>build:A</h1>");
+          await page.evaluate(() => Reflect.set(window, "universalMarker", true));
+          await page.getByRole("link", { name: "Home", exact: true }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "universalMarker"))).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          await page.goto(server.url + "delegated/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.locator(".shell-label").textContent()).toBe("build:shell");
+          expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
 
 for (const delivery of ["development", "built"] as const) {
   describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} component provider modules`, () => {

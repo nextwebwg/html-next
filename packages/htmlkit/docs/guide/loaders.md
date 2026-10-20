@@ -7,8 +7,9 @@ eyebrow: HTMLKit
 
 # Loading data
 
-Components receive data through their typed props. A page loader supplies values before HTMLKit
-renders the page. A component module can supply values in the browser, including on a prerendered page.
+Components receive data through their typed props. A component module can provide them during
+prerendering, request-time rendering, and browser updates. A page loader can also supply ordinary
+values before rendering; supplied values bypass that prop's provider.
 
 ## Component providers in the browser
 
@@ -69,6 +70,36 @@ An explicit `module="./behavior.js"` selects that module instead of a same-name 
 If both `.js` and `.ts` companions exist, select one explicitly. A file declaring several components
 also uses explicit module pointers rather than attaching one companion to every component.
 Existing `controller` components keep their legacy lifecycle.
+
+## Preparing the same provider on the server
+
+Omit `initial: 'browser'` to prepare the provider before HTMLKit writes the page. Its `load` receives
+`phase: 'build'` during prerendering, `'request'` during request-time rendering, and `'browser'` for
+later client reads. Use a data function that works in those environments:
+
+```js
+import { readProduct } from './products.js';
+
+export const props = {
+  product: {
+    input: ({ productId }) => productId,
+    load: (id, { signal }) => readProduct(id, { signal }),
+  },
+};
+```
+
+The rendered value and matching read identity reach the browser together. Hydration adopts that
+result without repeating the initial read. Changing `productId` starts a browser read, while local
+draft state retains its edits. A failed read renders the component's `$error` branch.
+
+Common module imports and `create()` must work without browser globals. Put browser API calls in
+`connect`; HTMLKit never calls it during server preparation. A module exporting only `connect` is
+left out of server preparation, including its browser-only imports. `initial: 'browser'` delays a
+provider's read, but its common module still has to load on the server.
+
+Common providers run in application-owned render workers. Modules are cached for a worker's lifetime,
+so keep per-component mutable values inside passive `create()` closures rather than module variables.
+Closing the application or reloading development sources retires its workers and temporary bundles.
 
 ## Page and layout loaders
 

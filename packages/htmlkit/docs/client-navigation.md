@@ -152,6 +152,12 @@ links on screen.
 
 ### Rendering a payload
 
+Pages with automatically prepared component providers use payload version 2: the server-rendered
+body and component head accompany the layer metadata and assets. The browser parses that inert
+markup and adopts it with the existing HTML Next continuation records. This preserves prepared
+values, draft seeds and matching read identities when a fresh page is inserted. Version 1 remains
+the factory path for pages without these providers:
+
 1. Import the page's module, which registers its compiled components. A component that conflicts
    with one the document has throws here, before anything renders.
 2. Make each layer with its component's factory, from the payload's invocation attributes as

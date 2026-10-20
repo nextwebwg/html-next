@@ -8,12 +8,13 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { serializePropTarget, serializeTypedValue, type ComponentDefinition } from "@nextwebwg/html-next";
-import { renderComponents, setRenderWorkers } from "@nextwebwg/html-next/server";
+import { createRenderer, renderComponents, setRenderWorkers, type ServerRenderer } from "@nextwebwg/html-next/server";
 
 import { HtmlKitError, within } from "./config.js";
 import { policyHeader } from "./csp.js";
 import { authoredHead, documentHTML, escapeHTML, pagePayload, redirectPage, type PageAssets } from "./document.js";
 import { matchRoute, parameter, redirectLocation, redirectStatuses } from "./routes.js";
+import { preparationModule, type ProviderModule } from "./provider-preparation.js";
 import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestRedirect, Middleware, NavigationItem,
   NavigationNode, NavigationQuery, PageAction, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
 
@@ -201,6 +202,8 @@ export interface RenderInput {
   readonly layers: readonly RenderLayer[];
   /** Every component the layers use, for HTML Next's renderer. */
   readonly definitions: readonly ComponentDefinition[];
+  readonly providers?: Readonly<Record<string, ProviderModule>>;
+  readonly render?: ServerRenderer["render"];
   readonly scripts: readonly string[];
   /** The site's Content Security Policy, unless csp is false. */
   readonly policy?: RenderedPolicy;
@@ -222,7 +225,7 @@ export function failurePage({ status, message }: Failure, scripts: readonly stri
   return { status, head, body, html: documentHTML(body, head) };
 }
 export type Rendered =
-  | { readonly kind: "page"; readonly status: number; readonly headers: Headers; readonly body: string; readonly css: string; readonly head: RenderedHead; readonly layers: readonly RenderedLayer[] }
+  | { readonly kind: "page"; readonly status: number; readonly headers: Headers; readonly body: string; readonly css: string; readonly head: RenderedHead; readonly layers: readonly RenderedLayer[]; readonly prepared?: boolean }
   | { readonly kind: "redirect"; readonly status: RedirectStatus; readonly location: string; readonly headers: Headers }
   | { readonly kind: "notFound"; readonly headers: Headers };
 
@@ -329,18 +332,22 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const canonical = own !== undefined && !own.includes("[") && !input.definitions.some(definition => definition.head?.some(declaration =>
     declaration.kind === "link" && declaration.attributes.some(attribute => attribute.kind === "literal" && attribute.name === "rel" && attribute.value.trim().toLowerCase() === "canonical")))
     ? input.canonicalOrigin + own : undefined;
-  const output = await renderComponents(body, { definitions: input.definitions, url: url.href, state, props,
+  const modules = input.providers ?? {};
+  const output = await (input.render ?? renderComponents)(body, { definitions: input.definitions, url: url.href, state, props, signal,
+    ...Object.keys(modules).length === 0 ? {} : { prepare: { module: preparationModule,
+      data: { modules, phase: input.request === undefined ? "build" : "request" } } },
     head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
   signal.throwIfAborted();
   const { policy } = input;
   const head: RenderedHead = { html: output.head, ...(lang === undefined ? {} : { lang }), ...(canonical === undefined ? {} : { canonical }),
     ...(input.scripts.length === 0 ? {} : { scripts: input.scripts }), ...(policy === undefined ? {} : { csp: policy }) };
-  return { kind: "page", status: response.status, headers: response.headers, body: output.html, css: output.css, head, layers: rendered };
+  return { kind: "page", status: response.status, headers: response.headers, body: output.html, css: output.css, head, layers: rendered,
+    ...Object.keys(modules).length === 0 ? {} : { prepared: true } };
 }
 
 /** A page's answer: a redirect with its redirect page, its document, or for a payload request its payload (404 when it has none). */
 export function pageResponse(page: { readonly status: number; readonly location?: string; readonly body: string; readonly head: RenderedHead;
-  readonly layers: readonly RenderedLayer[]; readonly headers?: Headers }, request: Request, payload: boolean, assets: PageAssets = { styles: [], modules: [] }): Response {
+  readonly layers: readonly RenderedLayer[]; readonly headers?: Headers; readonly prepared?: boolean }, request: Request, payload: boolean, assets: PageAssets = { styles: [], modules: [] }): Response {
   const headers = new Headers(page.headers);
   const bodyless = request.method === "HEAD";
   if (payload) {
@@ -465,7 +472,7 @@ async function answerEndpoint<Route extends NavigationRoute>(app: Pipeline<Route
 
 /** A build's request server data, which the build writes into _htmlkit/server/entry.js. */
 export interface ServerData {
-  readonly version: 2;
+  readonly version: 2 | 3;
   readonly base: string;
   readonly redirects: readonly ManifestRedirect[];
   readonly routes: readonly NavigationRoute[];
@@ -485,6 +492,7 @@ export interface ServerData {
 }
 /** A route the server renders: each layer's component and loader module, every component they use, and their browser delivery. */
 export interface ServerPage {
+  readonly providers?: Readonly<Record<string, ProviderModule>>;
   readonly layers: readonly { readonly definition: ComponentDefinition; readonly module?: string; readonly origin: string }[];
   readonly definitions: readonly ComponentDefinition[];
   readonly assets: PageAssets;
@@ -527,9 +535,10 @@ export async function outputPath(output: string, base: string, pathname: string)
  * The application a build's server entry exports: data and module loaders the build wrote, and the
  * output directory two levels above the entry. Prerendered pages and assets come from the output's files.
  */
-export async function serverApplication(entry: string, data: ServerData, modules: Readonly<Record<string, () => Promise<unknown>>>): Promise<ServerApplication> {
-  if (data.version !== 2) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
+export async function serverApplication(entry: string, data: ServerData, modules: Readonly<Record<string, () => Promise<unknown>>>, options: { readonly renderWorkers?: number } = {}): Promise<ServerApplication> {
+  if (data.version !== 2 && data.version !== 3) throw new HtmlKitError(`Unsupported server entry version ${String(data.version)}; rebuild with this HTMLKit.`, entry);
   const output = await realpath(fileURLToPath(new URL("../../", entry)));
+  const renderer = createRenderer(options.renderWorkers === undefined ? {} : { workers: options.renderWorkers });
   const { base, routes } = data;
   const load = async <Module>(id: string) => await modules[id]!() as Module;
   const catalog = new Map(data.catalog.map(([path, index]) => [path, routes[index]!]));
@@ -547,7 +556,8 @@ export async function serverApplication(entry: string, data: ServerData, modules
   };
   const missing = (request: Request, headers?: Headers) => file(join(output, "404.html"), request, 404, headers, true);
   const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure, action?: PageAction) =>
-    renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions,
+    renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions, render: renderer.render,
+      providers: Object.fromEntries(Object.entries(page.providers ?? {}).map(([tag, provider]) => [tag, { ...provider, module: new URL(`./${provider.module}.js`, entry).href }])),
       scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }), ...(action === undefined ? {} : { action }),
       layers: page.layers.map(layer => ({ ...layer, module: () => layer.module === undefined ? Promise.resolve({}) : load<ServerModule>(layer.module) })) });
   // A failure answers with app/error.html, rendered as the build would render it, and a safe message; the error goes to the console.
@@ -603,6 +613,7 @@ export async function serverApplication(entry: string, data: ServerData, modules
   };
   return {
     base,
+    close: () => renderer.close(),
     async fetch(request) {
       try {
         // Files answer before middleware: a page's directory, and an endpoint's path, go through it.
@@ -647,8 +658,9 @@ export async function listen(server: Server, options: { readonly host?: string; 
   await new Promise<void>((done, reject) => { server.once("error", reject); server.listen(options.port ?? 3000, host, done); });
   const address = server.address();
   if (address === null || typeof address === "string") throw new HtmlKitError("Server did not obtain a TCP port.");
+  let closing: Promise<void> | undefined;
   return { url: `http://${host.includes(":") ? `[${host}]` : host}:${address.port}${base}`,
-    close: () => new Promise<void>((done, reject) => { server.close(error => error ? reject(error) : done()); server.closeIdleConnections(); }) };
+    close: () => closing ??= new Promise<void>((done, reject) => { server.close(error => error ? reject(error) : done()); server.closeIdleConnections(); }) };
 }
 
 /** Serve a build's server entry on Node: `htmlkit start`. */
@@ -657,7 +669,8 @@ export async function startApplication(options: StartOptions = {}): Promise<Appl
   const entry = pathToFileURL(resolve(options.outDir ?? "dist", "_htmlkit/server/entry.js"));
   try { await stat(entry); }
   catch { throw new HtmlKitError("No server entry; run htmlkit build first.", fileURLToPath(entry)); }
-  const application = (await import(entry.href) as { default: ServerApplication }).default;
+  const loaded = await import(entry.href) as { default: ServerApplication; create?: (options: { readonly renderWorkers?: number }) => Promise<ServerApplication> };
+  const application = loaded.create === undefined ? loaded.default : await loaded.create(options);
   const server = createHTTPServer((incoming, outgoing) => {
     void (async () => {
       let request: Request;
@@ -670,5 +683,8 @@ export async function startApplication(options: StartOptions = {}): Promise<Appl
       else outgoing.writeHead(500, { "content-type": "text/html; charset=utf-8" }).end(failurePage(serverFailure, []).html);
     });
   });
-  return listen(server, options, application.base);
+  try {
+    const listening = await listen(server, options, application.base);
+    return { url: listening.url, close: async () => { await Promise.all([listening.close(), application.close?.()]); } };
+  } catch (error) { await application.close?.(); throw error; }
 }

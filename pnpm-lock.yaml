@@ -413,6 +413,9 @@ importers:
       parse5:
         specifier: 'catalog:'
         version: 8.0.1
+      typescript-compiler:
+        specifier: npm:@typescript/typescript6@6.0.2
+        version: '@typescript/typescript6@6.0.2'
       vite:
         specifier: 'catalog:'
         version: 8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)
