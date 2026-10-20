@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { availableParallelism } from "node:os";
 import { describe, it } from "vitest";
+import { JSDOM } from "jsdom";
 
+import { renderedInstanceRecord } from "../src/rendered-form.js";
 import { parseComponent } from "../src/source-parser.js";
 import { closeRenderWorkers, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
 
@@ -13,6 +15,29 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("accepts typed caller props before state initialization and records null separately from omission", async () => {
+    const definition = parseComponent(`<template component="x-initial-props"><defs>
+      <prop name="label" type="string" default="Default">Label.</prop>
+      <state name="draft" type="string" from="$label"></state></defs>
+      <article><h1>{$label}</h1><output>{$draft}</output></article></template>`);
+    const rendered = await renderComponents('<x-initial-props id="typed" label="HTML"></x-initial-props><x-initial-props id="null" label="HTML"></x-initial-props><x-initial-props id="released" label="HTML"></x-initial-props><x-initial-props id="implicit"></x-initial-props>', {
+      definitions: [definition], props: { "#typed": { label: "Typed" }, "#null": { label: null }, "#released": { label: undefined } },
+    });
+    const dom = new JSDOM(rendered.html);
+    try {
+      for (const [id, label, supplied] of [["typed", "Typed", true], ["null", "Default", true], ["released", "Default", false], ["implicit", "Default", false]] as const) {
+        const root = dom.window.document.getElementById(id)!;
+        assert.equal(root.querySelector("h1")!.textContent, label);
+        assert.equal(root.querySelector("output")!.textContent, label);
+        const input = renderedInstanceRecord(root, "x-initial-props")!.inputs.label!;
+        assert.equal(input.provided ?? input.present, supplied);
+        if (id === "null") assert.equal(input.value, null);
+      }
+    } finally { dom.window.close(); }
+    await assert.rejects(renderComponents('<x-initial-props></x-initial-props>', { definitions: [definition], props: { "#missing": { label: "No" } } }), /matches no component/);
+    await assert.rejects(renderComponents('<div id="plain"></div>', { definitions: [definition], props: { "#plain": { label: "No" } } }), /does not identify a component/);
+    await assert.rejects(renderComponents('<x-initial-props id="wrong"></x-initial-props>', { definitions: [definition], props: { "#wrong": { unknown: true } } }), /declares no prop/);
+  });
   it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: '&lt;b&gt;Ada&lt;/b&gt;' }]"></state>

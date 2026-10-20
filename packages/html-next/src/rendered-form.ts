@@ -223,6 +223,18 @@ export interface RenderedInstanceRecord {
   readonly initialized?: readonly string[];
 }
 
+/** Caller inputs for a kept instance: a supplied null resets its value without releasing ownership. */
+export function renderedCallerProps(
+  record: Pick<RenderedInstanceRecord, "explicit" | "inputs" | "props">,
+  names: readonly string[],
+): Record<string, unknown> {
+  return Object.fromEntries(names.map(name => {
+    const input = record.inputs[name];
+    const supplied = input?.provided ?? (input === undefined ? record.explicit.includes(name) : input.present && !input.producer);
+    return [name, supplied ? input?.value === null ? null : record.props[name] : undefined];
+  }));
+}
+
 const renderedInstanceRecords = new WeakMap<Element, Readonly<Record<string, RenderedInstanceRecord>>>();
 
 export function renderedInstanceRecord(element: Element, tag: string): RenderedInstanceRecord | undefined {

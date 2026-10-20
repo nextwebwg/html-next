@@ -34,7 +34,7 @@ import {
 } from "./expression.js";
 import { kebabCase, propAttribute } from "./names.js";
 import {
-  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
+  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
   currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
@@ -950,7 +950,10 @@ function readInvocation(
   }
   for (const [name, input] of Object.entries(frameworkProps ?? {})) {
     const prop = contract.props[name];
-    if (prop !== undefined && input !== undefined) incoming[name] = { value: input, source: "value", attributePresent: false };
+    if (prop !== undefined) {
+      if (input === undefined) delete incoming[name];
+      else incoming[name] = { value: input, source: "value", attributePresent: false };
+    }
   }
 
   const bindings = pendingInvocationBindings.get(invocation)?.filter(binding => binding.tag === contract.tag) ?? [];
@@ -3623,6 +3626,7 @@ function lowerRenderedComponents(
   registry: DocumentRegistry,
   committed: readonly PreparedInvocation[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
+  props?: DocumentRenderingOptions["props"],
 ): Element[] {
   const lowered: Element[] = [];
   let batch = committed;
@@ -3653,7 +3657,9 @@ function lowerRenderedComponents(
         root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
         shouldLower?.(element, definition, false) === false
       ) continue;
-      const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners));
+      const values = props?.get(element);
+      if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
+      const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners), values);
       prepared.push(invocation);
       pendingOwners.set(element, invocation.instance);
       recordUnrendered(invocation, unrendered);
@@ -3731,6 +3737,7 @@ function lowerScopes(
   root: Document,
   scopes: readonly QueryRoot[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
+  props?: DocumentRenderingOptions["props"],
 ): LoweredScopes {
   const registry = registryFor(root);
   const discovered = new Set<Element>();
@@ -3775,7 +3782,9 @@ function lowerScopes(
       shouldLower?.(element, definition, hydration) === false
     ) return false;
     if (hydration) restoreSerializedFormDefaults(element);
-    const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners));
+    const values = props?.get(element);
+    if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
+    const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners), values);
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
     if (!hydration) recordUnrendered(invocation, unrendered);
@@ -3827,7 +3836,7 @@ function lowerScopes(
     lowered.push(element);
     roots.add(element);
   }
-  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower)) {
+  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower, props)) {
     lowered.push(element);
     roots.add(element);
   }
@@ -3842,13 +3851,15 @@ function lowerScopes(
 export interface DocumentRenderingOptions {
   /** Render the declarative baseline without starting reads or connecting browser lifecycle. */
   readonly connect?: boolean;
+  /** Typed caller inputs for invocations in this pass, before one-time state initialization. */
+  readonly props?: ReadonlyMap<Element, Readonly<Record<string, unknown>>>;
 }
 
 export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
   const state = documentState(root);
   const wasStatic = state.staticRendering;
   state.staticRendering = options.connect === false;
-  const result = lowerScopes(root, [root]);
+  const result = lowerScopes(root, [root], undefined, options.props);
   if (wasStatic && !state.staticRendering) {
     for (const element of result.roots) {
       const instance = runtimeInstance(element);
@@ -4154,8 +4165,7 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
   if (instance === undefined || record === undefined) {
     fail("HR005", "The rendered element records no props for this element's component.");
   }
-  applyComponentProps(instance, Object.fromEntries(Object.keys(instance.definition.contract.props)
-    .map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+  applyComponentProps(instance, renderedCallerProps(record, Object.keys(instance.definition.contract.props)));
 }
 
 /**

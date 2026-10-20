@@ -322,6 +322,18 @@ describe("defineContract", () => {
 });
 
 describe("serializePropTarget", () => {
+  it("resets null inputs to declared defaults, including required and falsy defaults", () => {
+    for (const [type, fallback, expected] of [
+      ["string", "Fallback", "Fallback"],
+      ["number", 0, "0"],
+      ["boolean", false, null],
+    ] as const) {
+      const prop = { type, default: fallback, required: true, target: { attribute: "data-value" }, description: "Defaulted value." };
+      assert.deepEqual(serializePropTarget(prop, null), { kind: "attribute", name: "data-value", value: expected });
+      assert.deepEqual(serializePropTarget({ ...prop, target: { property: "value" } }, null),
+        { kind: "property", name: "value", value: fallback });
+    }
+  });
   it("serializes scalar, enum, default, boolean, and omitted values", () => {
     const contract = defineFromButtonFile({
       ...validContract(),

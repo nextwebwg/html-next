@@ -156,7 +156,7 @@ function invocationAttributes(definition: ComponentDefinition, result: LoaderRes
     serializePropTarget(contract, props[name], name, definition.contract.tag);
     // The contract target describes lowering onto native DOM. Invocation attributes carry
     // the public prop name; writing the target name here silently loses remapped props.
-    const provided = props[name] === undefined ? contract.default : props[name];
+    const provided = props[name] == null ? contract.default ?? props[name] : props[name];
     const value = provided == null ? null : serializeTypedValue(provided, contract.type);
     if (value !== null) attributes[name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()] = value;
   }
@@ -311,13 +311,16 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     attributes.push(invocationAttributes(layer.definition, result));
   }
   const state: Record<string, Readonly<Record<string, unknown>>> = {};
+  const props: Record<string, Readonly<Record<string, unknown>>> = {};
   const rendered: RenderedLayer[] = layers.map((layer, i) => ({ component: layer.definition.contract.tag,
-    attributes: attributes[i]!, ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
+    attributes: attributes[i]!, props: Object.fromEntries(Object.entries(results[i]!.props ?? {}).filter(([, value]) => value !== undefined)),
+    ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
   let body = "";
   for (let i = layers.length - 1; i >= 0; i--) {
     const id = `hk-layer-${i}`;
     const layer = rendered[i]!;
     if (layer.state !== undefined) state[`#${id}`] = layer.state;
+    props[`#${id}`] = Object.fromEntries(Object.keys(layers[i]!.definition.contract.props).map(name => [name, layer.props![name]]));
     body = invocation(layer.component, layer.attributes, id, body, i > 0);
   }
   // An alias names its page's own URL canonical, and a page in an alias page directory the same page
@@ -326,7 +329,7 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const canonical = own !== undefined && !own.includes("[") && !input.definitions.some(definition => definition.head?.some(declaration =>
     declaration.kind === "link" && declaration.attributes.some(attribute => attribute.kind === "literal" && attribute.name === "rel" && attribute.value.trim().toLowerCase() === "canonical")))
     ? input.canonicalOrigin + own : undefined;
-  const output = await renderComponents(body, { definitions: input.definitions, url: url.href, state,
+  const output = await renderComponents(body, { definitions: input.definitions, url: url.href, state, props,
     head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) });
   signal.throwIfAborted();
   const { policy } = input;

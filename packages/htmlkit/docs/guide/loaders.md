@@ -119,6 +119,11 @@ import server-only packages. `@/` is the project root.
 Props and state are written into the page's HTML and its navigation data file, so **anything in
 them is public**. Keep secrets in `data` or out of the result entirely.
 
+Omitting a prop, or returning `undefined`, leaves its default implicit and allows its component
+provider to run. Returning `null` supplies the prop: it uses the declared default when present,
+and suppresses that provider. This distinction survives hydration and navigation, including a
+layout kept between pages. Passing ordinary fixture values uses the same typed props.
+
 ## What `load()` receives
 
 | Field | Value |

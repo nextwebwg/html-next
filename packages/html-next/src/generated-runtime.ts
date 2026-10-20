@@ -15,7 +15,7 @@ import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue, holdControl } from "./controls.js";
 import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
-import { currentProjection, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
+import { currentProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
 import type { RenderedInstanceRecord } from "./rendered-form.js";
 import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
@@ -1655,10 +1655,10 @@ export function adoptRenderedProps(element: Element, rendered: Element): void {
   if (kept === undefined || props === undefined) return;
   const names = Object.keys(props.D.props);
   const fresh = ((rendered as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined)?.B;
-  const record = fresh !== undefined ? { explicit: [...fresh.x], props: Object.fromEntries(names.map((name, index) => [name, fresh.v[fresh.n.length + index]])) }
+  const record = fresh !== undefined ? { explicit: [...fresh.x], inputs: fresh.i, props: Object.fromEntries(names.map((name, index) => [name, fresh.v[fresh.n.length + index]])) }
     : renderedInstanceRecord(rendered, kept.S.g);
   if (record === undefined) fail("HR005", "The rendered element records no props for this element's component.");
-  props.u!(Object.fromEntries(names.map((name) => [name, record.explicit.includes(name) ? record.props[name] : undefined])));
+  props.u!(renderedCallerProps(record, names));
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */

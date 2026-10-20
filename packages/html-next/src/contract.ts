@@ -352,7 +352,7 @@ export function serializePropTarget(
   name?: string,
   component?: string,
 ): SerializedPropTarget {
-  const value = provided === undefined ? prop.default : provided;
+  const value = provided == null ? prop.default ?? provided : provided;
   const invalid = (): never => {
     const subject = `${name === undefined ? "A prop" : `Prop \`${name}\``}${component === undefined ? "" : ` of <${component}>`}`;
     const actual = value === null ? "null" : Array.isArray(value) ? "a list" : typeof value === "object" ? "an object" : `a ${typeof value}`;

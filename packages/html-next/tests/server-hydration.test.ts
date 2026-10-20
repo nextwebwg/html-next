@@ -192,6 +192,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
       const first = await renderComponents('<ssr-counter id="subject" label="First">World</ssr-counter>', { definitions });
       const [second, implicit] = await Promise.all(['<ssr-counter id="subject" label="Second">Other</ssr-counter>',
         '<ssr-counter id="subject">Other</ssr-counter>'].map(async (html) => (await renderComponents(html, { definitions })).html));
+      const reset = (await renderComponents('<ssr-counter id="subject">Other</ssr-counter>', { definitions, props: { "#subject": { label: null } } })).html;
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -201,6 +202,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
           const runtime = (window as unknown as { HtmlRuntime: {
             registerComponentDefinitions(definitions: unknown[]): void; lowerDocument(): number;
             adoptRenderedProps(element: Element, rendered: Element): void;
+            getComponentHost(element: Element): unknown;
+            componentInputs(host: unknown): { supplied(name: string): boolean };
           } }).HtmlRuntime;
           runtime.registerComponentDefinitions(JSON.parse(definitionJSON) as unknown[]);
           runtime.lowerDocument();
@@ -208,7 +211,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
           root.querySelector("button")!.click();
           await new Promise((resolve) => setTimeout(resolve, 0));
           const read = () => ({ label: root.getAttribute("data-label"), count: root.querySelector("span")!.textContent,
-            open: root.querySelector("aside") !== null, projected: root.querySelector("p")!.textContent, kept: document.querySelector("#subject") === root });
+            open: root.querySelector("aside") !== null, projected: root.querySelector("p")!.textContent, kept: document.querySelector("#subject") === root,
+            supplied: runtime.componentInputs(runtime.getComponentHost(root)).supplied("label") });
           const adopt = async (html: string) => {
             const template = document.createElement("template");
             template.innerHTML = html;
@@ -216,13 +220,14 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             await new Promise((resolve) => setTimeout(resolve, 0));
             return read();
           };
-          return { before: read(), second: await adopt(renderings[0]!), implicit: await adopt(renderings[1]!),
+          return { before: read(), second: await adopt(renderings[0]!), reset: await adopt(renderings[2]!), implicit: await adopt(renderings[1]!),
             unrecorded: (() => { try { runtime.adoptRenderedProps(root, document.createElement("section")); return "adopted"; } catch (error) { return String(error); } })() };
-        }, { definitionJSON: JSON.stringify(definitions), renderings: [second, implicit] });
+        }, { definitionJSON: JSON.stringify(definitions), renderings: [second, implicit, reset] });
         // Props follow the new rendering; state, slot content, and the root itself stay.
-        assert.deepEqual(result.before, { label: "First", count: "1", open: true, projected: "Hello World!", kept: true });
+        assert.deepEqual(result.before, { label: "First", count: "1", open: true, projected: "Hello World!", kept: true, supplied: true });
         assert.deepEqual(result.second, { ...result.before, label: "Second" });
-        assert.deepEqual(result.implicit, { ...result.before, label: "Visits" });
+        assert.deepEqual(result.reset, { ...result.before, label: "Visits" });
+        assert.deepEqual(result.implicit, { ...result.before, label: "Visits", supplied: false });
         assert.match(result.unrecorded, /HR005/);
       } finally { await browser.close(); }
     });

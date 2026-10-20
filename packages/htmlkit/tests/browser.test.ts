@@ -28,6 +28,10 @@ for (const delivery of ["development", "built"] as const) {
           await unscripted.goto(server.url);
           expect(await unscripted.getByText("Waiting.", { exact: true }).count()).toBe(1);
           expect(await unscripted.locator("h2").allTextContents()).toEqual(["Fixture"]);
+          await unscripted.goto(server.url + "defaults/");
+          expect(await unscripted.locator("h1").textContent()).toBe("Default");
+          expect(await unscripted.locator(".nullable").textContent()).toBe("");
+          expect(await unscripted.locator(".count").textContent()).toBe("0");
           const page = await browser.newPage(); const errors: string[] = [];
           page.setDefaultTimeout(5_000);
           page.on("pageerror", error => errors.push(error.message));
@@ -48,6 +52,23 @@ for (const delivery of ["development", "built"] as const) {
           await expect.poll(() => cards.first().getAttribute("data-connections")).toBe("2");
           expect(await cards.first().locator("input").inputValue()).toBe("Edited");
           expect(await page.evaluate(() => Reflect.get(window, "bindingReads"))).toEqual(["A", "B"]);
+          // Fresh navigation and SSR adoption preserve caller ownership, including null with a default.
+          await page.evaluate(() => Reflect.set(window, "navigationMarker", document.querySelector(".shell")));
+          await page.getByRole("link", { name: "Default inputs" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("Provider");
+          expect(await page.evaluate(() => Reflect.get(window, "navigationMarker") === document.querySelector(".shell"))).toBe(true);
+          expect(await page.locator(".shell-value").textContent()).toBe("Shell");
+          expect(await page.locator(".shell-draft").textContent()).toBe("First");
+          expect(await page.locator(".nullable").textContent()).toBe("");
+          expect(await page.locator(".count").textContent()).toBe("0");
+          expect(await page.locator("input").inputValue()).toBe("Default");
+          expect(await page.evaluate(() => Reflect.get(window, "defaultReads"))).toEqual(["label"]);
+          await page.goto(server.url + "defaults/");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("Provider");
+          expect(await page.locator(".nullable").textContent()).toBe("");
+          expect(await page.locator(".count").textContent()).toBe("0");
+          expect(await page.locator("input").inputValue()).toBe("Default");
+          expect(await page.evaluate(() => Reflect.get(window, "defaultReads"))).toEqual(["label"]);
           expect(errors).toEqual([]);
         } finally { await browser.close(); }
       });

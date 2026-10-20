@@ -27,12 +27,14 @@ import { parseComponent } from "@nextwebwg/html-next";
 import { renderComponents } from "@nextwebwg/html-next/server";
 
 const counter = parseComponent(`<template component="x-counter"><defs>
+  <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><button type="button" on:click="increment"><span $value="$count"></span></button></template>`);
+</defs><button type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
 
 const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],
+  props: { "#counter": { label: "Visits" } },
   state: { "#counter": { count: 5 } },
 });
 ```
@@ -46,6 +48,13 @@ In the browser, register the same definitions
 with `registerComponentDefinitions()` from `@nextwebwg/html-next/runtime`, then call `lowerDocument()`
 or `observeDocument()`. Hydration adopts the rendered roots; clicking the example counter changes 5
 to 6. A graph from `loadNodeComponents()` supplies definitions through its non-shadowed nodes.
+
+`props` addresses authored invocations before lowering. Values pass through the renderer's typed
+prop boundary before `<state from>` initializes. A supplied `null` uses the declared default while
+retaining caller ownership; `undefined` releases the prop, including an invocation's literal input.
+Omitted props keep their invocation values or implicit defaults. Inputs must name declared props;
+a selector that matches no invocation is an error. Values cross the worker boundary through
+Node's structured clone.
 
 `state` addresses lowered component roots, so selectors should use stable authored IDs. Each value
 must name declared state. Node output matches the browser's declarative baseline before connection:

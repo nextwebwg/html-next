@@ -56,7 +56,9 @@ function exact(value: unknown, seen: Set<object>): boolean {
  * navigates by its HTML instead.
  */
 export function pagePayload(page: Pick<RenderedPage, "status" | "head" | "layers">, assets: PageAssets) {
-  if (page.status !== 200 || !page.layers.every(layer => layer.state === undefined || exact(layer.state, new Set()))) return undefined;
+  if (page.status !== 200 || !page.layers.every(layer =>
+    (layer.state === undefined || exact(layer.state, new Set())) &&
+    (layer.props === undefined || exact(layer.props, new Set())))) return undefined;
   const { lang = "en", canonical } = page.head;
   return { version: 1, head: { lang, ...(canonical === undefined ? {} : { canonical }) },
     styles: assets.styles, modules: assets.modules, layers: page.layers };

@@ -399,6 +399,8 @@ export interface RenderedLayer {
   readonly component: string;
   /** The invocation's prop attributes, in their HTML form, defaults included. */
   readonly attributes: Readonly<Record<string, string>>;
+  /** Typed caller inputs, excluding omitted/undefined props. Absent in older payloads. */
+  readonly props?: Readonly<Record<string, unknown>>;
   /** The loader's initial state, when it returned one. */
   readonly state?: Readonly<Record<string, unknown>>;
 }

@@ -13,6 +13,29 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("preserves omitted defaults and supplied null inputs in SSR and navigation payloads", async () => {
+    const root = await bindingFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/defaults/");
+      expect(page.body).toContain("<h1>Default</h1>");
+      expect(page.body).toContain('<output class="count">0</output>');
+      expect(page.body).not.toContain("Nullable waiting.");
+      expect(page.layers.at(-1)).toMatchObject({ attributes: { label: "Default", count: "0" }, props: { nullable: null, count: null } });
+      const payload = await (await application.fetch(new Request("http://localhost/_htmlkit/pages/defaults/payload.json"))).json();
+      expect(payload.layers.at(-1).props).toEqual({ nullable: null, count: null });
+    } finally { await application.close(); }
+  });
+  it("uses HTML navigation when JSON would change a typed caller input", async () => {
+    const root = await app();
+    await write(root, "extra/signed.html", '<template component="signed-page"><defs><prop name="value" type="number" required>Value.</prop></defs><output>{$value}</output></template>');
+    await write(root, "extra/signed.server.ts", 'export const load = () => ({ props: { value: -0 } });');
+    const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/signed.html", server: "extra/signed.server.ts" }] });
+    try {
+      expect((await application.render("/")).body).toContain(">0</output>");
+      expect((await application.fetch(new Request("http://localhost/_htmlkit/pages/payload.json"))).status).toBe(404);
+    } finally { await application.close(); }
+  });
   it("resolves a component's sibling module without running its browser providers", async () => {
     const root = await bindingFixture(); roots.push(root);
     const application = await createApplication({ root });

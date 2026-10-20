@@ -47,7 +47,18 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
     const authored = new Set<Element>(Array.from(document.head.children));
     document.body.innerHTML = request.html;
     registerComponentDefinitions(request.definitions, document, compileComponentStylesForBuild);
-    lowerDocument(document, { connect: false });
+    const props = new Map<Element, Readonly<Record<string, unknown>>>();
+    for (const [selector, values] of Object.entries(request.props ?? {})) {
+      const elements = document.querySelectorAll(selector);
+      if (elements.length === 0) fail("HR010", `Initial props selector \`${selector}\` matches no component.`);
+      for (const element of elements) {
+        if (!request.definitions.some(definition => definition.contract.tag === element.localName)) {
+          fail("HR010", `Initial props selector \`${selector}\` does not identify a component invocation.`);
+        }
+        props.set(element, { ...props.get(element), ...values });
+      }
+    }
+    lowerDocument(document, { connect: false, props });
     for (const [selector, state] of Object.entries(request.state ?? {})) {
       const elements = document.querySelectorAll(selector);
       if (elements.length === 0) fail("HR010", `Initial state selector \`${selector}\` matches no component.`);

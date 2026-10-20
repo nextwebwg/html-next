@@ -14,6 +14,12 @@ is `src/client.ts` (shared by every page module), `browserSources` in `src/brows
 in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functions:
 `adoptRenderedProps`, `replaceProjectedNode`, and `generatedHost`.
 
+Each payload layer carries the loader's typed `props` alongside its HTML `attributes`. The typed
+inputs retain explicit nulls and omit undefined values, so a declared default remains implicit
+unless the loader supplied the prop. Fresh browser factories and retained layouts use this same
+ownership. Attribute-only payloads remain readable. When JSON cannot carry props or state exactly,
+navigation uses the server HTML and its component continuation records.
+
 ## Native audit
 
 | Need | Native mechanism | Support, October 2026 |

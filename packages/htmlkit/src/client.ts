@@ -34,6 +34,7 @@ interface Payload {
   readonly styles: readonly string[];
   readonly modules: readonly string[];
   readonly layers: readonly { readonly component: string; readonly attributes: Readonly<Record<string, string>>;
+    readonly props?: Readonly<Record<string, unknown>>;
     readonly state?: Readonly<Record<string, unknown>> }[];
 }
 
@@ -101,16 +102,16 @@ async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
   // Innermost first: each layer is projected into its layout's `page` slot, as its invocation is on the server.
   const layers: Element[] = [];
   for (let index = payload.layers.length - 1; index >= 0; index -= 1) {
-    const { component: tag, attributes: authored, state } = payload.layers[index]!;
+    const { component: tag, attributes: authored, props, state } = payload.layers[index]!;
     const component = components.get(tag);
     if (component === undefined) throw new Error(`HTMLKit cannot render <${tag}>: no page module defines it.`);
     const attributes: Record<string, string> = { id: `hk-layer-${index}`, ...index === 0 ? {} : { slot: "page" } };
     const html: Record<string, string> = {};
     for (const [name, value] of Object.entries(authored)) {
       const prop = component[1][name];
-      if (prop === undefined) attributes[name] = value; else html[prop] = value;
+      if (prop === undefined) attributes[name] = value; else if (props === undefined) html[prop] = value;
     }
-    const root = component[0]({ attributes, ...layers.length === 0 ? {} : { slots: { page: [layers[0]] } } }, html);
+    const root = component[0]({ ...props, attributes, ...layers.length === 0 ? {} : { slots: { page: [layers[0]] } } }, props === undefined ? html : undefined);
     if (state !== undefined) {
       const host = runtime.generatedHost(root);
       if (host === undefined) throw new Error(`HTMLKit cannot give layer ${index} its state.`);

@@ -5,6 +5,12 @@
 ### Added
 
 - HTMLKit resolves a component's sibling `.js` or `.ts` module and connects its exported prop providers through the binding library. Browser-only providers work on prerendered pages, supplied values bypass reads, and retained component instances keep their drafts and provider scopes across reconnection. Explicit module pointers and legacy controllers retain their existing behavior; ambiguous companions name the files that need an explicit choice.
+- Node rendering accepts typed caller props before initializing component state. HTMLKit preserves those inputs through prerendering, hydration and client navigation while retaining the HTML attribute form for older payload consumers.
+
+### Fixed
+
+- Omitted prop defaults remain eligible for providers. Explicit null inputs stay caller-owned, use declared defaults when present, and retain that ownership when a layout persists across navigation.
+- Static prop serialization applies declared defaults to null inputs, including zero and false defaults.
 
 ## 1.0.0-alpha.61
 

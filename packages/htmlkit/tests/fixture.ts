@@ -66,10 +66,26 @@ export async function fixture(): Promise<string> {
 export async function bindingFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-bindings-"));
   await write(root, "package.json", '{"name":"htmlkit-bindings-fixture","private":true,"type":"module"}');
+  await write(root, "app/layouts/default.html", `<template component="binding-shell"><defs>
+    <prop name="marker" type="string" default="Shell">Marker.</prop><state name="draft" type="string" from="$marker"></state></defs>
+    <div class="shell"><strong class="shell-value">{$marker}</strong><output class="shell-draft">{$draft}</output><slot name="page"></slot></div></template>`);
+  await write(root, "app/layouts/default.server.ts", `export const load = ({ url }) => ({ props: { marker: url.pathname.endsWith('/defaults/') ? null : 'First' } });`);
+  await write(root, "app/layouts/default.ts", `export const props = { marker: { initial: 'browser', input: () => null,
+    load() { (window.defaultReads ||= []).push('shell'); return 'Unexpected shell read'; } } };`);
   await write(root, "app/pages/index.html", `<link rel="component" href="../components/card.html">
     <link rel="component" href="../components/label.html"><link rel="component" href="../components/behavior.html">
-    <template component="binding-page"><defs><meta name="hk:layout" content="none"></defs>
-    <main><binding-card></binding-card><binding-card product="Fixture"></binding-card><binding-label></binding-label><plain-behavior></plain-behavior></main></template>`);
+    <template component="binding-page">
+    <main><binding-card></binding-card><binding-card product="Fixture"></binding-card><binding-label></binding-label><plain-behavior></plain-behavior><a href="./defaults/">Default inputs</a></main></template>`);
+  await write(root, "app/pages/defaults.html", `<template component="default-inputs"><defs>
+    <prop name="label" type="string" default="Default">Label.</prop>
+    <prop name="nullable" type="string">Nullable fixture.</prop><prop name="count" type="number" default="0">Count.</prop>
+    <state name="draft" type="string" from="$label"></state></defs>
+    <article><h1>{$label}</h1><output class="nullable" $await="$nullable">{$nullable}</output><p $else>Nullable waiting.</p>
+    <output class="count">{$count}</output><input bind:value="$draft"><a href="../">Home</a></article></template>`);
+  await write(root, "app/pages/defaults.server.ts", 'export const load = () => ({ props: { nullable: null, count: null } });');
+  await write(root, "app/pages/defaults.ts", `export const props = Object.fromEntries(['label', 'nullable', 'count'].map(name => [name, {
+    initial: 'browser', input: () => null, load() { (window.defaultReads ||= []).push(name); return name === 'count' ? 42 : 'Provider'; }
+  }]));`);
   await write(root, "app/components/card.html", `<template component="binding-card"><defs>
     <prop name="product" type="string">Product.</prop>
     <state name="query" type="string" value="A"></state><state name="draft" type="string" from="$product"></state>
