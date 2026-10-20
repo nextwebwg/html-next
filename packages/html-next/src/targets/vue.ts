@@ -810,7 +810,10 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     if (index < 0) literals.unshift(`class=${attributeValue(styled.join(" "))}`);
     else literals[index] = `class="${styled.join(" ")} ${literals[index]!.slice('class="'.length)}`;
   }
-  attributes.unshift(...directives, ...literals);
+  // An input snapshot reads the element's own loop and branch names, so the element's structural
+  // directives move to a template around the snapshots, which then sit inside their scope.
+  const outer = inputSnapshots.length > 0 ? directives : [];
+  attributes.unshift(...(outer.length > 0 ? [] : directives), ...literals);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const outerPreformatted = context.preformatted;
@@ -845,7 +848,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     : renderedChildren;
   // An empty component closes itself, as Vue's style guide has it.
   const markup = component && children === "" ? `${open.slice(0, -1)} />` : `${open}${children}</${name}>`;
-  return inputSnapshots.reduceRight((body, input) => `<template v-for=${bound(`${input.name} in [${input.source}]`)}>${body}</template>`, markup);
+  const snapshotted = inputSnapshots.reduceRight((body, input) => `<template v-for=${bound(`${input.name} in [${input.source}]`)}>${body}</template>`, markup);
+  return outer.length === 0 ? snapshotted : `<template ${outer.join(" ")}>${snapshotted}</template>`;
 }
 
 function handlerSource(handler: HandlerDeclaration, name: string, names: Names, events: readonly EventDeclaration[], context: Context): string {
@@ -1288,7 +1292,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) =>
         `${propKey(prop.name)}: ${"default" in prop.contract ? defaultSource(prop.contract.default) : "null"}`).join(", ")} };`,
       `const inputTracking = vuePropInputs(acceptedProps, { ${target.props.filter(prop => "default" in prop.contract).map(prop => `${propKey(prop.name)}: ${defaultSource(prop.contract.default)}`).join(", ")} }, (name, value, source, values) => { switch (name) {`,
-      ...target.props.map(prop => `  case ${quote(prop.name)}: return checkPropInput(value, ${selectedNode(prop, "values")}, false, ${!prop.contract.required});`),
+      ...target.props.map(prop => `  case ${quote(prop.name)}: return checkPropInput(value, ${selectedNode(prop, "values")}, true, ${!prop.contract.required});`),
       "  default: return { ok: false }; } }, () => { void checkedProps.value; });",
       "const propInputs = inputTracking.inputs;",
       "const checkedProps = computed(() => { void inputTracking.version.value; return ({",

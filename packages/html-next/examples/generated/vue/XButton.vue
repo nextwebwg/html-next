@@ -51,9 +51,9 @@ const inputTracking = vuePropInputs(
   (name, value, source, values) => {
     switch (name) {
       case 'size':
-        return checkPropInput(value, { kind: 'terminal', name: 'keyword' }, false, true)
+        return checkPropInput(value, { kind: 'terminal', name: 'keyword' }, true, true)
       case 'variant':
-        return checkPropInput(value, { kind: 'terminal', name: 'keyword' }, false, true)
+        return checkPropInput(value, { kind: 'terminal', name: 'keyword' }, true, true)
       default:
         return { ok: false }
     }

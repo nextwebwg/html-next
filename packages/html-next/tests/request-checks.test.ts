@@ -61,7 +61,7 @@ describe("compiled request checks", () => {
 
   it("are written out for the declared type, without the full type checker", () => {
     assert.equal(valueCheckSource(parseTypeExpression("list(object({ id: string, label?: string }))")),
-      '(v0) => (Array.isArray(v0) && v0.every((v1) => (plainObject(v1) && "id" in v1 && typeof v1["id"] == "string" && (!("label" in v1) || typeof v1["label"] == "string") && Object.keys(v1).every((v2) => ["id","label"].includes(v2)))))');
+      '(v0) => (Array.isArray(v0) && v0.every((v1) => (plainObject(v1) && "id" in v1 && typeof v1["id"] == "string" && (v1["label"] == null || typeof v1["label"] == "string") && Object.keys(v1).every((v2) => ["id","label"].includes(v2)))))');
     // A separated list's text form defers to its full check.
     assert.match(valueCheckSource(parseTypeExpression("keyword+")), /^detailCheck\(checkSeparated\(/);
   });
