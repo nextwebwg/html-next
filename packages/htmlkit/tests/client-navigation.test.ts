@@ -470,6 +470,80 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
   }
 });
 
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation between pages that define a tag differently", () => {
+  let root: string;
+  let preview: ApplicationServer;
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "htmlkit-redefined-"));
+    await write(root, "package.json", '{"type":"module"}');
+    // A versioned site: the current pages and the archived v1 pages each define <demo-counter>.
+    await write(root, "app/layouts/default.html", `<template component="site-shell"><div class="shell"><slot name="page"></slot><div class="spacer"></div>
+      <p><a id="home" href="/">Home</a> <a id="guide" href="/guide/">Guide</a> <a id="v1" href="/v/v1/">V1</a> <a id="v1-guide" href="/v/v1/guide/">V1 guide</a></p></div>
+      <style>.spacer { height: 3000px; }</style></template>`);
+    await write(root, "components/counter.html", '<template component="demo-counter"><b class="counter">current counter</b></template>');
+    await write(root, "components/v1/counter.html", '<template component="demo-counter"><i class="counter">v1 counter</i></template>');
+    const pageOf = (path: string, title: string, counter: string) => write(root, `app/pages/${path}`,
+      `<link rel="component" href="@/components/${counter}"><template component="${title.toLowerCase().replace(" ", "-")}-page"><defs><title>${title}</title></defs><article><h1>${title}</h1><demo-counter></demo-counter></article></template>`);
+    await pageOf("index.html", "Home", "counter.html");
+    await pageOf("guide.html", "Guide", "counter.html");
+    await pageOf("v/v1/index.html", "V1 home", "v1/counter.html");
+    await pageOf("v/v1/guide.html", "V1 guide", "v1/counter.html");
+    await buildApplication({ root });
+    preview = await previewApplication({ root, port: 0 });
+  }, 120_000);
+  afterAll(async () => {
+    await preview?.close();
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  for (const [name, type] of engines) {
+    it(`${name} loads a page as a document when its definition conflicts, and in place when it does not`, async () => {
+      const browser = await type.launch({ headless: true });
+      try {
+        const { page, errors } = await open(await browser.newContext());
+        const logged: string[] = [];
+        page.on("console", message => { if (["error", "warning"].includes(message.type())) logged.push(message.text()); });
+        const shows = async (title: string, path: string, counter: string) => {
+          await settled(page, title);
+          expect([new URL(page.url()).pathname, await page.locator(".counter").textContent()]).toEqual([path, counter]);
+        };
+        await page.goto(preview.url);
+        await page.waitForFunction(() => document.readyState === "complete");
+        await mark(page);
+        // Pages with the same definitions render in place.
+        await page.locator("#guide").click();
+        await shows("Guide", "/guide/", "current counter");
+        expect(await marked(page)).toBe(true);
+        // A page whose <demo-counter> conflicts loads as a document, at the top, as a new entry.
+        const entries = await page.evaluate(() => history.length);
+        await page.evaluate(() => scrollTo(0, 1500));
+        await page.evaluate(() => document.querySelector<HTMLAnchorElement>("#v1")!.click());
+        await shows("V1 home", "/v/v1/", "v1 counter");
+        expect([await marked(page), await page.evaluate(() => [scrollY, history.length])]).toEqual([false, [0, entries + 1]]);
+        // Its own pages render in place in that document.
+        await mark(page);
+        await page.locator("#v1-guide").click();
+        await shows("V1 guide", "/v/v1/guide/", "v1 counter");
+        expect(await marked(page)).toBe(true);
+        // Back and forward cross between the two documents.
+        await page.goBack();
+        await shows("V1 home", "/v/v1/", "v1 counter");
+        expect(await marked(page)).toBe(true);
+        await page.goBack();
+        await shows("Guide", "/guide/", "current counter");
+        await page.goForward();
+        await shows("V1 home", "/v/v1/", "v1 counter");
+        await page.goForward();
+        await shows("V1 guide", "/v/v1/guide/", "v1 counter");
+        // And back to the current pages, which conflict with this document's in turn.
+        await page.locator("#home").click();
+        await shows("Home", "/", "current counter");
+        expect([await marked(page), logged, errors]).toEqual([false, [], []]);
+      } finally { await browser.close(); }
+    }, 60_000);
+  }
+});
+
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation to server-rendered pages", () => {
   let root: string;
   let server: ApplicationServer;

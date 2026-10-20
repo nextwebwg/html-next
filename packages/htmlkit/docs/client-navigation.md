@@ -63,7 +63,7 @@ Not used:
 - **History API fallback** (`pushState` and `popstate` with click interception). Every engine now
   ships the Navigation API, so older browsers keep document navigation, which is correct, only slower.
 - **`precommitHandler`** would delay the URL change until the next page is ready, as Nuxt does. Safari
-  26.2 lacks it, so the URL commits first and a failure reloads the committed URL.
+  26.2 lacks it, so the URL commits first and a failure loads the committed URL as a document.
 - **Speculation Rules** prefetch only for document navigations and cannot feed `fetch`.
 
 The browser does not announce a same-document navigation. As Nuxt (`<NuxtRouteAnnouncer>`) and
@@ -75,8 +75,11 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
 1. **One registry per document.** Page modules call `page()` in the shared `client.ts`, which
    registers each page's compiled components by tag, adopts the first page's server DOM, and starts
    navigation once. Pages that share a component share its compiled module, so a tag keeps one
-   factory per document; a page that defines a tag differently throws, as HTML Next's `HR001` does,
-   which falls back to a document load.
+   factory per document; a page that defines a tag differently throws when navigation imports its
+   module, as HTML Next's `HR001` does, before anything renders. Only a document of its own can hold
+   that definition, so the page loads as one directly, without the HTML fallback, and logs nothing.
+   A versioned documentation site whose archived pages define their own `<demo-counter>` takes this
+   path between versions and stays in place within each.
 2. **Which layers persist, and their new props.** Layers carry `data-hk-layer="N"`; older output's
    `hk-layer-N` IDs also remain readable. An authored `id` does not identify the layer. From the
    outermost, a layer whose root renders the same component (`data-component`) as the next page's
@@ -189,8 +192,13 @@ attributes in its own order, which the parity test sorts.
 
 The whole-HTML fetch from the first version of this design remains. HTMLKit uses it when the payload
 is missing or fails, when the module fails to load, or when rendering throws. If the HTML cannot
-render in place either (a missing page, a failed fetch, a page without layers, or a conflicting
-definition), the page loads as a document. Every opt-out is unchanged.
+render in place either (a missing page, a failed fetch, or a page without layers), or the page
+defines a tag differently, the page loads as a document. Every opt-out is unchanged.
+
+That document load is `navigation.navigate(url, { history: "replace" })`, which HTMLKit leaves
+native: it takes the committed entry's place, so history has one entry for the visit, the page starts
+at its top or fragment as any document load does, and back and forward cross between the documents
+natively. `location.reload()` would keep the previous page's scroll position for the new one.
 
 Alternatives considered:
 

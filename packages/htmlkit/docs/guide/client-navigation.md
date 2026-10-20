@@ -63,9 +63,12 @@ Put `data-hk-reload` on a link, or on an element around several links, to load t
 </nav>
 ```
 
+A page that defines a component differently from one already on the screen, such as an archived
+docs version's own copy of a component, loads in full: one page can't hold both definitions. Back
+and forward move between the two pages as usual.
+
 If a page's data file can't be used, HTMLKit fetches the page's HTML instead. If that can't be
-shown in place either, the page loads in full. That happens when it's missing, when the request
-fails, or when it defines a component differently from one already on the screen.
+shown in place either, because the page is missing or the request fails, the page loads in full.
 
 ## Faster clicks
 
