@@ -71,6 +71,52 @@ If both `.js` and `.ts` companions exist, select one explicitly. A file declarin
 also uses explicit module pointers rather than attaching one companion to every component.
 Existing `controller` components keep their legacy lifecycle.
 
+## Browser-only companion modules
+
+Use a `.client.js` or `.client.ts` companion for browser-only imports and readers. HTMLKit imports it
+only in the browser graph. A shared module can keep the selector while the client file supplies the
+reader:
+
+```js
+// product-card.js
+export const props = {
+  product: { input: ({ productId }) => productId },
+};
+```
+
+```js
+// product-card.client.js
+const storage = window.localStorage;
+
+export const props = {
+  product: {
+    load(id) {
+      const product = JSON.parse(storage.getItem(`product:${id}`) ?? 'null');
+      if (product === null) throw new Error('Product unavailable');
+      return product;
+    },
+  },
+};
+```
+
+The browser reader inherits the shared selector and policy. Without a shared reader, server rendering
+leaves the authored loading branch in place. A client file can instead define complete providers
+with both `input` and `load`, with no shared module. Supplied props bypass either form.
+
+When both environments have a reader, HTMLKit prepares the common reader on the server and adopts
+that result in the browser. Later browser reads use the client reader. For a read on every activation,
+set `revalidate: 'activate'` in the client provider.
+
+Both files may export `connect` or a passive `create()` returning `{ props, connect }`. Their connection
+hooks start in common-then-client order for each browser activation, and cleanups run in reverse order.
+An asynchronous setup that finishes after disconnection still releases its resources. Reconnecting a
+retained component reuses both factories' passive state.
+
+An explicit common module pointer also selects companions beside that module. An explicit pointer to
+a `.client` entry selects it as the browser-only module. Keep one `.client.js` or `.client.ts` per stem;
+ambiguous companions produce a diagnostic. Imported package components and legacy controllers keep
+their explicit entry points.
+
 ## Preparing the same provider on the server
 
 Omit `initial: 'browser'` to prepare the provider before HTMLKit writes the page. Its `load` receives
@@ -103,8 +149,9 @@ Closing the application or reloading development sources retires its workers and
 
 A provider may supply a `required` prop, including one deferred with `initial: 'browser'`. While the
 value is unavailable, `$await` selects its loading or error branch; ordinary constraint validity still
-reports a missing required value. A required page or layout input with neither a caller value nor a
-configured provider is an application error.
+reports a missing required value. Server preparation diagnoses a missing page or layout input when its
+common module has no provider for it. With a client companion, the browser owns its suppliers and
+constraint validation; HTMLKit does not execute browser code to predict those suppliers on the server.
 
 ## Page and layout loaders
 

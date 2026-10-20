@@ -97,7 +97,8 @@ export function createProviderModules(root: string, host: ModuleHost) {
       }
       return Promise.all(components.map(async component => {
         const provider = component.module === undefined ? undefined : await cache.get(component.module);
-        return provider === undefined ? component : { ...component, binding: { ...provider, source: `${provider.source}:${component.definition.contract.tag}` } };
+        return provider === undefined ? component : { ...component, binding: { ...provider, source: `${provider.source}:${component.definition.contract.tag}`,
+          ...component.client === undefined ? {} : { client: true } } };
       }));
     },
     close(): Promise<void> {

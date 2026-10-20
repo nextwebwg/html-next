@@ -8,7 +8,66 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { bindingFixture, fixture, universalFixture, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, universalFixture, write } from "./fixture.js";
+
+for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} client companion modules`, () => {
+    let root: string; let server: ApplicationServer;
+    beforeAll(async () => {
+      root = await environmentFixture();
+      if (delivery === "built") {
+        const { outDir } = await buildApplication({ root });
+        server = await startApplication({ outDir, port: 0 });
+      } else server = await devApplication({ root, port: 0 });
+    });
+    afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
+    for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+      it(`${name} composes browser readers and behavior with retained instance ownership`, async () => {
+        const browser = await engine.launch({ headless: true });
+        try {
+          const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+          await unscripted.goto(server.url);
+          expect(await unscripted.getByText("Waiting.", { exact: true }).count()).toBe(1);
+          const page = await browser.newPage(); const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(server.url);
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:A");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.clientConnections === "1");
+          expect(await page.locator("main").getAttribute("data-common-connections")).toBe("1");
+          expect(await page.evaluate(() => Reflect.get(window, "environmentCreates"))).toBe(1);
+          await page.locator("input").fill("Edited");
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:B");
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          await page.evaluate(() => { const root = document.querySelector("main")!; Reflect.set(window, "clientRoot", root); root.remove(); });
+          await expect.poll(() => page.evaluate(() => Reflect.get(window, "environmentHooks"))).toEqual(["common-connect", "client-connect", "client-stop", "common-stop"]);
+          await page.evaluate(() => document.body.prepend(Reflect.get(window, "clientRoot")));
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.clientConnections === "2");
+          expect(await page.locator("main").getAttribute("data-common-connections")).toBe("2");
+          expect(await page.evaluate(() => Reflect.get(window, "environmentCreates"))).toBe(1);
+          expect(await page.evaluate(() => Reflect.get(window, "environmentReads"))).toEqual(["A", "B"]);
+          expect(await page.locator("input").inputValue()).toBe("Edited");
+          await page.goto(server.url + "mixed/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.mixed === "connected");
+          expect(await page.locator("h1").textContent()).toBe("build:A");
+          expect(await page.evaluate(() => Reflect.get(window, "mixedReads"))).toBeUndefined();
+          await page.getByRole("button", { name: "Next" }).click();
+          await expect.poll(() => page.locator("h1").textContent()).toBe("client:B");
+          expect(await page.evaluate(() => Reflect.get(window, "mixedReads"))).toEqual(["B"]);
+          await page.goto(server.url + "only/");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("only:A");
+          await page.goto(server.url + "fixture/");
+          await page.waitForFunction(() => document.querySelector("main")?.dataset.clientConnections === "1");
+          expect(await page.locator("h1").textContent()).toBe("Fixture");
+          expect(await page.evaluate(() => Reflect.get(window, "environmentReads"))).toBeUndefined();
+          await page.goto(server.url + "live/?q=C");
+          await expect.poll(() => page.locator("h1").textContent()).toBe("browser:C");
+          expect(errors).toEqual([]);
+        } finally { await browser.close(); }
+      });
+    }
+  });
+}
 
 for (const delivery of ["development", "built"] as const) {
   describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} universal component providers`, () => {

@@ -74,8 +74,9 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
   for (const { route, graph, assets } of serverGraphs) {
     const layers = [...route.layouts, route];
     const page: ServerPage = { definitions: graph.definitions, assets,
+      clientModules: graph.components.filter(component => component.client !== undefined).map(component => component.definition.contract.tag),
       providers: Object.fromEntries(graph.components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag,
-        { module: module(component.module!, "provider"), source: component.binding.source }]])),
+        { module: module(component.module!, "provider"), source: component.binding.source, ...component.binding.client === undefined ? {} : { client: component.binding.client } }]])),
       layers: graph.layers.map((layer, i) => {
         const loader = layers[i]!.server;
         if (loader !== undefined && typeof loader !== "string") throw new HtmlKitError("A server-rendered page's layout loaders must be files, which the build bundles into its server.", route.component);

@@ -170,6 +170,50 @@ export async function universalFixture(): Promise<string> {
   return root;
 }
 
+/** Browser-only companion modules share public selectors without entering server evaluation. */
+export async function environmentFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "htmlkit-environments-"));
+  await write(root, "package.json", '{"name":"htmlkit-environments-fixture","private":true,"type":"module"}');
+  await write(root, "node_modules/@example/browser-only/package.json", '{"name":"@example/browser-only","type":"module","exports":{".":{"browser":"./browser.js"}}}');
+  await write(root, "node_modules/@example/browser-only/browser.js", 'export const doc = document; export const marker = "CLIENT_GRAPH_ONLY";');
+  for (const [file, tag, module, settings] of [["index", "client-page", "", ""], ["only", "client-only-page", "", ""],
+    ["mixed", "mixed-page", "", ""], ["fixture", "client-fixture-page", ' module="./index.ts"', ""],
+    ["live", "client-live-page", ' module="./index.ts"', '<meta name="hk:render" content="server">']]) {
+    await write(root, `app/pages/${file}.html`, `<template component="${tag}"${module}><defs><meta name="hk:layout" content="none">${settings}
+      <prop name="label" type="string" required>Label.</prop><state name="query" type="string" value="A"></state>
+      <state name="draft" type="string" from="$label"></state><handler name="next"><set name="query" value="B"></set></handler></defs>
+      <main><h1 $await="$label">{$label}</h1><p $error="problem">{$problem.message}</p><p $else>Waiting.</p>
+      <input bind:value="$draft"><button type="button" on:click="next">Next</button><a href="/">Home</a><a href="/mixed/">Mixed</a></main></template>`);
+  }
+  await write(root, "app/pages/index.ts", `export const props = { label: { input: (_, { state }) => state.query } };
+    export function connect(host) {
+      (window.environmentHooks ||= []).push('common-connect');
+      host.root.dataset.commonConnections = String(Number(host.root.dataset.commonConnections || 0) + 1);
+      return () => window.environmentHooks.push('common-stop');
+    }`);
+  await write(root, "app/pages/index.client.ts", `import { doc } from '@example/browser-only';
+    export function create() {
+      window.environmentCreates = (window.environmentCreates || 0) + 1;
+      return { props: { label: { async load(query, { phase }) {
+        if (doc !== document) throw new Error('Wrong document');
+        (window.environmentReads ||= []).push(query); return phase + ':' + query;
+      } } }, connect(host) {
+        (window.environmentHooks ||= []).push('client-connect');
+        host.root.dataset.clientConnections = String(Number(host.root.dataset.clientConnections || 0) + 1);
+        return Promise.resolve(() => window.environmentHooks.push('client-stop'));
+      } };
+    }`);
+  await write(root, "app/pages/only.client.ts", `import { doc } from '@example/browser-only';
+    export const props = { label: { input: (_, { state }) => state.query, load: query => doc === document ? 'only:' + query : 'Wrong document' } };`);
+  await write(root, "app/pages/mixed.ts", `export const props = { label: { input: (_, { state }) => state.query, load: (query, { phase }) => phase + ':' + query } };`);
+  await write(root, "app/pages/mixed.client.ts", `import { marker } from '@example/browser-only';
+    export const props = { label: { load: query => { if (!marker) throw new Error('No browser import'); (window.mixedReads ||= []).push(query); return 'client:' + query; } } };
+    export function connect(host) { host.root.dataset.mixed = 'connected'; }`);
+  await write(root, "app/pages/fixture.server.ts", 'export const load = () => ({ props: { label: "Fixture" } });');
+  await write(root, "app/pages/live.server.ts", 'export const load = ({ url }) => ({ state: { query: url.searchParams.get("q") ?? "A" } });');
+  return root;
+}
+
 /** A rendered head's title text, as HTML. */
 export function titleOf(page: { readonly head: { readonly html: string } }): string | undefined {
   return /<title[^>]*>([^<]*)<\/title>/.exec(page.head.html)?.[1];

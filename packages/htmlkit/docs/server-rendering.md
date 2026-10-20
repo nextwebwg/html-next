@@ -122,6 +122,14 @@ Prepared pages use a rendered-form navigation payload so a fresh navigation adop
 baseline, just as an initial document does. Pages without automatic providers keep the factory
 payload. Neither format transfers private loader data.
 
+Client companions enter only the browser graph. Common provider configuration can omit a reader
+when a client companion supplies it: server preparation marks that provider for browser execution
+without importing the client module. Fully client-only modules leave their required values unavailable
+in server output; their ordinary constraint validity remains missing until the browser supplies them.
+Known caller values and common readers still pass through the same typed checks. The built server
+carries client component tags, never client module imports. Browser imports of `.server` modules are
+rejected, including transitive imports and raw/URL imports.
+
 ## Cost
 
 `pnpm --filter @nextwebwg/htmlkit measure:server` builds a small site and loads `htmlkit start` with

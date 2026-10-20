@@ -379,8 +379,10 @@ export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
   readonly controller?: string;
   readonly module?: string;
+  /** App-owned browser companion, evaluated only in the browser graph. */
+  readonly client?: string;
   /** The server bundle and matching browser completion identity of a prop-provider module. */
-  readonly binding?: { readonly module: string; readonly source: string };
+  readonly binding?: { readonly module: string; readonly source: string; readonly client?: boolean };
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {

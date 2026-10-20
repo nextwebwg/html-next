@@ -7,13 +7,57 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { bindingFixture, fixture, universalFixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, universalFixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("keeps client companions out of server imports while preserving shared selectors and fixtures", async () => {
+    const root = await environmentFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain("Waiting.");
+      expect(page.components.find(component => component.definition.contract.tag === "client-page")).toMatchObject({ client: join(root, "app/pages/index.client.ts") });
+      expect((await application.render("/only/")).body).toContain("Waiting.");
+      expect((await application.render("/mixed/")).body).toContain("<h1>build:A</h1>");
+      expect((await application.render("/fixture/")).body).toContain("<h1>Fixture</h1>");
+      const live = await application.fetch(new Request("http://localhost/live/?q=C"));
+      expect(live.status).toBe(200);
+      expect(await live.text()).toContain("Waiting.");
+    } finally { await application.close(); }
+  });
+  it("bundles client readers only into the browser graph", async () => {
+    const root = await environmentFixture(); roots.push(root);
+    const result = await buildApplication({ root });
+    expect(result.browserInputs.some(file => file.includes("index.client.ts"))).toBe(true);
+    const directory = join(result.outDir, "_htmlkit/server");
+    const files = await readdir(directory, { recursive: true });
+    for (const file of files.filter(file => file.endsWith(".js"))) {
+      expect(await readFile(join(directory, file), "utf8")).not.toMatch(/CLIENT_GRAPH_ONLY|environmentCreates|@example\/browser-only/);
+    }
+  });
+  for (const query of ["", "?raw", "?url"]) it(`refuses a client companion's transitive import of a private server module${query}`, async () => {
+    const root = await environmentFixture(); roots.push(root);
+    await write(root, "app/lib/secret.server.ts", 'export const secret = "SERVER_GRAPH_SECRET";');
+    await write(root, "app/pages/only.client.ts", `import ${query === "" ? "{ secret }" : "secret"} from "../lib/secret.server.ts${query}"; export const props = { label: { input: () => null, load: () => secret } };`);
+    await expect(buildApplication({ root })).rejects.toThrow(/secret\.server\.ts.*server-only|server-only.*secret\.server\.ts/s);
+  });
+  it("diagnoses ambiguous client companions and honors an explicitly selected client entry", async () => {
+    const root = await environmentFixture(); roots.push(root);
+    await write(root, "app/pages/only.client.js", "export function connect() {};");
+    const application = await createApplication({ root });
+    try {
+      await expect(application.render("/only/")).rejects.toThrow(/ambiguous.*only\.client\.js.*only\.client\.ts/);
+      const source = await readFile(join(root, "app/pages/only.html"), "utf8");
+      await write(root, "app/pages/only.html", source.replace('component="client-only-page"', 'component="client-only-page" module="./only.client.ts"'));
+      const page = await application.render("/only/");
+      expect(page.components.find(component => component.definition.contract.tag === "client-only-page")).toMatchObject({ client: join(root, "app/pages/only.client.ts") });
+      expect(page.body).toContain("Waiting.");
+    } finally { await application.close(); }
+  });
   it("keeps local type exports out of server preparation", async () => {
     const root = await universalFixture(); roots.push(root);
     await write(root, "app/components/browser-only.ts", `import { doc } from "@example/browser-only";

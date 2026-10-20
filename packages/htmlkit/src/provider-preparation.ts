@@ -1,16 +1,17 @@
-import type { BindingModule, BindingPreparation } from "@nextwebwg/html-next/bindings";
+import type { BindingPreparation } from "@nextwebwg/html-next/bindings";
 import type { ComponentHost } from "@nextwebwg/html-next/runtime";
 import type { ServerPreparationContext } from "@nextwebwg/html-next/server";
 import { componentInputs } from "@nextwebwg/html-next/inputs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
+import { componentModule, type ComponentBindingModule } from "./component-module.js";
 
 const packaged = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/bindings"));
 const source = packaged.replace(/[/\\]dist[/\\]bindings\.js$/, "/src/bindings.ts");
 export const bindingsModule = pathToFileURL(fileURLToPath(import.meta.url).endsWith(".ts") && existsSync(source) ? source : packaged).href;
 export const preparationModule = import.meta.url;
 
-export interface ProviderModule { readonly module: string; readonly source: string }
+export interface ProviderModule { readonly module: string; readonly source: string; readonly client?: boolean }
 export interface ProviderPreparationData {
   readonly phase: "build" | "request";
   readonly modules: Readonly<Record<string, ProviderModule>>;
@@ -21,7 +22,7 @@ export async function prepare({ document, host, flush, signal, data: input }: Se
   const data = input as ProviderPreparationData;
   const { bindModule } = await import(bindingsModule) as typeof import("@nextwebwg/html-next/bindings");
   const modules = new Map(await Promise.all(Object.entries(data.modules).map(async ([tag, descriptor]) =>
-    [tag, { descriptor, binding: bindModule(await import(descriptor.module) as BindingModule<ComponentHost>) }] as const)));
+    [tag, { descriptor, binding: bindModule(componentModule(await import(descriptor.module) as ComponentBindingModule<ComponentHost>, {}, descriptor.client)) }] as const)));
   const known = new WeakSet<object>();
   const owned: { host: ComponentHost; tag: string; scope: BindingPreparation }[] = [];
   const dispose = (): void => { for (const entry of owned.toReversed()) entry.scope.dispose(); };

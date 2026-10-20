@@ -207,6 +207,12 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       carriers.set(node.url, carrier);
     }
     const siblings = new Map<string, Promise<string | undefined>>();
+    const sibling = (file: string, suffix = ""): string | undefined => {
+      const stem = file.slice(0, -extname(file).length) + suffix;
+      const candidates = [stem + ".js", stem + ".ts"].filter(path => existsSync(path));
+      if (candidates.length > 1) throw new HtmlKitError(`${suffix === "" ? "Component" : "Client"} sibling module is ambiguous: ${candidates.map(path => basename(path)).join(", ")}; ${suffix === "" ? "select one with an explicit module attribute" : "keep one client companion"}.`, file);
+      return candidates[0];
+    };
     const companion = (url: string): Promise<string | undefined> => {
       let found = siblings.get(url);
       if (found !== undefined) return found;
@@ -214,24 +220,32 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
         const carrier = carriers.get(url)!;
         if (carrier.count > 1 && carrier.explicit) return undefined;
         const file = fileURLToPath(url);
-        const stem = file.slice(0, -extname(file).length);
-        const candidates = [stem + ".js", stem + ".ts"].filter(path => existsSync(path));
-        if (candidates.length > 1) throw new HtmlKitError(`Component sibling module is ambiguous: ${candidates.map(path => basename(path)).join(", ")}; select one with an explicit module attribute.`, file);
-        if (candidates.length === 0) return undefined;
+        const found = sibling(file);
+        if (found === undefined) return undefined;
         if (carrier.count > 1) {
           throw new HtmlKitError("A sibling module is ambiguous for a file declaring several components; set module on the template it belongs to.", file);
         }
-        return candidates[0];
+        return found;
       })();
       siblings.set(url, found);
       return found;
     };
     const components = await providers.resolve(await Promise.all([...loaded.nodes.values()].map(async node => {
-      const module = node.module === undefined
+      let module = node.module === undefined
         ? node.controller !== undefined || node.imported || !node.url.startsWith("file:") ? undefined : await companion(node.url)
         : fileURLToPath(node.module.url);
+      let client: string | undefined;
+      if (node.controller === undefined && !node.imported && node.url.startsWith("file:")) {
+        const carrier = carriers.get(node.url)!;
+        if (module !== undefined && /\.client\.[jt]s$/.test(module)) { client = module; module = undefined; }
+        else if (module !== undefined || !carrier.explicit) {
+          client = sibling(module ?? fileURLToPath(node.url), ".client");
+          if (client !== undefined && module === undefined && carrier.count > 1) throw new HtmlKitError("A client sibling is ambiguous for a file declaring several components; set module on the template it belongs to.", fileURLToPath(node.url));
+        }
+      }
       return { definition: withoutSettings(node.definition), styles: compileComponentStylesForBuild(node.definition.css, node.definition),
         ...(node.controller === undefined ? {} : { controller: fileURLToPath(node.controller.url) }),
+        ...(client === undefined ? {} : { client }),
         ...(module === undefined ? {} : { module }) };
     })));
     return { components, definitions: components.map(component => component.definition), layers: layers.map((layer, i) => ({ definition: definitions[i]!,
@@ -269,6 +283,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     const { layers, definitions, components } = await graph(route);
     const rendered = await renderRoute({ base: config.base, canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, layers,
       definitions, providers: Object.fromEntries(components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag, component.binding]])),
+      clientModules: components.filter(component => component.client !== undefined).map(component => component.definition.contract.tag),
       render: renderer.render, scripts, ...(await site().then(site => site === undefined ? {} : { policy: site })), navigation, ...(failure === undefined ? {} : { failure }),
       ...(action === undefined ? {} : { action }) });
     if (rendered.kind === "redirect") return redirected(url.pathname, rendered.location, rendered.status, rendered.headers);

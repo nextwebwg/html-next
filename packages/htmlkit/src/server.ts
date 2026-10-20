@@ -204,6 +204,7 @@ export interface RenderInput {
   /** Every component the layers use, for HTML Next's renderer. */
   readonly definitions: readonly ComponentDefinition[];
   readonly providers?: Readonly<Record<string, ProviderModule>>;
+  readonly clientModules?: readonly string[];
   readonly render?: ServerRenderer["render"];
   readonly scripts: readonly string[];
   /** The site's Content Security Policy, unless csp is false. */
@@ -313,9 +314,10 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     results.push(result);
     parent = Object.freeze({ ...parent, ...result.data });
     // Checked against the layer's own component, which a prop's diagnostic names.
-    const names: string[] | undefined = input.providers?.[layer.definition.contract.tag] === undefined ? undefined : [];
+    const client = input.clientModules?.includes(layer.definition.contract.tag) ?? false;
+    const names: string[] | undefined = input.providers?.[layer.definition.contract.tag] === undefined && !client ? undefined : [];
     attributes.push(invocationAttributes(layer.definition, result, names));
-    if (names !== undefined && names.length > 0) required.push({ tag: layer.definition.contract.tag, selector: `#hk-layer-${index}`, names });
+    if (!client && names !== undefined && names.length > 0) required.push({ tag: layer.definition.contract.tag, selector: `#hk-layer-${index}`, names });
   }
   const state: Record<string, Readonly<Record<string, unknown>>> = {};
   const props: Record<string, Readonly<Record<string, unknown>>> = {};
@@ -496,6 +498,7 @@ export interface ServerData {
 }
 /** A route the server renders: each layer's component and loader module, every component they use, and their browser delivery. */
 export interface ServerPage {
+  readonly clientModules?: readonly string[];
   readonly providers?: Readonly<Record<string, ProviderModule>>;
   readonly layers: readonly { readonly definition: ComponentDefinition; readonly module?: string; readonly origin: string }[];
   readonly definitions: readonly ComponentDefinition[];
@@ -562,6 +565,7 @@ export async function serverApplication(entry: string, data: ServerData, modules
   const render = (page: ServerPage, route: NavigationRoute, params: Params, url: URL, request: Request | undefined, signal: AbortSignal, failure?: Failure, action?: PageAction) =>
     renderRoute({ base, canonicalOrigin: data.canonicalOrigin, route, params, url, ...(request === undefined ? {} : { request }), signal, definitions: page.definitions, render: renderer.render,
       providers: Object.fromEntries(Object.entries(page.providers ?? {}).map(([tag, provider]) => [tag, { ...provider, module: new URL(`./${provider.module}.js`, entry).href }])),
+      clientModules: page.clientModules ?? [],
       scripts: data.scripts, ...(data.policy === undefined ? {} : { policy: data.policy }), navigation, ...(failure === undefined ? {} : { failure }), ...(action === undefined ? {} : { action }),
       layers: page.layers.map(layer => ({ ...layer, module: () => layer.module === undefined ? Promise.resolve({}) : load<ServerModule>(layer.module) })) });
   // A failure answers with app/error.html, rendered as the build would render it, and a safe message; the error goes to the console.
