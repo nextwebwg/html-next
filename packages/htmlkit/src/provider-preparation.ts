@@ -1,7 +1,6 @@
 import type { BindingPreparation } from "@nextwebwg/html-next/bindings";
 import type { ComponentHost } from "@nextwebwg/html-next/runtime";
 import type { ServerPreparationContext } from "@nextwebwg/html-next/server";
-import { componentInputs } from "@nextwebwg/html-next/inputs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { componentModule, type ComponentBindingModule } from "./component-module.js";
@@ -10,6 +9,9 @@ import { readChannel } from "./read-channel.js";
 const packaged = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/bindings"));
 const source = packaged.replace(/[/\\]dist[/\\]bindings\.js$/, "/src/bindings.ts");
 export const bindingsModule = pathToFileURL(fileURLToPath(import.meta.url).endsWith(".ts") && existsSync(source) ? source : packaged).href;
+const packagedInputs = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/inputs"));
+const sourceInputs = packagedInputs.replace(/[/\\]dist[/\\]component-inputs\.js$/, "/src/component-inputs.ts");
+const inputsModule = pathToFileURL(fileURLToPath(import.meta.url).endsWith(".ts") && existsSync(sourceInputs) ? sourceInputs : packagedInputs).href;
 export const preparationModule = import.meta.url;
 
 export interface ProviderModule { readonly module: string; readonly source: string; readonly client?: boolean; readonly readers?: readonly string[] }
@@ -22,6 +24,7 @@ export interface ProviderPreparationData {
 export async function prepare({ document, host, flush, signal, port, data: input }: ServerPreparationContext): Promise<() => void> {
   const data = input as ProviderPreparationData;
   const library = await import(bindingsModule) as typeof import("@nextwebwg/html-next/bindings");
+  const { componentInputs } = await import(inputsModule) as typeof import("@nextwebwg/html-next/inputs");
   const remote = port === undefined ? undefined : readChannel(port, library);
   const modules = new Map(await Promise.all(Object.entries(data.modules).map(async ([tag, descriptor]) => {
     const props = Object.fromEntries((descriptor.readers ?? []).map(name => [name, { load: (input: unknown, operation: import("@nextwebwg/html-next/bindings").BindingOperation) => {

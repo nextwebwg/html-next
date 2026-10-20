@@ -21,7 +21,7 @@
 
 A browser test renders a list whose rows bind a prop through `$each`, a bare boolean attribute and an object prop with a null optional field and with a wrong-typed one, in the live runtime, compiled Vanilla output and converted Vue (type-checked with vue-tsc), React and Svelte components.
 
-- HTMLKit typechecks against workspace input-port sources before package build output exists.
+- HTMLKit typechecks and prepares providers against workspace input-port sources before package build output exists.
 - Live input producers validate output against the current state-selected prop type, matching compiled components and allowing private server preparation of those inputs.
 - Retained HTMLKit layouts adopt compatible prepared provider results without repeating browser reads or resetting drafts. Existing browser attempts for the same input stay current, including live values and failures. A typed `id` prop no longer breaks HTMLKit's layer lookup or required-provider preparation.
 - Components sharing a retained layout's native root adopt their own prepared results after forwarded inputs propagate through the existing reactive scheduler.
