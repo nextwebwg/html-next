@@ -17,6 +17,7 @@
 
 - Live input producers validate output against the current state-selected prop type, matching compiled components and allowing private server preparation of those inputs.
 - Retained HTMLKit layouts adopt compatible prepared provider results without repeating browser reads or resetting drafts. Existing browser attempts for the same input stay current, including live values and failures. A typed `id` prop no longer breaks HTMLKit's layer lookup or required-provider preparation.
+- Components sharing a retained layout's native root adopt their own prepared results after forwarded inputs propagate through the existing reactive scheduler.
 - HTMLKit lets configured providers supply required props before diagnosing missing inputs, including reads deferred to the browser, while preserving errors for unrelated unsupplied required inputs. Type-only local exports do not turn browser behavior into a server provider, and source execution recognizes module URLs with loader query strings.
 - Omitted prop defaults remain eligible for providers. Explicit null inputs stay caller-owned, use declared defaults when present, and retain that ownership when a layout persists across navigation.
 - Static prop serialization applies declared defaults to null inputs, including zero and false defaults.

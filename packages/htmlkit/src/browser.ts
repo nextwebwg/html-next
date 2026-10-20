@@ -84,7 +84,7 @@ export async function adoption() {
     const inputs = Object.fromEntries(Object.entries(snapshot.reads).flatMap(([name, read]) =>
       record.revisions?.[name] !== read.revision || !record.inputs[name]?.producer ? [] :
         [[name, { value: record.props[name], status: record.availability?.[name] ?? READY_INPUT }]]));
-    bound.adopt(generatedHost(root), { snapshot, inputs, update });
+    bound.adopt(generatedHost(root, ${JSON.stringify(component.definition.contract.tag)}), { snapshot, inputs, update });
   };
 }
 `}
@@ -119,7 +119,7 @@ export async function adoption() {
   // which client navigation renders a payload's layers with.
   const registered = components.map(({ definition, binding }, index) => `${JSON.stringify(definition.contract.tag)}: [c${index}, ${JSON.stringify(Object.fromEntries(
     Object.keys(definition.contract.props).map((name) => [name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase(), name])))}${binding === undefined ? "" : `, b${index}`}]`);
-  const functions = "adoptRenderedProps, replaceProjectedNode, generatedHost";
+  const functions = "adoptRenderedProps, replaceProjectedNode, generatedHost, flushComponent";
   sources.set(entry, `import { ${functions} } from ${JSON.stringify(runtime)};
 import { page } from ${JSON.stringify(client)};
 ${css.map(file => `import ${JSON.stringify(normalizePath(file))};`).join("\n")}

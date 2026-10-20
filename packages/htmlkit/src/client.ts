@@ -6,7 +6,7 @@
  * Anything the payload cannot render falls back to the page's static HTML, which the components
  * adopt in place. docs/client-navigation.md records the design.
  */
-import type { adoptRenderedProps, generatedHost, replaceProjectedNode } from "@nextwebwg/html-next/generated-runtime";
+import type { adoptRenderedProps, flushComponent, generatedHost, replaceProjectedNode } from "@nextwebwg/html-next/generated-runtime";
 import type { BindingSnapshot } from "@nextwebwg/html-next/bindings";
 
 /** Consume only this component's read identities; the renderer adopts accepted values itself. */
@@ -27,6 +27,7 @@ export interface Runtime {
   readonly adoptRenderedProps: typeof adoptRenderedProps;
   readonly replaceProjectedNode: typeof replaceProjectedNode;
   readonly generatedHost: typeof generatedHost;
+  readonly flushComponent: typeof flushComponent;
 }
 export interface ClientOptions {
   readonly base: string;
@@ -321,8 +322,8 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       await Promise.all([...loading, ...modules]);
       const adopting = [];
       for (let index = 0; index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component"); index += 1) {
-        const tag = layer(document, index)!.getAttribute("data-component")!.split(" ")[0]!;
-        adopting.push(components.get(tag)?.[2]?.());
+        const tags = layer(document, index)!.getAttribute("data-component")!.split(/\s+/);
+        adopting.push(Promise.all(tags.map(tag => components.get(tag)?.[2]?.())));
       }
       const adopters = await Promise.all(adopting);
       const commit = () => {
@@ -336,11 +337,13 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
         // and controllers, and take the new rendering's props. The page layer is always replaced.
         let index = 0;
         while (index < layers.length - 1 && layer(document, index)?.getAttribute("data-component") === layers[index]!.getAttribute("data-component")) {
-          const root = layer(document, index)!;
-          const update = () => runtime.adoptRenderedProps(root, layers[index]!);
-          const adoptPrepared = adopters[index];
-          if (adoptPrepared === undefined) update();
-          else adoptPrepared(root, layers[index]!, update);
+          const update = () => runtime.adoptRenderedProps(layer(document, index)!, layers[index]!);
+          for (const [at, adoptPrepared] of adopters[index]!.entries()) {
+            const applyCaller = at === 0 ? update : () => {};
+            if (adoptPrepared === undefined) applyCaller();
+            else adoptPrepared(layer(document, index)!, layers[index]!, applyCaller);
+            runtime.flushComponent(layer(document, index)!);
+          }
           index += 1;
         }
         // A page sits in its layout's slot; the layout projects the new page as it did the old one.

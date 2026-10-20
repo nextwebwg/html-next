@@ -15,8 +15,8 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
-  it("prepares a layout provider when a typed id prop supplies the native root id", async () => {
-    const root = await retainedProviderFixture(); roots.push(root);
+  it.each([false, true])("prepares a layout provider when a typed id prop supplies the native root id (delegated: %s)", async delegated => {
+    const root = await retainedProviderFixture(delegated); roots.push(root);
     const application = await createApplication({ root, services: { read: (id: string) => "Product:" + id } });
     try {
       const page = await application.render("/");

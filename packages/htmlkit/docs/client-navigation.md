@@ -11,8 +11,8 @@ The owner's direction was Nuxt-like routing, with Next.js as a second reference,
 data payloads with the whole-HTML fetch as the fallback. Pages ship their components compiled to
 direct DOM code (`generateComponent(…, { hydrate: true })`), not the live runtime. The implementation
 is `src/client.ts` (shared by every page module), `browserSources` in `src/browser.ts`, `pagePayload`
-in `src/document.ts`, and three `@nextwebwg/html-next/generated-runtime` functions:
-`adoptRenderedProps`, `replaceProjectedNode`, and `generatedHost`.
+in `src/document.ts`, and `@nextwebwg/html-next/generated-runtime` functions:
+`adoptRenderedProps`, `replaceProjectedNode`, `generatedHost`, and `flushComponent`.
 
 Each payload layer carries the loader's typed `props` alongside its HTML `attributes`. The typed
 inputs retain explicit nulls and omit undefined values, so a declared default remains implicit
@@ -92,6 +92,9 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    sources. A current attempt for the same selected input wins over a cached server baseline. No
    factory or connection restarts, local state stays intact, and dependent outputs use the existing
    native input/status tracking rather than a second value store.
+   Components sharing that layout's root use their own tagged hosts and preparation. Between offers,
+   `flushComponent` drains the existing component schedulers from outer owner to inner delegates,
+   so forwarded inputs reflect retained browser state and the new caller props before selection.
 3. **Replacing the page inside a kept layout.** The page is projected into its layout's `page` slot.
    HTML Next records projected nodes when it hydrates, so a plain `replaceWith` left the layout
    projecting the old page: the new page missed `data-slotted` (so the layout's `:slotted()` styles

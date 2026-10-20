@@ -10,11 +10,11 @@ import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, write } from "./fixture.js";
 
-for (const delivery of ["development", "built"] as const) {
-  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} retained layout providers`, () => {
+for (const delegated of [false, true]) for (const delivery of ["development", "built"] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} ${delegated ? "delegated " : ""}retained layout providers`, () => {
     let root: string; let server: ApplicationServer; const requests: string[] = [];
     beforeAll(async () => {
-      root = await retainedProviderFixture();
+      root = await retainedProviderFixture(delegated);
       const services = { read(id: string, { phase }: { phase: string }) {
         if (phase === "request") requests.push(id);
         return phase + ":" + id;

@@ -1630,8 +1630,17 @@ export function adoptInvoke(
 }
 
 /** A compiled root's host, as `getComponentHost` gives it, for code that holds the root. */
-export function generatedHost(element: Element): { readonly root: Element; readonly state: Record<string, unknown> } | undefined {
-  return ((element as RuntimeElement)[lifecycleKey]?.h as { H?: { readonly root: Element; readonly state: Record<string, unknown> } } | undefined)?.H;
+export function generatedHost(element: Element, tag?: string): { readonly root: Element; readonly state: Record<string, unknown> } | undefined {
+  const owner = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  const instance = tag === undefined || owner?.S.g === tag ? owner : owner?.D?.find(entry => entry.S.g === tag);
+  return (instance as { H?: { readonly root: Element; readonly state: Record<string, unknown> } } | undefined)?.H;
+}
+
+/** Drain existing reactive work before an application offers preparation to a retained delegate. */
+export function flushComponent(element: Element): void {
+  const owner = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  owner?.q.flush();
+  for (const delegate of owner?.D ?? []) delegate.q.flush();
 }
 
 /**
