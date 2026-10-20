@@ -1517,7 +1517,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
         <x-panel><h2 slot="title">Title</h2><p>Body</p></x-panel>
         <x-panel></x-panel>
         <x-panel><h2 slot="title" $if="false">Hidden</h2></x-panel>
-        <x-panel><template slot="title"><h2>Inert</h2></template></x-panel>
+        <x-panel><template slot="title"><h2>Deferred</h2></template></x-panel>
       </article></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
@@ -1544,7 +1544,7 @@ void [named, functionSlot, undeclared];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<article data-component="x-app"><section data-component="x-panel"><header><h2 slot="title" data-slotted="">Title</h2></header><main><p data-slotted="">Body</p></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><template slot="title" data-slotted=""><h2>Inert</h2></template></header><main><i>Empty</i></main></section></article>');
+      '<article data-component="x-app"><section data-component="x-panel"><header><h2 slot="title" data-slotted="">Title</h2></header><main><p data-slotted="">Body</p></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><h2 data-slotted="">Deferred</h2></header><main><i>Empty</i></main></section></article>');
   });
 
   it("renders repeated React scoped slots with outlet props and consumer lexical state", async () => {

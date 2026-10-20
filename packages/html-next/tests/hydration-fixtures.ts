@@ -83,6 +83,14 @@ export const definitions = [
     <section><button type="button" on:click="toggle">More</button><div $if="$open"><slot name="details"></slot></div></section></template>`,
   `<template component="ssr-lazy-page"><defs><state name="label" type="string" value="first"></state></defs>
     <article><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="$label"></b></template></ssr-lazy-toggle></article></template>`,
+  `<template component="ssr-forward-panel"><defs><prop name="open" type="boolean" default="false">Open.</prop></defs>
+    <div><section $if="$open"><slot name="details"></slot></section></div></template>`,
+  `<template component="ssr-forward"><defs><state name="open" type="boolean" value="false"></state>
+    <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
+    <article><button type="button" on:click="toggle">Toggle</button><ssr-forward-panel from:open="$open"><template slot="details"><slot name="details"></slot></template></ssr-forward-panel></article></template>`,
+  `<template component="ssr-scoped-forward"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs>
+    <div><ssr-scoped><template slot="row"><slot name="row" from:item="$item"></slot></template></ssr-scoped></div></template>`,
+  `<template component="ssr-scoped-forward-page"><article><ssr-scoped-forward><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-forward></article></template>`,
   `<template component="ssr-row-flows"><defs>
     <state name="items" type="list(object({ label: string, href: string, tags: list(string) }))" value="[]"></state>
     <handler name="change"><set name="items" expr:value="[{ label: 'group', href: '', tags: [] }, { label: 'link', href: '/a/', tags: ['x'] }]"></set></handler>
@@ -140,6 +148,9 @@ export const cases = [
   { name: "scoped slots and keyed projection", html: '<ssr-scoped id="subject"><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped>', state: { rows: ["Ada", "Bea"] } },
   { name: "a consumer component's scoped template and keyed projection", html: '<ssr-scoped-page id="subject"></ssr-scoped-page>', state: {} },
   { name: "$html, a bound select, rows of several nodes and $with", html: '<ssr-assorted id="subject"></ssr-assorted>', state: { choice: "a", pairs: ["y", "x"] } },
+  { name: "a lazy slot forwarded to the inner slot of the same name, open", html: '<ssr-forward id="subject"><b slot="details">Forwarded</b></ssr-forward>', state: { open: true } },
+  { name: "a lazy slot forwarded to the inner slot of the same name, closed", html: '<ssr-forward id="subject"><b slot="details">Forwarded</b></ssr-forward>', state: {} },
+  { name: "a scoped slot forwarded to the inner slot of the same name", html: '<ssr-scoped-forward-page id="subject"></ssr-scoped-forward-page>', state: {} },
   { name: "control flow in rows reading the row's item", html: '<ssr-row-flows id="subject"></ssr-row-flows>',
     state: { items: [{ label: "link", href: "/a/", tags: ["x", "y"] }, { label: "group", href: "", tags: ["z"] }] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },

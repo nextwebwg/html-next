@@ -34,7 +34,7 @@ import {
 } from "./expression.js";
 import { kebabCase, propAttribute } from "./names.js";
 import {
-  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
+  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRangeAt, serverRanges,
   currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
@@ -2756,6 +2756,7 @@ function renderSlot(
   scope: ReactiveScope,
   document: Document,
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   const name = node.name ?? "";
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
@@ -2772,9 +2773,14 @@ function renderSlot(
     }
     const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
     const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
+    // A `<slot>` in the template is the consumer's outlet, so it reads the consumer's projection and
+    // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
     const projectionContext = authored === undefined ? context : Object.create(context, {
       definition: { value: authored.context.definition, enumerable: true },
       refs: { value: authored.context.refs, enumerable: true },
+      projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
+      projectedSlotNames: { value: authored.context.projectedSlotNames, enumerable: true },
+      hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
     }) as RuntimeRenderContext;
     for (const prop of props) {
       ownEffect(context, scope, () => {
@@ -2822,7 +2828,7 @@ function renderSlot(
   };
   // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
   // delimited, so server output can rebuild the same instance.
-  const hydrating = context.hydrationRanges?.shift();
+  const hydrating = context.hydrationRanges?.shift() ?? (candidate === undefined ? undefined : serverRangeAt(candidate, name));
   if (hydrating !== undefined) {
     // Adopt the server's range whole: its markers, and either the consumer's nodes or the fallback.
     if (hydrating.fallback) {
@@ -3058,7 +3064,7 @@ function renderTemplateNode(
     return [text];
   }
   if (node.kind === "slot") return node.flow === undefined
-    ? renderSlot(node, scope, document, context)
+    ? renderSlot(node, scope, document, context, candidate)
     : renderEachRegion(node, scope, document, [], context, candidate);
   return renderNode(node, scope, document, [], context, candidate);
 }
