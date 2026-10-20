@@ -336,13 +336,14 @@ and an explicit (controlled) prop "is authoritative while present".
 
 ### The carrier
 
-Serialization appends an inert `<template>` to each component root holding the projected nodes that no
-slot currently renders. Precedent: `getHTML({ serializableShadowRoots })` writes a `<template
-shadowrootmode>` that the live DOM does not hold, and the parser consumes it. The carrier exists only in
-the serialized form: the lowered live DOM never contains it, and hydration removes it, so selectors see
-the same tree in both paths. It needs no name: template output is always stamped with `data-component`
-and rendered consumer content is always inside a slot range, so an unstamped root-level `<template>`
-outside every range can only be the carrier.
+Serialization appends an inert `<template carrier="<tag>">` to a component root for each component on it
+holding projected nodes that no slot currently renders, outer to inner as the root's `data-component`
+lists them. Precedent: `getHTML({ serializableShadowRoots })` writes a `<template shadowrootmode>` that
+the live DOM does not hold, and the parser consumes it. The carrier exists only in the serialized form:
+the lowered live DOM never contains it, and hydration gives its nodes to the component it names and
+removes it, so selectors see the same tree in both paths. The attribute names the owner because a
+component whose root is another component's shares that root, and each holds its own unrendered
+content; definitions may not author `carrier` on a `<template>` (HT027).
 
 ### Hydration changes (lab prototype)
 

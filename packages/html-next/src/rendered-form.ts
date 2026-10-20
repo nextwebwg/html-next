@@ -219,15 +219,15 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
     }
   };
   collect(Array.from(root.childNodes), ranges);
-  // The carrier is the <template> child that follows a `carrier` mark, outside every range.
+  // The carrier is the <template carrier> child naming this component, outside every range; without
+  // a tag, the outermost component's, which holds what the consumer projected.
+  const owner = tag ?? lineage[0];
   const carrier = Array.from(root.children).find((child): child is HTMLTemplateElement =>
-    child instanceof HTMLTemplateElement && !inRanges.has(child) &&
-    child.previousSibling !== null && serverMark(child.previousSibling)?.target === "carrier");
+    child instanceof HTMLTemplateElement && !inRanges.has(child) && child.getAttribute("carrier") === owner);
   if (ranges.length === 0 && carrier === undefined) return undefined;
   const carried: Node[] = [];
   if (carrier !== undefined && consume) {
     for (const child of Array.from(carrier.content.childNodes)) carried.push(root.ownerDocument.adoptNode(child));
-    carrier.previousSibling!.remove();
     carrier.remove();
   } else if (carrier !== undefined) carried.push(...Array.from(carrier.content.childNodes));
   return { ranges, carried };

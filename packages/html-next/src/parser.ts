@@ -1812,6 +1812,9 @@ function parseElementAtSource(
   // The receiving component declares these names, so a standalone consumer definition cannot
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   // A <template> renders its children among its parent's; a projected one, wherever its slot is.
+  if (tagName === "template" && attr(element, "carrier") !== undefined) {
+    fail("HT027", "`carrier` on a `<template>` is reserved: server output names each component's unrendered slot content with it.", source);
+  }
   const projectedTemplate = tagName === "template" && attr(element, "slot") !== undefined;
   const discardsWhitespace = tagName === "template" && !projectedTemplate ? nodeScope.discardsWhitespace === true : isWhitespaceDiscardingElement(tagName);
   const childScope = projectedTemplate || discardsWhitespace !== (nodeScope.discardsWhitespace === true)

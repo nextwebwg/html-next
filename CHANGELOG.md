@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0-alpha.65
+
+### Breaking
+
+- Server output names each carrier's component: `<template carrier="x-list">` replaces the `<?carrier?>` instruction (and its comment form) before an unnamed `<template>`, as the [Rendered form](https://nextwebwg.org/declarative-components/rendered-form) chapter now defines. A root that several components share, outer to inner in its `data-component` value, gets one carrier for each of them with content no slot renders, and hydration gives each carrier's nodes to the component it names. Output from earlier versions no longer hydrates; render it again.
+- `carrier` on a `<template>` inside a component definition is reserved, and reports HT027.
+
+### Fixed
+
+- A component whose root is the component it forwards a slot to, such as a relay whose root is a list it passes its scoped `row` slot on to, hydrates from Node output in place, through the live runtime and compiled modules. The single carrier held only the outer component's unrendered content, so the inner one lost the relay's `<template slot>` and hydration reported HR007.
+  - A hydration fixture renders that relay in Node and hydrates it in Chromium, Firefox and WebKit, live and through compiled modules.
+
 ## 1.0.0-alpha.64
 
 ### Fixed

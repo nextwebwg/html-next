@@ -2544,7 +2544,8 @@ function renderInstance(
     const invocation = bindInvocation(candidate, node, scope, context, false);
     bindEvents(candidate, node, scope, context, invocation);
     settleInvocation(candidate, invocation);
-    const nested = serverRanges(candidate, false);
+    // On a shared root, this component's own ranges and carrier, not those of the components it delegates to.
+    const nested = serverRanges(candidate, false, node.name);
     const slotOf = (child: TemplateNode): string => child.kind === "element"
       ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
       : "";
@@ -2969,14 +2970,18 @@ export function serializeRenderedForm(container: Element): string {
       const records = Object.fromEntries([compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, compiledRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     }
-    const recorded = instance?.projection?.nodes ?? compiled?.J?.map(([node]) => node);
-    if (recorded === undefined) return;
-    const projected = currentProjection(recorded);
-    const unrendered = projected.filter((node) => !original.contains(node));
-    if (unrendered.length === 0) return;
-    const carrier = clone.ownerDocument.createElement("template");
-    for (const node of unrendered) carrier.content.append(node.cloneNode(true));
-    copies[index]!.append(renderedFormMark(clone.ownerDocument, "carrier", ""), carrier);
+    // One carrier for each component on this root, outer to inner as `data-component` lists them.
+    const owners: [tag: string, nodes: readonly Node[] | undefined][] = instance !== undefined
+      ? [instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, entry.projection?.nodes])
+      : compiled === undefined ? [] : [compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, entry.J?.map(([node]) => node)]);
+    for (const [tag, recorded] of owners) {
+      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node));
+      if (unrendered.length === 0) continue;
+      const carrier = clone.ownerDocument.createElement("template");
+      carrier.setAttribute("carrier", tag);
+      for (const node of unrendered) carrier.content.append(node.cloneNode(true));
+      copy.append(carrier);
+    }
   });
   // Compiled keyed rows are their element, without item markers (owner decision 2a). Hydration
   // adopts rows by their markers, so a region whose first child is not one gets them back here.
@@ -3001,7 +3006,7 @@ export function serializeRenderedForm(container: Element): string {
   const walker = clone.ownerDocument.createTreeWalker(clone, 64 | 128 /* SHOW_PROCESSING_INSTRUCTION | SHOW_COMMENT */);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const mark = serverMark(node);
-    if (mark === undefined || !["start", "end", "marker", "carrier"].includes(mark.target)) continue;
+    if (mark === undefined || !["start", "end", "marker"].includes(mark.target)) continue;
     if ((mark.target === "start" || mark.target === "marker") && !mark.attributes.has("slot")) continue;
     const attributes = [...mark.attributes].map(([name, value]) =>
       `${name}="${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`).join(" ");
