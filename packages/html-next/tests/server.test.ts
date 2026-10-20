@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { availableParallelism } from "node:os";
+import { once, getEventListeners } from "node:events";
+import { MessageChannel } from "node:worker_threads";
 import { describe, it } from "vitest";
 import { JSDOM } from "jsdom";
 
@@ -15,6 +17,131 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  const preparation = new URL("./fixtures/server-prepare.mjs", import.meta.url).href;
+  const product = parseComponent(`<template component="x-prepared"><defs>
+    <prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs>
+    <section><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
+    <x-server-counter $await="$product" from:label="$product"></x-server-counter></section></template>`);
+  it("prepares typed providers in the worker through a private message channel without connecting browser behavior", async () => {
+    const { port1, port2 } = new MessageChannel();
+    const messages: unknown[] = [];
+    const closed = once(port1, "close");
+    port1.on("message", message => { messages.push(message); if (message.event === "read") port1.postMessage("Prepared " + message.query); });
+    const signal = new AbortController().signal;
+    try {
+      const result = await renderComponents('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter], signal,
+        prepare: { module: preparation, data: { query: "A" }, port: port2 } });
+      await closed;
+      assert.match(result.html, /<h1>Prepared A<\/h1>/);
+      assert.match(result.html, /<output>Prepared A<\/output>/);
+      assert.match(result.html, /<h2>Prepared A<\/h2>/);
+      assert.match(result.html, /data-prepared="preparation-test"/);
+      assert.doesNotMatch(result.html, /Waiting\./);
+      assert.deepEqual(messages, [{ event: "start", query: "A" }, { event: "read", query: "A" }, { event: "cleanup", aborted: true }]);
+      assert.equal(getEventListeners(signal, "abort").length, 0);
+    } finally { port1.close(); port2.close(); }
+  });
+  it("cancels queued and noncooperative active renders independently and recovers the worker slot", async () => {
+    setRenderWorkers(1);
+    const { port1, port2 } = new MessageChannel();
+    const active = new AbortController(); const queued = new AbortController();
+    const reason = new Error("Stop active render"); const queuedReason = new Error("Stop queued render");
+    const started = once(port1, "message"); const closed = once(port1, "close");
+    const rendering = renderComponents('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter], signal: active.signal,
+      prepare: { module: preparation, data: { query: "held", wait: true }, port: port2 } });
+    const stopped = assert.rejects(rendering, error => error === reason);
+    try {
+      assert.deepEqual((await started)[0], { event: "start", query: "held" });
+      const queuedPorts = new MessageChannel();
+      try {
+        const queuedClosed = once(queuedPorts.port1, "close");
+        const waiting = renderComponents('<x-server-counter></x-server-counter>', { definitions: [counter], signal: queued.signal,
+          prepare: { module: preparation, data: { query: "queued" }, port: queuedPorts.port2 } });
+        const cancelled = assert.rejects(waiting, error => error === queuedReason);
+        queued.abort(queuedReason); await cancelled; await queuedClosed;
+      } finally { queuedPorts.port1.close(); queuedPorts.port2.close(); }
+      assert.equal(active.signal.aborted, false);
+      active.abort(reason); await stopped; await closed;
+      isolated(await conflicting(4), 4);
+      assert.equal(getEventListeners(active.signal, "abort").length, 0);
+      assert.equal(getEventListeners(queued.signal, "abort").length, 0);
+      await assert.rejects(renderComponents("", { definitions: [], signal: active.signal }), error => error === reason);
+    } finally { active.abort(reason); port1.close(); port2.close(); setRenderWorkers(Math.min(availableParallelism(), 8)); }
+  });
+  it("closes transferred ports after preparation failure or async cleanup failure and keeps rendering", async () => {
+    for (const [data, message] of [[{ fail: true }, "Preparation refused"], [{ cleanupFail: true }, "Cleanup refused"]] as const) {
+      const { port1, port2 } = new MessageChannel();
+      const closed = once(port1, "close");
+      port1.on("message", message => { if (message.event === "read") port1.postMessage("Private result"); });
+      try {
+        await assert.rejects(renderComponents('<x-prepared id="subject"></x-prepared>', { definitions: [product, counter],
+          prepare: { module: preparation, data: { query: "B", ...data }, port: port2 } }), new RegExp(message));
+        await closed;
+        isolated(await conflicting(4), 4);
+      } finally { port1.close(); port2.close(); }
+    }
+    const { port1, port2 } = new MessageChannel();
+    const closed = once(port1, "close");
+    try {
+      await assert.rejects(renderComponents("", { definitions: [], url: "invalid URL", prepare: { module: preparation, port: port2 } }), /Invalid URL/);
+      await closed;
+      isolated(await conflicting(4), 4);
+    } finally { port1.close(); port2.close(); }
+  });
+  it("closes active and queued preparations together without dispatching another job during shutdown", async () => {
+    setRenderWorkers(1);
+    const active = new MessageChannel(); const queued = new MessageChannel();
+    const cancel = new AbortController();
+    const started = once(active.port1, "message");
+    const closed = Promise.all([once(active.port1, "close"), once(queued.port1, "close")]);
+    const rendering = renderComponents("", { definitions: [], prepare: { module: preparation, port: active.port2, data: { wait: true } } });
+    const stopped = assert.rejects(rendering, /exited without a result/);
+    let status = "pending";
+    let waiting: Promise<unknown> | undefined;
+    try {
+      await started;
+      waiting = renderComponents("", { definitions: [], signal: cancel.signal,
+        prepare: { module: preparation, port: queued.port2, data: { wait: true } } }).then(
+        () => { status = "resolved"; }, error => { status = "rejected"; return error; });
+      await closeRenderWorkers(); await stopped;
+      assert.equal(status, "rejected");
+      assert.match(String(await waiting), /exited without a result/);
+      await closed;
+      assert.equal(getEventListeners(cancel.signal, "abort").length, 0);
+      isolated(await conflicting(4), 4);
+    } finally {
+      cancel.abort(); await waiting; await closeRenderWorkers();
+      active.port1.close(); active.port2.close(); queued.port1.close(); queued.port2.close();
+      setRenderWorkers(Math.min(availableParallelism(), 8));
+    }
+  });
+  it("rejects invalid preparation modules and non-cloneable input without retaining a worker slot", async () => {
+    setRenderWorkers(1);
+    try {
+      for (const [source, message] of [
+        ["export default () => {}", "must export a named prepare function"],
+        ["export const prepare = () => 5", "must return cleanup or undefined"],
+        ["throw new Error('Module refused')", "Module refused"],
+      ]) {
+        await assert.rejects(renderComponents("", { definitions: [], prepare: { module: "data:text/javascript," + encodeURIComponent(source!) } }), new RegExp(message!));
+        isolated(await conflicting(4), 4);
+      }
+      for (const aborted of [false, true]) {
+        const { port1, port2 } = new MessageChannel();
+        const closed = once(port1, "close"); const controller = new AbortController();
+        const reason = new Error("Already aborted");
+        if (aborted) controller.abort(reason);
+        try {
+          await assert.rejects(renderComponents("", { definitions: [], signal: controller.signal,
+            prepare: { module: preparation, port: port2, data: () => "Not cloneable" } }),
+            error => aborted ? error === reason : (error as Error).name === "DataCloneError");
+          await closed;
+          assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+          isolated(await conflicting(4), 4);
+        } finally { port1.close(); port2.close(); }
+      }
+    } finally { setRenderWorkers(Math.min(availableParallelism(), 8)); }
+  });
   it("accepts typed caller props before state initialization and records null separately from omission", async () => {
     const definition = parseComponent(`<template component="x-initial-props"><defs>
       <prop name="label" type="string" default="Default">Label.</prop>

@@ -16,7 +16,7 @@ import {
   serializeRenderedForm,
 } from "./runtime.js";
 import { HEAD_MARKER } from "./head.js";
-import type { RenderedComponents, ServerRenderReply, ServerRenderRequest } from "./server.js";
+import type { RenderedComponents, ServerPreparation, ServerRenderReply, ServerRenderRequest } from "./server.js";
 
 // The browser constructors the runtime reads as globals, pointed at each render's own window.
 const globals = [
@@ -33,6 +33,8 @@ installProjectedSlotParser(parseBrowserProjectedSlot);
  * are restored afterwards, so nothing a render installs reaches the next one.
  */
 async function render(request: ServerRenderRequest): Promise<RenderedComponents> {
+  const scope = request.prepare === undefined ? undefined : new AbortController();
+  let cleanup: void | (() => void | PromiseLike<void>) = undefined;
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
     url: request.url ?? "https://html-next.invalid/",
     // Page scripts remain inert. Component controllers connect at browser hydration.
@@ -68,13 +70,22 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
         for (const [name, value] of Object.entries(state)) host.state[name] = value;
       }
     }
-    // Drain the shared runtime's microtask updates, including nested structural changes, until a
-    // pass lowers nothing: a component in a row those updates render takes its props in the next drain.
-    let pass = 0;
-    do {
-      if (++pass > 32) fail("HR008", "Component invocations nested deeper than the lowering limit.");
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    } while (lowerDocument(document, { connect: false }) > 0);
+    const flush = async (): Promise<void> => {
+      let pass = 0;
+      do {
+        if (++pass > 32) fail("HR008", "Component invocations nested deeper than the lowering limit.");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      } while (lowerDocument(document, { connect: false }) > 0);
+    };
+    await flush();
+    if (request.prepare !== undefined) {
+      const module = await import(request.prepare.module) as { prepare?: ServerPreparation };
+      if (typeof module.prepare !== "function") throw new TypeError("A server preparation module must export a named prepare function.");
+      const prepared = await module.prepare({ document, host: getComponentHost, flush, signal: scope!.signal, data: request.prepare.data, port: request.prepare.port });
+      if (prepared !== undefined && typeof prepared !== "function") throw new TypeError("Server preparation must return cleanup or undefined.");
+      cleanup = prepared;
+      await flush();
+    }
     renderServerHead(document);
     return {
       html: serializeRenderedForm(document.body),
@@ -83,10 +94,14 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
       styleOwnership: styleOwnership(document),
     };
   } finally {
-    dom.window.close();
-    for (const [name, descriptor] of original) {
-      if (descriptor === undefined) delete (globalThis as Record<string, unknown>)[name];
-      else Object.defineProperty(globalThis, name, descriptor);
+    scope?.abort();
+    try { await cleanup?.(); }
+    finally {
+      dom.window.close();
+      for (const [name, descriptor] of original) {
+        if (descriptor === undefined) delete (globalThis as Record<string, unknown>)[name];
+        else Object.defineProperty(globalThis, name, descriptor);
+      }
     }
   }
 }
@@ -118,6 +133,7 @@ parentPort!.on("message", async (request: ServerRenderRequest) => {
       ...(error instanceof HtmlDiagnosticError ? { diagnostic: error.diagnostic } : {}),
     } };
   }
+  finally { request.prepare?.port?.close(); }
   // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node MessagePort has no origin argument.
   parentPort!.postMessage(reply);
 });

@@ -70,6 +70,56 @@ component links, or bundle the controller imports alongside runtime registration
 The runtime's `lowerDocument(document, { connect: false })` renders the same static baseline in a
 browser. Ordinary `lowerDocument()` or `observeDocument()` connects its reads afterward.
 
+## Application-owned preparation
+
+The Node renderer can load an application adapter after initial props and state. This adapter
+uses the worker's actual typed hosts; it does not connect browser behavior or require a component
+to export another lifecycle hook.
+
+```js
+// prepare.js
+import { bindModule } from "@nextwebwg/html-next/bindings";
+import * as card from "./card.js";
+
+export async function prepare({ document, host, signal }) {
+  const binding = bindModule(card);
+  const scope = await binding.prepare(host(document.querySelector("#card")), {
+    phase: "request", signal, source: "card-build-1",
+  });
+  return () => scope.dispose();
+}
+```
+
+Pass its absolute ESM URL as `prepare.module`:
+
+```js
+const result = await renderComponents('<product-card id="card"></product-card>', {
+  definitions,
+  prepare: { module: new URL("./prepare.js", import.meta.url).href },
+  signal: request.signal,
+});
+```
+
+The exported `ServerPreparationContext` supplies `document`, `host(element)`, the render-owned
+`signal`, cloned `data`, an optional Node `MessagePort`, and `flush()`. Await `flush()` before
+inspecting DOM or hosts introduced by provider output; the renderer also flushes before and after
+the adapter. A returned cleanup may be asynchronous. On completion or failure, the render signal
+aborts before cleanup, then the document closes. An adapter that throws before returning cleanup
+must release resources it already acquired.
+
+An optional `prepare.port` is transferred to this render and closed on every exit, including
+queued cancellation and clone refusal. Application code can retain its peer to service private
+reads without sending request objects or functions into the worker. Preparing accepted values
+and transferring binding completion identities are separate host responsibilities: browser
+adapters use matching source revisions and binding snapshots to avoid duplicate initial reads.
+
+An already aborted signal rejects immediately. Cancelling a queued render leaves active work
+alone; cancelling an active render terminates its worker, including noncooperative preparation.
+Termination closes native worker resources but cannot run JavaScript cleanup in the terminated
+thread. Other workers continue, and the pool starts a replacement when needed. Abort listeners
+are removed when a job settles. Preparation module namespaces follow native ESM caching within
+each worker; changed application modules need a new module URL or a fresh renderer lifetime.
+
 ## Platform audit and implementation boundary
 
 Node supplies ESM, workers, structured cloning, Fetch and microtask scheduling, but no native HTML

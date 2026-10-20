@@ -1,8 +1,28 @@
 import { availableParallelism } from "node:os";
-import { Worker } from "node:worker_threads";
+import { Worker, type MessagePort } from "node:worker_threads";
 
 import { HtmlDiagnosticError, type HtmlDiagnostic } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
+import type { ComponentHost } from "./runtime.js";
+
+export interface ServerPreparationOptions {
+  /** Application adapter's absolute ESM module URL; it exports a named prepare function. */
+  readonly module: string;
+  readonly data?: unknown;
+  /** Transferred to this render and closed on completion, rejection or cancellation. */
+  readonly port?: MessagePort;
+}
+export interface ServerPreparationContext {
+  readonly document: Document;
+  readonly host: (element: Element) => ComponentHost | undefined;
+  /** Drain existing reactive rendering and lower newly rendered component invocations. */
+  readonly flush: () => Promise<void>;
+  readonly signal: AbortSignal;
+  readonly data: unknown;
+  readonly port: MessagePort | undefined;
+}
+export type ServerPreparation = (context: ServerPreparationContext) =>
+  void | (() => void | PromiseLike<void>) | PromiseLike<void | (() => void | PromiseLike<void>)>;
 
 export interface ServerRenderOptions {
   /** Validated definitions, for example from parseComponent or loadNodeComponents. */
@@ -14,6 +34,10 @@ export interface ServerRenderOptions {
   readonly state?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** The application document's own head content, which the components' head declarations start from. */
   readonly head?: string;
+  /** Runs after initial props/state, without connecting browser lifecycle. */
+  readonly prepare?: ServerPreparationOptions;
+  /** Cancels a queued render or terminates only its assigned worker. */
+  readonly signal?: AbortSignal;
 }
 
 export interface RenderedComponents {
@@ -32,7 +56,7 @@ export interface RenderedComponents {
   readonly styleOwnership: Readonly<Record<string, readonly string[]>>;
 }
 
-export interface ServerRenderRequest extends ServerRenderOptions {
+export interface ServerRenderRequest extends Omit<ServerRenderOptions, "signal"> {
   readonly html: string;
 }
 
@@ -44,6 +68,7 @@ interface Job {
   readonly request: ServerRenderRequest;
   readonly resolve: (result: RenderedComponents) => void;
   readonly reject: (error: unknown) => void;
+  transferred: boolean;
 }
 interface RenderWorker { readonly worker: Worker; job?: Job | undefined }
 
@@ -64,7 +89,14 @@ export function setRenderWorkers(count: number): void {
 
 /** End every render worker. Renders in progress reject; the next render starts new workers. */
 export async function closeRenderWorkers(): Promise<void> {
-  await Promise.all([...workers].map((entry) => entry.worker.terminate()));
+  const stopped = [...workers];
+  workers.clear();
+  for (const job of queue.splice(0)) job.reject(new Error("Component rendering worker exited without a result (renderer closed)."));
+  for (const entry of stopped) {
+    entry.job?.reject(new Error("Component rendering worker exited without a result (renderer closed)."));
+    entry.job = undefined;
+  }
+  await Promise.all(stopped.map(entry => entry.worker.terminate()));
 }
 
 function start(): RenderWorker {
@@ -114,8 +146,15 @@ function dispatch(): void {
     const job = queue.shift()!;
     idle.job = job;
     idle.worker.ref();
-    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node Worker has no origin argument.
-    idle.worker.postMessage(job.request);
+    try {
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node Worker has no origin argument.
+      idle.worker.postMessage(job.request, job.request.prepare?.port === undefined ? [] : [job.request.prepare.port]);
+      job.transferred = true;
+    } catch (error) {
+      idle.job = undefined;
+      idle.worker.unref();
+      job.reject(error);
+    }
   }
   // Beyond a smaller size, idle workers end.
   for (const entry of workers) if (workers.size > size && entry.job === undefined) { workers.delete(entry); void entry.worker.terminate(); }
@@ -128,8 +167,29 @@ function dispatch(): void {
  * the render; definitions and state arrive as structured clones. Workers share only loaded modules.
  */
 export function renderComponents(html: string, options: ServerRenderOptions): Promise<RenderedComponents> {
+  const { signal, ...request } = options;
   return new Promise((resolve, reject) => {
-    queue.push({ request: { ...options, html } satisfies ServerRenderRequest, resolve, reject });
+    if (signal?.aborted) { request.prepare?.port?.close(); reject(signal.reason); return; }
+    const finish = (): void => {
+      signal?.removeEventListener("abort", abort);
+      if (!job.transferred) job.request.prepare?.port?.close();
+    };
+    const job: Job = { request: { ...request, html }, transferred: false,
+      resolve: result => { finish(); resolve(result); }, reject: error => { finish(); reject(error); } };
+    const abort = (): void => {
+      const index = queue.indexOf(job);
+      if (index >= 0) queue.splice(index, 1);
+      const assigned = [...workers].find(entry => entry.job === job);
+      if (assigned !== undefined) {
+        workers.delete(assigned);
+        assigned.job = undefined;
+        void assigned.worker.terminate();
+      }
+      job.reject(signal!.reason);
+      dispatch();
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    queue.push(job);
     dispatch();
   });
 }
