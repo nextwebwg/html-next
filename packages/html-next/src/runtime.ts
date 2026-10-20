@@ -2781,13 +2781,18 @@ function renderSlot(
         const value = evalConforming(prop.expression, scope, context.definition);
         if (value === NONCONFORMING) return;
         // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
-        // accept warns once (HR007) and is absent (null); absent input is null too.
-        if (prop.type !== undefined && (value == null || value === ABSENT || !parseTypedValue(value, prop.type, "$", "value").ok)) {
-          if (value != null && value !== ABSENT) {
+        // accept warns once (HR007). It, and absent input, take the prop's default, or null.
+        const absent = value == null || value === ABSENT;
+        if (absent && prop.type === undefined && prop.default !== undefined) {
+          projectedScope.set(prop.name, prop.default as Value);
+          return;
+        }
+        if (prop.type !== undefined && (absent || !parseTypedValue(value, prop.type, "$", "value").ok)) {
+          if (!absent) {
             warnAuthored(context.definition, `slot:${name}:${prop.name}`,
               `${name === "" ? "The default slot" : `Slot \`${name}\``} prop \`${prop.name}\` does not satisfy its declared type \`${formatType(prop.type)}\`.`);
           }
-          projectedScope.set(prop.name, null);
+          projectedScope.set(prop.name, (prop.default ?? null) as Value);
           return;
         }
         projectedScope.set(prop.name, value);

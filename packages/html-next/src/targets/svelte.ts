@@ -13,7 +13,7 @@ import type { PropContract } from "../types.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, SLOT_PROP_IMPORT, slotPropValueSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { inputScope, Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
@@ -401,11 +401,12 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const checked = scoped ? `checkedSlot(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
       const value = lowering.value(prop.expressionPlan.ast, scope);
-      // A typed value its declared type does not accept is absent (null), as live gives it; an invalid result keeps the last value.
-      const unchecked = prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
-      if (!unchecked) context.usesSlotPropChecks = true;
-      const source = unchecked || prop.type === undefined ? value
-        : `((value: unknown) => typeof value === "symbol" || (${slotPropCheckSource(context.definition, node.name, prop.name, prop.type)})(value) ? value : null)(${value})`;
+      // A null value, and one its declared type rejects, takes the prop's default, or null, as live gives
+      // it; an invalid result keeps the last value.
+      const proven = prop.type !== undefined && provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
+      const given = proven ? undefined : slotPropValueSource(context.definition, node.name, prop, true);
+      if (given !== undefined && prop.type !== undefined) context.usesSlotPropChecks = true;
+      const source = given === undefined ? value : `(${given})(${value})`;
       return `${objectKey(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
     }).join(", ")} }` : "{}";
     const children = !scoped && defaultSlot && hasChildren ? "{:else if children}{@render children()}" : "";

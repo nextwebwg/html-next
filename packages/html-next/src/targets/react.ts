@@ -7,7 +7,7 @@ import { parseDuration } from "../duration.js";
 import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
@@ -16,7 +16,7 @@ import { stateAttribute } from "../component-styles.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropCheckSource, slotPropsType, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, inputScope, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
@@ -481,15 +481,17 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
     if ((node.props?.length ?? 0) > 0) {
       state.usesScopedSlots = true;
-      // A bound value its declared type does not accept is not given, as live leaves it unset.
-      const unchecked = (prop: NonNullable<SlotNode["props"]>[number]): boolean =>
-        prop.type === undefined || provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
-      const values = node.props!.map((prop) => unchecked(prop) || prop.type === undefined
-        ? `${quote(prop.name)}: ${lowering.value(prop.expressionPlan.ast, scope)}`
-        : `...((value: unknown) => (${slotPropCheckSource(state.definition, node.name, prop.name, prop.type)})(value) ? { ${quote(prop.name)}: value } : {})(${lowering.value(prop.expressionPlan.ast, scope)})`).join(", ");
-      // Its declared type says what a consumer reads; a value that does not conform is left out, so the object is not that type.
-      const checked = node.props!.some((prop) => !unchecked(prop));
-      if (checked) state.usesSlotPropChecks = true;
+      // A null value, and one its declared type rejects, takes the prop's default, or null; a value whose
+      // static type is the declared one needs no check.
+      let checked = false;
+      const values = node.props!.map((prop) => {
+        const value = lowering.value(prop.expressionPlan.ast, scope);
+        const proven = prop.type !== undefined && provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
+        const source = proven ? undefined : slotPropValueSource(state.definition, node.name, prop);
+        if (source !== undefined) checked = true;
+        if (source !== undefined && prop.type !== undefined) state.usesSlotPropChecks = true;
+        return `${quote(prop.name)}: ${source === undefined ? value : `(${source})(${value})`}`;
+      }).join(", ");
       return `{renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)}`;
     }
     state.usesPlainSlots = true;

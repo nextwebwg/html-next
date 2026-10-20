@@ -1847,7 +1847,7 @@ function parseElementAtSource(
         fail("HT008", "A slot's name is written as `name`, never computed with `from:name`; for content that varies by item, use one named scoped slot that passes the item as a prop, such as `<slot name=\"option\" from:item=\"$row\">`.", source);
       }
       const flowValues: Record<string, string> = {};
-      const rawProps: Array<{ name: string; expression: string; type?: PropType }> = [];
+      const rawProps: Array<{ name: string; expression: string; type?: PropType; default?: PropValue }> = [];
       const staticProps: Array<{ name: string; value: string }> = [];
       for (const attribute of sourceAttributes(child)) {
         if (FLOW_NAME_RE.test(attribute.name)) {
@@ -2051,7 +2051,7 @@ function parseElementAtSource(
  * values must conform to. Returns the static and default props; the bound ones are typed in place.
  */
 function slotOutletProps(name: string | undefined, declaration: SlotDeclaration | undefined,
-  bound: Array<{ name: string; expression: string; type?: PropType }>, statics: readonly { name: string; value: string }[], source: string,
+  bound: Array<{ name: string; expression: string; type?: PropType; default?: PropValue }>, statics: readonly { name: string; value: string }[], source: string,
 ): { name: string; expression: string }[] {
   const slot = name === undefined ? "the default slot" : `slot \`${name}\``;
   const outlet = name === undefined ? "<slot>" : `<slot name="${name}">`;
@@ -2081,6 +2081,9 @@ function slotOutletProps(name: string | undefined, declaration: SlotDeclaration 
     const type = declaration.props[prop.name]!.type;
     const node = normalizeType(type);
     if (node.kind !== "terminal" || node.name !== "unknown") prop.type = type;
+    // A null value, and one the type rejects, takes the declared default, as a prop's input does.
+    const declared = declaration.props[prop.name]!.default;
+    if (declared !== undefined) prop.default = declared;
   }
   const literal: { name: string; expression: string }[] = [];
   for (const { name: given, value } of statics) {

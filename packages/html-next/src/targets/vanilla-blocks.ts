@@ -175,6 +175,8 @@ interface Region {
   readonly propNames?: readonly string[];
   /** Each bound slot prop's declared type, which its value must fit to be given. */
   readonly propTypes?: readonly (TypeNode | undefined)[];
+  /** Each prop's declared default as source, which a null or rejected value takes. */
+  readonly propDefaults?: readonly (string | undefined)[];
 }
 
 interface Block {
@@ -1336,7 +1338,8 @@ class Planner {
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
       block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
         ...props === undefined ? {} : { props, propNames: node.props!.map((prop) => prop.name),
-          propTypes: node.props!.map((prop) => prop.type === undefined ? undefined : normalizeType(prop.type)) } });
+          propTypes: node.props!.map((prop) => prop.type === undefined ? undefined : normalizeType(prop.type)),
+          propDefaults: node.props!.map((prop) => prop.default === undefined ? undefined : JSON.stringify(prop.default)) } });
       return 4;
     }
     if (node.kind === "text") {
@@ -2056,16 +2059,17 @@ export function emitBlocks(
         // when a prop changes or nested data may have: an expression that fails keeps its last value.
         const rendering = `r.x${index}`;
         // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
-        // accept warns once (HR007) and is absent (null), as live gives it; absent input is null too.
+        // accept warns once (HR007). It, and absent input, take the prop's default, or null, as live gives it.
         const checks = new Map<number, string>();
         const given = (value: string, at: number): string => {
           const type = region.propTypes?.[at];
-          if (type === undefined) return value;
+          const fallback = region.propDefaults?.[at] ?? "null";
+          if (type === undefined) return region.propDefaults?.[at] === undefined ? value : `(${value} == null || ${value} === ABSENT ? ${fallback} : ${value})`;
           if (!checks.has(at)) checks.set(at, `K${slotPropChecks.push(valueCheckSource(type)) - 1}`);
           const check = checks.get(at)!;
           const name = typeof region.slot === "string" && region.slot !== "" ? `Slot \`${region.slot}\`` : "The default slot";
           const message = `${name} prop \`${region.propNames![at]}\` does not satisfy its declared type \`${formatType(type)}\`.`;
-          return `(${value} != null && ${value} !== ABSENT && (${check}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${region.slot ?? ""}:${region.propNames![at]}`)}, ${JSON.stringify(message)}), false)) ? ${value} : null)`;
+          return `(${value} != null && ${value} !== ABSENT && (${check}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${region.slot ?? ""}:${region.propNames![at]}`)}, ${JSON.stringify(message)}), false)) ? ${value} : ${fallback})`;
         };
         lines.push(
           `  if (r.f${index} === undefined) {`,

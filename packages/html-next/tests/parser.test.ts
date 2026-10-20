@@ -466,6 +466,10 @@ describe("parseComponent", () => {
     const boundOutlet = bound.template.children[0];
     assert.ok(boundOutlet?.kind === "slot");
     assert.deepEqual(boundOutlet.props?.map(({ name, expression, type }) => [name, expression, type]), [["count", "$items.length", "number"], ["label", "'Open'", undefined]]);
+    // A bound prop with a declared default carries it, for a null or rejected value to take.
+    const defaulted = parseComponent(disclosure(`<slot name="summary" count="1" from:label="$items.length"></slot>`)).template.children[0];
+    assert.ok(defaulted?.kind === "slot");
+    assert.deepEqual(defaulted.props?.find((prop) => prop.name === "label")?.default, "Details");
     // Each mistake names the outlet; an undeclared prop names the declaration to add.
     assert.match(message(disclosure(`<slot name="summary" count="1" from:count="$items.length"></slot>`)), /HT008: .*gives prop `count` more than once/);
     assert.match(message(disclosure(`<slot name="summary" count="1" size="2"></slot>`)), /HT008: .*`size`, which slot `summary` does not declare; add <slot name="summary"><prop name="size"/);
