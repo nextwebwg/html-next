@@ -75,10 +75,13 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   const { routes, notFound: notFoundRoute, error: errorRoute, redirects: declared, sources, files, watched } = await discover(config.root, { ...options, base: config.base });
   // Pages' hk:redirect-from entries join the redirects option's, rediscovered with the pages.
   const redirects = new Map(option);
+  // Each page redirect's deployment path, for the declaring page's diagnostics.
+  const pageRedirects = new Map<string, { readonly from: string; readonly component: string }>();
   for (const { from, to, component } of declared) {
     const path = new URL(config.base + from.slice(1), "http://localhost").pathname;
     if (option.has(path)) throw new HtmlKitError(`hk:redirect-from ${from} is also a key of the redirects option.`, component);
     redirects.set(path, config.base + to.slice(1));
+    pageRedirects.set(path, { from, component });
   }
   // Alias pages name their own URL canonical, absolute when the site sets its origin.
   const canonicalOrigin = options.origin === undefined ? "" : config.origin;
@@ -149,6 +152,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
         });
         const path = config.base + (segments.length === 0 ? "" : segments.join("/") + "/");
         if (paths.has(path)) throw new HtmlKitError(`Static route collision at ${path}.`, route.component);
+        const page = pageRedirects.get(path);
+        if (page !== undefined) throw new HtmlKitError(`The page redirect hk:redirect-from ${page.from} is the URL of ${route.component}.`, page.component);
         if (redirects.has(path)) throw new HtmlKitError(`The redirects option also redirects ${path}, which is this page's URL.`, route.component);
         const matched = matchRoute(routes, path, config.base);
         if (matched?.route !== route) throw new HtmlKitError(`Static route collision with ${matched?.route.pattern} at ${path}.`, route.component);

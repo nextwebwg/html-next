@@ -191,6 +191,11 @@ it("rejects an hk:redirect-from path that a page, an alias, the redirects option
     const root = await site(pages);
     await expect(createApplication({ root, ...(redirects === undefined ? {} : { redirects }) })).rejects.toThrow(message);
   }
+  // A dynamic page's listed URL is checked when entries() lists it, against the page that declares the redirect.
+  const root = await site({ "a.html": redirecting("page-a", "/docs/x/"), "docs/[id].html": echo("page-id"), "docs/[id].server.ts": echoLoader('[{ id: "x" }]') });
+  const application = await createApplication({ root });
+  try { await expect(application.entries()).rejects.toThrow(new RegExp(`${join(root, "app/pages/a.html")}: The page redirect hk:redirect-from /docs/x/ is the URL of .*\\[id\\]\\.html`)); }
+  finally { await application.close(); }
 }, 60_000);
 
 it("refuses a symbolic-link page or page folder, naming it, as it refuses symbolic-link public assets", async () => {
