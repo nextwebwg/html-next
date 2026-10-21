@@ -53,6 +53,13 @@ all three. Engine findings that needed code:
   navigation, through either `scroll: "after-transition"` or `event.scroll()` (in the tests, under
   `htmlkit dev`). HTMLKit uses `scroll: "manual"`, records each entry's position when it is left,
   and restores it after the swap; new entries still use `event.scroll()` for the top or fragment.
+- Chromium 153 and WebKit 26.6 treat the entries of a document that a load replaced, such as a page
+  that loaded as a document for a conflicting definition, as the new document's own: traversing to one
+  is a same-document `navigate` event (`destination.sameDocument`, `canIntercept`), and Firefox 155's
+  is a cross-document one. HTMLKit intercepts such a traversal and renders the entry's page, in place
+  or as a document. Before HTMLKit starts nothing intercepts it, so the URL changes and the loaded page
+  stays; `navigation.activation.entry` is the entry the document loaded into, and when HTMLKit starts
+  on another entry it renders that entry's page through the same navigation, as a `replace`.
 - Firefox 155 fires a second `navigate` event, without `downloadRequest`, for a `download` link.
   HTMLKit also leaves alone any navigation whose `sourceElement` has `download`.
 - Vite's development server rewrites a dynamic `import()` of a path to add `?import`, which is a
