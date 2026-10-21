@@ -1190,6 +1190,71 @@ describe("template whitespace", () => {
   }
 });
 
+describe("<template $slot> outlets", () => {
+  const grid = (outlets: string) => `<template component="x-grid"><defs>
+    <prop name="rows" type="list(string)" default="[]">Rows.</prop>
+    <slot name="row"><prop name="item" type="string" required>The row.</prop></slot></defs>
+    <table>${outlets}</table></template>`;
+
+  it("parses to the same outlets as <slot>, where the HTML parser would move a <slot> out of the table", () => {
+    const outlets = (slot: (name: string, attributes: string, fallback: string) => string) =>
+      `<thead><tr>${slot("", "", "<th>Name</th>")}</tr></thead><tbody>${slot("row", ` $each="r of $rows" from:item="$r"`, "<tr><td>{$r}</td></tr>")}</tbody>`;
+    const template = parseComponent(grid(outlets((name, attributes, fallback) =>
+      `<template $slot${name === "" ? "" : `="${name}"`}${attributes}>${fallback}</template>`))).template;
+    // Only a DOM built without the HTML parser holds a <slot> in a table section, as the runtime's own DOM does.
+    const { document } = new JSDOM().window;
+    const wrapper = document.createElement("template");
+    wrapper.setAttribute("component", "x-grid");
+    wrapper.innerHTML = grid("").replace(/^<template component="x-grid">|<\/template>$/g, "");
+    const table = wrapper.content.querySelector("table")!;
+    for (const [section, name, attributes, fallback] of [["thead", "", {}, "<th>Name</th>"], ["tbody", "row", { $each: "r of $rows", "from:item": "$r" }, "<tr><td>{$r}</td></tr>"]] as const) {
+      const part = table.appendChild(document.createElement(section));
+      const slot = (section === "thead" ? part.appendChild(document.createElement("tr")) : part).appendChild(document.createElement("slot"));
+      if (name !== "") slot.setAttribute("name", name);
+      for (const [attribute, value] of Object.entries(attributes)) slot.setAttribute(attribute, value);
+      const fallbackTemplate = document.createElement("template");
+      fallbackTemplate.innerHTML = fallback;
+      slot.append(fallbackTemplate.content);
+    }
+    assert.deepEqual(template, parseBrowserComponent(wrapper, "<source>").template);
+    assert.equal(JSON.stringify(template).includes('"$slot"'), false);
+  });
+
+  it("reads an empty $slot as the default slot and $if as a conditional outlet", () => {
+    const empty = parseComponent(`<template component="x-a"><div><template $slot=""></template></div></template>`).template;
+    const bare = parseComponent(`<template component="x-a"><div><template $slot></template></div></template>`).template;
+    assert.deepEqual(empty, bare);
+    assert.deepEqual(bare.children, [{ kind: "slot" }]);
+    const conditional = parseComponent(`<template component="x-a"><defs><prop name="open" type="boolean" default="false">Open.</prop></defs>
+      <div><template $slot="details" $if="$open">None</template><slot $if="$open"></slot></div></template>`).template;
+    assert.deepEqual(conditional.children.flatMap((child) => child.kind === "element"
+      ? [[child.name, child.flow?.kind, child.children.map((inner) => inner.kind === "slot" ? inner.name ?? "" : null)]] : []),
+    [["template", "if", ["details"]], ["template", "if", [""]]]);
+  });
+
+  it("rejects `name`, a second structural directive, and $slot off an outlet", () => {
+    expectDiagnostic("HT008", `<template component="x-a"><div><template $slot name="row"></template></div></template>`);
+    expectDiagnostic("HT008", `<template component="x-a"><div><template $slot="row" from:name="'row'"></template></div></template>`);
+    expectDiagnostic("HT008", `<template component="x-a"><div><template $slot="row-a"></template></div></template>`);
+    expectDiagnostic("HT008", `<template component="x-a"><div><template $slot $with="1 as one"></template></div></template>`);
+    expectDiagnostic("HT008", `<template component="x-a"><div><span $slot="row"></span></div></template>`);
+  });
+
+  it("reports a <slot> the HTML parser foster-parents out of a table, naming <template $slot>", () => {
+    for (const [body, suggestion] of [
+      [`<table><tbody><slot name="row"></slot></tbody></table>`, '<template $slot="row">'],
+      [`<div><table><tr><slot></slot></tr></table></div>`, "<template $slot>"],
+      [`<div><table><thead><tr $each="r of [1]"><slot name="row"></slot></tr></thead></table></div>`, '<template $slot="row">'],
+      [`<div><table><colgroup><slot name="cols"></slot></colgroup></table></div>`, '<template $slot="cols">'],
+    ] as const) {
+      assert.throws(() => parseComponent(`<template component="x-a">${body}</template>`), (error: unknown) =>
+        error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT032" && error.diagnostic.message.includes(suggestion), body);
+    }
+    // A slot in a cell, or one that is already before the table in the source, stays where it is written.
+    assert.doesNotThrow(() => parseComponent(`<template component="x-a"><div><slot name="before"></slot><table><tr><td><slot></slot></td></tr></table></div></template>`));
+  });
+});
+
 describe("browser-parsed components", () => {
   it("warns in the console when a bare keyword spells a name in scope", () => {
     const warnings: string[] = [];
