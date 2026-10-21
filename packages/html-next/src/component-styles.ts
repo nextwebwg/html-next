@@ -13,7 +13,7 @@ import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-
  * run the same selector rewrite over a CSS parser (`component-styles-build.ts`).
  */
 import { fail, type HtmlDiagnostic } from "./diagnostics.js";
-import type { ComponentDefinition } from "./template.js";
+import type { ComponentDefinition, TemplateNode } from "./template.js";
 import { parseTypeExpression } from "./type-system.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 
@@ -36,8 +36,29 @@ export function addAttributeToken(element: Element, attribute: string, token: st
   element.setAttribute(attribute, Array.from(tokens).join(" "));
 }
 
+/**
+ * Marks a top-level projected node. The component whose markup wrote it stamps its tag first (see
+ * `projectedOwner`), so a receiving component's mark keeps that value; content without a writing
+ * component, such as a page's, is marked empty.
+ */
 export function markProjectedRoot(node: Node): void {
-  if (node.nodeType === 1) (node as Element).setAttribute(PROJECTED_ATTRIBUTE, "");
+  if (node.nodeType === 1 && !(node as Element).hasAttribute(PROJECTED_ATTRIBUTE)) (node as Element).setAttribute(PROJECTED_ATTRIBUTE, "");
+}
+
+/** Whether a template projects its own markup into a component it invokes, so its styles also follow that markup. */
+export function projectsIntoComponents(node: ComponentDefinition["template"] | TemplateNode): boolean {
+  if (node.kind === "text") return false;
+  if (node.kind === "slot") return (node.fallback ?? []).some(projectsIntoComponents);
+  return node.name.includes("-") && node.children.length > 0 || node.children.some(projectsIntoComponents);
+}
+
+/**
+ * What `:host` becomes in the copy of a component's own rules that styles the markup it projects:
+ * an ancestor test, since that markup's scope is rooted at each projected node, not the root. The
+ * root itself is outside that scope, so a rule whose subject is `:host` matches nothing there.
+ */
+export function projectingHost(tag: string): string {
+  return `:where([${COMPONENT_ATTRIBUTE}~="${tag}"])`;
 }
 
 /** The attribute carrying the resolved prop and state values a definition's rules test. */
@@ -379,8 +400,9 @@ export function nestedRootDiagnostic(owner: string, selector: string, tag: strin
 }
 
 /** Firefox can leak a selector list containing pseudo-elements through an @scope limit. */
-export function guardComponentPseudoElements(selector: string): string {
-  if (!selector.includes("::")) return selector;
+export function guardComponentPseudoElements(selector: string,
+  boundary = `:where(:not([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]))`, always = false): string {
+  if (!always && !selector.includes("::")) return selector;
   const parts: string[] = [];
   let start = 0;
   let depth = 0;
@@ -389,8 +411,7 @@ export function guardComponentPseudoElements(selector: string): string {
   let subject = 0;
   const emit = (end: number): void => {
     const at = pseudo === -1 ? end : pseudo;
-    const guard = /:scope(?![\w-])/.test(selector.slice(subject, at)) ? ""
-      : `:where(:not([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]))`;
+    const guard = /:scope(?![\w-])/.test(selector.slice(subject, at)) ? "" : boundary;
     const prefix = selector.slice(start, at);
     parts.push((pseudo === -1 ? prefix.trimEnd() : prefix) + guard + selector.slice(at, end));
     start = end + 1;
@@ -412,9 +433,56 @@ export function guardComponentPseudoElements(selector: string): string {
   return parts.join(", ");
 }
 
-/** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
+/**
+ * Rewrites a selector of the copy of own rules that styles projected markup, whose scope is rooted
+ * at each projected node the component wrote. Inside `@scope` a selector without `:scope` is
+ * relative to the root's descendants, which would leave out the projected node itself. So a
+ * selector's first compound tests `:where(:scope, :scope *)`: the projected node or anything below
+ * it, which keeps context such as `.dark .label` inside the component's markup as in its own scope.
+ * A selector naming `:host` (`hosts`, its ancestor test here) takes its context from the document,
+ * and only its subject names `:scope`. The subject also carries the pseudo-element guard, which
+ * here lets the component's own projected roots through.
+ * ponytail: context above the receiving component is reached only through `:host`, and compounds
+ * between `:host` and the projected node may match the receiving component's markup.
+ */
+export function guardProjectingSelector(selector: string, tags: readonly string[], hosts: readonly string[], root = `[${COMPONENT_ATTRIBUTE}]`): string {
+  const boundary = `:not(${root}, [${PROJECTED_ATTRIBUTE}]:not(${tags.map((tag) => `[${PROJECTED_ATTRIBUTE}~="${tag}"]`).join(", ")}))`;
+  return complexSelectors(selector).map((complex) => hosts.some((host) => complex.includes(host))
+    ? guardComponentPseudoElements(complex, `:where(:scope, ${boundary})`, true)
+    : withinFirstCompound(guardComponentPseudoElements(complex, `:where(${boundary})`), ":where(:scope, :scope *)")).join(", ");
+}
+
+/** A complex selector with `test` added to its first compound, before any pseudo-element. */
+function withinFirstCompound(complex: string, test: string): string {
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < complex.length; index += 1) {
+    const character = complex[index]!;
+    if (character === "\\") { index += 1; continue; }
+    if (quote !== "") { if (character === quote) quote = ""; continue; }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(" || character === "[") depth += 1;
+    else if (character === ")" || character === "]") depth -= 1;
+    else if (depth === 0 && (/[\s>+~]/.test(character) || character === ":" && complex[index + 1] === ":")) {
+      return complex.slice(0, index) + test + complex.slice(index);
+    }
+  }
+  return complex + test;
+}
+
+/** The scope of the copy of own rules that styles projected markup: each projected node the tags wrote, down to component roots (`root`) and other projected nodes. */
+export function projectingScope(tags: readonly string[], root = `[${COMPONENT_ATTRIBUTE}]`): string {
+  return `(${tags.map(name => `[${PROJECTED_ATTRIBUTE}~="${name}"]:not(${root})`).join(", ")}) to (${root}, [${PROJECTED_ATTRIBUTE}])`;
+}
+
+/**
+ * Wraps the compiled groups in the component's scopes; `hoisted` rules stay document-wide. `projecting`
+ * is the own rules again, for the markup the component projects into the components it invokes: that
+ * markup is its own, but sits below another component's root, so it gets a scope rooted at each
+ * projected node the component wrote, with the same limits.
+ */
 export function assembleComponentStyles(tag: string | readonly string[], own: string, slotted: string, hoisted: string,
-  includeBoundaryReset = true): string {
+  includeBoundaryReset = true, projecting = ""): string {
   const tags = typeof tag === "string" ? [tag] : tag;
   const root = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"]`).join(", ");
   const scoped = own.trim() !== "" || slotted.trim() !== "";
@@ -425,6 +493,7 @@ export function assembleComponentStyles(tag: string | readonly string[], own: st
     scoped ? `@supports (-moz-appearance: none) {\n${identities}\n}` : "",
     own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]) {\n${own}\n}`,
     slotted.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) {\n${slotted}\n}`,
+    projecting.trim() === "" ? "" : `@scope ${projectingScope(tags)} {\n${projecting}\n}`,
   ].filter((part) => part !== "").join("\n");
 }
 
@@ -519,18 +588,21 @@ export function compileComponentStyles(
   const StyleRule = view.CSSStyleRule;
   const GroupingRule = view.CSSGroupingRule;
   const owners = adopters.map(owner => ({ owner, names: new Set<string>(), canonical: componentStyleNameResolver(owner, source, true) }));
+  const tagList = adopters.map(owner => owner.contract.tag);
+  let projecting = false;
   const rewriteNested = (rule: CSSStyleRule): void => {
     // Each rule is kept in exactly one of the two copies, so each is checked once.
-    if (!rule.selectorText.includes("&")) {
+    if (!projecting && !rule.selectorText.includes("&")) {
       for (const complex of complexSelectors(rule.selectorText)) {
         const tag = nestedRootSubject(complex, tags);
         if (tag !== undefined) warnings.push(nestedRootDiagnostic(definition.contract.tag, authoredSelector(complex), tag, source ?? definition.source.file));
       }
     }
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
-      rewriteComponentSelector(rule.selectorText, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical,
-        undefined, undefined, foreign)))].join(", ");
-    rule.selectorText = styleRuleKind(rule.selectorText) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
+      rewriteComponentSelector(rule.selectorText, owner.contract.tag, projecting ? projectingHost(owner.contract.tag)
+        : `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
+    rule.selectorText = styleRuleKind(rule.selectorText) !== "own" ? rewritten
+      : projecting ? guardProjectingSelector(rewritten, tagList, tagList.map(projectingHost)) : guardComponentPseudoElements(rewritten);
     for (const child of Array.from(rule.cssRules ?? [])) {
       if (child instanceof StyleRule) rewriteNested(child);
     }
@@ -571,8 +643,12 @@ export function compileComponentStyles(
   };
   const own = compile("own");
   const slotted = compile("slotted");
+  projecting = adopters.some(owner => projectsIntoComponents(owner.template));
+  const hoistedCount = hoisted.length;
+  const projected = projecting ? compile("own") : "";
+  hoisted.length = hoistedCount;
   for (const owner of owners) for (const name of owner.names) names.add(name);
-  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
+  return { css: assembleComponentStyles(tagList, own, slotted, hoisted.join("\n"), includeBoundaryReset, projected), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }),
     ...testedStatesField(tested), ...(warnings.length === 0 ? {} : { warnings }) };
 }

@@ -853,7 +853,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const reflections = boundReflections.length === 0 ? rootTag?.reflections ?? []
     : [`{...(Object.assign({}, reflectedAttrs, { ${boundReflections.join(", ")} }) as Record<string, unknown>)}`];
   if (inputBindings.length > 0) bindings.push(`{...{ [BINDING_INPUTS_PROP]: { ${inputBindings.join(", ")} } }}`);
-  const attributes = [...literals, ...(rootTag === undefined ? [] : ["{...nativeAttrs}"]), ...bindings, ...(projected ? ['data-slotted=""'] : []),
+  const attributes = [...literals, ...(rootTag === undefined ? [] : ["{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
       `data-component={[nativeAttrs["data-component"], ${quote(rootTag.tag)}].filter(Boolean).join(" ")}`,
@@ -1586,4 +1586,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
 
 export function generateReact(definition: ComponentDefinition, version: string, options: ReactConversionOptions = {}): string {
   return generateReactOutput(definition, version, options).component;
+}
+
+/** The tag the writing component stamped on a projected element (`stampProjected`), or none for a page's content. */
+function projectedOwner(node: TemplateNode): string {
+  const stamp = node.kind === "element" ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "data-slotted") : undefined;
+  return stamp?.kind === "literal" ? stamp.value : "";
 }

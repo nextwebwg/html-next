@@ -181,6 +181,24 @@ function textContent(element: Element): string {
   return text;
 }
 
+/**
+ * The elements a component with styles projects into a component it invokes carry its tag in
+ * `data-slotted`, so its own styles follow its markup below the other component's root (styling:
+ * projected content belongs to the consumer). Every target renders the literal, and a receiving
+ * component's projected mark keeps it. A `<template>`'s children are the projected nodes in its
+ * place, and a projected component's root belongs to that component's styles. The template is not
+ * frozen yet, so elements gain the attribute in place and keep their identity.
+ */
+function stampProjectedContent(node: TemplateNode, tag: string, platform: ComponentParserPlatform, projected = false): void {
+  if (node.kind === "text") return;
+  if (node.kind === "slot") { for (const child of node.fallback ?? []) stampProjectedContent(child, tag, platform); return; }
+  const component = node.name.includes("-") && !platform.isNativeElement(node.name);
+  if (projected && node.name !== "template" && !component && !node.attributes.some((attribute) => attribute.name === "data-slotted")) {
+    (node.attributes as TemplateAttribute[]).push({ kind: "literal", name: "data-slotted", value: tag });
+  }
+  for (const child of node.children) stampProjectedContent(child, tag, platform, component || projected && node.name === "template");
+}
+
 /** A slot outlet: a `<slot>`, or its parser-safe form `<template $slot>`, which table parsing leaves in place. */
 function isSlotOutlet(element: Element): boolean {
   const tag = sourceTag(element);
@@ -2363,6 +2381,7 @@ function parseComponentNodesAtSource(
           choices: rootChoices,
         },
   };
+  if (definition.css !== "") stampProjectedContent(template, contract.tag, platform);
   if (controller !== undefined) definition.controller = controller;
   if (module !== undefined) definition.module = module;
   if (Object.keys(lifecycle).length > 0) definition.lifecycle = lifecycle;

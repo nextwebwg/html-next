@@ -94,5 +94,6 @@
   "packages/html-next-converter/tests/slotted-style-parity.test.ts": 12,
   "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": 30,
   "packages/html-next-converter/tests/table-slot-parity.test.ts": 15,
-  "packages/html-next-converter/tests/slotted-each-parity.test.ts": 18
+  "packages/html-next-converter/tests/slotted-each-parity.test.ts": 18,
+  "packages/html-next-converter/tests/consumer-projected-style-parity.test.ts": 12
 }

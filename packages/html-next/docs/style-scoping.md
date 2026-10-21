@@ -7,7 +7,10 @@ contract is the source of truth; this note only records how the tooling meets it
 
 - `data-component="tag"` is on a component's root, and only its root. A delegated root (one whose
   markup root is another component) lists every owner: `data-component="x-primary x-base"`.
-- `data-slotted` is on each top-level projected node.
+- `data-slotted` is on each top-level projected node. When the component that wrote the node has
+  styles, its value is that component's tag: the parser stamps it on the elements a component
+  projects into one it invokes, and a receiving component's mark keeps it. Content with no writing
+  component, such as a page's, carries it empty.
 - `data-<tag>-state="name=value name"` carries the resolved props and state the definition's
   `:host()` prop and state rules test, and the state any stylesheet in the component graph tests on
   it with a `:state()` condition, and nothing else. A truthy value adds the bare `name`; a string or
@@ -15,13 +18,23 @@ contract is the source of truth; this note only records how the tooling meets it
 
 ## Compilation
 
-A style block compiles to two scopes:
+A style block compiles to two scopes, and a third when the component projects its own markup
+into a component it invokes:
 
 ```css
 @scope ([data-component~="x-card"]) to ([data-component], [data-slotted]) { /* own rules */ }
 @scope ([data-component~="x-card"]) to ([data-component]) { /* :slotted() rules */ }
+@scope ([data-slotted~="x-card"]:not([data-component])) to ([data-component], [data-slotted]) { /* own rules again */ }
 ```
 
+- The third scope follows the markup the component projects, which sits below the receiving
+  component's root and so outside the first scope. It is rooted at each projected node the
+  component wrote. Inside `@scope`, a selector without `:scope` is relative to the root's
+  descendants, so each selector's first compound tests `:where(:scope, :scope *)`: the projected
+  node or what is below it. Context stays in the projected markup, as the specification requires.
+  There `:host` is an ancestor test, `:where([data-component~="x-card"])`, so `:host .label` still
+  matches, its subject names `:scope` instead, and a rule whose subject is `:host` matches nothing.
+  Vue and Svelte emit the same scope bounded by `[data-hn]`.
 - `:host` becomes `:scope:where([data-component~="tag"])`. The zero-specificity qualifier
   prevents Firefox from retaining another root's scoped style during dynamic root replacement.
 - `:host([prop="value"])` and `:host(:state(name=value))` become tokens of the state attribute;

@@ -93,6 +93,8 @@ function componentPropAttribute(name: string, value: string): string {
 /** Match native projection marking so controllers can act on rendered slot content. */
 function projectedNode(node: TemplateNode): TemplateNode {
   if (node.kind !== "element") return node;
+  // The writing component's stamp (`stampProjected`) stays, so its styles keep reaching the element.
+  if (node.attributes.some(attribute => attribute.kind === "literal" && attribute.name === "data-slotted")) return node;
   return { ...node, attributes: [...node.attributes.filter(attribute => attribute.name !== "data-slotted"),
     { kind: "literal", name: "data-slotted", value: "" }] };
 }
