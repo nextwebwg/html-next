@@ -92,5 +92,6 @@
   "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts": 4,
   "packages/html-next-converter/tests/slot-props-parity.test.ts": 15,
   "packages/html-next-converter/tests/slotted-style-parity.test.ts": 12,
-  "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": 30
+  "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": 30,
+  "packages/html-next-converter/tests/slotted-each-parity.test.ts": 18
 }
