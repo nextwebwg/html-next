@@ -47,7 +47,7 @@ layout; a folder's `_layout.html` nests inside it ([nested layouts](/htmlkit/rou
 `@/` is the project root:
 
 ```html
-<link rel="component" href="@/components/card.html">
+<link rel="component" href="@/app/components/card.html">
 ```
 
 ```ts
