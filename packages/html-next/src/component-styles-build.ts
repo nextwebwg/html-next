@@ -13,6 +13,10 @@ import {
   assertResolvedStylesheet,
   componentStyleNameResolver,
   guardComponentPseudoElements,
+  projectingHost,
+  guardProjectingSelector,
+  projectingScope,
+  projectsIntoComponents,
   COMPONENT_ATTRIBUTE,
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
@@ -130,11 +134,14 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   const hoisted: string[] = [];
   const owners = adopters.map(owner => ({ owner, names: new Set<string>(), canonical: componentStyleNameResolver(owner, source) }));
 
+  const tagList = adopters.map(owner => owner.contract.tag);
+  let projecting = false;
   const selector = (input: string): string => {
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
-      rewriteComponentSelector(input, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical,
-        undefined, undefined, foreign)))].join(", ");
-    return styleRuleKind(input) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
+      rewriteComponentSelector(input, owner.contract.tag, projecting ? projectingHost(owner.contract.tag)
+        : `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
+    return styleRuleKind(input) !== "own" ? rewritten
+      : projecting ? guardProjectingSelector(rewritten, tagList, tagList.map(projectingHost)) : guardComponentPseudoElements(rewritten);
   };
 
   const rewrite = (rule: Rule): void => {
@@ -167,8 +174,12 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   };
   const own = compile("own");
   const slotted = compile("slotted");
+  projecting = adopters.some(owner => projectsIntoComponents(owner.template));
+  const hoistedCount = hoisted.length;
+  const projected = projecting ? compile("own") : "";
+  hoisted.length = hoistedCount;
   for (const owner of owners) for (const name of owner.names) names.add(name);
-  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), includeBoundaryReset), stateNames: Array.from(names),
+  return { css: assembleComponentStyles(tagList, own, slotted, hoisted.join("\n"), includeBoundaryReset, projected), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }),
     ...testedStatesField(tested) };
 }
@@ -300,13 +311,30 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
   const foreign = foreignStateResolver(graph, tested, source);
   const names = new Set<string>();
   const canonical = componentStyleNameResolver(definition, source);
-  const root = postcss.parse(renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css), renames));
+  const renamed = renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css), renames);
+  const root = postcss.parse(renamed);
   prepare?.(root);
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
     rule.selector = target(rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`, foreign), rule);
   });
+  // The own rules again, for the markup the component projects into the components it invokes (`assembleComponentStyles`).
+  const projecting = projectsIntoComponents(definition.template) ? postcss.atRule({ name: "scope", params: projectingScope([tag], `[${VUE_ROOT_ATTRIBUTE}]`) }) : undefined;
+  if (projecting !== undefined) {
+    const copy = postcss.parse(renamed);
+    prepare?.(copy);
+    copy.walkRules((rule) => {
+      const parent = rule.parent;
+      if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
+      if (styleRuleKind(rule.selector) === "slotted") { rule.remove(); return; }
+      rule.selector = target(guardProjectingSelector(rewriteComponentSelector(rule.selector, tag, `:where(${tagClassSelector(tag)})`, new Set(), canonical,
+        "[--slotted]", (name, namespace) => `:where(${tagClassSelector(name, namespace)})`, foreign), [tag], [`:where(${tagClassSelector(tag)})`], `[${VUE_ROOT_ATTRIBUTE}]`), rule);
+    });
+    for (const node of copy.nodes.slice()) {
+      if (node.type === "rule" || (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()))) projecting.append(node);
+    }
+  }
   const limit = limited();
   const limits = limit === false ? [] : [...componentTags(definition.template)];
   const scope = postcss.atRule({ name: "scope", params: typeof limit === "string"
@@ -320,6 +348,7 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
     return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
   }
   root.append(scope);
+  if (projecting?.nodes !== undefined && projecting.nodes.length > 0) root.append(projecting);
   return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
 }
 

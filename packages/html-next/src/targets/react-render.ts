@@ -186,7 +186,9 @@ export function markProjected(value: ReactNode): ReactNode {
     const children = markProjected((value.props as { children?: ReactNode }).children);
     return Array.isArray(children) ? React.cloneElement(value, {}, ...children) : React.cloneElement(value, {}, children);
   }
-  return React.cloneElement(value as React.ReactElement<Record<string, unknown>>, { "data-slotted": "" });
+  // The writing component's stamp stays, so its styles keep reaching the element.
+  const element = value as React.ReactElement<Record<string, unknown>>;
+  return React.cloneElement(element, { "data-slotted": element.props["data-slotted"] ?? "" });
 }
 
 /** A copy of a state value with one nested path written, or the same value when nothing changes. */

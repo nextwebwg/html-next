@@ -1371,7 +1371,7 @@ class Planner {
       ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot") : undefined;
     const projected = slotted?.kind === "literal" ? { projected: slotted.value } : {};
     // Content for a named slot is projected content wherever it renders, as `:slotted()` selects it.
-    const body: typeof authored = slotted === undefined || node.name === "template" ? authored
+    const body: typeof authored = slotted === undefined || node.name === "template" || authored.attributes.some((attribute) => attribute.name === PROJECTED_ATTRIBUTE) ? authored
       : { ...authored, attributes: [...authored.attributes, { kind: "literal", name: PROJECTED_ATTRIBUTE, value: "" }] };
     const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
     // A body rebuilds only when its decision changes, as live's region compares it: the `$if` result or the `$match` arm.

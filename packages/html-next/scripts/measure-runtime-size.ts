@@ -148,7 +148,9 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // +21 to +36 B on every fixture: a generated render counts how deeply renders nest, so components a
 // row or block builds inside projected content are created once the outermost render inserts them.
 // The step that creates them ships only with projection.
-const staticGenerated = await generatedFixture("static-card", 7_928);
+// +3 to +7 B on some fixtures: a projected node keeps the tag its writing component stamped on it,
+// so that component's styles follow its markup into another component's slot.
+const staticGenerated = await generatedFixture("static-card", 7_932);
 // The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
 // +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
@@ -170,7 +172,7 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_849);
 // Counters allocate only when queried; neither capability duplicates accepted values.
 // +132–148 B on SDK fixtures for read-only state/computed/context declaration reads and
 // status observation; +17 B on computed-counter for existing-property notification of status.
-const propGenerated = await generatedFixture("prop-button", 14_044);
+const propGenerated = await generatedFixture("prop-button", 14_049);
 const awaitGenerated = await generatedFixture("await-card", 14_617);
 // +55 B gzip: the seed-copy cold path recognizes ordinary foreign-realm records,
 // retaining local/foreign class and platform identities. Local record/list copies keep their fast path.
@@ -185,12 +187,12 @@ const keyedGenerated = await generatedFixture("keyed-list", 8_308);
 // +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
 // does nothing until a component on the page asks.
 const dataGenerated = await generatedFixture("data-read", 8_266);
-const controllerGenerated = await generatedFixture("controller-lifecycle", 7_940);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 7_943);
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 9_627);
+const requestGenerated = await generatedFixture("controller-request", 9_634);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
