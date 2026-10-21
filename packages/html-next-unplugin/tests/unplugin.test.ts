@@ -360,7 +360,9 @@ describe("HTML Next unplugin", () => {
     // +60 B: optional seeded-state hooks; the one-time initializer itself is absent here.
     // +151 B after composing main's declared-value reset behavior.
     // +5 B: the lifecycle observer reads each mutation's nodes by index, faster than a NodeList's iterator.
-    assert.ok(gzip <= 9_370, `direct benchmark entry is ${gzip} B gzip-6`);
+    // +11 B: a render counts its nesting, so components a row or block builds inside projected content
+    // are created once the outermost render has inserted them; the step itself ships only with projection.
+    assert.ok(gzip <= 9_381, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

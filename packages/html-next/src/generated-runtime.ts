@@ -1340,6 +1340,9 @@ export type Projection = readonly [node: Node, slot: string][];
 const projectedEntries = new WeakMap<Node, [Node, string]>();
 /** Components invoked in projected content no slot has placed yet, by the top-level projected node holding them. */
 const waiting = new WeakMap<Node, Map<Node, () => void>>();
+/** How deeply generated renders are nested, and what runs once the outermost one has inserted what it built. */
+let rendering = 0;
+let afterRender: (() => void) | undefined;
 
 function follows(previous: Node, root: Node): void {
   const entry = projectedEntries.get(previous);
@@ -1355,18 +1358,79 @@ function follows(previous: Node, root: Node): void {
  * no instance or bindings; until then `realize` waits for a slot to place that node.
  */
 export function placed(site: Node, realize: () => void): boolean {
-  // The projected node holding the site; before its component has it, the node under the projection's fragment.
+  if (site === settling) return true;
+  const top = projectedTop(site);
+  if (top === true) return true;
+  wait(top, site, realize);
+  // A row or block a render builds for content already projected is detached until the render inserts
+  // it, so the walk stops at its own root, which no slot places. The render looks again (`settle`).
+  if (!projectedEntries.has(top)) {
+    building.push([site, top, realize]);
+    afterRender = settle;
+  }
+  return false;
+}
+
+/** The projected node holding `site`, or `true` once a slot has placed it; before its component has it, the node under the projection's fragment. */
+function projectedTop(site: Node): Node | true {
   let top = site;
   for (let node: Node | null = site; node !== null && node.nodeType !== 11; node = node.parentNode) {
     top = node;
     if (projectedEntries.has(node)) break;
   }
   const parent = top.parentNode;
-  if (projectedEntries.has(top) && parent !== null && parent.nodeType !== 11) return true;
+  return projectedEntries.has(top) && parent !== null && parent.nodeType !== 11 ? true : top;
+}
+
+/**
+ * Whether `site` is in nodes a consumer's `$if`, `$each` or `$match` region inserted at the top of
+ * projected content: they are no projected node's descendants, but follow the region's projected start
+ * mark, which is placed with the region.
+ * ponytail: scans each ancestor's earlier siblings, so n rows a region adds at the top of projected
+ * content cost O(n²) steps; record each region's mark on the nodes it inserts if that shows up.
+ */
+function inPlacedRegion(site: Node): boolean {
+  for (let node: Node | null = site; node !== null && node.nodeType !== 11; node = node.parentNode) {
+    for (let previous = node.previousSibling; previous !== null; previous = previous.previousSibling) {
+      if (projectedEntries.has(previous)) return previous.parentNode !== null && previous.parentNode.nodeType !== 11;
+    }
+  }
+  return false;
+}
+
+function wait(top: Node, site: Node, realize: () => void): void {
   let pending = waiting.get(top);
   if (pending === undefined) waiting.set(top, pending = new Map());
   pending.set(site, realize);
-  return false;
+}
+
+/** Sites `placed` deferred inside a row or block still being built. */
+let building: [site: Node, top: Node, realize: () => void][] = [];
+/** The site `settle` is creating, which its `realize` asks `placed` about again. */
+let settling: Node | undefined;
+
+/**
+ * After the outermost generated render, when the rows and blocks it built are inserted, each deferred
+ * site is created if a slot has placed its projected node, or waits for that node as `placed` does.
+ * A site a slot already realized, or one a later render asked about again, is no longer pending.
+ */
+function settle(): void {
+  afterRender = undefined;
+  while (building.length > 0) {
+    const sites = building;
+    building = [];
+    for (const [site, deferred, realize] of sites) {
+      const pending = waiting.get(deferred);
+      if (pending?.get(site) !== realize) continue;
+      pending.delete(site);
+      if (pending.size === 0) waiting.delete(deferred);
+      const top = projectedTop(site);
+      if (top !== true && !inPlacedRegion(site)) { wait(top, site, realize); continue; }
+      rendering += 1;
+      settling = site;
+      try { realize(); } finally { rendering -= 1; settling = undefined; }
+    }
+  }
 }
 
 /**
@@ -1872,8 +1936,10 @@ export function attachGeneratedController(
   const render = (changed: number): void => {
     const written = objects;
     objects = spare;
+    rendering++;
     try { untracked(() => update(changed, written)); }
-    finally { written.clear(); spare = written; }
+    finally { written.clear(); spare = written; rendering--; }
+    if (!rendering && afterRender) untracked(afterRender);
   };
   const job = new ReactiveEffect(scheduler, () => {
     // Bits wait while disconnected; a reconnect's full render may already have taken them.
