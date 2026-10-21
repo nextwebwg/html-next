@@ -34,7 +34,7 @@
     "css-tree": "catalog:",
     "cssstyle": "catalog:",
     "parse5": "catalog:",
-    "svelte2tsx": "0.7.61",
+    "svelte2tsx": "0.7.62",
     "typescript": "5.9.3",
     "unplugin": "catalog:",
     "vue-tsc": "catalog:"
@@ -50,7 +50,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "svelte": "catalog:",
-    "svelte-check": "4.7.6",
+    "svelte-check": "4.7.7",
     "vite": "catalog:",
     "vitest": "catalog:",
     "vue": "catalog:"
