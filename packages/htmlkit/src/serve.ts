@@ -27,8 +27,9 @@ export async function previewApplication(input: ServerOptions = {}): Promise<App
   const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   // Read deployment metadata, never loaders or page source. The same tree works on a static host.
-  const { base } = await readManifest(config.outDir);
+  const { base, files } = await readManifest(config.outDir);
   const output = await realpath(config.outDir);
+  const types = new Map(files.map(file => [file.pathname, file.type]));
   const server = createHTTPServer((request, response) => { void (async () => {
     if (!methodAllowed(request, response)) return;
     const pathname = requestPath(request);
@@ -44,7 +45,7 @@ export async function previewApplication(input: ServerOptions = {}): Promise<App
       if (!within(output, file)) throw new HtmlKitError("Missing-page output escapes the deployment directory.");
     }
     const body = await readFile(file);
-    response.writeHead(status, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
+    response.writeHead(status, { "content-type": (status === 200 ? types.get(pathname) : undefined) ?? mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
     response.end(request.method === "HEAD" ? undefined : body);
   })().catch(error => { response.writeHead(500, { "content-type": "text/plain" }); response.end(String(error)); }); });
   return listen(server, options, base);
@@ -151,7 +152,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
       let file: string | undefined;
       try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
       // Other files, such as public/ and the application's modules, are Vite's to serve.
-      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined &&
+      if (file === undefined && !payload && /\.[A-Za-z0-9]+$/.test(pathname) && !application.generated.has(pathname) && matchRoute(application.routes, pathname, config.base) === undefined &&
         matchRoute(application.endpoints, pathname, config.base) === undefined) { next(); return; }
       if (file !== undefined) {
         if (!methodAllowed(request, response)) return;

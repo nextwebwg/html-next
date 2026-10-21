@@ -18,7 +18,7 @@ import { preparationModule, type ProviderModule } from "./provider-preparation.j
 import { privateReadBridge, type ServerReaders } from "./private-readers.js";
 import { privateReadResponse, type PrivateReadRegistration } from "./private-api.js";
 import { serverReaders } from "./private-readers.js";
-import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestRedirect, Middleware, NavigationItem,
+import type { ApplicationRoute, ApplicationServer, EndpointModule, EndpointRoute, LoadContext, LoaderResult, ManifestFile, ManifestRedirect, Middleware, NavigationItem,
   NavigationNode, NavigationQuery, PageAction, PagerLinks, RedirectStatus, RenderedHead, RenderedLayer, RouteParam, ServerApplication, ServerModule, StartOptions, RenderedPolicy } from "./types.js";
 
 export { setRenderWorkers } from "@nextwebwg/html-next/server";
@@ -390,6 +390,8 @@ export interface Pipeline<Route extends NavigationRoute> {
   readonly base: string;
   /** Redirects by deployment pathname with a trailing slash. */
   readonly redirects: ReadonlyMap<string, { readonly location: string; readonly status: RedirectStatus }>;
+  /** Plugins' generated files by deployment pathname, which answer before redirects and pages. */
+  readonly files?: ReadonlyMap<string, { readonly contents: string | Uint8Array; readonly type: string; readonly headers?: Readonly<Record<string, string>> }>;
   readonly routes: readonly Route[];
   readonly endpoints: readonly EndpointRoute[];
   endpoint(route: EndpointRoute): Promise<EndpointModule>;
@@ -437,6 +439,11 @@ async function route<Route extends NavigationRoute>(app: Pipeline<Route>, reques
     if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
     if (!sameOrigin(request)) return new Response("Cross-origin component reads are refused.", { status: 403 });
     return app.read(request);
+  }
+  const file = payload ? undefined : app.files?.get(pathname);
+  if (file !== undefined) {
+    if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+    return new Response(request.method === "HEAD" ? null : file.contents as BodyInit, { headers: { "content-type": file.type, ...file.headers } });
   }
   // The redirects option precedes pages, with or without the trailing slash.
   const redirect = app.redirects.get(pathname.endsWith("/") ? pathname : pathname + "/");
@@ -502,6 +509,8 @@ export interface ServerData {
   readonly version: 2 | 3;
   readonly base: string;
   readonly redirects: readonly ManifestRedirect[];
+  /** Plugins' generated files, whose media types their files' extensions may not give. */
+  readonly files?: readonly ManifestFile[];
   readonly routes: readonly NavigationRoute[];
   /** Each concrete page URL and its route's index, for navigation. */
   readonly catalog: readonly (readonly [string, number])[];
@@ -579,9 +588,10 @@ export async function serverApplication(entry: string, data: ServerData, modules
   // Files that are never served: the server's own code, and payloads, which answer through their pages.
   const reserved = [join(output, "_htmlkit/server"), join(output, "_htmlkit/pages")];
   // A prerendered page's file carries the site's policy as a header too, which may hold header-only directives.
+  const types = new Map((data.files ?? []).map(file => [join(output, decodeURIComponent(file.pathname.slice(base.length))), file.type]));
   const file = async (path: string, request: Request, status = 200, init?: Headers, page = false) => {
     const headers = new Headers(init);
-    headers.set("content-type", mime[extname(path)] ?? "application/octet-stream");
+    headers.set("content-type", types.get(path) ?? mime[extname(path)] ?? "application/octet-stream");
     if (page && data.policy !== undefined) headers.set(policyHeader(data.policy), data.policy.header);
     // Hashed bundles beside the manifest never change.
     if (/^_htmlkit\/[^/]+$/.test(path.slice(output.length + 1).replaceAll("\\", "/")) && !path.endsWith("manifest.json")) headers.set("cache-control", "public, max-age=31536000, immutable");

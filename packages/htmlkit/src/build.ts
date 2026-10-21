@@ -11,7 +11,7 @@ import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type 
 import { checkLinks } from "./links.js";
 import { matchRoute } from "./routes.js";
 import type { ServerData, ServerPage } from "./server.js";
-import type { ApplicationOptions, ApplicationRoute, BrowserDefinition, RenderedPolicy, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
+import type { ApplicationOptions, ApplicationRoute, BrowserDefinition, RenderedPolicy, BuildManifest, BuildResult, ManifestFile, ManifestRedirect, RedirectStatus } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
@@ -45,17 +45,17 @@ export async function readManifest(outDir: string): Promise<BuildManifest> {
   const file = join(outDir, "_htmlkit/manifest.json");
   const manifest = JSON.parse(await readFile(file, "utf8")) as BuildManifest;
   if (manifest.version !== 1) throw new HtmlKitError(`Unsupported manifest version ${String(manifest.version)}; this HTMLKit reads version 1.`, file);
-  // Builds from before redirects have none.
-  return { ...manifest, redirects: manifest.redirects ?? [] };
+  // Builds from before redirects or generated files have none.
+  return { ...manifest, redirects: manifest.redirects ?? [], files: manifest.files ?? [] };
 }
 
 /**
  * Write _htmlkit/server: entry.js, whose default export answers requests, and the loaders, endpoints,
  * and middleware it imports. Prerendered pages need none of their code there; their files serve them.
  */
-async function writeServer({ root, base, canonicalOrigin, stage, redirects, scripts, policy, internals, serverGraphs, components }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
+async function writeServer({ root, base, canonicalOrigin, stage, redirects, files, scripts, policy, internals, serverGraphs, components }: { readonly root: string; readonly base: string; readonly canonicalOrigin: string;
   readonly policy: RenderedPolicy | undefined;
-  readonly stage: string; readonly redirects: readonly ManifestRedirect[]; readonly scripts: readonly string[];
+  readonly stage: string; readonly redirects: readonly ManifestRedirect[]; readonly files: readonly ManifestFile[]; readonly scripts: readonly string[];
   readonly internals: Awaited<ReturnType<typeof createApplicationInternals>>;
   readonly components: readonly BrowserDefinition[];
   readonly serverGraphs: readonly { readonly route: ApplicationRoute; readonly graph: RouteGraph; readonly assets: PageAssets }[] }): Promise<void> {
@@ -91,7 +91,7 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, scri
   const readers = Object.fromEntries(components.flatMap(component => component.server === undefined || component.binding === undefined ? [] : [[component.binding.source, {
     definition: component.definition, common: module(component.module!, "provider"), server: module(component.server, "reader"),
   }]]));
-  const data: ServerData = { version: 3, base, canonicalOrigin, redirects, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
+  const data: ServerData = { version: 3, base, canonicalOrigin, redirects, files, scripts, ...(policy === undefined ? {} : { policy }), pages, ...(error === undefined ? {} : { error }),
     readers,
     routes: application.routes.map(path),
     catalog: [...catalog].map(([path, route]) => [path, application.routes.indexOf(route)] as const),
@@ -231,6 +231,18 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, redirectPage(to, policy).html);
     }
+    // Plugins' generated files, which a public sitemap.xml or robots.txt never is, so a plugin may supply sitemap.xml.
+    const files: ManifestFile[] = [];
+    for (const [pathname, { contents, type }] of application.generated) {
+      const target = join(stage, decodeURIComponent(pathname.slice(config.base.length)));
+      await mkdir(dirname(target), { recursive: true });
+      try { await writeFile(target, contents, { flag: "wx" }); }
+      catch (error) {
+        if (["EEXIST", "EISDIR"].includes((error as NodeJS.ErrnoException).code!)) throw new HtmlKitError(`Generated file collision at ${pathname}: the build already wrote it.`);
+        throw error;
+      }
+      files.push({ pathname, type });
+    }
     // A public sitemap.xml is the site's own and stays as it is.
     if (options.origin !== undefined && !await exists(join(stage, "sitemap.xml"))) {
       await writeFile(join(stage, "sitemap.xml"), '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
@@ -241,11 +253,11 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       const sitemap = options.origin === undefined || /^sitemap:/im.test(rules) ? "" : `Sitemap: ${config.origin}${config.base}sitemap.xml\n`;
       await writeFile(join(stage, "robots.txt"), rules + sitemap);
     }
-    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, scripts, policy, internals,
+    await writeServer({ root: config.root, base: config.base, canonicalOrigin: options.origin === undefined ? "" : config.origin, stage, redirects, files, scripts, policy, internals,
       components: [...pages.flatMap(page => page.components), ...serverGraphs.flatMap(({ graph }) => graph.components)], serverGraphs: serverGraphs.map(({ route, graph }, i) =>
       ({ route, graph, assets: bundled(pages.length + i, route.pattern).assets })) });
     const routes = delivery.map(page => page.pathname);
-    const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects };
+    const published: BuildManifest = { version: 1, base: config.base, routes, pages: delivery, redirects, files };
     await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify(published, null, 2) + "\n");
     await runHook(options, "buildEnd", { root: config.root, base: config.base, outDir: stage, routes: application.routes, pages: routes,
       async writeFile(path, contents) {
