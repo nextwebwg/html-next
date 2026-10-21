@@ -392,10 +392,10 @@ const { base, routes, pages, redirects } = await readManifest('dist');
 | `pages[].pageName` | The page's component name. |
 | `pages[].browserModule` | The URL of the page's own browser module. |
 | `pages[].chunks` | URLs of the shared modules the page imports. |
-| `redirects` | Each redirect page the build wrote, from the [`redirects` option](/htmlkit/routes#redirects) and from loaders' [`redirect()`](/htmlkit/loaders#redirecting). |
+| `redirects` | Each redirect page the build wrote, from the [`redirects` option](/htmlkit/routes#redirects), pages' [`hk:redirect-from`](/htmlkit/routes#redirects) and loaders' [`redirect()`](/htmlkit/loaders#redirecting). |
 | `redirects[].from` | The old URL path, where the redirect page is. |
 | `redirects[].to` | Where it sends readers: a URL path including `base`, or an absolute URL. |
-| `redirects[].status` | The status a server answers with: 308 for the option, and the loader's status for `redirect()`. |
+| `redirects[].status` | The status a server answers with: 308 for the option and `hk:redirect-from`, and the loader's status for `redirect()`. |
 
 These fields are stable. A release may add fields at version `1`, so ignore fields you don't use.
 `version` changes only when a field is removed, renamed, or changes meaning, and `readManifest`
