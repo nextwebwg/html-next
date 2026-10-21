@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page, type Route } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApplication, devApplication, previewApplication, startApplication, type ApplicationServer } from "../src/index.js";
 import { write } from "./fixture.js";
@@ -473,6 +473,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation between pages that define a tag differently", () => {
   let root: string;
   let preview: ApplicationServer;
+  let development: ApplicationServer;
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "htmlkit-redefined-"));
     await write(root, "package.json", '{"type":"module"}');
@@ -490,24 +491,27 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation be
     await pageOf("v/v1/guide.html", "V1 guide", "v1/counter.html");
     await buildApplication({ root });
     preview = await previewApplication({ root, port: 0 });
+    development = await devApplication({ root, port: 0 });
   }, 120_000);
   afterAll(async () => {
-    await preview?.close();
+    await preview?.close(); await development?.close();
     if (root) await rm(root, { recursive: true, force: true });
   });
 
-  for (const [name, type] of engines) {
-    it(`${name} loads a page as a document when its definition conflicts, and in place when it does not`, async () => {
+  for (const [name, type] of engines) for (const mode of ["built", "development"] as const) {
+    it(`${name} loads a ${mode} page as a document when its definition conflicts, and in place when it does not`, async () => {
       const browser = await type.launch({ headless: true });
+      const url = mode === "built" ? preview.url : development.url;
       try {
         const { page, errors } = await open(await browser.newContext());
         const logged: string[] = [];
-        page.on("console", message => { if (["error", "warning"].includes(message.type())) logged.push(message.text()); });
+        // Firefox's own warnings for a document left while it loads, such as an unfinished module, are not HTMLKit's.
+        page.on("console", message => { if (["error", "warning"].includes(message.type()) && !message.text().startsWith("[JavaScript Warning:")) logged.push(message.text()); });
         const shows = async (title: string, path: string, counter: string) => {
           await settled(page, title);
           expect([new URL(page.url()).pathname, await page.locator(".counter").textContent()]).toEqual([path, counter]);
         };
-        await page.goto(preview.url);
+        await page.goto(url);
         await page.waitForFunction(() => document.readyState === "complete");
         await mark(page);
         // Pages with the same definitions render in place.
@@ -520,6 +524,27 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation be
         await page.evaluate(() => document.querySelector<HTMLAnchorElement>("#v1")!.click());
         await shows("V1 home", "/v/v1/", "v1 counter");
         expect([await marked(page), await page.evaluate(() => [scrollY, history.length])]).toEqual([false, [0, entries + 1]]);
+        // Back, then forward before the previous page's document has run its scripts: Chromium and WebKit
+        // treat both entries as that document's own, so forward changes only its URL until HTMLKit starts.
+        let release!: () => void;
+        const scripts = new Promise<void>(done => { release = done; });
+        let loading = false;
+        const hold = async (route: Route) => {
+          if (route.request().resourceType() === "document") loading = true;
+          else if (loading && route.request().resourceType() === "script") await scripts;
+          await route.continue();
+        };
+        await page.route("**/*", hold);
+        await page.goBack({ waitUntil: "commit" });
+        await page.getByRole("heading", { name: "Guide", exact: true }).waitFor();
+        await page.goForward({ waitUntil: "commit" });
+        release();
+        await shows("V1 home", "/v/v1/", "v1 counter");
+        await page.unroute("**/*", hold);
+        // And at once, with no scripts held.
+        await page.goBack({ waitUntil: "commit" });
+        await page.goForward({ waitUntil: "commit" });
+        await shows("V1 home", "/v/v1/", "v1 counter");
         // Its own pages render in place in that document.
         await mark(page);
         await page.locator("#v1-guide").click();

@@ -159,8 +159,15 @@ async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
 }
 
 function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: ClientOptions): void {
-  /** The path and query whose layers the document shows. A navigation's URL commits before its layers arrive. */
-  let rendered = location.pathname + location.search;
+  /**
+   * The path and query whose layers the document shows. A navigation's URL commits before its layers
+   * arrive. A document shows the page of the entry it loaded into, navigation.activation's, until
+   * HTMLKit renders another. Chromium 153 and WebKit 26.6 treat the entries of a document that a load
+   * replaced as the new document's own, so traversing to one before HTMLKit starts changes only the URL.
+   */
+  const loadedInto = navigation.activation?.entry;
+  const shown = new URL(loadedInto?.url == null || loadedInto.key === navigation.currentEntry?.key ? location.href : loadedInto.url);
+  let rendered = shown.pathname + shown.search;
   /**
    * The links HTMLKit's documents carry: stylesheets and an alias page's canonical link. HTML Next
    * manages head declarations, marked data-component-head; elements that scripts add are never removed.
@@ -411,6 +418,11 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
       }
     } });
   });
+  // The entry the document moved to before HTMLKit started renders now, as a traversal to it would:
+  // in place, or as a document when its page conflicts with this document's definitions.
+  // ponytail: an entry a script pushed before HTMLKit started looks the same as one traversed to, and
+  // renders its URL's page too. HTMLKit leaves later pushes alone.
+  if (rendered !== location.pathname + location.search) void navigation.navigate(location.href, { history: "replace" });
 }
 
 /** Authors animate navigation with @view-transition { navigation: auto }, as for document navigation. */

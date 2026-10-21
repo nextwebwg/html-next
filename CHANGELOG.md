@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.67
+
+### Fixed
+
+- HTMLKit shows the right page when back or forward reaches an entry before HTMLKit has started in a newly loaded document ([Client navigation](packages/htmlkit/docs/client-navigation.md#native-audit)). Chromium and WebKit treat the entries of a document that a load replaced as the new document's own, so after a page loaded as a document for a conflicting definition, a quick back then forward changed the URL to `/v/v1/…` and left the current version's page on screen. HTMLKit compares the current entry with `navigation.activation.entry` when it starts and renders the current entry's page, in place or as a document.
+  - The conflicting-definition browser test goes back, then forward before the previous page's scripts run, and back then forward at once, in Chromium, Firefox and WebKit, built and in development.
+
 ## 1.0.0-alpha.66
 
 ### Fixed
