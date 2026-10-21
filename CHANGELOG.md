@@ -6,6 +6,7 @@
 
 - A component's styles reach the markup it projects into a child component's slot, at any depth, in the live runtime, compiled output, Node rendering and converted Vue, React and Svelte components ([Styling](https://nextwebwg.org/declarative-components/styling#projected-content-is-the-consumers)). In `<demo-frame><span class="menu" slot="menu">Menu</span></demo-frame>`, the page's `.menu` rule matched nothing: its scope stopped at `<demo-frame>`'s root and at projected nodes. The elements a component with styles projects now carry its tag in `data-slotted`, and its styles compile a scope rooted at each of them with the same limits, so `.menu` styles the menu while the receiving component's own rules still do not, its `:slotted()` rules still stop at a projected component's root, and a projected component keeps its own scope.
   - A browser test projects a page's markup into a frame and a badge, and the frame's own markup into a badge, in the live runtime, compiled Vanilla output and converted Vue, React and Svelte components, in Chromium, Firefox and WebKit.
+- HTMLKit's configuration and routing guides link a project component as `@/app/components/card.html`, in the `app/components/` folder the guide's project layout names. `@/` is the project root.
 
 ## 1.0.0-alpha.68
 
