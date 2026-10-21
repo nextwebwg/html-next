@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-alpha.68
+
+### Added
+
+- `<template $slot>` is a slot outlet the HTML parser leaves in place inside `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<tr>` and `<colgroup>` ([Parser-safe outlets](https://nextwebwg.org/declarative-components/components#parser-safe-outlets)). The parser moves a `<slot>` written there to before the table, so a component could not slot rows or cells into table parts. `<template $slot>` is the default slot's outlet and `<template $slot="row">` a named one; each works as the matching `<slot>` does, with slot props given statically or through `from:`, its content as fallback, scoped slots, `$each`, and the same server range marks and hydration. The live runtime, compiled Vanilla output, converted Vue, React and Svelte components, and Node rendering support it.
+  - A browser test slots a consumer's `<tr>` rows through `<template $slot="row">` in `<tbody>` and header cells through `<template $slot>` in `<thead><tr>`, and shows each outlet's fallback, in the live runtime, compiled Vanilla output and converted Vue, React and Svelte components, in Chromium, Firefox and WebKit. Hydration fixtures render the same table in Node and hydrate it in the three engines, live and through compiled modules.
+- A build reports `HT032` for a `<slot>` written directly in a table, table section, row or column group, which the HTML parser moves out of the table, and suggests `<template $slot>` with the slot's name.
+- `$if` works on a slot outlet, `<slot>` or `<template $slot>`, as on any element: the outlet renders while the condition is true. Before, a `<slot>` took only `$each`.
+
 ## 1.0.0-alpha.67
 
 ### Fixed
