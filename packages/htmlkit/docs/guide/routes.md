@@ -348,7 +348,7 @@ external scripts it needs. They read the component's props, state, and data:
 - **Head content goes in `<defs>`.** A `<title>`, `<meta>`, or `<link>` placed directly in a
   `<template component>` is an error that names the component.
 - **Packages don't set the page's identity.** A component reached by a bare name, such as
-  `@acme/ui/card.html` or `@/components/card.html`, is an imported component. Its page-wide entries,
+  `@acme/ui/card.html` or `@/app/components/card.html`, is an imported component. Its page-wide entries,
   which are the canonical, `alternate`, `icon`, and `manifest` links, the `robots`, `referrer`,
   `viewport`, `color-scheme`, and `theme-color` metas, and `og:url`, are left out with an `HL011`
   warning. Pages, layouts, and components linked by a relative path set them.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.69
+
+### Fixed
+
+- HTMLKit's configuration and routing guides link a project component as `@/app/components/card.html`, in the `app/components/` folder the guide's project layout names. `@/` is the project root.
+
 ## 1.0.0-alpha.68
 
 ### Added
