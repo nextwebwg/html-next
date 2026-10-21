@@ -12,6 +12,8 @@ interface ComponentMetadata {
   readonly render?: "prerender" | "server";
   /** Extra route patterns for a page, relative to its page directory's prefix. */
   readonly aliases: readonly string[];
+  /** hk:redirect-from: old route paths, relative to its page directory's prefix, that redirect to the page. */
+  readonly redirectsFrom: readonly string[];
   /** The text of a <title> without expressions. */
   readonly title?: string;
 }
@@ -44,7 +46,7 @@ export function applicationResource(source: string, file: string) {
     if (node.tagName !== "template" || tag === undefined) continue;
     const children = (node as DefaultTreeAdapterMap["template"]).content.childNodes;
     const configuration: { layout?: string; label?: string; order?: string; hidden?: boolean; render?: "prerender" | "server"; title?: string } = {};
-    const aliases: string[] = [];
+    const aliases: string[] = [], redirectsFrom: string[] = [];
     for (const child of children) {
       if ("tagName" in child && ["meta", "title", "link"].includes(child.tagName)) {
         throw new HtmlKitError(`<${child.tagName}> belongs in <${tag}>'s <defs>, where head content and hk: settings are declared.`, file);
@@ -66,8 +68,9 @@ export function applicationResource(source: string, file: string) {
       const content = child.attrs.find(attribute => attribute.name === "content")?.value;
       if (!content) throw new HtmlKitError(`Declare ${name} with nonempty content.`, file);
       if (name === "hk:alias") { aliases.push(content); continue; }
+      if (name === "hk:redirect-from") { redirectsFrom.push(content); continue; }
       const key = ({ "hk:layout": "layout", "hk:label": "label", "hk:order": "order", "hk:navigation": "hidden", "hk:render": "render" } as const)[name];
-      if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:order, hk:navigation, hk:render, or hk:alias; hk:page belongs outside the carrier (${name}).`, file);
+      if (key === undefined) throw new HtmlKitError(`Component configuration is hk:layout, hk:label, hk:order, hk:navigation, hk:render, hk:alias, or hk:redirect-from; hk:page belongs outside the carrier (${name}).`, file);
       if (configuration[key] !== undefined) throw new HtmlKitError(`Declare ${name} once per component.`, file);
       if (key === "hidden" && content !== "hidden") throw new HtmlKitError('hk:navigation accepts only content="hidden".', file);
       if (key === "order" && !/^\d+$/.test(content)) throw new HtmlKitError("hk:order needs a whole number, such as content=\"3\".", file);
@@ -76,7 +79,7 @@ export function applicationResource(source: string, file: string) {
       else if (key === "render") configuration.render = content as "prerender" | "server";
       else configuration[key] = content;
     }
-    components.set(tag, { ...configuration, aliases });
+    components.set(tag, { ...configuration, aliases, redirectsFrom });
   }
   // HTMLKit's own rules first, so their diagnostics name what HTMLKit expects.
   const parsed = parseComponentResource(source, file);

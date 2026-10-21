@@ -140,6 +140,59 @@ it("writes a redirect page at each old URL and lists redirects in the manifest",
   await expect(buildApplication({ root, redirects: { "/docs/static/": "/" } })).rejects.toThrow(/also redirects \/docs\/static\/, which is this page's URL/);
 }, 60_000);
 
+it("redirects each page's hk:redirect-from paths to it, relative to its page directory, in fetch, development and the build", async () => {
+  const moved = (from: string) => `<template component="page-moved"><defs><title>Moved</title>${from}</defs><h1>Moved</h1></template>`;
+  const root = await site({ "guide/moved.html": moved('<meta name="hk:redirect-from" content="/old/"><meta name="hk:redirect-from" content="/older/path/">') });
+  await write(root, "docs/page.html", '<template component="docs-page"><defs><title>Doc</title><meta name="hk:redirect-from" content="/before/"></defs><h1>Doc</h1></template>');
+  // A further mount of a directory redirects under its own prefix too, to the page under that prefix, as hk:alias routes there.
+  const pages = [{ dir: "app/pages" }, { dir: "docs", prefix: "/docs/" }, { dir: "docs", prefix: "/v/current/", alias: true }];
+  const application = await createApplication({ root, base: "/kit/", pages });
+  try {
+    const answer = async (path: string) => {
+      const response = await application.fetch(new Request(`http://localhost${path}`));
+      return [response.status, response.headers.get("location")];
+    };
+    expect(await answer("/kit/old/")).toEqual([308, "/kit/guide/moved/"]);
+    expect(await answer("/kit/older/path")).toEqual([308, "/kit/guide/moved/"]);
+    expect(await answer("/kit/docs/before/")).toEqual([308, "/kit/docs/page/"]);
+    expect(await answer("/kit/v/current/before/")).toEqual([308, "/kit/v/current/page/"]);
+    expect(application.routes.map(route => route.pattern)).not.toContain("/old/");
+  } finally { await application.close(); }
+  const result = await buildApplication({ root, base: "/kit/", pages, origin: "https://example.com" });
+  expect(await readFile(join(result.outDir, "old/index.html"), "utf8")).toContain('<meta http-equiv="refresh" content="0; url=/kit/guide/moved/">');
+  const manifest = await readManifest(result.outDir);
+  expect(manifest.redirects).toEqual(expect.arrayContaining([{ from: "/kit/old/", to: "/kit/guide/moved/", status: 308 },
+    { from: "/kit/docs/before/", to: "/kit/docs/page/", status: 308 }, { from: "/kit/v/current/before/", to: "/kit/v/current/page/", status: 308 }]));
+  expect(manifest.routes).not.toContain("/kit/old/");
+  expect(await readFile(join(result.outDir, "sitemap.xml"), "utf8")).not.toContain("old/");
+  // The development server reads the metadata again after an edit.
+  const server = await devApplication({ root, port: 0 });
+  try {
+    const status = async (path: string) => { const response = await fetch(server.url + path, { redirect: "manual" }); return [response.status, response.headers.get("location")]; };
+    expect(await status("old/")).toEqual([308, "/guide/moved/"]);
+    await write(root, "app/pages/guide/moved.html", moved('<meta name="hk:redirect-from" content="/renamed/">'));
+    await expect.poll(() => status("renamed/"), { timeout: 10_000 }).toEqual([308, "/guide/moved/"]);
+    expect((await status("old/"))[0]).toBe(404);
+  } finally { await server.close(); }
+}, 60_000);
+
+it("rejects an hk:redirect-from path that a page, an alias, the redirects option or another page also claims", async () => {
+  const redirecting = (name: string, from: string, extra = "") => `<template component="${name}"><defs><title>${name}</title><meta name="hk:redirect-from" content="${from}">${extra}</defs><h1>${name}</h1></template>`;
+  const cases: [Readonly<Record<string, string>>, Readonly<Record<string, string>> | undefined, RegExp][] = [
+    [{ "a.html": redirecting("page-a", "/a/") }, undefined, /hk:redirect-from \/a\/ is this page's own URL/],
+    [{ "a.html": redirecting("page-a", "/start/", '<meta name="hk:alias" content="/start/">') }, undefined, /hk:redirect-from \/start\/ is this page's own URL/],
+    [{ "a.html": redirecting("page-a", "/b/"), "b.html": echo("page-b") }, undefined, /hk:redirect-from \/b\/ is the URL of .*b\.html/],
+    [{ "a.html": redirecting("page-a", "/old/"), "b.html": redirecting("page-b", "/old/") }, undefined, /hk:redirect-from \/old\/ is declared by .*a\.html and .*b\.html/],
+    [{ "a.html": redirecting("page-a", "/old/") }, { "/old/": "/" }, /hk:redirect-from \/old\/ is also a key of the redirects option/],
+    [{ "a.html": redirecting("page-a", "old") }, undefined, /hk:redirect-from needs a route path with leading and trailing slashes/],
+    [{ "[id].html": redirecting("page-id", "/old/") }, undefined, /hk:redirect-from redirects to one URL, and \/\[id\]\/ has parameters/],
+  ];
+  for (const [pages, redirects, message] of cases) {
+    const root = await site(pages);
+    await expect(createApplication({ root, ...(redirects === undefined ? {} : { redirects }) })).rejects.toThrow(message);
+  }
+}, 60_000);
+
 it("refuses a symbolic-link page or page folder, naming it, as it refuses symbolic-link public assets", async () => {
   const root = await site({});
   await write(root, "other/page.html", '<template component="page-other"><h1>Other</h1></template>');

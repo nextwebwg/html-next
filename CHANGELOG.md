@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.68
+
+### Added
+
+- A page declares the old URLs that redirect to it with `<meta name="hk:redirect-from" content="/old/">` in its `<defs>`, once per URL ([Redirects](packages/htmlkit/docs/guide/routes.md#redirects)). Each path is relative to the page's page folder, as an `hk:alias` path is, and a page in an alias page folder redirects under that folder's prefix too. The redirects answer with 308 in development, `htmlkit start` and `application.fetch`, and a static build writes a redirect page at each old URL and lists it in the manifest's `redirects`. The development server reads them again after each edit. An `hk:redirect-from` path that is the page's own URL, another page's URL or alias, a key of the `redirects` option, or another page's `hk:redirect-from` path is an error naming the page.
+  - Tests cover fetch, the development server after an edit, the build's redirect pages, manifest and sitemap, and each conflict.
+
 ## 1.0.0-alpha.67
 
 ### Fixed

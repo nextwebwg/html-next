@@ -218,12 +218,21 @@ export async function discover(root: string, options: DiscoveryOptions) {
     pageFiles.set(identity, resource);
     return { identity, resource };
   };
-  // Page aliases are further routes for the same page, relative to its page directory. The loop
-  // also reaches the aliases it appends, which it skips.
+  // Page aliases are further routes for the same page, relative to its page directory, as its redirects
+  // from old paths are. The loop also reaches the aliases it appends, which it skips.
+  const redirects: { readonly from: string; readonly to: string; readonly component: string }[] = [];
   for (const route of routes) {
     if (route.canonical !== undefined || route.notFound || route.error) continue;
     const { resource } = await resourceOf(route.component);
-    for (const alias of resource.components.get(pageDefinition(resource, route.component).contract.tag)!.aliases) {
+    const metadata = resource.components.get(pageDefinition(resource, route.component).contract.tag)!;
+    for (const from of metadata.redirectsFrom) {
+      if (!/^\/(?:[^/]+\/)*$/.test(from) || !from.slice(1, -1).split("/").filter(Boolean).every(validSegment)) {
+        throw new HtmlKitError("hk:redirect-from needs a route path with leading and trailing slashes.", route.component);
+      }
+      if (route.params.length > 0) throw new HtmlKitError(`hk:redirect-from redirects to one URL, and ${route.pattern} has parameters.`, route.component);
+      redirects.push({ from: route.prefix + from.slice(1), to: route.pattern, component: route.component });
+    }
+    for (const alias of metadata.aliases) {
       if (!/^\/(?:[^/]+\/)*$/.test(alias)) throw new HtmlKitError("hk:alias needs a route path with leading and trailing slashes.", route.component);
       add({ component: route.component, ...(route.server === undefined ? {} : { server: route.server }), layouts: route.layouts,
         pattern: route.prefix + alias.slice(1), canonical: route.pattern, ...(route.aliasOf === undefined ? {} : { aliasOf: route.aliasOf }) }, route.prefix, undefined, route.directoryLayout, route.folderLayouts);
@@ -238,6 +247,14 @@ export async function discover(root: string, options: DiscoveryOptions) {
     const normalized = route.segments.map(segment => ["", "[]", "[...]", "[[...]]"][breadth(segment)] || segment.toLowerCase()).join("/");
     if (patterns.has(normalized)) throw new HtmlKitError(`Route conflict: ${patterns.get(normalized)} and ${route.component} (${route.pattern}).`, route.component);
     patterns.set(normalized, `${route.component} (${route.pattern})`);
+  }
+  const redirected = new Map<string, string>();
+  for (const { from, component } of redirects) {
+    const page = routes.find(route => !route.error && !route.notFound && route.pattern.toLowerCase() === from.toLowerCase());
+    if (page !== undefined) throw new HtmlKitError(`hk:redirect-from ${from} is ${page.component === component ? "this page's own URL" : `the URL of ${page.component}`}.`, component);
+    const other = redirected.get(from);
+    if (other !== undefined) throw new HtmlKitError(`hk:redirect-from ${from} is declared by ${other} and ${component}.`, component);
+    redirected.set(from, component);
   }
   const pageNames = new Map<string, { component: string; pattern: string; identity: string }>();
   const discovered: ApplicationRoute[] = [];
@@ -321,7 +338,7 @@ export async function discover(root: string, options: DiscoveryOptions) {
       discovered[i] = { ...route, order };
     }
   }
-  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), ...(error === undefined ? {} : { error }), sources, files, watched };
+  return { routes: discovered, ...(notFound === undefined ? {} : { notFound }), ...(error === undefined ? {} : { error }), redirects, sources, files, watched };
 }
 /**
  * The request-time files: each app/api/**\/*.server.ts endpoint, which answers its folder path without

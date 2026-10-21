@@ -71,8 +71,15 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   assets?: (page: RenderedPage) => PageAssets, policy?: ContentSecurityPolicyOptions | false) {
   const options = await withPlugins(input);
   const config = configure(options);
-  const redirects = redirectTable(config.base, options.redirects);
-  const { routes, notFound: notFoundRoute, error: errorRoute, sources, files, watched } = await discover(config.root, { ...options, base: config.base });
+  const option = redirectTable(config.base, options.redirects);
+  const { routes, notFound: notFoundRoute, error: errorRoute, redirects: declared, sources, files, watched } = await discover(config.root, { ...options, base: config.base });
+  // Pages' hk:redirect-from entries join the redirects option's, rediscovered with the pages.
+  const redirects = new Map(option);
+  for (const { from, to, component } of declared) {
+    const path = new URL(config.base + from.slice(1), "http://localhost").pathname;
+    if (option.has(path)) throw new HtmlKitError(`hk:redirect-from ${from} is also a key of the redirects option.`, component);
+    redirects.set(path, config.base + to.slice(1));
+  }
   // Alias pages name their own URL canonical, absolute when the site sets its origin.
   const canonicalOrigin = options.origin === undefined ? "" : config.origin;
   const { endpoints, middleware } = await discoverServerFiles(config.root);
@@ -400,7 +407,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
       finally { await providers.close(); }
     },
   };
-  return { application, graph, catalog: concreteRoutes, policy: site };
+  return { application, graph, catalog: concreteRoutes, policy: site, redirects };
 }
 
 /**

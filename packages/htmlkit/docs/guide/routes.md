@@ -291,7 +291,27 @@ canonical, and links to it for readers who stay on the page:
 <p>This page is now at <a href="/docs/intro/">/docs/intro/</a>.</p>
 ```
 
-A redirect from a page's own URL is an error that names the page. The build lists every redirect in
+A page can also declare the old URLs that lead to it, with `hk:redirect-from` in its `<defs>`, once
+per URL:
+
+```html
+<template component="install-page"><defs>
+<title>Installation</title>
+<meta name="hk:redirect-from" content="/getting-started/">
+<meta name="hk:redirect-from" content="/setup/">
+</defs>…</template>
+```
+
+Each path is relative to the page's page folder, as an `hk:alias` path is: in a folder served at
+`/docs/`, `content="/setup/"` redirects `/docs/setup/` to the page. A page in an
+[alias page folder](/htmlkit/configuration#page-folders) redirects under that folder's prefix too,
+to its page there. These redirects answer and build exactly as the option's do, with a 308 and a
+redirect page, and the development server reads them again after each edit. The page they lead to
+has no parameters.
+
+A redirect from a page's own URL is an error that names the page. So is an `hk:redirect-from` path
+that is a page's URL or `hk:alias`, a key of the `redirects` option, or another page's
+`hk:redirect-from` path. The build lists every redirect in
 the manifest's
 [`redirects`](/htmlkit/configuration#build-manifest). To redirect from a loader, for example after
 checking data, use [`redirect()`](/htmlkit/loaders#redirecting).
@@ -373,6 +393,7 @@ Settings that start with `hk:` configure HTMLKit. They are `<meta>` entries in t
 | `hk:order` | Sets the page's place in [navigation](/htmlkit/navigation#ordering-pages), in place of its file name's number. |
 | `hk:navigation` | `content="hidden"` keeps the page out of navigation. |
 | `hk:alias` | Adds another URL for the page, such as `content="/start/"`. Its page has a canonical link to the page's own URL, unless the page sets one, and [`sitemap.xml`](/htmlkit/configuration#search-engines) lists only the page's own URL. |
+| `hk:redirect-from` | Redirects an old URL to the page, such as `content="/getting-started/"` ([details](#redirects)). |
 | `hk:render` | `content="server"` renders the page on each request instead of at build time ([details](/htmlkit/loaders#rendering-on-each-request)). |
 
 ## A script before first paint
