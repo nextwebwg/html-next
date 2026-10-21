@@ -181,6 +181,32 @@ function textContent(element: Element): string {
   return text;
 }
 
+/** A slot outlet: a `<slot>`, or its parser-safe form `<template $slot>`, which table parsing leaves in place. */
+function isSlotOutlet(element: Element): boolean {
+  const tag = sourceTag(element);
+  return tag === "slot" || tag === "template" && attr(element, "$slot") !== undefined;
+}
+
+/**
+ * The HTML parser foster-parents a `<slot>` written directly in `<table>`, `<tbody>`, `<thead>`,
+ * `<tfoot>`, `<tr>` or `<colgroup>`: it moves the slot to just before the table. Only source
+ * locations show the move, as a slot that precedes a table starting earlier in the source, so the
+ * build reports it and the live parser, which reads located-less browser DOM, cannot.
+ */
+function failFosteredSlot(siblings: Iterable<ChildNode | string>, source: string): void {
+  const elements = [...siblings].filter((node): node is Element => typeof node !== "string" && isElement(node));
+  const start = (node: Element): number | undefined =>
+    "sourceCodeLocation" in node ? node.sourceCodeLocation?.startOffset : undefined;
+  for (const [index, slot] of elements.entries()) {
+    const at = sourceTag(slot) === "slot" ? start(slot) : undefined;
+    if (at === undefined) continue;
+    if (elements.slice(index + 1).some((node) => sourceTag(node) === "table" && (start(node) ?? at) < at)) {
+      const name = attr(slot, "name");
+      locatedFail(slot)("HT032", `The HTML parser moves a \`<slot>\` written directly in a table, table section or row out to before the \`<table>\`. Write \`<template $slot${name === undefined ? "" : `="${name}"`}>\` there instead; it stays in place and behaves as the \`<slot>\` would.`, source);
+    }
+  }
+}
+
 function directElements(element: Element, name: string): Element[] {
   const matches: Element[] = [];
   for (const node of sourceChildren(element)) {
@@ -439,7 +465,7 @@ function collectTargetsAtSource(
       }
     }
     for (const child of sourceChildren(element)) {
-      if (isElement(child) && sourceTag(child) !== "slot") visit(child);
+      if (isElement(child) && !isSlotOutlet(child)) visit(child);
     }
   };
   visit(root);
@@ -1689,7 +1715,7 @@ function parseAwaitGroup(
     }
     return undefined;
   }
-  if (sourceTag(first) === "slot") fail("HT008", "A slot only supports `$each` structural flow.", source);
+  if (isSlotOutlet(first)) fail("HT008", "A slot only supports `$each` or `$if` structural flow.", source);
   const parsed = AWAIT_RE.exec(raw);
   if (parsed === null) fail("HT031", "`$await` requires `$name` or `binding of $name`.", source);
   const requested = parsed[1];
@@ -1792,6 +1818,7 @@ function parseElementAtSource(
     else if (attribute.name === "$transition") transitionValue = attribute.value;
     else if (attribute.name === "$transition-name") transitionName = attribute.value;
     else if (attribute.name.startsWith("on:")) (eventAttributes ??= []).push(attribute);
+    else if (attribute.name === "$slot") fail("HT008", "`$slot` makes a `<template>` a slot outlet, written where a `<slot>` outlet could be; it cannot be used here.", source);
     else bindingAttributes.push(attribute);
   }
   if (consumed !== undefined && flowValues !== undefined) {
@@ -1831,6 +1858,7 @@ function parseElementAtSource(
     : undefined;
   const merged = { defaults: slotState.defaults, names: new Set<string>(), refs: new Set<string>() };
   const content = contentNodes(element);
+  failFosteredSlot(content, source);
   for (let index = 0; index < content.length; index += 1) {
     const child = content[index]!;
     if (typeof child === "string") {
@@ -1844,8 +1872,13 @@ function parseElementAtSource(
       index = awaited.next - 1;
       continue;
     }
-    if (sourceTag(child) === "slot") {
-      const name = attr(child, "name");
+    if (isSlotOutlet(child)) {
+      // `<template $slot="name">` is the same outlet as `<slot name="name">`; an empty `$slot` is the default slot.
+      const templateForm = sourceTag(child) === "template";
+      const name = templateForm ? attr(child, "$slot") || undefined : attr(child, "name");
+      if (templateForm && (attr(child, "name") !== undefined || attr(child, "from:name") !== undefined)) {
+        fail("HT008", "A `<template $slot>` outlet names its slot with the literal value of `$slot`, such as `<template $slot=\"row\">`; `name` is not one of its attributes.", source);
+      }
       if (attr(child, "from:name") !== undefined) {
         fail("HT008", "A slot's name is written as `name`, never computed with `from:name`; for content that varies by item, use one named scoped slot that passes the item as a prop, such as `<slot name=\"option\" from:item=\"$row\">`.", source);
       }
@@ -1861,7 +1894,7 @@ function parseElementAtSource(
             fail("HT008", `Slot prop \`${prop}\` is not an expression-scope name.`, source);
           }
           rawProps.push({ name: prop, expression: attribute.value });
-        } else if (attribute.name !== "name") {
+        } else if (attribute.name !== (templateForm ? "$slot" : "name")) {
           if (!isIdentifier(attribute.name)) {
             fail("HT008", `Slot prop \`${attribute.name}\` is not an expression-scope name.`, source);
           }
@@ -1870,10 +1903,15 @@ function parseElementAtSource(
       }
       rawProps.push(...slotOutletProps(name, contract.slots?.[name ?? ""], rawProps, staticProps, source));
       const parsedFlow = extractFlow(flowValues, childScope, source);
-      if (parsedFlow !== undefined && parsedFlow.kind !== "each") {
-        fail("HT008", "A slot only supports `$each` structural flow.", source);
+      if (parsedFlow !== undefined && parsedFlow.kind !== "each" && parsedFlow.kind !== "if") {
+        fail("HT008", "A slot only supports `$each` or `$if` structural flow.", source);
       }
       const flow = parsedFlow?.kind === "each" ? parsedFlow : undefined;
+      // `$if` on an outlet is the outlet inside a `<template $if>`.
+      const condition = parsedFlow?.kind === "if" ? parsedFlow : undefined;
+      const place = (node: TemplateNode): void => {
+        children.push(condition === undefined ? node : { kind: "element", name: "template", attributes: [], children: [node], flow: condition });
+      };
       const slotScope = flow === undefined ? childScope : withAliases(withRoots(childScope, flow.item, flow.index, "loop"), flow);
       const props = rawProps.map((prop) => ({
         ...prop,
@@ -1928,7 +1966,7 @@ function parseElementAtSource(
         };
       }
       if (name === undefined && fallback.length === 0 && flow === undefined && props.length === 0) {
-        children.push({ kind: "slot" });
+        place({ kind: "slot" });
       } else {
         const slot: {
           kind: "slot";
@@ -1943,7 +1981,7 @@ function parseElementAtSource(
         if (name !== undefined) slot.name = name;
         if (flow !== undefined) slot.flow = flow;
         if (props.length > 0) slot.props = props;
-        children.push(slot);
+        place(slot);
       }
       continue;
     }
@@ -2178,6 +2216,7 @@ function parseComponentNodesAtSource(
   let legacyProps = false;
   let style: Element | undefined;
   let root: Element | undefined;
+  failFosteredSlot(sourceChildren(wrapper), source);
   for (const node of sourceChildren(wrapper)) {
     if (node.nodeName === "#comment" || (isText(node) && sourceText(node).trim() === "")) continue;
     if (!isElement(node)) {

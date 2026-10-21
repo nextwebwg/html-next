@@ -135,6 +135,16 @@ export const definitions = [
     <handler name="toggle"><set name="open" expr:value="not $open"></set><set name="tags" expr:value="$open ? [] : ['docs', 'guide']"></set></handler>
     </defs><section><button type="button" on:click="toggle">Toggle</button>
     <ssr-slot-row><b slot="meta" $if="$open">Opened</b><i slot="leading" $each="tag of $tags">#{$tag}</i>Body</ssr-slot-row></section></template>`,
+  // `<template $slot>` outlets in table parts, where the HTML parser would move a `<slot>` out of the table.
+  `<template component="ssr-grid"><defs><slot name="row"><prop name="item" type="string" required>The row.</prop></slot>
+    <state name="rows" type="list(string)" value="['Ada']"></state>
+    <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
+    </defs><section><button type="button" on:click="change">Change</button><table>
+    <thead><tr><template $slot><th>Name</th></template></tr></thead>
+    <tbody><template $slot="row" $each="row of $rows" $key="$row" from:item="$row"><tr><td><i $value="$row"></i></td></tr></template></tbody>
+    <tfoot><tr><template $slot="total" $if="$rows.length > 1"><td><span>Many</span></td></template></tr></tfoot></table></section></template>`,
+  `<template component="ssr-grid-page"><article><ssr-grid><template slot=""><th>Who</th></template>
+    <template slot="row"><tr><td><b $value="$item"></b></td></tr></template></ssr-grid></article></template>`,
 ].map((source) => parseComponent(source));
 
 export const cases = [
@@ -170,6 +180,8 @@ export const cases = [
   { name: "conditional and repeated content for named slots, shown after the server's fallback", html: '<ssr-slot-form id="subject"></ssr-slot-form>', state: {} },
   { name: "conditional and repeated content for named slots, replaced by their fallback", html: '<ssr-slot-form id="subject"></ssr-slot-form>',
     state: { open: true, tags: ["x"] } },
+  { name: "<template $slot> outlets in table parts, showing their fallback", html: '<ssr-grid id="subject"></ssr-grid>', state: { rows: ["Ada", "Bea"] } },
+  { name: "<template $slot> outlets in table parts, rendering a consumer's rows and header cells", html: '<ssr-grid-page id="subject"></ssr-grid-page>', state: {} },
 ] as const;
 
 /**
