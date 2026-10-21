@@ -9,7 +9,7 @@ import { bundleBrowser, bundleServer } from "./bundle.js";
 import { configure, globalStylesheets, HtmlKitError, runHook, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML, pagePayload, payloadPath, redirectPage, type PageAssets } from "./document.js";
 import { checkLinks } from "./links.js";
-import { matchRoute, redirectTable } from "./routes.js";
+import { matchRoute } from "./routes.js";
 import type { ServerData, ServerPage } from "./server.js";
 import type { ApplicationOptions, ApplicationRoute, BrowserDefinition, RenderedPolicy, BuildManifest, BuildResult, ManifestRedirect, RedirectStatus } from "./types.js";
 
@@ -139,7 +139,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     }
     const pages = [];
     const sources = new Map<string, string>();
-    const redirects: ManifestRedirect[] = [...redirectTable(config.base, options.redirects)].map(([from, to]) => ({ from, to, status: 308 }));
+    const redirects: ManifestRedirect[] = [...internals.redirects].map(([from, to]) => ({ from, to, status: 308 }));
     // The not-found page renders like a page, through its layouts, and becomes 404.html.
     let notFoundIndex = -1;
     for (const pathname of application.notFound === undefined ? entries : [...entries, config.base + "404/"]) {
