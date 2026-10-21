@@ -10,6 +10,6 @@ import type { ApplicationOptions } from "./types.js";
 /** Type-check an htmlkit.config.ts file without changing its values. */
 export function defineConfig(options: ApplicationOptions): ApplicationOptions { return options; }
 export type { Application, ApplicationOptions, ApplicationRoute, ApplicationServer, BrowserDefinition, BuildEndContext, BuildManifest, BuildResult, BuildStartContext, ContentSecurityPolicyOptions,
-  EndpointContext, EndpointHandler, EndpointModule, EndpointRoute, HtmlKitPlugin, PageAction, PageContext, PageDirectory, LoadContext, LoaderResult, ManifestPage,
+  EndpointContext, EndpointHandler, EndpointModule, EndpointRoute, GenerateContext, GeneratedFile, HtmlKitPlugin, PageAction, PageContext, PageDirectory, LoadContext, LoaderResult, ManifestFile, ManifestPage,
   ManifestRedirect, Middleware, NavigationItem, NavigationNode, NavigationQuery, PagerLinks, PageHead, PrefetchPolicy, RedirectStatus, RenderedHead, RenderedLayer, RenderedPolicy,
   RenderedPage, RouteGroup, RouteInput, RouteLayer, RouteParam, ServerApplication, ServerModule, ServerOptions, StartOptions } from "./types.js";
