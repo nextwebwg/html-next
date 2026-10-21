@@ -119,7 +119,21 @@ export interface HtmlKitPlugin {
    * output replaces outDir. A throw fails the build and leaves the previous output in place.
    */
   readonly buildEnd?: (context: BuildEndContext) => void | Promise<void>;
+  /**
+   * Files that are not pages, such as a search index or a feed, by application path (`/search.json`). It runs once
+   * every page has compiled, so it can use what `pages.compile` read. The development server runs it again after each
+   * change and serves the files uncached; a build writes each one into the output and lists it in the manifest.
+   */
+  readonly generate?: (context: GenerateContext) => Readonly<Record<string, GeneratedFile>> | Promise<Readonly<Record<string, GeneratedFile>>>;
 }
+
+export interface GenerateContext {
+  /** The absolute application root. */
+  readonly root: string;
+  readonly base: string;
+}
+/** A generated file's contents, with its media type when the path's extension doesn't give the right one. */
+export type GeneratedFile = string | Uint8Array | { readonly contents: string | Uint8Array; readonly type?: string };
 
 export interface BuildStartContext {
   readonly command: "build" | "dev";
@@ -152,6 +166,14 @@ export interface BuildManifest {
   readonly pages: readonly ManifestPage[];
   /** Each redirect page the build wrote, from the redirects option and from loaders. */
   readonly redirects: readonly ManifestRedirect[];
+  /** Each file plugins generated, from their generate hooks. */
+  readonly files: readonly ManifestFile[];
+}
+export interface ManifestFile {
+  /** The deployment pathname, such as /docs/search.json. */
+  readonly pathname: string;
+  /** Its media type, as the build's servers send it. */
+  readonly type: string;
 }
 
 export interface ManifestRedirect {
@@ -425,6 +447,8 @@ export interface Application {
   readonly error?: ApplicationRoute;
   /** Files that plugin pages reference through PageContext.asset, by deployment-relative path. */
   readonly files: ReadonlyMap<string, string>;
+  /** The files plugins' generate hooks returned, by deployment pathname. */
+  readonly generated: ReadonlyMap<string, { readonly contents: string | Uint8Array; readonly type: string }>;
   /** The absolute paths page plugins passed to page.watch(), which the development server watches. */
   readonly watchFiles: ReadonlySet<string>;
   /** The app/api endpoints, in file order. */

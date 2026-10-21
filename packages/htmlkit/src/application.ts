@@ -16,8 +16,8 @@ import { applicationResource, pageDefinition, withoutSettings } from "./resource
 import { createProviderModules } from "./providers.js";
 import { serverReaders } from "./private-readers.js";
 import { privateReadResponse, type PrivateReadRegistration } from "./private-api.js";
-import { createNavigation, failurePage, pageAction, pageResponse, prerenderedActions, renderRoute, requestReadContext, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
-import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
+import { createNavigation, failurePage, mime, pageAction, pageResponse, prerenderedActions, renderRoute, requestReadContext, respond, serverFailure, type Failure, type Pipeline, type RenderLayer } from "./server.js";
+import type { Application, ApplicationOptions, ContentSecurityPolicyOptions, EndpointRoute, RenderedPolicy, ApplicationRoute, BrowserDefinition, EndpointModule, Middleware, PageAction, RedirectStatus, RenderedHead, RenderedPage, RouteLayer,
   RouteParam, ServerModule } from "./types.js";
 
 // Built-in components need no link: a resource that uses one gets it added after its content, so
@@ -89,6 +89,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   // A dynamic page's entries are checked the same way when they are listed.
   const shadowed = routes.find(route => route.params.length === 0 && redirects.has(config.base + route.pattern.slice(1)));
   if (shadowed !== undefined) throw new HtmlKitError(`The redirects option also redirects ${shadowed.pattern}, which is this page's URL.`, shadowed.component);
+  const generated = await generate(options, config, routes, endpoints, redirects, files);
   const scripts = await headScripts(options, config.root);
   const csp = policy ?? config.csp;
   const ownsServer = moduleServer === undefined;
@@ -353,6 +354,8 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
         matchRoute(routes, url.pathname, config.base)?.params ?? {}, options.services));
     },
     redirects: new Map([...redirects].map(([from, location]) => [from, { location, status: 308 as const }])),
+    // The unbuilt application regenerates them on each change, so readers always fetch them afresh.
+    files: new Map([...generated].map(([pathname, file]) => [pathname, { ...file, headers: { "cache-control": "no-cache" } }])),
     endpoint: async route => await environment.runner.import(route.file) as EndpointModule,
     ...(middleware === undefined ? {} : { middleware: async () => {
       const handler = (await environment.runner.import(middleware) as { default?: unknown }).default;
@@ -385,7 +388,7 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
   const application: Application = {
     ...config, routes, ...(notFoundRoute === undefined ? {} : { notFound: notFoundRoute }), ...(errorRoute === undefined ? {} : { error: errorRoute }),
     navigation: navigation.navigation, navigationTree: navigation.navigationTree,
-    files, watchFiles: watched, endpoints, ...(middleware === undefined ? {} : { middleware }),
+    files, generated, watchFiles: watched, endpoints, ...(middleware === undefined ? {} : { middleware }),
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
@@ -413,6 +416,51 @@ export async function createApplicationInternals(input: ApplicationOptions = {},
     },
   };
   return { application, graph, catalog: concreteRoutes, policy: site, redirects };
+}
+
+type Generated = Map<string, { readonly contents: string | Uint8Array; readonly type: string }>;
+/**
+ * Each plugin's generate hook, run once every page has compiled, by deployment pathname. A path is an application
+ * path, as a redirect's is, and it claims a URL no page, redirect, endpoint, public file, page asset, other plugin's
+ * file, or HTMLKit's own output has.
+ */
+async function generate(options: ApplicationOptions, config: { readonly root: string; readonly base: string; readonly origin: string }, routes: readonly ApplicationRoute[],
+  endpoints: readonly EndpointRoute[], redirects: ReadonlyMap<string, string>, assets: ReadonlyMap<string, string>): Promise<Generated> {
+  const generated: Generated = new Map();
+  const owners = new Map<string, string>();
+  const pages = new Set(routes.filter(route => route.params.length === 0).map(route => config.base + route.pattern.slice(1)));
+  const handlers = new Set(endpoints.filter(route => route.params.length === 0).map(route => config.base + route.pattern.slice(1)));
+  for (const plugin of options.plugins ?? []) {
+    if (plugin.generate === undefined) continue;
+    let files: Readonly<Record<string, unknown>>;
+    try { files = await plugin.generate({ root: config.root, base: config.base }); }
+    catch (error) {
+      const failure = new HtmlKitError(`Plugin ${plugin.name} failed in generate: ${error instanceof Error ? error.message : String(error)}`);
+      failure.cause = error;
+      throw failure;
+    }
+    for (const [path, value] of Object.entries(files)) {
+      const fail = (problem: string): never => { throw new HtmlKitError(`Plugin ${plugin.name} generates ${path}, ${problem}.`); };
+      if (!/^\/(?!\/)/.test(path) || path.endsWith("/") || !path.slice(1).split("/").every(validSegment)) fail("which is no file path: it starts with /, names a file, and has no empty, . or .. segment");
+      const pathname = new URL(config.base + path.slice(1), config.origin).pathname;
+      const relative = decodeURIComponent(pathname.slice(config.base.length));
+      if (relative.split("/")[0] === "_htmlkit") fail("which is in _htmlkit, reserved for HTMLKit's own files");
+      if (relative === "404.html" || (relative === "robots.txt" && options.robots !== undefined && options.robots !== false)) fail(`which HTMLKit generates`);
+      const owner = owners.get(pathname);
+      if (owner !== undefined) fail(`which plugin ${owner} also generates`);
+      if (pages.has(pathname + "/")) fail("which is a page's URL");
+      if (redirects.has(pathname + "/")) fail("which a redirect answers");
+      if (handlers.has(pathname)) fail("which an endpoint answers");
+      if (assets.has(relative)) fail("which is a file a page references");
+      if (existsSync(join(config.root, "public", relative))) fail("which is a file in public/");
+      const file = typeof value === "string" || value instanceof Uint8Array ? { contents: value } : value as { contents?: unknown; type?: unknown };
+      if (value === null || typeof value !== "object" && typeof value !== "string" || !(typeof file.contents === "string" || file.contents instanceof Uint8Array) ||
+        (file.type !== undefined && (typeof file.type !== "string" || file.type === ""))) fail("whose value is no string, Uint8Array, or { contents, type }");
+      owners.set(pathname, plugin.name);
+      generated.set(pathname, { contents: file.contents as string | Uint8Array, type: (file.type as string | undefined) ?? mime[extname(relative)] ?? "application/octet-stream" });
+    }
+  }
+  return generated;
 }
 
 /**

@@ -189,6 +189,56 @@ return. A plugin that has more data than a site's layout declares returns
 `Object.fromEntries(Object.entries(data).filter(([name]) => propNames.includes(name)))` and passes
 the rest on as `data`.
 
+### Generated files
+
+`generate` returns files that aren't pages, such as a search index or a feed, by application path.
+It runs once every page has compiled, so a plugin can build the files from what its
+[`pages.compile`](#plugins) read. The `notes` plugin above can list its notes this way:
+
+```ts
+const texts = new Map<string, string>();
+const notes: HtmlKitPlugin = {
+  name: 'notes',
+  pages: {
+    extensions: ['.note'],
+    compile(source, page) {
+      texts.set(page.file, source.trim());
+      const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
+      return `<template component="note-${name}"><defs><title>Note</title></defs><article>${source}</article></template>`;
+    },
+  },
+  generate: () => ({
+    '/notes.json': JSON.stringify([...texts.values()]),
+    '/notes.txt': { contents: [...texts.values()].join('\n'), type: 'text/plain; charset=utf-8' },
+  }),
+};
+
+export default defineConfig({ base: '/docs/', plugins: [notes] });
+```
+
+Each key is an application path, as a [redirect](/htmlkit/routes#redirects)'s is, so with `base:
+'/docs/'` the file `/notes.json` is at `/docs/notes.json`. Each value is a string, a `Uint8Array`,
+or `{ contents, type }`. `type` is the file's media type, and without it the path's extension gives
+it (`.json` is `application/json`), or `application/octet-stream` for an extension HTMLKit doesn't
+know. The context has `root` and `base`, as in `buildStart`.
+
+- **`htmlkit dev` and `createApplication`** answer each file's `GET` and `HEAD` with its type and
+  `Cache-Control: no-cache`. The development server compiles the pages again after each change and
+  runs `generate` again with them, so the next request reads the new file.
+- **`htmlkit build`** writes each file into the output, lists it in the
+  [manifest](#build-manifest)'s `files`, and leaves it out of `sitemap.xml`. Links to it pass the
+  [link check](#link-check). `htmlkit preview` and `htmlkit start` send its `type`. A generated
+  `sitemap.xml` takes the place of the one `origin` writes, as a public one does.
+
+A path is an error that names the plugin when it isn't a file path (it starts with `/`, names a
+file and has no empty, `.` or `..` segment), when it is in `_htmlkit/`, or when it is `404.html`, or
+`robots.txt` with the `robots` option set. So is a path that a page's URL, a redirect, an endpoint, a
+file in `public/`, a file a page references, or another plugin's `generate` also claims. When
+`generate` throws, the error names the plugin and the hook.
+
+`generate` covers a file that a build and the development server both serve. `buildEnd`'s
+`writeFile` writes a file only into a build's output.
+
 ### Build hooks
 
 `buildStart` and `buildEnd` run steps around a build, such as generating data before it or writing a
@@ -360,7 +410,7 @@ link checker or a coverage report. Read it with `readManifest(outDir)`, which re
 ```ts
 import { readManifest } from '@nextwebwg/htmlkit';
 
-const { base, routes, pages, redirects } = await readManifest('dist');
+const { base, routes, pages, redirects, files } = await readManifest('dist');
 ```
 
 ```json
@@ -378,6 +428,9 @@ const { base, routes, pages, redirects } = await readManifest('dist');
   ],
   "redirects": [
     { "from": "/docs/start/", "to": "/docs/guide/", "status": 308 }
+  ],
+  "files": [
+    { "pathname": "/docs/notes.json", "type": "application/json" }
   ]
 }
 ```
@@ -396,6 +449,9 @@ const { base, routes, pages, redirects } = await readManifest('dist');
 | `redirects[].from` | The old URL path, where the redirect page is. |
 | `redirects[].to` | Where it sends readers: a URL path including `base`, or an absolute URL. |
 | `redirects[].status` | The status a server answers with: 308 for the option and `hk:redirect-from`, and the loader's status for `redirect()`. |
+| `files` | Each file plugins' [`generate`](#generated-files) returned. |
+| `files[].pathname` | The file's URL path, including `base`. |
+| `files[].type` | Its media type, which `htmlkit preview` and `htmlkit start` send. |
 
 These fields are stable. A release may add fields at version `1`, so ignore fields you don't use.
 `version` changes only when a field is removed, renamed, or changes meaning, and `readManifest`
