@@ -19,6 +19,7 @@ the page has loaded, HTMLKit submits it in place.
     <meta name="hk:render" content="server">
     <title>Todos</title>
   </defs>
+
   <section>
     <form method="post">
       <label>Title <input name="title" required></label>
@@ -82,6 +83,7 @@ Return the errors and the submitted values as props the page declares, and the p
     <meta name="hk:render" content="server">
     <title>Todos</title>
   </defs>
+
   <section>
     <form method="post">
       <label>Title

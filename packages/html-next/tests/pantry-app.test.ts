@@ -2,7 +2,7 @@
  * Whole-application proof for the two browser delivery modes.
  *
  * The `examples/pantry` app is a data-driven pantry list: purely declarative components
- * (`ui-badge`, `ui-stat`, `pantry-shell`, `pantry-item`) plus one controller-backed component
+ * (`ui-badge`, `ui-stat`, `pantry-shell`, `pantry-item`) plus one module-backed component
  * (`pantry-app`). The same component sources are delivered two ways:
  *
  *  - live: the page links one root and the browser parses the graph at runtime;
@@ -100,7 +100,7 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   await snapshot("searchedEmpty");
   await retype('input[name="query"]', "");
 
-  // A row's own buttons only dispatch events; the controller decides what they mean.
+  // A row's own buttons only dispatch events; the module decides what they mean.
   await row("Basmati rice").locator(".item__step").nth(1).click();
   await settle();
   await snapshot("restocked");
@@ -116,7 +116,7 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   await retype('input[name="catalog-query"]', "oli");
   await page.waitForFunction(`document.querySelectorAll("li.suggestion").length > 0`);
   await snapshot("catalogSearched");
-  // "Green olives" is not stocked yet; "Olive oil" already is, which the controller de-duplicates.
+  // "Green olives" is not stocked yet; "Olive oil" already is, which the module de-duplicates.
   await page.locator("li.suggestion", { has: page.locator('.suggestion__label:text-is("Green olives")') })
     .locator("button").click();
   await snapshot("catalogAdded");
@@ -131,11 +131,23 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   await settle();
   await snapshot("added");
 
-  // A native request event reaches the controller through the rendered root.
+  // A native request event reaches the module through the rendered root.
   // The outermost element carrying the component's lineage is its lowered root.
   await page.evaluate(`document.querySelector('[data-component~="pantry-app"]').dispatchEvent(new Event('restock-request'))`);
   await settle();
   await snapshot("restockedAll");
+
+  // A retained component keeps its edited rows and starts one fresh set of listeners.
+  await page.evaluate(async () => {
+    const root = document.querySelector('[data-component~="pantry-app"]')!;
+    const parent = root.parentNode!;
+    root.remove();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    parent.appendChild(root);
+  });
+  await snapshot("reconnected");
+  await row("Basmati rice").locator(".item__step").nth(1).click();
+  await snapshot("incrementedAfterReconnect");
 
   return transcript;
 }
@@ -316,6 +328,8 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     );
     assert.ok(steps.restockedAll!.rows.every((row) => row.badge === "Stocked"));
     assert.deepEqual(steps.restockedAll!.stats, ["Items=7", "Low=0"]);
+    assert.deepEqual(steps.reconnected, steps.restockedAll, "reconnecting keeps edited stock");
+    assert.equal(rice("incrementedAfterReconnect").count, "3 kg", "one listener handles each adjustment after reconnect");
   }, 180_000);
 
   it("carries the parsed graph in the pre-compiled bundle", async () => {

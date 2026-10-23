@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-alpha.70
+
+### Fixed
+
+- HTML Next's guides, READMEs and runnable examples use component modules with named `connect` exports, typed `Connect` declarations and connection-owned cleanup. The pantry example activates bundled modules through the shared lifecycle helper and preserves edited stock across reconnections.
+- HTML Next and HTMLKit examples separate `<defs>` declarations from rendered content with a blank line.
+
 ## 1.0.0-alpha.69
 
 ### Fixed

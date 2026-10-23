@@ -191,7 +191,7 @@ The [public proposal](https://nextwebwg.org/declarative-components/javascript/) 
 A component that declares a `<request>` accepts a function prop for it, named in camelCase
 (`mention-query` is `mentionQuery`), and its event form (Vue's `@mention-query`, React's
 `onMentionQuery`, Svelte's `onmention-query`). The host adds one listener per request on the root
-before the controller runs and reads the prop when a request arrives; a prop or listener set later
+before the module runs and reads the prop when a request arrives; a prop or listener set later
 relays to the requests that went unanswered, as a late `host.on` does. The generated types give
 each prop the request's detail and answer types, and a request whose camelCase name equals a
 prop's fails conversion (`HC011`). Such a component imports `requests.ts`, the request steps, which

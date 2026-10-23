@@ -36,6 +36,7 @@ app/components/
     <prop name="productId" type="string">Lookup key.</prop>
     <prop name="product" type="object({ name: string })">Displayed product.</prop>
   </defs>
+
   <article>
     <h2 $await="$product">{$product.name}</h2>
     <p $error="problem">{$problem.message}</p>
@@ -259,6 +260,7 @@ export function load() {
     <prop name="people" type="list(object({ name: string, role: string }))" required>Team members</prop>
     <title>Team</title>
   </defs>
+
   <ul>
     <li $each="person of $people">{$person.name}, {$person.role}</li>
   </ul>
@@ -319,6 +321,7 @@ layouts' loaders, then read the request and shape the response:
     <meta name="hk:render" content="server">
     <title>Orders</title>
   </defs>
+
   <ul><li $each="order of $orders">{$order.id}: {$order.total}</li></ul>
 </template>
 ```

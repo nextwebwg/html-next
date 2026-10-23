@@ -22,7 +22,7 @@ entries when an installed source package supplies them. Framework checks require
 entries and use the converter's graph planner.
 
 The command checks the parser's declarations and constraints, graph resolution, and the selected
-backend's lowering restrictions and output collisions. Controllers are never executed. It runs
+backend's lowering restrictions and output collisions. Modules are never executed. It runs
 compiler checks in memory; it does not run Vite, resolve application imports, or invoke the
 framework's own typechecker. The existing `html-next check` remains a parser/graph inspection
 check; use `html-next-check` for backend validation.
@@ -36,7 +36,7 @@ boundaries.
 ### Combine with TypeScript
 
 Use both checks: HTML Next checks authored HTML and compiler contracts; TypeScript checks authored
-JS/TS controllers and application code. Include those files in your TypeScript project. To check
+JS/TS modules and application code. Include those files in your TypeScript project. To check
 JavaScript too, enable [`allowJs`](https://www.typescriptlang.org/tsconfig/allowJs.html) and
 [`checkJs`](https://www.typescriptlang.org/tsconfig/checkJs.html), with `noEmit: true`.
 
@@ -70,9 +70,9 @@ frameworks. Configure local HTML entries in the Vite adapter so `html-next-sync`
 types. Include the generated declarations in the consumer project; local `.html` imports also
 need [`allowArbitraryExtensions`](https://www.typescriptlang.org/tsconfig/allowArbitraryExtensions.html).
 `html-next-sync` writes the files those typecheckers need; `html-next-check` itself writes none.
-For each local component that declares a controller, the plugin and `html-next-sync` also write
-`<tag>.host.d.ts` beside its definition, the typed host its controller imports as
-`import type { Host } from "./<tag>.host.js"` ([Type a controller](https://nextwebwg.org/html-next/usage#typed-host)).
+For each local component that declares a module, the plugin and `html-next-sync` also write
+`<tag>.host.d.ts` beside its definition, the typed host its module imports as
+`import type { Host } from "./<tag>.host.js"` ([Type a module](https://nextwebwg.org/html-next/usage#typed-host)).
 For preconverted output, run the converter before the framework typechecker instead of syncing.
 Neither the check command nor declaration preparation provides general TypeScript-style inference
 for every HTML binding expression. Runtime behavior and bundler failures still need tests/builds.
@@ -186,7 +186,7 @@ The adapter includes `.html` resources in that folder and nested folders. Each d
 named framework export: `<template component="ui-button">` becomes `UiButton`. Native consumers
 import `createUiButton` with `htmlNext()`; Vite discovers installed source libraries automatically.
 Use `npm pack` to test the published files, then publish with npm. Include linked definitions and
-controllers in `files`, preserving relative paths; declare controllers' external dependencies in
+modules in `files`, preserving relative paths; declare modules' external dependencies in
 the package manifest. The [publishing guide](https://nextwebwg.org/html-next/ship) covers the README
 and consumption instructions.
 
@@ -281,7 +281,7 @@ import { createApp } from "virtual:html-next/components";
 document.body.append(createApp());
 ```
 
-Each component compiles to direct DOM code: a cloned template plus the exact updates its state, conditions, lists, props, slots, and controller need. The bundle carries no template interpreter, and each component imports only the helpers its features use.
+Each component compiles to direct DOM code: a cloned template plus the exact updates its state, conditions, lists, props, slots, and module need. The bundle carries no template interpreter, and each component imports only the helpers its features use.
 
 In application mode, the virtual module exports one `create<Name>` function for each component declared in the configured
 application entries. A linked `<link rel="component">` dependency used as an empty custom-element

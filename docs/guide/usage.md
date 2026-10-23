@@ -276,7 +276,7 @@ The result uses Svelte and native DOM roots. Generated components import the hel
 
 ::: framework-html-next
 
-Run `html-next-check` to check components without building. It reports invalid declarations, constraints, and component links with their file and line. Pass the same entries as your Vite configuration, then write the [typed controller hosts](#typed-host) and check controllers and other application code with your project's usual tools:
+Run `html-next-check` to check components without building. It reports invalid declarations, constraints, and component links with their file and line. Pass the same entries as your Vite configuration, then write the [typed module hosts](#typed-host) and check modules and other application code with your project's usual tools:
 
 ```json title="package.json"
 {
@@ -336,9 +336,11 @@ If a component needs declarations before its first import, add `entries: ["src/c
 
 :::
 
-### Type a controller {#typed-host}
+### Type a module {#typed-host}
 
-Each component that declares a controller gets a typed host: `<tag>.host.d.ts`, beside its definition. It exports `Host`, the host the controller receives, and `Controller`, the type of the controller module's default export. The Vite plugin writes it when a build or dev server starts, `html-next-sync` writes it for a typecheck that runs first, and `html-next build` and `html-next-convert` write it too, as does `assembleComponentPackage` with `hostTypes: true`. Each run rewrites it from the definition, so you can list `*.host.d.ts` in `.gitignore`. A file of that name that HTML Next didn't write stays as it is, and the run stops with an error naming it.
+Each component that declares a module gets a typed host: `<tag>.host.d.ts`, beside its definition. It exports `Host`, the host the module receives, and `Connect`, the type of its named `connect` export. The Vite plugin writes it when a build or dev server starts, `html-next-sync` writes it for a typecheck that runs first, and `html-next build` and `html-next-convert` write it too, as does `assembleComponentPackage` with `hostTypes: true`. Each run rewrites it from the definition, so you can list `*.host.d.ts` in `.gitignore`. A file of that name that HTML Next didn't write stays as it is, and the run stops with an error naming it.
+
+Set `module="./behavior.js"` on the component template and export `connect(host, { signal })` from that file. `connect` runs each time the component connects to the document. Disconnection aborts `signal`, releases subscriptions created through `host.on`, `host.effect` and `host.computed`, and runs any cleanup the function returns. Reconnection starts a new activation with the same component state. Pass `signal` to native listeners and asynchronous work; check it after an `await` before using the DOM.
 
 The host types what `<defs>` declares:
 
@@ -352,7 +354,7 @@ The host types what `<defs>` declares:
 - `on(type, callback)`: the component's own events and requests, those of the components its template uses, `connect` and `disconnect`, and DOM events.
 
 ```html title="src/checkout-form.html"
-<template component="checkout-form" controller="./checkout-form.ts">
+<template component="checkout-form" module="./checkout-form.ts">
   <defs>
     <prop name="pk" type="string" required>The Stripe publishable key.</prop>
     <state name="status" type="keyword" values="idle, paying, paid" value="idle"></state>
@@ -360,6 +362,7 @@ The host types what `<defs>` declares:
     <request name="card-token" type="object({ amount: number })" returns="string"></request>
     <script name="stripe" src="https://js.stripe.com/v3/" loading="manual"></script>
   </defs>
+
   <form>
     <div $ref="card"></div>
     <button>Pay</button>
@@ -370,12 +373,13 @@ The host types what `<defs>` declares:
 ```ts title="src/checkout-form.ts"
 import type { Host } from "./checkout-form.host.js";
 
-export default function controller(host: Host) {
+export function connect(host: Host, { signal }: { signal: AbortSignal }) {
   host.on("submit", async (event) => {
     event.preventDefault();
     host.state.status = "paying";
     await host.scripts.stripe.load();
-    const token = await host.request("card-token", { amount: 1200 });
+    if (signal.aborted) return;
+    const token = await host.request("card-token", { amount: 1200 }, { signal });
     if (token === null) { host.state.status = "idle"; return; }
     host.state.status = "paid";
     host.dispatch("paid", { id: token });
@@ -385,11 +389,11 @@ export default function controller(host: Host) {
 
 A misspelled name, a wrong detail, or a name `<defs>` doesn't declare is a type error, such as `host.state.stauts` (`Property 'stauts' does not exist … Did you mean 'status'?`) or `host.request("card-token", { amount: "12" })` (`Type 'string' is not assignable to type 'number'`).
 
-A JavaScript controller takes the same types through JSDoc, checked when `checkJs` is on:
+A JavaScript module takes the same types through JSDoc, checked when `checkJs` is on:
 
 ```js title="src/checkout-form.js"
-/** @type {import("./checkout-form.host.js").Controller} */
-export default function controller(host) {
+/** @type {import("./checkout-form.host.js").Connect} */
+export function connect(host) {
   host.refs.card.dataset.key = host.props.pk.value;
 }
 ```
@@ -475,7 +479,7 @@ The live runtime needs native CSS `@scope`: Chrome 118, Safari 17.4, Firefox 146
 
 ### Loading and trust
 
-Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="component-src">`](#head) list that names its source. Controllers are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
+Same-origin component links work directly. Loading a component root from another origin requires an import-map entry, or a [`<meta name="component-src">`](#head) list that names its source. Modules are ordinary trusted JavaScript; browser CORS and CSP rules apply. See the proposal's [resource loading rules](/declarative-components/security).
 
 :::
 
@@ -499,35 +503,32 @@ For Svelte, use the Vite adapter above. Choose HTML Next in this section for the
 
 ## Contain a wrapped component's events {#contain-events}
 
-A component that wraps another one sees the inner component's events bubble through its own root. To raise its own event in their place, its controller listens on its root in the capture phase and stops the inner event there:
+A component that wraps another one sees the inner component's events bubble through its own root. To raise its own event in their place, its module listens on its root in the capture phase and stops the inner event there:
 
 ```js title="src/picker.js"
-export default function initialize(host) {
-  host.on("connect", () => {
-    const contain = (event) => {
-      event.stopImmediatePropagation();
-      host.dispatch("pick", event.detail);
-    };
-    host.root.addEventListener("select", contain, { capture: true });
-    return () => host.root.removeEventListener("select", contain, { capture: true });
-  });
+export function connect(host, { signal }) {
+  host.root.addEventListener("select", (event) => {
+    event.stopImmediatePropagation();
+    host.dispatch("pick", event.detail);
+  }, { capture: true, signal });
 }
 ```
 
-The DOM runs capture listeners on an element before the event reaches a descendant, and before that element's own non-capture listeners when the element is the event's target, as it is for a component whose root is the wrapped component. So the consumer's non-capture `select` listeners on the root and above it never see the event, whenever they were added. A capture listener on an ancestor of the root still runs first, as does one the consumer added to the root before the controller connected. The pattern works the same in the browser runtime and in converted Vue, React, and Svelte components.
+The DOM runs capture listeners on an element before the event reaches a descendant, and before that element's own non-capture listeners when the element is the event's target, as it is for a component whose root is the wrapped component. So the consumer's non-capture `select` listeners on the root and above it never see the event, whenever they were added. A capture listener on an ancestor of the root still runs first, as does one the consumer added to the root before the module connected. The pattern works the same in the browser runtime and in converted Vue, React, and Svelte components.
 
 ## Ask the consumer for behavior {#requests}
 
-Some components need behavior from whoever uses them: an editor asks for mention suggestions, an image field asks where to store a file. The component declares a **request** in `<defs>`, a named question with a typed detail and a typed answer. Its controller asks with `host.request`, and the consumer answers in its own JavaScript. The [requests section of the proposal](https://nextwebwg.org/declarative-components/javascript#requests) defines the behavior.
+Some components need behavior from whoever uses them: an editor asks for mention suggestions, an image field asks where to store a file. The component declares a **request** in `<defs>`, a named question with a typed detail and a typed answer. Its module asks with `host.request`, and the consumer answers in its own JavaScript. The [requests section of the proposal](https://nextwebwg.org/declarative-components/javascript#requests) defines the behavior.
 
 ```html title="src/editor.html"
-<template component="ui-editor" controller="./editor.js">
+<template component="ui-editor" module="./editor.js">
   <defs>
     <request name="mention-query" type="object({ query: string })"
       returns="list(object({ id: string, label: string }))">
       People matching the text after @.
     </request>
   </defs>
+
   <div class="editor"></div>
 </template>
 ```
@@ -535,12 +536,12 @@ Some components need behavior from whoever uses them: an editor asks for mention
 A component that declares a request has `host.request(name, detail, { signal })`, which resolves to the answer, or to `null` when nobody answers. Each keystroke aborts the request before it, so a slow answer to `@ad` never replaces the answer to `@ada`:
 
 ```js title="src/editor.js"
-export default function controller(host) {
+export function connect(host, { signal }) {
   let pending;
-  host.root.addEventListener("input", () => {
+  host.on("input", () => {
     pending?.abort();
     pending = new AbortController();
-    host.request("mention-query", { query: currentQuery() }, { signal: pending.signal })
+    host.request("mention-query", { query: currentQuery() }, { signal: AbortSignal.any([signal, pending.signal]) })
       .then((people) => showMentions(people ?? []), () => {}); // rejected: superseded or disconnected
   });
 }
@@ -550,10 +551,10 @@ The answer is checked against `returns`, and a `null` answer is always accepted.
 
 ::: framework-html-next
 
-A consumer component answers in its controller:
+A consumer component answers in its module:
 
 ```js title="src/notes.js"
-export default function controller(host) {
+export function connect(host) {
   host.on("mention-query", (event) => {
     event.respondWith(searchPeople(event.detail.query, { signal: event.signal }));
   });
@@ -613,25 +614,27 @@ The component reads the function prop when each request arrives, so a new functi
 A long answer, such as an upload, reports progress while it is pending. The asker passes a `progress` callback, and the responder calls `event.progress(loaded, total)`:
 
 ```html title="src/image-field.html"
-<template component="ui-image-field" controller="./image-field.js">
+<template component="ui-image-field" module="./image-field.js">
   <defs>
     <request name="image-upload" type="object">
       <prop name="file" type="unknown" required>The file the author dropped.</prop>
       <returns type="object"><prop name="src" type="string" required></prop></returns>
     </request>
   </defs>
+
   <figure><img $ref="preview" alt=""><progress $ref="bar" value="0"></progress></figure>
 </template>
 ```
 
 ```js title="src/image-field.js"
-export default function controller(host) {
-  host.root.addEventListener("drop", (event) => {
+export function connect(host, { signal }) {
+  host.on("drop", (event) => {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
     host.request("image-upload", { file }, {
+      signal,
       progress: (loaded, total) => { host.refs.bar.value = total === 0 ? 0 : loaded / total; },
-    }).then((image) => { host.refs.preview.src = image?.src ?? URL.createObjectURL(file); });
+    }).then((image) => { host.refs.preview.src = image?.src ?? URL.createObjectURL(file); }, () => {});
   });
 }
 ```
@@ -650,10 +653,10 @@ With no uploader on the page, the request resolves `null` and the field keeps a 
 
 ### Late responders
 
-A request reaches the listeners that exist when it is asked. A request from inside a consumer component waits until that consumer's controller has run, so the two controllers load in either order. A page script that loads later, or a framework prop set after the component mounted, is a late responder: it announces itself, and each component whose request went unanswered receives a `responder` event and decides whether to ask again:
+A request reaches the listeners that exist when it is asked. A request from inside a consumer component waits until that consumer's module has run, so the two modules load in either order. A page script that loads later, or a framework prop set after the component mounted, is a late responder: it announces itself, and each component whose request went unanswered receives a `responder` event and decides whether to ask again:
 
 ```js title="src/editor.js"
-export default function controller(host) {
+export function connect(host) {
   const build = () => host.request("extensions").then((extensions) => createSession(extensions ?? []));
   build();
   host.on("responder", (event) => { if (event.detail.name === "extensions") build(); });
@@ -667,18 +670,19 @@ element.addEventListener("extensions", (event) => event.respondWith([Highlight])
 element.dispatchEvent(new CustomEvent("responder", { bubbles: true, detail: { name: "extensions" } }));
 ```
 
-A consumer controller's later `host.on("extensions", …)`, and a function prop or event listener a framework sets after mounting, reach the waiting component the same way without dispatching an announcement.
+A consumer module's later `host.on("extensions", …)`, and a function prop or event listener a framework sets after mounting, reach the waiting component the same way without dispatching an announcement.
 
 ### Show a feature only when someone answers
 
-`host.hasResponder(name)` is `true` while a responder that HTML Next knows about answers a declared request: one added with `RequestEvent.respond`, a consumer controller's `host.on(name, …)`, or a framework function prop or event listener. It is a reactive read, so `host.effect` and `host.computed` run again when a responder arrives or leaves. An editor shows its "Insert image" button only while something stores images:
+`host.hasResponder(name)` is `true` while a responder that HTML Next knows about answers a declared request: one added with `RequestEvent.respond`, a consumer module's `host.on(name, …)`, or a framework function prop or event listener. It is a reactive read, so `host.effect` and `host.computed` run again when a responder arrives or leaves. An editor shows its "Insert image" button only while something stores images:
 
 ```html title="src/editor.html"
-<template component="ui-editor" controller="./editor.js">
+<template component="ui-editor" module="./editor.js">
   <defs>
     <request name="image-upload" type="object">…</request>
     <state name="canUpload" type="boolean" value="false"></state>
   </defs>
+
   <div>
     <button type="button" from:hidden="!$canUpload">Insert image</button>
     <div class="editor"></div>
@@ -687,14 +691,14 @@ A consumer controller's later `host.on("extensions", …)`, and a function prop 
 ```
 
 ```js title="src/editor.js"
-export default function controller(host) {
+export function connect(host) {
   host.effect(() => { host.state.canUpload = host.hasResponder("image-upload"); });
 }
 ```
 
 The button shows when `respond(document, "image-upload", …)` ran before the editor mounted, and appears when it runs later. Calling the function `respond` returned hides it again.
 
-It looks for responders on the component's root, its ancestors, the document and the window: a responder in a sibling subtree doesn't count, and neither does the component's own controller listening on its own root. A plain `addEventListener` still answers requests, but the DOM can't list an element's listeners, so `hasResponder` returns `false` for it. Register with `respond` to be found.
+It looks for responders on the component's root, its ancestors, the document and the window: a responder in a sibling subtree doesn't count, and neither does the component's own module listening on its own root. A plain `addEventListener` still answers requests, but the DOM can't list an element's listeners, so `hasResponder` returns `false` for it. Register with `respond` to be found.
 
 ### Ask from a page script
 
@@ -708,7 +712,7 @@ const image = await request<{ src: string }>(this, "image-upload", { file }, { s
 const canUpload = hasResponder(this, "image-upload");   // now, not reactive
 ```
 
-An unanswered `request` resolves `null` and isn't remembered for late responders, which only a component's controller hears.
+An unanswered `request` resolves `null` and isn't remembered for late responders, which only a component's module hears.
 
 ## Add to the document head {#head}
 
@@ -760,7 +764,7 @@ A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel
 A component that needs a third-party SDK declares its script in `<defs>`. The runtime inserts an ordinary `<script>` into `document.head`, once per URL and type, and never removes it, so the browser fetches and runs it once under the page's Content Security Policy, however many components declare it. The [declared scripts section of the proposal](https://nextwebwg.org/declarative-components/components#declared-scripts) defines the behavior.
 
 ```html title="src/checkout-form.html"
-<template component="checkout-form" controller="./checkout-form.js">
+<template component="checkout-form" module="./checkout-form.js">
   <defs>
     <prop name="pk" type="string" required>The Stripe publishable key.</prop>
     <event name="paymentready"></event>
@@ -780,20 +784,16 @@ A component that needs a third-party SDK declares its script in `<defs>`. The ru
 ```
 
 ```js title="src/checkout-form.js"
-export default function controller(host) {
-  let card;
-  host.on("connect", () => {
-    host.scripts.stripe.ready.then(() => {
-      if (!host.root.isConnected) return;
-      card = Stripe(host.props.pk.value).elements().create("card");
-      card.mount(host.refs.card);
-    }, () => {});
-  });
-  host.on("disconnect", () => { card?.destroy(); card = undefined; });
+export async function connect(host, { signal }) {
+  await host.scripts.stripe.ready;
+  signal.throwIfAborted();
+  const card = Stripe(host.props.pk.value).elements().create("card");
+  card.mount(host.refs.card);
+  return () => card.destroy();
 }
 ```
 
-- `loading="eager"`, the default, inserts the script when an instance connects; `lazy` when its root comes within 1,250 pixels of the viewport; `manual` when the controller calls `host.scripts.name.load()`.
+- `loading="eager"`, the default, inserts the script when an instance connects; `lazy` when its root comes within 1,250 pixels of the viewport; `manual` when the module calls `host.scripts.name.load()`.
 - `$stripe.pending`, `.ok` and `.error` read the script's status, and `host.scripts.stripe` adds `ready`, a promise that settles once with the script, and `load()`.
 - `on:load` and `on:error` run a handler once for each connection, as soon as the script settles: when it fires `load` or `error`, or straight away when it already has. A connection that ends first gets neither, and a reconnected form announces again.
 - `type="module"`, `integrity`, `crossorigin`, `referrerpolicy` and `fetchpriority` are copied onto the inserted element. Declarations of one script that disagree on `integrity`, `crossorigin` or `referrerpolicy` fail with `HR011` for the later one. A bare `src`, such as `@acme/maps/v2.js`, resolves through the page's import map (`HR012` when it maps nothing).

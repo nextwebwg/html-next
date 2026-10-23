@@ -136,7 +136,7 @@ renders, so an indicator needs no announcement of its own. Scripts read the brow
 
 ## Running code after a navigation
 
-Controllers connect and disconnect with their components, so most code needs nothing else. For
+Component modules connect and disconnect with their components, so most code needs nothing else. For
 code that watches the whole page, such as analytics, listen to the browser's own event:
 
 ```js

@@ -123,7 +123,9 @@ const notes: HtmlKitPlugin = {
     compile(source, page) {
       // Each page needs its own valid component name; a hash of its path is both.
       const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
-      return `<template component="note-${name}"><defs><title>Note</title></defs><article>${source}</article></template>`;
+      return `<template component="note-${name}"><defs><title>Note</title></defs>
+
+<article>${source}</article></template>`;
     },
   },
 };
@@ -204,7 +206,9 @@ const notes: HtmlKitPlugin = {
     compile(source, page) {
       texts.set(page.file, source.trim());
       const name = createHash('sha256').update(page.file).digest('hex').slice(0, 12);
-      return `<template component="note-${name}"><defs><title>Note</title></defs><article>${source}</article></template>`;
+      return `<template component="note-${name}"><defs><title>Note</title></defs>
+
+<article>${source}</article></template>`;
     },
   },
   generate: () => ({

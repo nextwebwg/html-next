@@ -27,6 +27,7 @@ HTML Next brings markup, state, events, slots, and scoped styles together in one
       <set name="count" expr:value="$count + 1"></set>
     </handler>
   </defs>
+
   <button type="button" on:click="increment">
     Count: {$count}
   </button>
@@ -55,7 +56,7 @@ export default defineConfig({
 });
 ```
 
-The build compiles every component to direct DOM code: a cloned template plus the exact updates its state, conditions, lists, props, slots, and controller need. The bundle carries no template interpreter, and each component imports only the helpers its features use. [Finish the Vite setup →](https://nextwebwg.org/html-next/usage)
+The build compiles every component to direct DOM code: a cloned template plus the exact updates its state, conditions, lists, props, slots, and module need. The bundle carries no template interpreter, and each component imports only the helpers its features use. [Finish the Vite setup →](https://nextwebwg.org/html-next/usage)
 
 For the browser runtime, server rendering, or component tooling:
 
@@ -83,7 +84,7 @@ npm install @nextwebwg/html-next
 | `@nextwebwg/html-next/forms` | Build native form requests with validation, encoding, and cancellation. |
 | `@nextwebwg/html-next/validation` | Use the shared validity model. |
 
-`@nextwebwg/html-next` also exports `add`, `subtract`, `multiply`, and `divide`, the number arithmetic expressions use: `add(0.1, 0.2)` is `0.3`, as `$a + $b` would be, where JavaScript gives `0.30000000000000004`. A controller that calculates a value an expression also calculates gets the same result from them. Each is a separate function, so a bundle keeps only the ones it calls. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects.
+`@nextwebwg/html-next` also exports `add`, `subtract`, `multiply`, and `divide`, the number arithmetic expressions use: `add(0.1, 0.2)` is `0.3`, as `$a + $b` would be, where JavaScript gives `0.30000000000000004`. A module that calculates a value an expression also calculates gets the same result from them. Each is a separate function, so a bundle keeps only the ones it calls. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects.
 
 Importing `forms` pulls in no component runtime. Generated native components import the helpers their features need; generated Vue, React, and Svelte components use their target framework without an HTML Next runtime dependency.
 
