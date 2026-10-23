@@ -1,9 +1,10 @@
-<!-- Purely visual: no controller, no state. Props in, native <span> out. -->
+<!-- Purely visual: no module, no state. Props in, native <span> out. -->
 <template component="ui-badge" status="early" summary="A small status label.">
   <defs>
     <prop name="label" type="string" default="">Text shown inside the badge.</prop>
     <prop name="tone" type="keyword" values="neutral, warning, danger" default="neutral">Visual emphasis.</prop>
   </defs>
+
   <span class="badge" from:data-tone="$tone" $value="$label"></span>
   <style>
     .badge { border-radius: 999px; padding: 0.1rem 0.5rem; font-size: 0.8rem; border: 1px solid; }

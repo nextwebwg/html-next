@@ -72,7 +72,7 @@ The Vite plugin and `html-next build` compile every component to plain JavaScrip
 - **Updates are direct.** Every binding knows which state it reads, and writes its element only when its converted text or value changes. A change to one state value touches only the bindings that read it.
 - **Keyed lists move rows.** `$each` with `$key` keeps each row's element, moves only rows outside the longest stable run, and removes adjacent rows together. Selecting a row by key updates only the old and new rows.
 - **Only what you use ships.** A component imports only the helpers its features need. Each prop and event type compiles to its own check, so a component with `keyword` props does not carry list, object or color parsing.
-- **Behavior matches the browser runtime.** Compiled components give the same DOM, validity messages, warnings, controller host, lifecycle order and hydration as definitions loaded in the browser. The repository's parity tests hold the two to each other in Chromium, Firefox and WebKit.
+- **Behavior matches the browser runtime.** Compiled components give the same DOM, validity messages, warnings, module host, lifecycle order and hydration as definitions loaded in the browser. The repository's parity tests hold the two to each other in Chromium, Firefox and WebKit.
 
 The [compiled components reference](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/docs/compiled-direct-path.md) describes the architecture and the size budgets.
 

@@ -13,7 +13,7 @@ You already have your components. Publishing them takes a package manifest, a RE
 
 ## Point to your components
 
-Keep your HTML files in a folder, with any controllers and other files they reference. Nested folders work too. This example calls the folder `components/`; use your existing folder name if you prefer.
+Keep your HTML files in a folder, with any modules and other files they reference. Nested folders work too. This example calls the folder `components/`; use your existing folder name if you prefer.
 
 ```text
 components/
@@ -43,7 +43,7 @@ Add these fields to your `package.json`, using your own name, version, and licen
 
 `files` tells npm what to include. The `html-next` export tells the Vite plugin where your components live. The plugin finds the HTML files in that folder and its subfolders; you do not need an index file or a build script.
 
-Keep relative component links and controller imports intact. If they reference another folder, include that folder in `files` too. Declare any npm packages imported by your controllers in `dependencies`, as you would for any library. npm includes your README and license automatically.
+Keep relative component links and module imports intact. If they reference another folder, include that folder in `files` too. Declare any npm packages imported by your modules in `dependencies`, as you would for any library. npm includes your README and license automatically.
 
 ## Tell people how to use it
 
@@ -70,7 +70,7 @@ import { createUiButton } from "your-library";
 document.getElementById("app").append(createUiButton());
 ```
 
-Use your library's actual component names in the README. Consumers' usual Vite build handles the HTML, controllers, and component styles.
+Use your library's actual component names in the README. Consumers' usual Vite build handles the HTML, modules, and component styles.
 
 ## Say which versions you support
 

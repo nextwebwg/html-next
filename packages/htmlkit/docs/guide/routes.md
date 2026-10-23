@@ -43,6 +43,7 @@ adds them to the document head ([The page head](#the-page-head)):
     <title>About us</title>
     <meta name="description" content="Who we are.">
   </defs>
+
   <main>
     <h1>About us</h1>
   </main>
@@ -152,6 +153,7 @@ where the layout puts `<slot name="page">`:
 <!-- app/layouts/default.html -->
 <template component="site-shell">
   <defs><title>My site</title></defs>
+
   <header>My site</header>
   <main><slot name="page"></slot></main>
 </template>
@@ -162,6 +164,7 @@ To use another layout for one page, name it; `content="none"` uses no layout:
 ```html
 <template component="page-dashboard">
   <defs><meta name="hk:layout" content="admin"></defs>   <!-- app/layouts/admin.html -->
+
   <h1>Dashboard</h1>
 </template>
 ```
@@ -223,6 +226,7 @@ paths.
 ```html
 <template component="page-not-found">
   <defs><title>Page not found</title></defs>
+
   <h1>This page doesn't exist</h1>
   <p><a href="/">Go to the home page</a></p>
 </template>
@@ -244,6 +248,7 @@ itself goes to the server's console, so its message and stack stay out of the pa
     <prop name="message" type="string" required>Reason</prop>
     <title>Something went wrong</title>
   </defs>
+
   <main>
     <h1>{$status}: {$message}</h1>
     <p><a href="/">Go to the home page</a></p>
@@ -299,7 +304,9 @@ per URL:
 <title>Installation</title>
 <meta name="hk:redirect-from" content="/getting-started/">
 <meta name="hk:redirect-from" content="/setup/">
-</defs>…</template>
+</defs>
+
+…</template>
 ```
 
 Each path is relative to the page's page folder, as an `hk:alias` path is: in a folder served at
@@ -334,6 +341,7 @@ external scripts it needs. They read the component's props, state, and data:
     <meta property="og:title" from:content="$title">
     <script type="application/ld+json" from:value="$schema"></script>
   </defs>
+
   <article><h1>{$title}</h1></article>
 </template>
 ```

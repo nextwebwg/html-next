@@ -1,6 +1,6 @@
 // Build-time half of the pre-compiled delivery. It resolves the same component graph the live
 // page would resolve in the browser, then emits a module holding the already-parsed definitions
-// and static controller imports. The browser bundle therefore contains no component parser.
+// and static component module imports. The browser bundle therefore contains no component parser.
 //
 // The shipped `@nextwebwg/html-next-unplugin` compiles components all the way to
 // native DOM factories, which is smaller still, but it cannot yet express this app: compiled
@@ -30,41 +30,31 @@ export async function precompileGraph(entryPath, publicRoot = resolve(dirname(en
   const publicPath = (url) => `/${relative(publicRoot, fileURLToPath(url)).split("\\").join("/")}`;
   const definitions = [];
   const imports = [];
-  const controllers = [];
+  const modules = [];
   for (const node of graph.nodes.values()) {
     definitions.push({ ...node.definition, source: { ...node.definition.source, file: publicPath(node.url) } });
-    if (node.controller === undefined) continue;
-    const alias = `controller${controllers.length}`;
-    imports.push(`import * as ${alias} from ${JSON.stringify(new URL(node.controller.url).pathname)};`);
-    controllers.push(`  ${JSON.stringify(node.definition.contract.tag)}: ${alias},`);
+    if (node.module === undefined) continue;
+    const alias = `module${modules.length}`;
+    imports.push(`import * as ${alias} from ${JSON.stringify(new URL(node.module.url).pathname)};`);
+    modules.push(`  ${JSON.stringify(node.definition.contract.tag)}: ${alias},`);
   }
 
   return [
-    'import { getComponentHost, observeDocument, registerComponentDefinitions }',
+    'import { activateModule, getComponentHost, observeDocument, registerComponentDefinitions }',
     '  from "@nextwebwg/html-next/runtime";',
     ...imports,
     "",
     `const definitions = ${JSON.stringify(definitions)};`,
-    `const controllers = {\n${controllers.join("\n")}\n};`,
+    `const modules = {\n${modules.join("\n")}\n};`,
     "",
-    "const initialized = new WeakSet();",
     "export function start(root = document) {",
     "  registerComponentDefinitions(definitions, root);",
     "  return observeDocument(root, {",
     "    onConnect(element, definition) {",
-    "      const module = controllers[definition.contract.tag];",
+    "      const module = modules[definition.contract.tag];",
     "      if (module === undefined) return;",
     "      const host = getComponentHost(element);",
-    "      if (initialized.has(host)) return;",
-    "      initialized.add(host);",
-    "      let disposed = false;",
-    "      let cleanup;",
-    "      Promise.resolve(module.default(host)).then((value) => {",
-    "        if (typeof value !== 'function') return;",
-    "        if (disposed) value();",
-    "        else cleanup = value;",
-    "      });",
-    "      return () => { disposed = true; cleanup?.(); };",
+    "      return activateModule(module, host);",
     "    },",
     "  });",
     "}",

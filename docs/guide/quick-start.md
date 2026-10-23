@@ -25,6 +25,7 @@ Save this as `counter.html`: each click counts a guest, and Reset starts the nex
       <set name="count" expr:value="0"></set>
     </handler>
   </defs>
+
   <div>
     <button type="button" on:click="increment">
       Count: {$count}
@@ -164,4 +165,4 @@ The Svelte adapter generates this component when your app builds. [Set up Svelte
 
 ## Keep learning
 
-The proposal's [component model](/declarative-components/components), [bindings](/declarative-components/bindings), [reactivity](/declarative-components/reactivity), and [styles](/declarative-components/styling) chapters are the full authoring reference, including scoped `<style>` and `controller` modules.
+The proposal's [component model](/declarative-components/components), [bindings](/declarative-components/bindings), [reactivity](/declarative-components/reactivity), and [styles](/declarative-components/styling) chapters are the full authoring reference, including scoped `<style>` and component modules.

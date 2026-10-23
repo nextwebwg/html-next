@@ -1,22 +1,22 @@
 # Pantry — one application, two delivery modes
 
 A small data-driven application: a pantry stock list with search, restocking, discarding, an add
-form, and controller event requests. It exists to prove the whole path end to end, not one feature
+form, and module event requests. It exists to prove the whole path end to end, not one feature
 at a time, and to keep the two browser delivery modes honest about producing the same result.
 
 ## The components
 
-| Component | Controller | What it shows |
+| Component | Module | What it shows |
 | --- | --- | --- |
 | `ui-badge` | no | A prop-driven visual atom with scoped styles. |
 | `ui-stat` | no | A prop-driven summary figure. |
 | `pantry-shell` | no | Pure layout: every region is a named slot. |
 | `pantry-item` | no | A row that owns no data: it declares events and dispatches them. |
 | `pantry-suggestion` | no | One catalog hit; dispatches what the user chose. |
-| `pantry-app` | yes | The one stateful component: declared request, state, computed values, and controller event requests. |
+| `pantry-app` | yes | The one stateful component: declared request, state, computed values, and module event requests. |
 
 The split is the point. Only `pantry-app` has JavaScript, and it drives state, never the DOM. Rows
-never mutate the list; they dispatch `adjust` and `remove`, and the controller decides what those
+never mutate the list; they dispatch `adjust` and `remove`, and the module decides what those
 mean. The add form is a native `<form>`, so `required` and `min`/`max` stay the browser's job.
 
 ## `<data>`: values to a JSON endpoint and back
@@ -60,7 +60,7 @@ list. The template then renders straight from the result:
 </ul>
 ```
 
-Choosing a hit dispatches an event the controller applies, then clears `catalogQuery` — which
+Choosing a hit dispatches an event the module applies, then clears `catalogQuery` — which
 re-runs the read with an empty `q`, because the request is a function of state.
 
 ## Running it

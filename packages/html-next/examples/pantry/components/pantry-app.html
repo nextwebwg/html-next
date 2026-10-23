@@ -1,11 +1,11 @@
-<!-- The one stateful component. It owns the pantry list, and its controller turns row events
+<!-- The one stateful component. It owns the pantry list, and its module turns row events
      and the add form into state changes. Everything it renders is declarative. -->
 <link rel="component" href="./pantry-shell.html" />
 <link rel="component" href="./pantry-item.html" />
 <link rel="component" href="./pantry-suggestion.html" />
 <link rel="component" href="./ui-stat.html" />
 
-<template component="pantry-app" controller="./pantry-app.js" status="early"
+<template component="pantry-app" module="./pantry-app.js" status="early"
   summary="Pantry stock list with search, restocking, and an add form.">
   <defs>
     <prop name="heading" type="string" default="Pantry">Page heading.</prop>
@@ -25,7 +25,7 @@
       <param name="limit" from:value="5"></param>
     </data>
 
-    <!-- The controller keeps these in step with the fetched data and the search box. -->
+    <!-- The module keeps these in step with the fetched data and the search box. -->
     <state type="list(unknown)" name="rows" value="[]"></state>
     <state type="number" name="lowCount" value="0"></state>
     <state type="number" name="visible" value="0"></state>
@@ -89,7 +89,7 @@
         <p class="notice" $if="not $loading and $visible = 0">Nothing matches that search.</p>
       </span>
 
-      <span slot="footer">Data-driven pantry example. Rows are declarative; the shell has the controller.</span>
+      <span slot="footer">Data-driven pantry example. Rows are declarative; the shell has the module.</span>
     </pantry-shell>
   </main>
 

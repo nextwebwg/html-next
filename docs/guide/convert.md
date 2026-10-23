@@ -27,7 +27,7 @@ npx html-next-convert react 'components/**' --mode library --out-dir generated/r
 npx html-next-convert svelte 'components/**' --mode library --out-dir generated/svelte-target
 ```
 
-Each component that declares a controller also gets its [typed host](/html-next/usage#typed-host), `<tag>.host.d.ts`, beside its definition. A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
+Each component that declares a module also gets its [typed host](/html-next/usage#typed-host), `<tag>.host.d.ts`, beside its definition. A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
 
 | Target | Component output | Styles |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ Each component that declares a controller also gets its [typed host](/html-next/
 | React 19.3 | `.tsx` components | Adjacent imported `.css` files |
 | Svelte 5.57.1 | `.svelte` single-file components | `<style>` |
 
-The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
+The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies modules and writes the small helper files each component needs.
 
 Svelte conversion is available and uses the standard, unpatched framework. A known upstream
 limitation affects focused inputs when keyed rows reorder: the edited value and selection remain,
@@ -58,7 +58,7 @@ Both modes write `html-next.conversion.json` with the inputs, entry, artifacts, 
 
 [Ship for Vue and React](/html-next/ship-frameworks) shows a complete library build: convert both targets automatically, compile their JavaScript and types, publish their CSS, and expose Vue and React entries from one package.
 
-Svelte libraries can publish the generated components, CSS, controllers, and helpers as source, or compile them with `@sveltejs/vite-plugin-svelte`, `svelte-check`, and `svelte2tsx`. Give each target its own package subpath; framework peers can be optional when those entries are independently consumable.
+Svelte libraries can publish the generated components, CSS, modules, and helpers as source, or compile them with `@sveltejs/vite-plugin-svelte`, `svelte-check`, and `svelte2tsx`. Give each target its own package subpath; framework peers can be optional when those entries are independently consumable.
 
 ## Prefer conversion during the app build?
 

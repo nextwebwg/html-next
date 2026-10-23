@@ -44,3 +44,8 @@
 - Before handoff, run `pnpm verify:pr` and report commands, results, skips, and remaining judgment.
 - Keep each CI check within 15 minutes. Shard a long suite across parallel jobs instead of extending a job, and flag any check that approaches the limit.
 - Keep package license metadata aligned with the repository's MIT license. Packages remain private until the repository owner explicitly selects public visibility and a protected release workflow.
+
+## Documentation examples
+
+- Describe component JavaScript as a module. Use `module="…"` and a named `connect` export in authoring examples; reserve controller terminology for explicit legacy compatibility documentation.
+- In HTML Next and HTMLKit documentation and runnable examples, separate the closing `</defs>` from the component's rendered content with a blank line.

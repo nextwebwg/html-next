@@ -60,9 +60,9 @@ npx vite build --mode vue
 npx vite build --mode react
 ```
 
-Vue and React stay outside the bundles; consumers use their own framework installation. Controllers are bundled with the components.
+Vue and React stay outside the bundles; consumers use their own framework installation. Modules are bundled with the components.
 
-If a component renders HTML strings with `$html`, install `parse5` as a dependency of your library: `npm install parse5`. The generated `html-next.conversion.json` lists required dependencies. Declare your controllers' external dependencies as usual, and review that file when adding component features. If component-relative data URLs need a hosted location, set `publicRootURL` in the conversion options above.
+If a component renders HTML strings with `$html`, install `parse5` as a dependency of your library: `npm install parse5`. The generated `html-next.conversion.json` lists required dependencies. Declare your modules' external dependencies as usual, and review that file when adding component features. If component-relative data URLs need a hosted location, set `publicRootURL` in the conversion options above.
 
 ## Include component types
 

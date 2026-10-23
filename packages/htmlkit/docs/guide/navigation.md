@@ -23,6 +23,7 @@ export async function load({ navigation }) {
   <defs>
     <prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... }))" required>Site pages</prop>
   </defs>
+
   <aside><hk-nav from:items="$pages" label="Site"></hk-nav></aside>
   <main><slot name="page"></slot></main>
 </template>
@@ -58,6 +59,7 @@ compares with its neighbours' prefixes as one, so this page sorts as `03.about.h
 ```html
 <template component="page-about">
   <defs><meta name="hk:order" content="3"></defs>
+
   …
 </template>
 ```
@@ -119,11 +121,13 @@ out of navigation while remaining a page:
 ```html
 <template component="page-install">
   <defs><meta name="hk:label" content="Installation"></defs>
+
   …
 </template>
 
 <template component="page-thanks">
   <defs><meta name="hk:navigation" content="hidden"></defs>
+
   …
 </template>
 ```
@@ -150,6 +154,7 @@ export async function load({ navigationTree }) {
   <defs>
     <prop name="pages" type="list(object({ label: string, current: string, depth: number, ... }))" required>Site pages</prop>
   </defs>
+
   <aside><hk-nav from:items="$pages" label="Site"></hk-nav></aside>
   <main><slot name="page"></slot></main>
 </template>
@@ -210,6 +215,7 @@ export async function load({ breadcrumbs, pager }) {
     <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })">Previous page</prop>
     <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string, group?: string, ... })">Next page</prop>
   </defs>
+
   <main>
     <hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs>
     <slot name="page"></slot>

@@ -1,7 +1,7 @@
 # Compiled components
 
 The build plugin (`@nextwebwg/html-next-unplugin`) and `html-next build` compile every component the parser accepts to direct DOM code: a cloned template plus the exact
-updates its state, conditions, lists, props, slots, invocations, data reads, contexts and controller
+updates its state, conditions, lists, props, slots, invocations, data reads, contexts and module
 need. There is no option to turn on and no general-runtime fallback. Compiled components have the live
 runtime's semantics, which parity suites hold them to, and the generated module imports only the
 `@nextwebwg/html-next/generated-runtime` helpers its features use. Component behavior is defined by
@@ -48,12 +48,13 @@ authored .html ──parse──▶ ComponentDefinition ──blockPlan──▶
   facades are checked with `conforms` and warn HR007 once per definition and path; computeds,
   contexts and data are read-only views. Changed roots are marked in a bitmask and written raw objects
   in a map. The template render is one priority-1 job on the instance's `ReactiveScheduler`, between
-  controller computeds and effects. The factory renders initial state at construction, calls the
-  controller's default export on first connect, pauses on disconnect and re-renders everything on
-  reconnect, as the live runtime does.
+  module computeds and effects. The factory renders initial state at construction, calls the
+  module's named `connect` export on each connection, aborts its signal and releases cleanup on
+  disconnect, and re-renders on reconnect with the same instance state, as the live runtime does.
+  Legacy `controller` default exports retain their once-per-instance initialization.
 - **Lifecycle coordinator and observers.** Every document has one coordinator slot and one
   MutationObserver hub, shared by the live runtime, compiled roots and the framework targets'
-  controller hosts. Compiled output installs the indexed coordinator
+  module hosts. Compiled output installs the indexed coordinator
   (`src/generated-lifecycle-index.ts`), which holds registered roots' lifecycle records through
   `WeakRef`s pruned by a `FinalizationRegistry`. With up to 32 roots it synchronizes a single changed
   root without walking the mutated subtrees; otherwise it runs the same walk, with the same light-DOM
@@ -80,7 +81,7 @@ its own `generated-runtime` export, so only hydrating bundles carry them.
 | Edits before startup | `value`, `checked`, `selectionStart`/`selectionEnd`, `defaultValue`, `defaultChecked`, `defaultSelected` | Control values and selection are captured before the first render and restored after it; `data-html-next-form-defaults` restores the template's defaults |
 | Markup that changed before startup | `remove()`, `insertBefore` | A block whose server nodes do not match its spec is created afresh in place of them; the blocks around it are still adopted |
 
-| Connection order | `isConnected`, `compareDocumentPosition` | Every root a hydration adopts connects once the outermost one has finished, in document order, so a context's reader finds its provider and each controller sees a complete tree |
+| Connection order | `isConnected`, `compareDocumentPosition` | Every root a hydration adopts connects once the outermost one has finished, in document order, so a context's reader finds its provider and each module sees a complete tree |
 
 Adoption keeps every server node it binds in place, so focus, selection, media and frames are
 undisturbed. Each binding writes once on the first render, as live hydration's effects run once
@@ -92,7 +93,7 @@ delivery's parser, when created or hydrated alike.
 `compiled-hydration.test.ts` holds hydration to the live runtime's over the cases in
 `hydration-fixtures.ts`, rendered by `renderComponents`: node identity, the consumed records, inspected
 instances and markup before and after interaction, retained rows, parent bindings, edits made before
-startup, controllers, and markup that changed before startup. `server-hydration.test.ts` runs the same
+startup, modules, and markup that changed before startup. `server-hydration.test.ts` runs the same
 cases in Chromium, Firefox and WebKit.
 
 ## Owner decisions (2026-10-06)
@@ -131,8 +132,8 @@ Gzip bytes for one component compiled alone; an application pays the shared supp
 
 | Measure | Size |
 | --- | ---: |
-| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,727 B |
-| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 8,140 B |
+| Benchmark entry through Vite (unplugin test build, gzip-6, legacy controller included) | 8,727 B |
+| `controller-keyed` `measure:runtime` fixture (gzip-9, legacy controller external) | 8,140 B |
 | `static-card` fixture (gzip-9) | 6,875 B |
 | `prop-button` fixture (gzip-9) | 11,353 B |
 | Same, before prop types compiled to their own checks | 18,325 B |

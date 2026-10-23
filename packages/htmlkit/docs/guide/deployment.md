@@ -23,6 +23,7 @@ loader can read the [request](/htmlkit/loaders#rendering-on-each-request):
 <!-- app/pages/account.html -->
 <template component="page-account">
   <defs><meta name="hk:render" content="server"></defs>
+
   …
 </template>
 ```
