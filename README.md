@@ -388,8 +388,10 @@ Node version, host kernel and selection runner image match. Repository, Node and
 consumer checks still run. A source/dependency/configuration change or relevant
 base change invalidates reuse; package documentation follow-ups can reuse browser
 validation. The guide remains an input because tests execute its examples.
-The summary links the original run. Failed/cancelled runs, changed attempts, another
-PR/fork, missing/expired receipts or unavailable API evidence run the selected
+The summary links the original run. After reuse, the Browser matrix is skipped;
+the Affected packages summary identifies the successful run, tested merge commit
+and input digest. Required still verifies that the skip came from validated reuse.
+Failed/cancelled runs, changed attempts, another PR/fork, missing/expired receipts or unavailable API evidence run the selected
 browser suites again. Receipts are published only after every selected browser
 job reports matching execution inputs and the Required check succeeds. A container
 digest pins browser userspace, not hardware or the whole hosted infrastructure.
