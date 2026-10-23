@@ -40,9 +40,13 @@ describe("affected CI", () => {
   });
 
   it("skips documentation and includes shared build inputs and removed package files", () => {
-    expect(affectedPackages(["README.md", "CHANGELOG.md", "docs/guide/install.md", "packages/htmlkit/docs/client-navigation.md"])).toEqual([]);
+    expect(affectedPackages(["README.md", "CHANGELOG.md", "docs/architecture.md", "packages/htmlkit/docs/client-navigation.md"])).toEqual([]);
     expect(affectedPackages(["packages/html-next-converter/src/deleted.ts"])).toEqual(["html-next-converter", "html-next-unplugin"]);
     expect(affectedPackages(["pnpm-lock.yaml"])).toHaveLength(4);
+    // Guide examples are executable fixtures in target-transitions and HTMLKit.
+    expect(affectedPackages(["docs/guide/transitions.md"])).toHaveLength(4);
+    expect(createPlan(["docs/guide/transitions.md"]).browser.flatMap((job) => job.files))
+      .toContain("packages/html-next/tests/target-transitions.test.ts");
     expect(affectedPackages(["vitest.browser.config.ts"])).toHaveLength(4);
     expect(affectedPackages(["scripts/ci-plan.ts"])).toHaveLength(4);
   });
@@ -105,6 +109,16 @@ describe("affected CI", () => {
       expect(JSON.parse(values.node!).include.map((job: { package: string }) => job.package)).toEqual(["htmlkit"]);
       expect(JSON.parse(values.packages!)).toEqual(["html-next", "html-next-unplugin", "htmlkit"]);
       expect(values.generated).toBe("true"); expect(values.has_packages).toBe("true");
+      // A developer's new file is not in HEAD yet, but must select its owning suite.
+      write("packages/html-next/tests/new-regression.test.ts", "// New local regression");
+      const localOutput = join(directory, "local-outputs");
+      execFileSync(process.execPath, [join(directory, "scripts/ci-plan.ts")], {
+        env: { ...process.env, CI_BASE: "HEAD", CI_LOCAL: "1", GITHUB_OUTPUT: localOutput },
+      });
+      const local = Object.fromEntries(readFileSync(localOutput, "utf8").trim().split("\n")
+        .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+      expect(JSON.parse(local.node!).include.flatMap((job: { files: string[] }) => job.files))
+        .toContain("packages/html-next/tests/new-regression.test.ts");
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 

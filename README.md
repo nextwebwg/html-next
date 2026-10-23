@@ -368,3 +368,30 @@ motivates the proposal. This repository and its conformance corpus are library-a
 ## License
 
 [MIT](LICENSE)
+
+### Check affected changes before pushing
+
+Run `pnpm verify:affected --plan` to inspect the CI plan against `origin/main`,
+including tracked edits and new files. Run `pnpm verify:affected` to execute its
+repository checks, affected Node/browser suites and packed-consumer checks locally.
+Pass another base, for example `pnpm verify:affected origin/main`. Browser jobs run
+serially with one worker. Install the locked Playwright browsers before running them.
+The Deno/Bun consumer smoke remains a hosted CI check.
+
+Batch related, verified commits into a reviewable push. There is no required push
+interval: push a useful checkpoint when it is ready. Hosted CI still validates the
+published result.
+
+Browser CI can reuse an earlier successful validation in the same PR when the
+actual tested merge-tree inputs, exact selected suites, pinned browser image and
+Node version, host kernel and selection runner image match. Repository, Node and
+consumer checks still run. A source/dependency/configuration change or relevant
+base change invalidates reuse; package documentation follow-ups can reuse browser
+validation. The guide remains an input because tests execute its examples.
+The summary links the original run. Failed/cancelled runs, changed attempts, another
+PR/fork, missing/expired receipts or unavailable API evidence run the selected
+browser suites again. Receipts are published only after every selected browser
+job reports matching execution inputs and the Required check succeeds. A container
+digest pins browser userspace, not hardware or the whole hosted infrastructure.
+Updating Playwright requires updating `scripts/ci-browser-environment.json` to its
+corresponding immutable manifest digest. Existing historical runs cannot be reused.

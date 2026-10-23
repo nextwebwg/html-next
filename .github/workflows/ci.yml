@@ -7,12 +7,13 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Selection and Required each get one minute; parallel checks get ten, leaving three to publish.
+# Selection gets one minute; Required gets three to validate and publish the receipt.
 # Routine checks target five minutes including setup; no automatic job can run past fifteen.
 jobs:
   changes:
@@ -28,6 +29,12 @@ jobs:
       has_packages: ${{ steps.plan.outputs.has_packages }}
       playwright: ${{ steps.plan.outputs.playwright }}
       generated: ${{ steps.plan.outputs.generated }}
+      browser_reused: ${{ steps.reuse.outputs.reused }}
+      browser_image: ${{ steps.reuse.outputs.image }}
+      browser_node: ${{ steps.reuse.outputs.node }}
+      host_kernel: ${{ steps.reuse.outputs.kernel }}
+      runner_image: ${{ steps.reuse.outputs.runner_image }}
+      tested_commit: ${{ steps.reuse.outputs.tested_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,6 +48,12 @@ jobs:
         env:
           CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/ci-plan.ts
+      - id: reuse
+        name: Find successful browser validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_BROWSER_PLAN: ${{ steps.plan.outputs.browser }}
+        run: node scripts/ci-reuse.ts
 
   repository:
     name: Repository contracts
@@ -57,7 +70,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint && pnpm exec tsc -p tsconfig.json
-      - run: pnpm exec vitest run tests/ci.test.ts
+      - run: pnpm exec vitest run tests/ci.test.ts tests/ci-reuse.test.ts
       - run: pnpm --filter @nextwebwg/html-next check:release
       - if: needs.changes.outputs.generated == 'true'
         run: pnpm check:generated
@@ -87,11 +100,11 @@ jobs:
   browser:
     name: Browser ${{ matrix.name }}
     needs: changes
-    if: needs.changes.outputs.has_browser == 'true'
+    if: needs.changes.outputs.has_browser == 'true' && needs.changes.outputs.browser_reused != 'true'
     runs-on: ubuntu-latest
-    # The locked image includes all three engines and OS libraries; avoid apt/CDN installs.
+    # Immutable browser userspace includes all three engines and OS libraries.
     container:
-      image: mcr.microsoft.com/playwright:v${{ needs.changes.outputs.playwright }}-noble
+      image: ${{ needs.changes.outputs.browser_image }}
       options: --user 1001 --ipc=host --init
     timeout-minutes: 10
     strategy:
@@ -101,8 +114,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version: ${{ needs.changes.outputs.browser_node }}
           package-manager-cache: false
+      - id: environment
+        name: Check browser validation inputs
+        env:
+          CI_TESTED_COMMIT: ${{ needs.changes.outputs.tested_commit }}
+          CI_BROWSER_NODE: ${{ needs.changes.outputs.browser_node }}
+          CI_HOST_KERNEL: ${{ needs.changes.outputs.host_kernel }}
+        run: node scripts/ci-reuse.ts check-environment
+      - name: Reusable environment matches
+        if: steps.environment.outputs.eligible == 'true'
+        run: echo 'Pinned browser userspace, Node, tested commit and host kernel match.'
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
@@ -172,9 +195,9 @@ jobs:
     if: always()
     needs: [changes, repository, verify, browser, packages, runtimes]
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 3
     steps:
-      # Only an empty selection may skip a matrix. Fail closed on planner failure/cancellation.
+      # Only empty selection or validated browser reuse may skip a matrix. Fail closed otherwise.
       - env:
           RESULTS: ${{ toJSON(needs) }}
         run: |
@@ -184,9 +207,29 @@ jobs:
             if (results[name].result !== 'success') process.exit(1);
           }
           for (const [name, flag] of [['verify', 'has_node'], ['browser', 'has_browser'], ['packages', 'has_packages']]) {
-            const expected = results.changes.outputs[flag] === 'true' ? 'success' : 'skipped';
+            const reused = name === 'browser' && results.changes.outputs.browser_reused === 'true';
+            const expected = results.changes.outputs[flag] === 'true' && !reused ? 'success' : 'skipped';
             if (results[name].result !== expected) process.exit(1);
           }
           const runtimes = JSON.parse(results.changes.outputs.packages).includes('htmlkit') ? 'success' : 'skipped';
           if (results.runtimes.result !== runtimes) process.exit(1);
           JS
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: receipt
+        if: needs.changes.outputs.has_browser == 'true' && needs.changes.outputs.browser_reused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_BROWSER_PLAN: ${{ needs.changes.outputs.browser }}
+          CI_RECEIPT_KERNEL: ${{ needs.changes.outputs.host_kernel }}
+          CI_RECEIPT_RUNNER_IMAGE: ${{ needs.changes.outputs.runner_image }}
+        run: |
+          # Each job has its own filesystem; reconstruct the selector's exact receipt.
+          GITHUB_OUTPUT='' node scripts/ci-reuse.ts write-receipt
+          CI_RECEIPT="$RUNNER_TEMP/browser-validation.json" node scripts/ci-reuse.ts finalize
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.receipt.outputs.receipt != ''
+        with:
+          name: browser-validation-v1
+          path: ${{ steps.receipt.outputs.receipt }}
+          if-no-files-found: error
+          overwrite: true

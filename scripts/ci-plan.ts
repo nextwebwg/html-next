@@ -48,7 +48,7 @@ export function isReleaseMetadataChange(path: string, before: string, after: str
 export function affectedPackages(paths: readonly string[]): string[] {
   const changed = new Set<string>();
   for (const path of paths) {
-    if (path.startsWith("docs/") || /(?:^|\/)(?:README|CHANGELOG|AGENTS|CLAUDE)\.md$/.test(path)
+    if ((path.startsWith("docs/") && !path.startsWith("docs/guide/")) || /(?:^|\/)(?:README|CHANGELOG|AGENTS|CLAUDE)\.md$/.test(path)
       || /^packages\/[^/]+\/docs\//.test(path)) continue;
     const directory = /^packages\/([^/]+)\//.exec(path)?.[1];
     if (directory && directories.includes(directory)) changed.add(directory);
@@ -124,8 +124,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const base = process.env.CI_BASE;
   // A new branch's zero SHA cannot be diffed. Select everything rather than skip verification.
   const paths = !base || /^0+$/.test(base) ? ["pnpm-lock.yaml"] : execFileSync(
-    "git", ["diff", "--name-only", "-z", base, "HEAD"], { cwd: root, encoding: "utf8" },
+    "git", ["diff", "--name-only", "-z", base, ...(process.env.CI_LOCAL ? [] : ["HEAD"])], { cwd: root, encoding: "utf8" },
   ).split("\0").filter(Boolean);
+  if (process.env.CI_LOCAL) paths.push(...execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"],
+    { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean));
   const metadataOnly = new Set<string>();
   if (base && !/^0+$/.test(base)) {
     const previous = (JSON.parse(execFileSync("git", ["show", `${base}:packages/html-next/package.json`],
