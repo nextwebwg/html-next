@@ -9,7 +9,7 @@ React, Svelte, or Solid components while that target owns rendering, reactivity,
 ## Inputs and graph boundary
 
 The converter receives application entries or component-library entries, a target framework and
-supported version, and output/package settings. It follows the same component, controller, style,
+supported version, and output/package settings. It follows the same component, module, style,
 and static module graph as the native build.
 
 Unknown runtime component edges require a declared target-native dynamic import, a universal
@@ -20,9 +20,9 @@ output inventory.
 
 Generated target components must preserve the shared semantic model: native root behavior,
 projected content, properties (as attributes), events, methods, declared type behavior, state results,
-requests, styles, lifecycle, controller behavior, and hydration outcome.
+requests, styles, lifecycle, module behavior, and hydration outcome.
 
-Acceptance is based on the component's appearance and runtime behavior, including controller
+Acceptance is based on the component's appearance and runtime behavior, including module
 connect/disconnect calls and cleanup. Each framework may use its own DOM and SSR representation,
 provided its output can hydrate into the equivalent functioning component. Node-object identity
 and identical serialized SSR markup are not independent acceptance criteria. Tests should verify
@@ -39,8 +39,8 @@ reconciliation, component lifecycle, SSR attachment, and hydration. The converte
 normalized component plan through those facilities.
 
 Converted output has **no runtime dependency on HTML Next**: it imports the target framework,
-feature-specific generated helpers, and the component's own modules (its controller and preserved
-ordinary modules), never an HTML Next package or live runtime. The generated `$html` helper also
+feature-specific generated helpers, component modules and preserved ordinary modules, never an
+HTML Next package or live runtime. The generated `$html` helper also
 imports `parse5` for deterministic server-side fragment parsing. Svelte output with style bindings
 uses `cssstyle` and the public `css-tree/parser` entry for server CSSOM operations. A generated
 helper package maps its server entry to a browser entry through the standard `browser` field;
@@ -51,14 +51,14 @@ part of the generated output.
 ## Output artifacts
 
 Application conversion emits target application entries, generated components, target-native
-styles or imported CSS, controller adapters, types, static assets, and an inventory.
+styles or imported CSS, module adapters, types, static assets, and an inventory.
 
 Library conversion emits independently consumable component entries, package exports appropriate
-to the target, declaration files, styles, controllers, preserved ordinary modules, and dependency
+to the target, declaration files, styles, modules, preserved ordinary modules, and dependency
 metadata. The inventory's `package.dependencies` lists feature-specific runtime imports such as
 `parse5` for `$html`, and `package.peerDependencies` names the target framework. Publishers merge
 these fields into their package manifest and remain responsible for dependencies imported by their
-own controller modules. A multi-target package may mark each framework peer optional when its
+own component modules. A multi-target package may mark each framework peer optional when its
 subpaths are independently usable. Generated source must remain compatible with the target's
 standard compiler and bundler pipeline.
 
@@ -70,7 +70,7 @@ not silently approximate behavior.
 
 Runtime failures preserve the shared public error, event, type, cancellation, and cleanup
 contract. Target error boundaries may observe those failures but cannot replace required component
-events or leave effects, requests, or controllers active after disposal.
+events or leave effects, requests, or modules active after disposal.
 
 An incompatible React server root is a hydration diagnostic exception, not a component-thrown
 HTML Next error. The application calls React's `hydrateRoot` and may observe recovery through its
@@ -118,7 +118,7 @@ multi-entry consumer bundles.
    props, events, methods, state results, declared types, native form behavior, styles, and diagnostics.
 2. Server-render and hydrate each target while preserving specified form edits, focus, and
    selection.
-3. Exercise target-native reactive updates, keyed reorders, controller cleanup, and request
+3. Exercise target-native reactive updates, keyed reorders, module cleanup, and request
    cancellation without importing the general live browser runtime.
 4. Bundle one and several entries from a converted library and verify stable exports plus shared
    bridge deduplication.
@@ -126,6 +126,10 @@ multi-entry consumer bundles.
    diagnostic rather than emitting an approximation.
 
 ## Vue parity gate status
+
+The controller fixtures in this section exercise legacy `controller` default exports and their
+compatibility host. Current component modules use `module` and named `connect` exports, with a
+fresh activation on each connection as described in the [module guidance](../README.md).
 
 The browser parity suite is `packages/html-next/tests/vue-parity.test.ts`. Run it with
 `corepack pnpm test:targets`. It compiles real Vue single-file component output, mounts the same

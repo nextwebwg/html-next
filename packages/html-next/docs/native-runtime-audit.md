@@ -61,7 +61,7 @@ status-only changes independently of ordinary typed props. Framework getters ret
 of unchanged status so eligibility watchers do not rerun for a producer's own results. SDK watchers
 obtained through a connection host end with that activation, including React StrictMode replay.
 Vue uses an immediate native watch callback outside dependency collection for SDK publication;
-Svelte uses untrack and React uses its existing controller dependency collector.
+Svelte uses untrack and React uses its existing module dependency collector.
 React render candidates commit their accepted input metadata in a layout effect, while
 useSyncExternalStore checks source revisions before commit. A suspended or abandoned render
 cannot transfer fixture ownership or expose its tentative values through the connected SDK.
@@ -216,8 +216,8 @@ contains all of them for arbitrary later graphs.
 | Declared type enforcement | Attributes, native scalar conversion and constraint validation | Parse and serialize structural types explicitly authored by a component contract | Type enforcement remains at prop, event, and other declared contract boundaries. HTML formats such as email, URL, date, color, identifier, and token syntax use native-control constraints or an opt-in validation adapter rather than being universal contract terminals. External response validation is available through `DataResource.adapt`; opt-in validation utilities remain package APIs but are not installed by the browser runtime. Those historical boundary corrections cut 20,854 minified raw bytes and 6,147 gzip bytes from their comparison baseline. |
 | Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | Owner-approved for the current baseline: retain the `sanitize.ts` adapter (1,133 minified raw bytes), with its separate `sanitizer-default.ts` policy (2,907 bytes) across engines. Definition validation now imports this module's URL-attribute and executable-scheme policy instead of carrying a second copy. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Revisit when every target engine exposes equivalent policy control. |
 | Component styling | CSS parser/CSSOM, selectors, cascade, `@scope`, native style/link elements | Compilation of owned source and explicit delivery metadata | Component compilation emits bounded `@scope` rules and rewrites validity selectors once. Validation never scans or patches application CSS. Owned style/link markers let hydration reuse server-delivered CSS, including bundles containing several components, while restoring state-selector metadata without parsing CSS again. Native rendering already coalesces same-task installations; measured containment variants did not remove forced style/layout passes. See [style delivery measurements](style-delivery-performance.md). |
-| Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. The isolated controller capability fixture costs 37,973 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full controller-facing contract while pruning implementation machinery the graph does not require. |
-| Resource graphs and import maps | `URL`, `fetch()`, CORS, CSP, native module loading, and application import-map markup | HTML component dependency graph, duplicate-tag checks, import-map snapshot resolution, and application-selected live-scope enforcement | Same-origin roots remain inside the application origin. Cross-origin roots require an application-owned mapping; relative definition and controller entry edges cannot escape its mapped prefix, and component redirects are checked before registration. A polyfill cannot enforce the controller final-target rule because native `import()` has no pre-execution redirect hook; that check requires browser integration. Controller transitive imports remain ordinary ESM. Browsers expose no equivalent component-resource resolver, so the remaining authority layer is necessary. |
+| Modules | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Component modules load through native `import()`. The isolated legacy controller capability fixture costs 37,973 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full module-facing contract while pruning implementation machinery the graph does not require. |
+| Resource graphs and import maps | `URL`, `fetch()`, CORS, CSP, native module loading, and application import-map markup | HTML component dependency graph, duplicate-tag checks, import-map snapshot resolution, and application-selected live-scope enforcement | Same-origin roots remain inside the application origin. Cross-origin roots require an application-owned mapping; relative definition and module entry edges cannot escape its mapped prefix, and component redirects are checked before registration. A polyfill cannot enforce the module final-target rule because native `import()` has no pre-execution redirect hook; that check requires browser integration. Module transitive imports remain ordinary ESM. Browsers expose no equivalent component-resource resolver, so the remaining authority layer is necessary. |
 | Hydration and adoption | Existing DOM identity, selectors, control state, focus, and selection APIs | Matching server-lowered roots to definitions and attaching only authored behavior | Cross-browser tests preserve node identity and live form-control state. `pnpm measure:hydration` reports server-DOM adoption and fresh lowering separately while asserting identity, edit, focus, and selection preservation on every sample. A parent never binds a template-component invocation: its bound values stay that invocation's attributes until the component lowers, and its listeners, refs, and properties attach to the component's root when it does, in either adoption order, then re-run on each new root. |
 
 ## Native-build capability fixtures
@@ -228,13 +228,13 @@ builds one execution-local `Set`. The runtime still owns read-to-consumer routin
 observation does not expose authored JavaScript state reads. After reordered reads insert a new
 subscription, membership is checked before consuming an old link so the same dependency is not
 subscribed twice. Execution completion releases the membership index; conditional cleanup,
-pause, and stop release obsolete subscriptions. Live components and compiled components' controller
+pause, and stop release obsolete subscriptions. Live components and compiled components' module
 hosts share it.
 
-Controller paths retain separate write guards for their destination types. Native `WeakMap`
+Module paths retain separate write guards for their destination types. Native `WeakMap`
 identity associates writable facades with their existing reactive objects, so assigning values
 returned by array filtering, concatenation, or swapping does not stack another reactive proxy
-around an old controller guard. The next controller read applies its destination's guard.
+around an old module guard. The next module read applies its destination's guard.
 Readonly facades are not registered as writable aliases: their barriers survive assignments
 into writable state. Frozen values and native events keep their existing handling.
 
@@ -257,12 +257,12 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | --- | ---: | --- |
 | Static markup | 6,875 | Cloned blocks, slot ranges, compiled-root handle and host |
 | Numeric state and handler | 7,117 | Same, with root bits, a handler, and decimal `add` |
-| Numeric computed state | 7,449 | Same, with a computed root, read-only to the controller, and decimal `add` and `multiply` |
+| Numeric computed state | 7,449 | Same, with a computed root, read-only to the module, and decimal `add` and `multiply` |
 | Scalar and enum props | 11,353 | Same, with the live prop boundary and validity, each type compiled to its own checks |
 | Keyed list | 7,577 | Cloned blocks and `KeyedList` |
 | Declared read | 7,536 | Cloned blocks and `DataResource` |
-| Controller lifecycle | 6,907 | Cloned blocks and the generated controller host |
-| Controller keyed list | 8,140 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
+| Legacy controller lifecycle | 6,907 | Cloned blocks and the generated controller host |
+| Legacy controller keyed list | 8,140 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
 The fixtures isolate authored capabilities so regressions remain attributable. They are not separate
 per-component runtimes: an application or library build combines the complete input graph,
@@ -293,8 +293,8 @@ the checks it uses (`type-checks.ts`), which the live type system builds its own
 | Insertion | Native `insertBefore` for each fresh row, in forward order | Finding each fresh run and its retained insertion reference; fragment grouping is removed after paired screening |
 | Bulk removal | `replaceChildren(start, end)` when the region owns its parent, else `Range.deleteContents()` or `remove()` | Adjacency grouping; foreign nodes split groups |
 | Moves | `moveBefore` with an `insertBefore` fallback, as the live runtime | Swapped ends, then the longest increasing run of retained positions |
-| Controller contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |
-| Change notification | None native | Controller effects use the reactivity dependency graph; templates use root bits and written raw objects |
+| Module contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |
+| Change notification | None native | Module effects use the reactivity dependency graph; templates use root bits and written raw objects |
 | Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()`, `WeakRef`, `FinalizationRegistry` | A scope-exact fast path that skips the per-node marker walk |
 | Prop validity | `ValidityState`, `setCustomValidity` on native control roots; the generalized validity facade elsewhere | Each prop type's compiled check and the live validation messages |
 | Scheduling | `queueMicrotask` through the existing `ReactiveScheduler` | None |
@@ -312,7 +312,7 @@ group so attribute creation keeps authored order.
 
 The platform has no keyed reconciliation and no reactive binding of template parts; DOM Parts and
 Template Instantiation have not shipped. These helpers are the smallest layer that binds cloned DOM
-to declared state while keeping the controller contract. If `ChildNodePart`/`AttributePart` ship, the
+to declared state while keeping the module contract. If `ChildNodePart`/`AttributePart` ship, the
 compile-time site walks map onto them.
 
 The coordinator fast path keeps today's light-DOM scope exactly and retains no root the document no
@@ -330,7 +330,7 @@ installs first serves every root registered in that document, so two coordinator
 When the live coordinator installed first, compiled roots get the exact walk without the fast path.
 
 A document has one MutationObserver for connection tracking, whatever runs on it: the live runtime,
-compiled components and the React, Svelte and Vue targets' controller hosts all subscribe to the hub
+compiled components and the React, Svelte and Vue targets' module hosts all subscribe to the hub
 stored on the document under the shared runtime key. Bound `<select>` elements in the Svelte and Vue
 targets share one more observer per document for their option lists, which no native event reports.
 
@@ -355,7 +355,7 @@ parent's flush reaches its children in later ones, while a document runs one vie
 time. One coordinator per document holds each participating instance's flush, starts one
 transition, runs the held flushes in its update callback, waits one task for cascades, and skips the
 transition when no participating region or list changed structure. The hold shadows that instance's
-scheduler `flush`; the scheduler class and the shared controller are unchanged.
+scheduler `flush`; the scheduler class and the shared transition coordinator are unchanged.
 
 Evidence: `tests/target-transitions.test.ts` in Chromium, Firefox and WebKit. Remaining gaps: a
 second document transition skips a running one (`Element.startViewTransition` would run them side by
@@ -366,7 +366,7 @@ side; Chromium only), and a leaving picture is not clipped by an `overflow` ance
 The next decisions are intentionally separated so approval of one custom layer cannot be read as
 approval of all runtime machinery:
 
-1. Native build host: preserve the uniform controller contract while deriving one shared host
+1. Native build host: preserve the uniform module contract while deriving one shared host
    implementation from the capabilities used across the application or library graph.
 2. Declared reads: distinguish request behavior supplied directly by Fetch/URL/AbortController from
    proposal state and scheduling that generated output must retain.

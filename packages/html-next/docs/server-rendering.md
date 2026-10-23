@@ -30,7 +30,9 @@ const counter = parseComponent(`<template component="x-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><button type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
+</defs>
+
+<button type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
 
 const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],
@@ -60,12 +62,12 @@ Node's structured clone.
 must name declared state. Node output matches the browser's declarative baseline before connection:
 props, initial state, computeds, template output and projected slots. Declared reads remain in their
 initial pending state. Browser hydration restores the instance, connects reads and attaches its
-controller to the adopted nodes. This follows the proposal's
-[controller lifecycle](https://nextwebwg.org/declarative-components/javascript/#lifecycle-and-hydration) and
+module to the adopted nodes. This follows the proposal's
+[module lifecycle](https://nextwebwg.org/declarative-components/javascript/#lifecycle-and-hydration) and
 [connection boundary](https://nextwebwg.org/declarative-components/reactivity/#lifecycle).
 
-For controller-backed definitions, use the live browser loader (`@nextwebwg/html-next/browser`) with
-component links, or bundle the controller imports alongside runtime registration and observation.
+For module-backed definitions, use the live browser loader (`@nextwebwg/html-next/browser`) with
+component links, or bundle the module imports alongside runtime registration and observation.
 `registerComponentDefinitions()` alone registers data; it does not import JavaScript modules.
 The runtime's `lowerDocument(document, { connect: false })` renders the same static baseline in a
 browser. Ordinary `lowerDocument()` or `observeDocument()` connects its reads afterward.
@@ -159,7 +161,7 @@ Native DOM connection (`isConnected`) also holds in a server DOM; it does not me
 joined an interactive browser document. Disabling HTML scripts and resource loading in jsdom does
 not stop the runtime's own Fetch calls. The runtime therefore needs one explicit rendering boundary:
 static lowering keeps reactive DOM bindings active but leaves declared reads and connection lifecycle
-paused. Browser lowering and observation connect them. Controllers attach through the browser's
+paused. Browser lowering and observation connect them. Modules attach through the browser's
 ordinary ESM loader after adoption, as described in the proposal's JavaScript lifecycle.
 
 The rendered-form serializer carries prop inputs, accepted values, explicitness and declared state
@@ -183,8 +185,8 @@ edits, focus and selection. `tests/package.test.ts` executes the renderer from a
 
 `tests/server-continuation.test.ts` compares the exact Node and browser baseline markup, then feeds
 Node output through the live graph loader and a minified, tree-shaken browser bundle with pre-parsed
-definitions and controller imports. Both deliveries adopt existing nodes, preserve input edits,
-attach controller effects and event subscriptions, resolve and refetch declared reads, and dispose and
+definitions and legacy controller module imports. Both deliveries adopt existing nodes, preserve input edits,
+attach module effects and event subscriptions, resolve and refetch declared reads, and dispose and
 reattach behavior on removal/reconnection. The bundle inventory excludes Node dependencies; the
 pre-parsed delivery also excludes the live parser. These checks run in Chromium, Firefox and WebKit.
 
