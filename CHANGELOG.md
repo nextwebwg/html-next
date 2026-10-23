@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.70
+
+- Reuse successful browser validation for unchanged tested inputs within one PR; retain all selected browser engines on a cache miss. Add local affected checks to support verified, batched pushes.
+
 ## 1.0.0-alpha.69
 
 ### Fixed

@@ -33,6 +33,7 @@
     "test:package": "vitest run --config vitest.package.config.ts",
     "test:targets": "vitest run --config vitest.targets.config.ts",
     "typecheck": "tsc -p tsconfig.json && pnpm --recursive --if-present typecheck",
+    "verify:affected": "node scripts/ci-local.ts",
     "verify:inner": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:generated && pnpm measure:runtime",
     "verify:pr": "pnpm verify:inner && pnpm build && pnpm test:package",
     "verify:compatibility": "pnpm test:browser && pnpm test:targets && pnpm test:consumer",
