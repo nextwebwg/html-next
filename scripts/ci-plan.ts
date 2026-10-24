@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync, readdirSync, realpathSync } from "node:fs
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const directories = ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"];
+const directories = ["html-next", "html-next-converter", "html-next-unplugin"];
 const manifests = directories.map((directory) => ({ directory, ...JSON.parse(
   readFileSync(`${root}packages/${directory}/package.json`, "utf8"),
 ) as { name: string; version: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> } }));
@@ -12,8 +12,6 @@ const durations = JSON.parse(readFileSync(`${root}tests/target-durations.json`, 
 Object.assign(durations, {
   "packages/html-next/tests/runtime.test.ts": 260,
   "packages/html-next/tests/server-hydration.test.ts": 217,
-  "packages/htmlkit/tests/client-navigation.test.ts": 164,
-  "packages/htmlkit/tests/browser.test.ts": 38,
 });
 
 export interface TestJob {

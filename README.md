@@ -21,9 +21,9 @@ Author once. Use native DOM, Vue, React, or Svelte.
 ---
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
-`@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
+`@nextwebwg/html-next` supplies component tooling; [HTMLKit](https://github.com/threadlabs-studio/htmlkit), a Threadlabs product, builds applications on it, and the
 converter and unplugin adapt it to other build workflows.
-The four HTML Next packages share one version and publish together. Shared policy and verification
+The three HTML Next packages share one version and publish together. Shared policy and verification
 live at the repository root.
 
 Use [`html-next-check`](./packages/html-next-unplugin/README.md#check-components-in-ci) for
@@ -35,7 +35,7 @@ The command supports native, Vue, React, and Svelte targets and JSON output for 
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
-| [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
+
 
 Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
 
@@ -121,8 +121,8 @@ Playwright's pinned Chromium, Firefox, and WebKit builds are required for the br
 gates. Install them once with `corepack pnpm exec playwright install chromium firefox webkit`.
 
 CI runs Node tests, browser regressions and installed-consumer checks only for changed packages
-and their transitive workspace consumers. Core changes affect all four packages; converter changes
-also affect the Vite plugin; HTMLKit changes stay with HTMLKit. Shared toolchain changes select all
+and their transitive workspace consumers. Core changes affect all three packages; converter changes
+also affect the Vite plugin; HTMLKit now runs its checks in its own repository. Shared toolchain changes select all
 packages. Documentation changes run repository contracts without package suites.
 Pure shared-version changes do not widen functional test selection. Release metadata, generated
 output and installed consumers for the changed package versions are still verified.
@@ -137,7 +137,7 @@ benchmarks use the manual Framework rendering workflow, and
 The manual Converter corpus workflow runs the broad React, Vue and Svelte public-corpus sweeps
 for shared compiler changes or parity investigations. Focused framework regressions remain automatic
 in Chromium, Firefox and WebKit.
-Deno/Bun installed-consumer smoke checks run only when core or HTMLKit changes affect HTMLKit.
+HTMLKit and its installed-consumer runtime checks now live in [threadlabs-studio/htmlkit](https://github.com/threadlabs-studio/htmlkit).
 Automatic npm publication waits for successful CI on the exact main commit and has its own
 three-minute cap. See [release mechanics](./packages/html-next/docs/releasing.md).
 

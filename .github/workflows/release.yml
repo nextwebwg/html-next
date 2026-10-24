@@ -33,7 +33,7 @@ jobs:
         name: Check for unpublished package versions
         run: |
           pending=false
-          for directory in html-next html-next-converter html-next-unplugin htmlkit; do
+          for directory in html-next html-next-converter html-next-unplugin; do
             package=$(node -p "const p = require('./packages/$directory/package.json'); p.name + '@' + p.version")
             if ! npm view "$package" version >/dev/null 2>&1; then pending=true; fi
           done
@@ -62,7 +62,7 @@ jobs:
           failed=""
           echo "| Package | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
-          for directory in html-next html-next-converter html-next-unplugin htmlkit; do
+          for directory in html-next html-next-converter html-next-unplugin; do
             name=$(node -p "require('./packages/$directory/package.json').name")
             version=$(node -p "require('./packages/$directory/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
