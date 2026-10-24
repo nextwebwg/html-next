@@ -1,8 +1,8 @@
 # Release mechanics
 
 `@nextwebwg/html-next`, `@nextwebwg/html-next-converter`,
-`@nextwebwg/html-next-unplugin`, and `@nextwebwg/htmlkit` share one version and publish together. A release changes all
-four package manifests and the core `GENERATOR_VERSION` to the same unused version. Regenerate
+and `@nextwebwg/html-next-unplugin` share one version and publish together. A release changes all
+three package manifests and the core `GENERATOR_VERSION` to the same unused version. Regenerate
 the checked-in examples and snapshots after changing the generator version.
 
 From the repository root, verify the candidate with a supported Node version and Corepack pnpm:
@@ -23,11 +23,11 @@ three-minute job limit. Manual dispatch verifies and publishes the selected revi
 It attempts every package in the set through npm trusted publishing with provenance. A successful
 run publishes each new version to `latest`. When rerun after a partial failure, it skips packages
 whose version already exists and publishes the missing packages; it fails if any publish fails.
-Confirm all four `latest` dist-tags after npm finishes processing the uploads.
+Confirm all three `latest` dist-tags after npm finishes processing the uploads.
 
 A new package name needs a manual first publish and npm trusted-publisher setup before it can
 join the workflow. An existing npm version cannot be replaced, so a correction uses a new shared
-version for all four packages.
+version for all three packages.
 
 ## Versions and snapshots
 
@@ -39,3 +39,5 @@ major's changelog heading and in [Versions and stability](../../../docs/guide/ve
 major, no release may break a component that builds on an earlier release of that major: a
 breaking change waits for the next major, and the previous major's last minor release warns about
 each construct it will change.
+
+HTMLKit releases independently as [`@threadlabs/htmlkit`](https://github.com/threadlabs-studio/htmlkit). Do not publish further `@nextwebwg/htmlkit` versions from this repository.

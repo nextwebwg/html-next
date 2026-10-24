@@ -2,6 +2,10 @@
 
 ## 1.0.0-alpha.70
 
+- Move HTMLKit to [threadlabs-studio/htmlkit](https://github.com/threadlabs-studio/htmlkit) as `@threadlabs/htmlkit`, with independent releases, tests, and documentation. The three HTML Next packages keep their shared release version.
+
+## 1.0.0-alpha.70
+
 - Reuse successful browser validation for unchanged tested inputs within one PR; retain all selected browser engines on a cache miss. Add local affected checks to support verified, batched pushes.
 
 ## 1.0.0-alpha.69
