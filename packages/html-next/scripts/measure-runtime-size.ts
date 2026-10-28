@@ -199,9 +199,10 @@ const requestGenerated = await generatedFixture("controller-request", 9_634);
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
 const headNoneGenerated = await generatedFixture("head-none", 12_444);
-const headStaticGenerated = await generatedFixture("head-static", 14_542);
-const headJsonGenerated = await generatedFixture("head-json", 14_685);
-const headGenerated = await generatedFixture("head-script", 16_654);
+// +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
+const headStaticGenerated = await generatedFixture("head-static", 14_573);
+const headJsonGenerated = await generatedFixture("head-json", 14_717);
+const headGenerated = await generatedFixture("head-script", 16_690);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

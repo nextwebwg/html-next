@@ -35,7 +35,12 @@ const source = `<template component="docs-layout"><defs>
 <template component="x-product"><defs>
   <prop name="section" type="string" default="Install">The section.</prop>
   <script type="application/ld+json" from:value="{ name: $section }"></script>
-</defs><section></section></template>`;
+</defs><section></section></template>
+<template component="language-page"><defs>
+  <link rel="alternate" hreflang="en" href="https://docs.example/">
+  <link rel="alternate" hreflang="x-default" href="https://docs.example/">
+</defs><article>Languages</article></template>
+<template component="language-peer"><defs><link rel="alternate" hreflang="x-default" href="https://docs.example/"></defs><aside>Peer</aside></template>`;
 const definitions = parseComponentResource(source, "https://app.example/app.html").definitions;
 // A build reads its components from files, as HTMLKit does.
 const widget = parseComponentResource(`<template component="x-widget"><defs>
@@ -48,17 +53,48 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
   let page = "";
   /** Rendered at HTMLKit's default origin, to be served from another. */
   let elsewhere = "";
+  let languages = "";
 
   beforeAll(async () => {
     compiled = await compiledFixtures("iife", 'export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";', [...definitions, ...widget]);
     const rendered = await renderComponents('<docs-layout><page-a id="page"></page-a></docs-layout><x-product></x-product>', { definitions, head: authoredHead, url: "https://app.example/" });
     page = `<!doctype html><head>${rendered.head}</head><body><main id="mount">${rendered.html}</main></body>`;
+    const languagePage = await renderComponents('<language-page id="language"></language-page>', { definitions,
+      head: '<link rel="alternate" hreflang="EN" href="https://docs.example/">', url: "https://app.example/" });
+    languages = `<!doctype html><head>${languagePage.head}</head><body><main id="mount">${languagePage.html}</main></body>`;
     const widgetPage = await renderComponents("<x-widget></x-widget>", { definitions: widget, head: '<meta charset="utf-8">', url: "http://localhost/" });
     elsewhere = `<!doctype html><head>${widgetPage.head}</head><body><main id="mount">${widgetPage.html}</main></body>`;
   });
   afterAll(() => {});
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} hydrates language alternates sharing one URL without merging languages or replacing authored nodes`, async () => {
+      const browser = await browserType.launch({ headless: true }); const errors: string[] = [];
+      try {
+        const tab = await browser.newPage(); tab.on("pageerror", error => errors.push(error.message));
+        await tab.route("https://app.example/**", route => route.fulfill({ contentType: "text/html", body: languages }));
+        await tab.goto("https://app.example/languages/");
+        assert.equal(await tab.locator('head link[rel="alternate"]').count(), 2);
+        await tab.evaluate(() => { Object.assign(window, { languageLinks: [...document.head.querySelectorAll('link[rel="alternate"]')] }); });
+        await tab.addScriptTag({ content: compiled });
+        const result = await tab.evaluate(async () => {
+          const kept = window as unknown as { languageLinks: Element[]; HtmlCompiled: { factories: Record<string, (options?: object, html?: undefined, root?: Element) => Element> } };
+          const { factories } = kept.HtmlCompiled;
+          const settle = () => new Promise(done => setTimeout(done, 0));
+          const root = document.getElementById("language")!;
+          factories["language-page"]!({}, undefined, root); await settle();
+          const read = () => [...document.head.querySelectorAll('link[rel="alternate"]')];
+          const hydrated = read().length === 2 && read().every((link, index) => link === kept.languageLinks[index]);
+          const peer = factories["language-peer"]!(); document.getElementById("mount")!.append(peer); await settle();
+          root.remove(); await settle();
+          const shared = read().length === 2 && read()[1] === kept.languageLinks[1];
+          peer.remove(); await settle();
+          return { hydrated, shared, restored: read().length === 1 && read()[0] === kept.languageLinks[0] };
+        });
+        assert.deepEqual(result, { hydrated: true, shared: true, restored: true }); assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} adopts the server's head, inserts the eager script once, and restores the authored title as the same node`, async () => {
       // The server wrote the reconciled head with a preload, never a script.
       assert.match(page, /<title data-component-head="">Install · Docs<\/title><template data-component-head="set-aside"><title>Acme<\/title><\/template>/);

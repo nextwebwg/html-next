@@ -1410,7 +1410,10 @@ function readHeadDeclaration(
     if (!HEAD_LINK_RELS.has(rel)) fail("HC025", `\`<link rel="${rel}">\` is not a head declaration.`, source);
     const href = literal("href");
     if (rel === "canonical") once("canonical", "one canonical link");
-    else if (href !== undefined) once(`link ${rel} ${href}`, `one \`<link rel="${rel}" href="${href}">\``);
+    else if (href !== undefined) {
+      const language = rel === "alternate" ? literal("hreflang")?.trim().toLowerCase() : undefined;
+      once(`link ${rel} ${href}${language ? `\0${language}` : ""}`, `one \`<link rel="${rel}" href="${href}"${language ? ` hreflang="${language}"` : ""}>\``);
+    }
   }
   head.push({ kind: tag as "meta" | "link", attributes: parsed });
 }

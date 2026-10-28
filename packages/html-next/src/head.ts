@@ -75,7 +75,9 @@ function keyOf(document: Document, tag: string, read: (name: string) => string |
     if (href === null) return undefined;
     let resolved = href;
     try { resolved = new URL(href, document.baseURI).href; } catch { /* kept as written */ }
-    return [`l${rel} ${resolved}`];
+    // One URL may represent both a language and x-default; each alternate owns its own shared key.
+    const language = rel === "alternate" ? read("hreflang")?.trim().toLowerCase() : undefined;
+    return [`l${rel} ${resolved}${language ? `\0${language}` : ""}`];
   }
   return undefined;
 }
