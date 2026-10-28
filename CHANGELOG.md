@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.70
 
+- Keep alternate-language head links distinct by their normalized hreflang, including a language and x-default sharing the same URL. Preserve those entries in parsing, server rendering, hydration and native head reconciliation.
+
 - Reuse successful browser validation for unchanged tested inputs within one PR; retain all selected browser engines on a cache miss. Add local affected checks to support verified, batched pushes.
 
 ## 1.0.0-alpha.69

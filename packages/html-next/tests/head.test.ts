@@ -369,3 +369,42 @@ describe("declared scripts in the live runtime", () => {
     assert.match(String(errors.mock.calls[0]?.[0]), /HR012/);
   });
 });
+
+it("parses language alternates sharing one URL and rejects only the same normalized language key", () => {
+  const definition = parseComponent(`<template component="language-page"><defs>
+    <link rel="alternate" hreflang="en" href="https://docs.example/">
+    <link rel="alternate" hreflang="x-default" href="https://docs.example/">
+  </defs><main>Languages</main></template>`);
+  assert.equal(definition.head!.length, 2);
+  assert.throws(() => parseComponent(`<template component="duplicate-language"><defs>
+    <link rel="alternate" hreflang="en" href="https://docs.example/">
+    <link rel="alternate" hreflang=" EN " href="https://docs.example/">
+  </defs><main></main></template>`), /HC027/);
+});
+
+it("keeps language alternates independent of an authored link with the same URL", async () => {
+  const { document, main, settle } = await page('<link rel="alternate" hreflang="EN" href="https://docs.example/">', [
+    '<template component="english-links"><defs><link rel="alternate" hreflang="en" href="https://docs.example/"></defs><div></div></template>',
+    '<template component="fallback-links"><defs><link rel="alternate" hreflang="x-default" href="https://docs.example/"></defs><div></div></template>',
+  ]);
+  const authored = document.head.firstElementChild!;
+  main.innerHTML = '<english-links id="english"></english-links><fallback-links></fallback-links>';
+  await settle();
+  assert.deepEqual(Array.from(document.head.querySelectorAll('link[rel="alternate"]'), link => link.getAttribute("hreflang")), ["EN", "x-default"]);
+  assert.equal(document.head.firstElementChild, authored);
+  document.getElementById("english")!.remove(); await settle();
+  assert.equal(document.head.querySelectorAll('link[rel="alternate"]').length, 2);
+  main.replaceChildren(); await settle();
+  assert.equal(document.head.children.length, 1); assert.equal(document.head.firstElementChild, authored);
+});
+
+it("server-renders every language alternate when two tags target the same URL", async () => {
+  const { renderComponents } = await import("../src/server.js");
+  const definition = parseComponent(`<template component="language-ssr"><defs>
+    <link rel="alternate" hreflang="en" href="https://docs.example/">
+    <link rel="alternate" hreflang="x-default" href="https://docs.example/">
+  </defs><main>Languages</main></template>`);
+  const rendered = await renderComponents('<language-ssr></language-ssr>', { definitions: [definition], url: "https://docs.example/" });
+  const document = new JSDOM(`<head>${rendered.head}</head>`).window.document;
+  assert.deepEqual(Array.from(document.head.querySelectorAll('link[rel="alternate"]'), link => link.getAttribute("hreflang")), ["en", "x-default"]);
+});
