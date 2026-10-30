@@ -359,11 +359,17 @@ process.stdout.write("ok");
       const packageRoot = join(root, "packages", packageDirectory);
       const manifest = JSON.parse(
         readFileSync(join(packageRoot, "package.json"), "utf8"),
-      ) as { version: string; private?: boolean; license?: string; publishConfig?: { access: string; tag: string } };
+      ) as { version: string; private?: boolean; license?: string; dependencies?: Record<string, string>; publishConfig?: { access: string; tag: string } };
       versions.add(manifest.version);
       expect(manifest.private, packageDirectory).toBeUndefined();
       expect(manifest.publishConfig, packageDirectory).toMatchObject({ access: "public", tag: "latest" });
       expect(manifest.license, packageDirectory).toBe("MIT");
+      for (const [name, range] of Object.entries(manifest.dependencies ?? {})) {
+        if (name.startsWith("@nextwebwg/")) {
+          expect(range, `${name} must allow future releases`).toMatch(/^workspace:>=/);
+          expect(range, `${name} must not impose a speculative ceiling`).not.toContain("<");
+        }
+      }
       expect(readFileSync(join(packageRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
     }
     expect([...versions], "All published packages must share one version.").toHaveLength(1);

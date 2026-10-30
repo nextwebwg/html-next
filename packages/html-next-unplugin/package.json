@@ -29,8 +29,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:*",
-    "@nextwebwg/html-next-converter": "workspace:*",
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.71",
+    "@nextwebwg/html-next-converter": "workspace:>=1.0.0-alpha.71",
     "css-tree": "catalog:",
     "cssstyle": "catalog:",
     "parse5": "catalog:",

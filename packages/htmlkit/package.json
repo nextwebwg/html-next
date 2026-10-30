@@ -35,7 +35,7 @@
     "measure:server": "tsx scripts/measure-server.ts"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:*",
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.71",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2",
     "vite": "catalog:",
     "parse5": "catalog:"

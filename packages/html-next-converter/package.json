@@ -28,7 +28,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:*"
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.71"
   },
   "devDependencies": {
     "@formatjs/intl-durationformat": "0.11.1",

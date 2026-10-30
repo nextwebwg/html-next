@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.71
 
+- Publish minimum-version HTML Next dependency ranges without a 1.0 or later major-version ceiling. Assembled packages use the same open-ended runtime peer; lockfiles retain the exact verified workspace graph.
+
 - Defer all bindings on a projected component’s placeholder until its slot places the real element, then apply the complete initial binding set. Conditional controls created inside projected rows no longer try to set attributes on a text node.
 - Generate strictly typed React compositions for recursive components, fixed selected-prop types and native attribute forwarding. Keep boolean concatenation precise, translate native boolean/numeric literals and React attribute names, preserve optional native values, and expose the native root’s attributes without importing a recursive component into itself.
 
