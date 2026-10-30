@@ -1850,6 +1850,39 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
   });
 
+  it("applies projected row component attributes only after its placeholder is placed", async () => {
+    const leaf = `<template component="x-leaf"><defs><prop name="text" type="string" default="">Visible text.</prop></defs><button $value="$text"></button></template>`;
+    const host = `<template component="x-host"><div><slot></slot></div></template>`;
+    const page = `<template component="x-page"><defs>
+      <state name="items" type="list(object({ id: integer, label: string }))" value="[{ id: 1, label: 'First' }]"></state>
+      <handler name="change"><set name="items" expr:value="[{ id: 1, label: 'Changed' }, { id: 2, label: 'Second' }]"></set></handler>
+      <handler name="remove"><set name="items" expr:value="[{ id: 2, label: 'Second' }]"></set></handler>
+      </defs><section><button class="change" on:click="change">Change</button><button class="remove" on:click="remove">Remove</button><x-host><template $each="item of $items" $key="$item.id">
+      <x-leaf $if="$item.id > 0" from:id="concat('item-', $item.id)" from:aria-label="$item.label" from:text="$item.label"></x-leaf>
+      </template></x-host></section></template>`;
+    const steps: Step[] = [
+      host => { host.root.querySelector("button.change").click(); },
+      host => { host.root.querySelector("button.remove").click(); },
+    ];
+    const expected = [
+      [["item-1", "First", "First"]],
+      [["item-1", "Changed", "Changed"], ["item-2", "Second", "Second"]],
+      [["item-2", "Second", "Second"]],
+    ];
+    for (const direct of [false, true]) {
+      const result = await run([page, host, leaf], direct, steps);
+      assert.deepEqual(result.errors, []);
+      const buttons = result.snapshots.map(snapshot => {
+        const { window } = new JSDOM(snapshot);
+        const attributes = Array.from(window.document.querySelectorAll("button[id]"), button =>
+          [button.id, button.getAttribute("aria-label"), button.textContent]);
+        window.close();
+        return attributes;
+      });
+      assert.deepEqual(buttons.slice(0, 3), expected);
+    }
+  });
+
   it("creates a component projected into a closed slot only when a slot renders it, like live", async () => {
     const leaf = `<template component="x-leaf" status="early" summary="Leaf."><defs><prop name="text" type="string" default="none">Text.</prop></defs>
       <p class="leaf" data-id="leaf" $value="$text"></p></template>`;

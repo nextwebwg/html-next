@@ -697,11 +697,17 @@ export function initializedState<T>(evaluate: () => { value: unknown; status: In
  */
 export function useReflectedProp() {
   const instance = getCurrentInstance();
+  const structured = new Map<string, string | undefined>();
   return (name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean, separator?: string): string | undefined => {
     const incoming = instance?.vnode.props;
     if (!bound && (incoming === null || incoming === undefined || (!Object.hasOwn(incoming, name) && !Object.hasOwn(incoming, kebab)))) return fallback;
     if (value === null || value === undefined) return undefined;
-    return Array.isArray(value) && separator !== undefined ? value.join(separator) : typeof value === "object" ? JSON.stringify(value) : String(value);
+    // Hydration metadata keeps its initial structured input; rendering reads the current prop.
+    // A binding authored on this attribute remains ordinary live template output.
+    if (!bound && typeof value === "object" && structured.has(name)) return structured.get(name);
+    const text = Array.isArray(value) && separator !== undefined ? value.join(separator) : typeof value === "object" ? JSON.stringify(value) : String(value);
+    if (!bound && typeof value === "object") structured.set(name, text);
+    return text;
   };
 }
 

@@ -298,7 +298,7 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 }`,
   concat: `// A nonempty scalar call cannot produce the invalid-result sentinel.
-type ConcatResult<T extends unknown[]> = T extends [string | number | boolean | null | undefined, ...(string | number | boolean | null | undefined)[]]
+type ConcatResult<T extends unknown[]> = T extends [boolean] ? "true" | "false" : T extends [string | number | boolean | null | undefined, ...(string | number | boolean | null | undefined)[]]
   ? string | undefined : string | symbol | undefined;
 function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
   if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;

@@ -720,7 +720,10 @@ export function acceptProps(
   }
   for (const name of names) if (input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
   const accepted: Record<string, unknown> = {};
-  const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
+  const at = (name: string): number => {
+    const index = names.indexOf(name);
+    return index < 0 ? n.indexOf(name) : n.length + index;
+  };
   for (const pass of [false, true]) {
     for (const name of names) {
       const prop = props[name]!;
@@ -814,12 +817,13 @@ export function manageProps(instance: GeneratedInstance): void {
     const prop = props[name]!;
     const element = instance.e;
     record.w.delete(name);
-    if (!record.b.includes(name) && !explicit.has(name)) return;
     const value = v[at(name)];
+    const attribute = propAttribute(D.g, name);
+    // Keep structured hydration metadata after creation; current inputs live in the prop record.
+    if (!record.b.includes(name) && (!explicit.has(name) || value !== null && typeof value === "object" && element.hasAttribute(attribute))) return;
     // Null is "no value" at the attribute boundary: it removes the attribute.
     const text = value === undefined || value === ABSENT || value === null ? null
       : reflected(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
-    const attribute = propAttribute(D.g, name);
     if (text === null) element.removeAttribute(attribute);
     else if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
   };
@@ -893,7 +897,7 @@ export function manageProps(instance: GeneratedInstance): void {
         if (!record.b.includes(name)) element.removeAttribute(attribute);
       } else {
         explicit.add(name);
-        if (!record.b.includes(name)) {
+        if (!record.b.includes(name) && !(typeof value === "object" && element.hasAttribute(attribute))) {
           const text = reflected(value, selected(prop, next));
           if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
           record.w.add(name);

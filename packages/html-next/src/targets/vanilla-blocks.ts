@@ -1859,7 +1859,7 @@ export function emitBlocks(
     // In projected content a component waits until a slot places it, as live lowering does.
     const waits = inProjection(block);
     return [
-      waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, 0, new Map()))) {` : `  if (r.h${index} === undefined) {`,
+      waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, -1, new Map()))) {` : `  if (r.h${index} === undefined) {`,
       ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.hasAttribute("data-component");`] : [],
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
       `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
@@ -1895,7 +1895,7 @@ export function emitBlocks(
       ...[...invocation.controls, ...block.bindings.filter((binding) => binding.site === invocation.site && binding.kind === "control").map((binding) => binding.path!)]
         .map((path) => `    r.z.push(bindRootControl(I, r.h${index}, ${path}));`),
       ...projection === undefined ? [] : [`    r.z.push(() => dispose(r.j${index}));`],
-      waits ? `  } } else {` : `  } else {`,
+      waits ? `  } else return; } else {` : `  } else {`,
       ...projection === undefined ? [] : [`    p${projection.id}(r.j${index}, c, d);`],
       ...invocation.props.flatMap((prop, at) => [
         `    if (${guard(maskOf(prop.expression) | NESTED)}) {`,
@@ -2272,7 +2272,7 @@ export function emitBlocks(
     // Each top-level region's slot, by its position among the prototype's children (a region's two marks are one).
     const children = (block.spec as unknown[]).slice(2);
     const position = (node: number): number => {
-      for (let index = 0, at = 0; index < children.length; at += typeof children[index] === "number" ? 2 : 1, index += 1) if (at === node) return index + 2;
+      for (let index = 0, at = 0; index < children.length; at += typeof children[index] === "number" && children[index] !== 0 ? 2 : 1, index += 1) if (at === node) return index + 2;
       return -1;
     };
     const regions = block.regions.flatMap((region) => region.projected === undefined || block.sites[region.site]!.length !== 1 ? []

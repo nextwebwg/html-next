@@ -8,10 +8,12 @@ import { generateVueComponent, vueHostArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 /** The shared Vue host as a consumer receives it, with Vue itself stubbed: dispatch uses none of it. */
-async function loadHost() {
+async function loadHost(incoming?: Record<string, unknown>) {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>null,onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined';");
+  const instance = incoming === undefined ? "null" : JSON.stringify({ vnode: { props: incoming } });
+  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined';`);
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
+    useReflectedProp: () => (name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean) => string | undefined;
     createDispatch: (
       root: { value: null },
       emit: (name: string, detail: unknown) => void,
@@ -21,6 +23,16 @@ async function loadHost() {
 }
 
 describe("the shared Vue host", () => {
+  it("keeps structured hydration data stable without freezing authored bindings or scalar props", async () => {
+    const { useReflectedProp } = await loadHost({ content: {}, label: "" });
+    const reflect = useReflectedProp();
+    const first = reflect("content", "content", { text: "First" }, undefined, false);
+    assert.equal(reflect("content", "content", { text: "Changed" }, undefined, false), first);
+    assert.equal(reflect("content", "content", { text: "Bound" }, undefined, true), '{"text":"Bound"}');
+    assert.equal(reflect("label", "label", "Changed", undefined, false), "Changed");
+    assert.equal(reflect("content", "content", null, undefined, false), undefined);
+  });
+
   it("carries src/decimal.ts as the decimal operations converted arithmetic calls", async () => {
     const host = await loadHost() as unknown as Record<string, (a: number, b: number) => number>;
     const operations = [["decimalAdd", decimal.add], ["decimalSubtract", decimal.subtract], ["decimalMultiply", decimal.multiply],

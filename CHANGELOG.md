@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-alpha.71
+
+- Defer all bindings on a projected component’s placeholder until its slot places the real element, then apply the complete initial binding set. Conditional controls created inside projected rows no longer try to set attributes on a text node.
+- Generate strictly typed React compositions for recursive components, fixed selected-prop types and native attribute forwarding. Keep boolean concatenation precise, translate native boolean/numeric literals and React attribute names, preserve optional native values, and expose the native root’s attributes without importing a recursive component into itself.
+
+- Keep structured prop hydration metadata as its initial wire snapshot in live, compiled and Vue components. Current props still drive rendering and validation, and explicit template attribute bindings remain live. Editing a document no longer serializes its full content into a root attribute on every keystroke.
+
+- Compile hydration for a conditional named slot after dynamic text. An empty dynamic text prototype occupies one DOM node; treating it as a two-marker region produced an invalid negative slot index and prevented consumers from building. Regression cases hydrate both populated and empty slots in place and toggle them against the live runtime.
+
 ## 1.0.0-alpha.70
 
 - Keep alternate-language head links distinct by their normalized hreflang, including a language and x-default sharing the same URL. Preserve those entries in parsing, server rendering, hydration and native head reconciliation.
