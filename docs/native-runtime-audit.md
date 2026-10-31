@@ -74,3 +74,22 @@ style reads had medians of 24 ms without the workaround and 27 ms with its share
 are a cost check, not a general application benchmark. Repeated copies of the common rules
 cost more, so live and graph delivery keep only one copy. The browser fixture, loader parity,
 SSR graph comparison and build/Svelte boundary cases provide the independent regression checks.
+
+
+## Preact conversion
+
+On 2026-10-31, the Preact adapter was added using the existing React lowering and feature
+helpers, rebound to `preact/compat` and Preact JSX. Native DOM events, form validity and
+control defaults remain owned by the existing shared helpers; Preact owns rendering,
+observation through hooks, scheduling, ref cleanup and hydration. The remaining gaps are
+build-time import/type adaptation and native attribute serialization. Preact's DOM renderer
+looks up property names case-sensitively, while HTML attribute names are case-insensitive.
+The compiler emits uppercase `VALUE` for generic value attributes and `CONSTRUCTOR` for
+that unreflected attribute, allowing the browser to apply attributes without invoking a
+different DOM property setter. SVG retains its case-sensitive names. Enumerated booleans
+are strings in server output. Native control helpers own authored reset defaults; the
+Preact memoized input wrapper keeps its initial default. Bound selects use
+Preact's core element factory and supply the initial selection once, so its compatibility
+layer does not rewrite option selection when surrounding state changes. Preact 11 is required
+because generated components receive refs as props; see its
+[upgrade guide](https://preactjs.com/guide/v11/upgrade-guide/#refs-are-forwarded-by-default).

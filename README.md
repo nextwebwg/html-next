@@ -9,7 +9,7 @@
 
 ### Universal components. Built with HTML.
 
-Author once. Use native DOM, Vue, React, or Svelte.
+Author once. Use native DOM, Vue, React, Preact, or Svelte.
 
 [**Get started →**](https://nextwebwg.org/html-next/quick-start) · [Documentation](https://nextwebwg.org/html-next/)
 
@@ -28,13 +28,13 @@ live at the repository root.
 
 Use [`html-next-check`](./packages/html-next-unplugin/README.md#check-components-in-ci) for
 compiler diagnostics without build output, alongside TypeScript or your framework's typechecker.
-The command supports native, Vue, React, and Svelte targets and JSON output for tooling.
+The command supports native, Vue, React, Preact, and Svelte targets and JSON output for tooling.
 
 | Package | Role | Current scope |
 | --- | --- | --- |
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
-| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
+| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, Preact, and Svelte conversion |
 | [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
 
 Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
@@ -66,7 +66,7 @@ modes:
 | --- | --- | --- | --- |
 | **Live browser runtime** — supports any graph | [`@nextwebwg/html-next`](./packages/html-next) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
 | **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
-| **Framework conversion** — to Vue, React, or Svelte | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue or Svelte single-file components, or React TSX components, with no HTML Next runtime dependency |
+| **Framework conversion** — to Vue, React, Preact, or Svelte | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue or Svelte single-file components, or React/Preact TSX components, with no HTML Next runtime dependency |
 
 These are the only three build outputs, and they are distinct: the **runtime** ships one universal
 distributable, the **compiled build** emits tree-shaken native DOM for a known graph, and the
@@ -134,7 +134,7 @@ ten for parallel checks, one for the Required result, and three for publication.
 Windows/macOS and the full Node LTS matrix use the manual Cross-platform workflow. Rendering
 benchmarks use the manual Framework rendering workflow, and
 `pnpm verify:performance --base=origin/main` runs explicitly for reactive performance work.
-The manual Converter corpus workflow runs the broad React, Vue and Svelte public-corpus sweeps
+The manual Converter corpus workflow runs the broad React, Preact, Vue and Svelte public-corpus sweeps
 for shared compiler changes or parity investigations. Focused framework regressions remain automatic
 in Chromium, Firefox and WebKit.
 Deno/Bun installed-consumer smoke checks run only when core or HTMLKit changes affect HTMLKit.
@@ -320,7 +320,7 @@ update(callout, { tone: "warning" });
 registers every definition it reads, and a compiled Vanilla module defines its component when it is
 evaluated. Every bundle on the page shares one registry for each document. The
 [componentRegistry support note](./packages/html-next/docs/component-registry.md) says which registry
-behaviors the live runtime, compiled Vanilla output and the Vue, React and Svelte targets support.
+behaviors the live runtime, compiled Vanilla output and the Vue, React, Preact and Svelte targets support.
 
 ## Types and validation
 

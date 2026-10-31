@@ -74,7 +74,7 @@ async function typecheckReact(root: string, files: readonly string[]): Promise<v
 }
 
 describe("framework converter", () => {
-  for (const target of ["react", "svelte", "vue"] as const) {
+  for (const target of ["react", "preact", "svelte", "vue"] as const) {
     it(`resolves shared defaults and preserves ${target}'s component and slot boundaries`, async () => {
       const root = await mkdtemp(join(tmpdir(), "html-next-converter-shared-"));
       temporary.push(root);
@@ -88,12 +88,12 @@ describe("framework converter", () => {
         .map(async file => ({ path: file.path, content: await readFile(join(output, file.path), "utf8") })));
       for (const file of files) assert.doesNotMatch(file.content, /@import "defaults\.css"/);
       const css = files.filter(file => file.path.endsWith(".css")).map(file => file.content).join("\n");
-      if (target === "react") {
+      if (target === "react" || target === "preact") {
         assert.equal(css.match(/@namespace/g)?.length, 1);
         assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
         assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
       }
-      if (target === "react") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
+      if (target === "react" || target === "preact") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
       if (target === "svelte") for (const file of files) {
         assert.match(file.content, /box-sizing: border-box/);
         const compiled = compileSvelte(file.content, { filename: file.path });
@@ -1013,7 +1013,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
       <template component="ui-button" status="early" summary="Button."><button>Save</button></template>
       <template component="ui-dialog" status="early" summary="Dialog."><section><ui-button></ui-button></section></template>
     `);
-    for (const target of ["vue", "react"] as const) for (const mode of ["application", "library"] as const) {
+    for (const target of ["vue", "react", "preact"] as const) for (const mode of ["application", "library"] as const) {
       const outDirectory = join(root, `multi-${target}-${mode}`);
       const manifest = await convertComponents({ mode, entries: ["library.html"], target, root, outDirectory });
       assert.deepEqual(manifest.entries.map(({ tag }) => tag).sort(), ["ui-button", "ui-dialog"]);
@@ -1022,8 +1022,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
       assert.match(entry, /default as UiButton/);
       assert.match(entry, /default as UiDialog/);
       assert.doesNotMatch(entry, /default as Button|export default/);
-      if (target === "react") {
-        const dialog = await readFile(join(outDirectory, "react/UiDialog.tsx"), "utf8");
+      if (target === "react" || target === "preact") {
+        const dialog = await readFile(join(outDirectory, `${target}/UiDialog.tsx`), "utf8");
         assert.match(dialog, /["']\.\/UiButton\.tsx["']/);
       } else {
         compileVue(await readFile(join(outDirectory, "vue/UiButton.vue"), "utf8"), "UiButton.vue");

@@ -90,7 +90,7 @@ async function capturePixels(page: Page): Promise<Buffer> {
   return page.screenshot({ animations: "disabled" });
 }
 
-describe.skipIf(!enabled)("public React converter shared conformance parity", () => {
+for (const target of ["react", "preact"] as const) describe.skipIf(!enabled)(`public ${target} converter shared conformance parity`, () => {
   let directory = "";
   let liveBundle = "";
   const artifacts = new Map<string, { readonly bundle: string; readonly css: string; readonly server: string }>();
@@ -108,17 +108,17 @@ describe.skipIf(!enabled)("public React converter shared conformance parity", ()
         await mkdir(caseDirectory, { recursive: true });
         await writeFile(join(caseDirectory, "component.html"), definition);
         const outDirectory = join(caseDirectory, "out");
-        const manifest = await convertComponents({ mode, target: "react", entries: ["component.html"], root: caseDirectory, outDirectory });
+        const manifest = await convertComponents({ mode, target, entries: ["component.html"], root: caseDirectory, outDirectory });
         assert.deepEqual(manifest.components.map((component) => component.tag), [parsedDefinition.contract.tag]);
-        assert.equal(manifest.output.entry, `react/${mode === "application" ? "application" : "index"}.ts`);
+        assert.equal(manifest.output.entry, `${target}/${mode === "application" ? "application" : "index"}.ts`);
         const component = manifest.components[0]!;
         const expression = consumer(invocation, parsedDefinition.contract.tag, component.name, parsedDefinition.contract.props);
         const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
         const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
         const browserEntry = join(outDirectory, "browser.tsx");
         const bundle = join(outDirectory, "react.js");
-        await writeFile(browserEntry, `import { createElement, Fragment } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+        await writeFile(browserEntry, `import { createElement, Fragment } from "${target === "preact" ? "preact/compat" : "react"}";
+import { createRoot, hydrateRoot } from "${target === "preact" ? "preact/compat/client" : "react-dom/client"}";
 import { ${component.name} } from "./${manifest.output.entry.replace(/\.ts$/, "")}";
 const root = document.querySelector("main")!;
 const tree = ${expression};
@@ -128,8 +128,8 @@ else createRoot(root).render(tree);
         await build({ entryPoints: [browserEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
           target: ["es2022"], jsx: "automatic", loader: { ".css": "empty" }, nodePaths: [nodeModulesPath] });
         const serverEntry = join(outDirectory, "server.tsx");
-        await writeFile(serverEntry, `import { createElement, Fragment } from "react";
-import { renderToString } from "react-dom/server";
+        await writeFile(serverEntry, `import { createElement, Fragment } from "${target === "preact" ? "preact/compat" : "react"}";
+import { renderToString } from "${target === "preact" ? "preact-render-to-string" : "react-dom/server"}";
 import { ${component.name} } from "./${manifest.output.entry.replace(/\.ts$/, "")}";
 export const render = () => renderToString(${expression});
 `);

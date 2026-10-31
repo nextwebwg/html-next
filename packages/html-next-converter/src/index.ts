@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { preactArtifact } from "./preact.js";
 
 import {
   addControllerGraph,
@@ -51,12 +52,13 @@ import {
   writeHostDeclarations,
 } from "@nextwebwg/html-next";
 
-export type FrameworkTarget = "vue" | "react" | "svelte";
+export type FrameworkTarget = "vue" | "react" | "preact" | "svelte";
 export type ConversionGraph = "application" | "library";
 
 const targetVersions: Readonly<Record<FrameworkTarget, string>> = {
   vue: "3.5",
   react: "19.3",
+  preact: "11.1.0",
   svelte: "5.57.1",
 };
 
@@ -409,6 +411,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.targetVersion !== undefined && options.targetVersion !== targetVersion) {
     throw new FrameworkTargetVersionError(options.target, options.targetVersion, targetVersion);
   }
+  const reactTarget = options.target === "react" || options.target === "preact";
   const projectRoot = resolve(options.root ?? process.cwd());
   const expanded = await expandComponentEntries(projectRoot, options.entries);
   const entries = expanded.map((entry) => pathToFileURL(resolve(projectRoot, entry)).href);
@@ -470,7 +473,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     node.definition.declarations?.some((declaration) => declaration.kind === "event") === true);
   let reactStyles = false;
   const claimed = new Map<string, string>();
-  const claim = (artifact: GeneratedArtifact, kind: ConversionOutput["kind"], source?: string): void => {
+  const claim = (inputArtifact: GeneratedArtifact, kind: ConversionOutput["kind"], source?: string): void => {
+    const artifact = options.target === "preact" && (kind === "component" || kind === "helper") ? preactArtifact(inputArtifact) : inputArtifact;
     const previous = claimed.get(artifact.path);
     if (previous !== undefined && previous !== source) {
       throw new FrameworkOutputCollisionError(options.target, artifact.path, [previous, source ?? "<generated>"]);
@@ -506,7 +510,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           scripts,
           contract: Object.freeze({ ...node.definition.contract, scripts: browserScripts(node.definition.contract.scripts!, definitionURL) }),
         }),
-        ...(options.target !== "react" && node.definition.stylesheets !== undefined ? {
+        ...(!reactTarget && node.definition.stylesheets !== undefined ? {
           css: node.definition.stylesheets.map(sheet => wrapStylesheetConditions(sheet.css, sheet.conditions)).join("\n") + "\n" + node.definition.css,
           stylesheets: [],
         } : {}),
@@ -525,7 +529,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           if (imported === undefined) throw new FrameworkConversionError(options.target, source, tag, `unknown component <${importedTag}>`);
           return relativeImport(componentPath, imported);
         };
-        const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
+        const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "vue" ? generateVueComponent(definition, {
           publishedStates: published,
           slotsByTag,
@@ -562,6 +566,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           requestsSpecifier: relativeImport(componentPath, "svelte/requests.ts").replace(/\.ts$/, ""),
           headSpecifier: relativeImport(componentPath, "svelte/head.svelte.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
+          target: options.target,
           publishedStates: published,
           slotsByTag,
           componentGraph,
@@ -592,14 +597,14 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         throw error;
       }
       if (/@nextwebwg\//.test(content)) throw new FrameworkConversionError(options.target, source, tag);
-      if (sharedStyles.length > 0 && options.target === "react") {
+      if (sharedStyles.length > 0 && reactTarget) {
         content = content.replace(/^import ["'][^"']+\.css["'];?\s*$/gm, "");
         content = `import ${JSON.stringify(relativeImport(componentPath, sharedStylePath))};\n${content}`;
         reactStyles = true;
       }
       // TypeScript 6+ rejects a stylesheet import unless the program declares `*.css`.
       const component: GeneratedArtifact = reactConversion !== undefined && (reactConversion.css !== "" || sharedStyles.length > 0)
-        ? { path: componentPath, content: `/// <reference path="${posix.relative(posix.dirname(componentPath), "react/styles.d.ts")}" />\n${content}` }
+        ? { path: componentPath, content: `/// <reference path="${posix.relative(posix.dirname(componentPath), `${options.target}/styles.d.ts`)}" />\n${content}` }
         : { path: componentPath, content };
       claim(component, "component", source);
       if (reactConversion !== undefined) {
@@ -650,7 +655,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "vue" && neededHelpers.has("props")) {
     claim(vuePropsArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("props")) {
+  if (reactTarget && neededHelpers.has("props")) {
     claim(reactPropsArtifact(), "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("props")) {
@@ -686,36 +691,36 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "svelte" && neededHelpers.has("events")) {
     claim(svelteEventsArtifact(hasDeclaredEvents), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("events")) {
+  if (reactTarget && neededHelpers.has("events")) {
     claim(reactEventsArtifact(hasDeclaredEvents), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("control")) {
+  if (reactTarget && neededHelpers.has("control")) {
     claim(reactControlArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("data")) {
+  if (reactTarget && neededHelpers.has("data")) {
     claim(reactDataArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("html")) {
+  if (reactTarget && neededHelpers.has("html")) {
     claim(reactHtmlArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("host")) {
+  if (reactTarget && neededHelpers.has("host")) {
     claim(reactHostArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("context")) {
+  if (reactTarget && neededHelpers.has("context")) {
     claim(reactContextArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("depth")) {
+  if (reactTarget && neededHelpers.has("depth")) {
     claim(reactDepthArtifact(), "helper");
   }
-  if (options.target === "react" && neededHelpers.has("render")) {
-    claim(reactRenderArtifact(), "helper");
+  if (reactTarget && neededHelpers.has("render")) {
+    claim(reactRenderArtifact(options.target === "preact" ? "preact" : "react"), "helper");
   }
-  if (neededHelpers.has("requests")) claim(requestsHelperArtifact(options.target), "helper");
-  if (neededHelpers.has("head")) claim(headHelperArtifact(options.target), "helper");
-  if (options.target === "react" && reactStyles) {
-    claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
+  if (neededHelpers.has("requests")) claim(requestsHelperArtifact(options.target === "preact" ? "react" : options.target), "helper");
+  if (neededHelpers.has("head")) claim(headHelperArtifact(options.target === "preact" ? "react" : options.target), "helper");
+  if (reactTarget && reactStyles) {
+    claim({ path: `${options.target}/styles.d.ts`, content: 'declare module "*.css";\n' }, "helper");
   }
-  if (sharedStyles.length > 0 && options.target === "react") {
+  if (sharedStyles.length > 0 && reactTarget) {
     const css = compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition));
     claim({ path: sharedStylePath, content: wrapStylesheetConditions(css, []) + "\n" }, "style");
   }
@@ -748,7 +753,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     package: Object.freeze({
       dependencies: Object.freeze({ ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
       // Vue 3.5.43 restores generic inference through runtime PropType declarations.
-      peerDependencies: Object.freeze({ [options.target]: options.target === "vue" ? "^3.5.43" : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
+      peerDependencies: Object.freeze({ [options.target]: options.target === "vue" ? "^3.5.43" : options.target === "preact" ? `^${targetVersion}` : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
     }),
     entries: Object.freeze(conversionEntries),
     sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),

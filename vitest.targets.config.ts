@@ -71,6 +71,7 @@ config.test!.include = [
   "packages/html-next-converter/tests/slotted-each-parity.test.ts",
   "packages/html-next-converter/tests/library-distribution.test.ts",
   "packages/html-next-unplugin/tests/framework.test.ts",
+  "packages/html-next-unplugin/tests/preact-framework.test.ts",
 ];
 
 export default config;

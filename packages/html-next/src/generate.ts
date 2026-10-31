@@ -38,7 +38,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.78";
+export const GENERATOR_VERSION = "1.0.0-alpha.79";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -242,8 +242,8 @@ export function reactDepthArtifact(): GeneratedArtifact {
 }
 
 /** The rendering helpers converted React components share; every package that emits React ships it once. */
-export function reactRenderArtifact(): GeneratedArtifact {
-  return makeReactRenderArtifact(GENERATOR_VERSION);
+export function reactRenderArtifact(target: "react" | "preact" = "react"): GeneratedArtifact {
+  return makeReactRenderArtifact(GENERATOR_VERSION, target);
 }
 
 export { importsVueHost } from "./targets/vue-host.js";

@@ -21,7 +21,7 @@ async function fixture(): Promise<string> {
 }
 
 describe("checkHtmlNext", () => {
-  it.each(["native", "vue", "react", "svelte"] as const)("collects independent declaration and expression failures for %s", async (target) => {
+  it.each(["native", "vue", "react", "preact", "svelte"] as const)("collects independent declaration and expression failures for %s", async (target) => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), `<template component="x-app">
   <defs>
@@ -117,7 +117,7 @@ describe("checkHtmlNext", () => {
     assert.deepEqual(diagnostics.map(({ code }) => code), ["HC015", "HC015"]);
   });
 
-  it.each(["vue", "react", "svelte"] as const)("collects %s backend failures across valid components", async (target) => {
+  it.each(["vue", "react", "preact", "svelte"] as const)("collects %s backend failures across valid components", async (target) => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), '<template component="x-app" controller="./missing-one.js"><main></main></template>');
     await writeFile(join(root, "other.html"), '<template component="x-other" controller="./missing-two.js"><main></main></template>');
@@ -125,7 +125,7 @@ describe("checkHtmlNext", () => {
     assert.deepEqual(diagnostics.map(({ code, source }) => [code, source]), [["HTC001", "app.html"], ["HTC001", "other.html"]]);
   });
 
-  it.each(["native", "vue", "react", "svelte"] as const)("checks %s without output or controller execution", async (target) => {
+  it.each(["native", "vue", "react", "preact", "svelte"] as const)("checks %s without output or controller execution", async (target) => {
     const root = await fixture();
     await writeFile(join(root, "card.html"), `<template component="x-card"><defs><prop name="label" type="string" default="Ready">Label.</prop></defs><output $value="$label"></output></template>`);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./card.html"><template component="x-app"><main><x-card></x-card></main></template>`);
@@ -156,7 +156,7 @@ describe("checkHtmlNext", () => {
       dynamicBoundaries: [{ tag: "x-missing", strategy: "external-custom-element" }] }), []);
   });
 
-  it.each(["vue", "react", "svelte"] as const)("preserves %s conversion diagnostics", async (target) => {
+  it.each(["vue", "react", "preact", "svelte"] as const)("preserves %s conversion diagnostics", async (target) => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), `<template component="x-app" controller="./missing.js"><main></main></template>`);
     const options = { entries: ["app.html"], target, mode: "library" as const, root };
@@ -193,7 +193,7 @@ describe("checkHtmlNext", () => {
     assert.equal(resource[0]?.column, 3);
   });
 
-  it.each(["native", "vue", "react", "svelte"] as const)("warns when a bare %s keyword spells a name in scope, beside errors", async (target) => {
+  it.each(["native", "vue", "react", "preact", "svelte"] as const)("warns when a bare %s keyword spells a name in scope, beside errors", async (target) => {
     const root = await fixture();
     const source = (extra: string) => `<template component="x-app" status="early" summary="App.">
   <defs><state name="count" type="number" value="1"></state></defs>
@@ -224,7 +224,7 @@ describe("checkHtmlNext", () => {
     assert.deepEqual(off.map(({ code, severity, line }) => [code, severity, line]), [["HT024", "error", 4]]);
     assert.match(off[0]!.message, /extensions: \["transitions"\]/);
     assert.deepEqual(await checkHtmlNext({ root, entries: ["app.html"], mode: "application", extensions: ["transitions"] }), []);
-    for (const target of ["vue", "react", "svelte"] as const) {
+    for (const target of ["vue", "react", "preact", "svelte"] as const) {
       const converted = await checkHtmlNext({ target, root, entries: ["app.html"], mode: "application" });
       assert.deepEqual(converted.map(({ code, severity, line }) => [code, severity, line]), [["HT024", "warning", 4]], target);
     }

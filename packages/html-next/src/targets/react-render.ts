@@ -2,7 +2,7 @@
  * The rendering module converted React components share: the helpers their markup renders and
  * binds values with, and the checks their handlers write through. They are the same for every
  * component, so they ship once beside the components rather than inside each one; a bundler keeps
- * only the ones a component imports. It depends on React alone.
+ * only the ones a component imports. Preact output reuses these with its compatibility API.
  */
 import type { GeneratedArtifact } from "../generate.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
@@ -13,8 +13,9 @@ import { expressionHelpersSource } from "./vue-lowering.js";
 export const REACT_RENDER_PATH = "react/render.tsx";
 export const REACT_RENDER_SPECIFIER = "./render";
 
-const SOURCE = `import React from "react";
+const source = (preact = false): string => `import React from "react";
 import type { ReactNode } from "react";
+${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 
 ${expressionHelpersSource()}
 
@@ -60,16 +61,24 @@ function sameControlProps(previousProps: object, nextProps: object): boolean {
 interface ControlDefaults { readonly htmlNextDefault?: "defaultValue" | "defaultChecked"; readonly htmlNextAuthored?: unknown; readonly htmlNextInitial?: unknown }
 /** A bound control renders its initial default, then switches to its authored one as it mounts, rendering only itself. */
 function useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial }: ControlDefaults): Record<string, unknown> {
-  const mounted = React.useRef(false);
+  ${preact ? 'return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: htmlNextInitial };' : `const mounted = React.useRef(false);
   const [, settle] = React.useReducer((revision: number) => revision + 1, 0);
   React.useLayoutEffect(() => { if (htmlNextDefault !== undefined) { mounted.current = true; settle(); } }, []);
-  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };
+  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
 }
 /** Inputs and textareas render through these, so React DOM, which rewrites an input's name and type and a textarea's default whenever it commits one, commits nothing to them on an unrelated render. */
 export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>
   <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 export const HtmlNextTextarea = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
   <textarea {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
+
+${preact ? `/** Preact's core select leaves option properties to the native binding helper after the first render. */
+export function HtmlNextSelect({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"select"> & ControlDefaults): ReactNode {
+  const initial = React.useRef(true);
+  React.useLayoutEffect(() => { initial.current = false; }, []);
+  return nativeElement("select", { ...props, value: initial.current ? htmlNextInitial as React.SelectHTMLAttributes<HTMLSelectElement>["value"] : undefined });
+}
+` : ""}
 
 /** Text that keeps its last accepted value while an expression is invalid. */
 export function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {
@@ -157,10 +166,14 @@ export function renderPlainSlot(slot: ReactNode | ((props: Record<string, any>) 
   return hasSlotContent(slot) ? markProjected(slot) : fallback;
 }
 
+function isElement(value: ReactNode): value is React.ReactElement<Record<string, unknown>> {
+  return React.isValidElement(value);
+}
+
 function hasSlotContent(value: ReactNode): boolean {
   if (value == null || typeof value === "boolean" || value === "") return false;
   if (Array.isArray(value)) return value.some(hasSlotContent);
-  if (React.isValidElement(value) && value.type === React.Fragment) {
+  if (isElement(value) && value.type === React.Fragment) {
     return hasSlotContent((value.props as { children?: ReactNode }).children);
   }
   return true;
@@ -180,7 +193,7 @@ export function renderScopedSlot<T extends Record<string, unknown>>(slot: ReactN
 export function markProjected(value: ReactNode): ReactNode {
   // Several projected children keep their places as a fragment's arguments; returned as an array they would be a list needing keys.
   if (Array.isArray(value)) return React.createElement(React.Fragment, null, ...value.map(markProjected));
-  if (!React.isValidElement(value)) return value;
+  if (!isElement(value)) return value;
   if (value.type === React.Fragment) {
     // A fragment's children keep their places as arguments; one array argument would be a list needing keys.
     const children = markProjected((value.props as { children?: ReactNode }).children);
@@ -216,8 +229,8 @@ export function writeStatePath<T>(root: T, path: readonly unknown[], value: unkn
 `;
 
 /** Every name the module exports, which a component's own identifiers must not take. */
-export const REACT_RENDER_EXPORTS: readonly string[] = [...SOURCE.matchAll(/^export (?:const|function|class) ([\w$]+)/gm)].map((match) => match[1]!);
+export const REACT_RENDER_EXPORTS: readonly string[] = [...source(true).matchAll(/^export (?:const|function|class) ([\w$]+)/gm)].map((match) => match[1]!);
 
-export function reactRenderArtifact(version: string): GeneratedArtifact {
-  return Object.freeze({ path: REACT_RENDER_PATH, content: formatReact(`// Generated by HTML Next ${version} for React 19. Do not edit.\n${SOURCE}`, "render.tsx") });
+export function reactRenderArtifact(version: string, target: "react" | "preact" = "react"): GeneratedArtifact {
+  return Object.freeze({ path: REACT_RENDER_PATH, content: formatReact(`// Generated by HTML Next ${version} for React 19. Do not edit.\n${source(target === "preact")}`, "render.tsx") });
 }
