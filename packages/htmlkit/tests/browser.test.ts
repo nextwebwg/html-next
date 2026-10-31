@@ -274,7 +274,7 @@ for (const delivery of ["development", "built"] as const) {
           expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toBeUndefined();
           expect(await page.locator(".details").textContent()).toBe("build:details:build:A");
           expect(await page.evaluate(() => Reflect.get(window, "detailReads"))).toBeUndefined();
-          await page.evaluate(() => Reflect.set(window, "detailsRoot", document.querySelector('[data-component="product-details"]')));
+          await page.evaluate(() => Reflect.set(window, "detailsRoot", document.querySelector('[component="product-details"]')));
           await page.locator("input").fill("Edited");
           await page.getByRole("button", { name: "Next" }).click();
           await expect.poll(() => page.locator("h1").textContent()).toBe("browser:B");
@@ -282,7 +282,7 @@ for (const delivery of ["development", "built"] as const) {
           expect(await page.evaluate(() => Reflect.get(window, "universalReads"))).toEqual(["B"]);
           await expect.poll(() => page.locator(".details").textContent()).toBe("browser:details:browser:B");
           expect(await page.locator(".details-draft").textContent()).toBe("build:details:build:A");
-          expect(await page.evaluate(() => Reflect.get(window, "detailsRoot") === document.querySelector('[data-component="product-details"]'))).toBe(true);
+          expect(await page.evaluate(() => Reflect.get(window, "detailsRoot") === document.querySelector('[component="product-details"]'))).toBe(true);
           expect(await page.evaluate(() => Reflect.get(window, "detailReads"))).toEqual(["browser:B"]);
           await page.goto(server.url + "live/?q=C");
           await page.waitForFunction(() => document.querySelector("main")?.dataset.connections === "1");
@@ -352,17 +352,17 @@ for (const delivery of ["development", "built"] as const) {
           page.setDefaultTimeout(5_000);
           page.on("pageerror", error => errors.push(error.message));
           await page.goto(server.url);
-          const cards = page.locator('[data-component="binding-card"]');
+          const cards = page.locator('[component="binding-card"]');
           await expect.poll(() => cards.first().locator("h2").textContent()).toBe("Product A");
-          await expect.poll(() => page.locator('[data-component="binding-label"] output').textContent()).toBe("Label only");
-          await expect.poll(() => page.locator('[data-component="plain-behavior"]').getAttribute("data-plain")).toBe("connected");
+          await expect.poll(() => page.locator('[component="binding-label"] output').textContent()).toBe("Label only");
+          await expect.poll(() => page.locator('[component="plain-behavior"]').getAttribute("data-plain")).toBe("connected");
           expect(await cards.last().locator("h2").textContent()).toBe("Fixture");
           expect(await page.evaluate(() => Reflect.get(window, "bindingReads"))).toEqual(["A"]);
           await cards.first().locator("input").fill("Edited");
           await cards.first().locator("button").click();
           await expect.poll(() => cards.first().locator("h2").textContent()).toBe("Product B");
           expect(await cards.first().locator("input").inputValue()).toBe("Edited");
-          await page.evaluate(() => { const subject = document.querySelector('[data-component="binding-card"]')!; Reflect.set(window, "bindingSubject", subject); subject.remove(); });
+          await page.evaluate(() => { const subject = document.querySelector('[component="binding-card"]')!; Reflect.set(window, "bindingSubject", subject); subject.remove(); });
           await page.waitForFunction(() => Reflect.get(window, "bindingSubject").dataset.stops === "1");
           await page.evaluate(() => document.querySelector("main")!.prepend(Reflect.get(window, "bindingSubject")));
           await expect.poll(() => cards.first().getAttribute("data-connections")).toBe("2");
@@ -415,8 +415,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         await staticPage.goto(server.url);
         expect(await staticPage.title()).toBe("Home & kit");
         expect(await staticPage.locator('head meta[name="description"]').getAttribute("content")).toBe("/kit/mark.svg");
-        expect(await staticPage.locator('[data-component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
-        expect(await staticPage.locator('[data-component="home-page"]').evaluate(element => getComputedStyle(element).borderTopColor)).toBe("rgb(10, 20, 30)");
+        expect(await staticPage.locator('[component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
+        expect(await staticPage.locator('[component="home-page"]').evaluate(element => getComputedStyle(element).borderTopColor)).toBe("rgb(10, 20, 30)");
         expect(await staticPage.locator("output").textContent()).toBe("4");
         expect(await staticPage.getByText("Loading data", { exact: true }).count()).toBe(1);
         expect(await staticPage.locator("main").evaluate(element => getComputedStyle(element).color)).toBe("rgb(20, 30, 40)");
@@ -437,7 +437,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         await page.goto(server.url, { waitUntil: "commit" });
         await page.locator("input").waitFor();
         await page.evaluate(() => {
-          const root = document.querySelector('[data-component="home-page"]')!;
+          const root = document.querySelector('[component="home-page"]')!;
           const input = root.querySelector("input")!;
           Object.assign(window, { originalRoot: root, originalInput: input, originalNodes: [...root.querySelectorAll("button, output, input")] });
           input.value = "edited before startup"; input.focus(); input.setSelectionRange(2, 8);
@@ -445,14 +445,14 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         expect(await page.locator("output").textContent()).toBe("4");
         expect(await page.evaluate(() => document.documentElement.dataset.prepaint)).toBe("true");
         released = true; release();
-        const subject = page.locator('[data-component="home-page"]');
+        const subject = page.locator('[component="home-page"]');
         await expect.poll(() => subject.getAttribute("data-connections")).toBe("1");
         await page.getByText("Loaded data", { exact: true }).waitFor();
         expect(await subject.getAttribute("data-production")).toBe("true");
         expect(await page.locator("input").inputValue()).toBe("edited before startup");
         expect(await page.evaluate(() => {
           const saved = window as unknown as { originalRoot: Element; originalInput: HTMLInputElement; originalNodes: Element[] };
-          const root = document.querySelector('[data-component="home-page"]')!;
+          const root = document.querySelector('[component="home-page"]')!;
           return root === saved.originalRoot && saved.originalNodes.every(node => root.contains(node)) &&
             document.activeElement === saved.originalInput && saved.originalInput.selectionStart === 2 && saved.originalInput.selectionEnd === 8;
         })).toBe(true);
@@ -462,7 +462,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         await page.evaluate(runtime);
         expect(await page.evaluate(() => {
           const { getComponentHost } = (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): { state: { count: number }; root: Element } | undefined } }).HtmlRuntime;
-          const root = document.querySelector('[data-component="home-page"]')!;
+          const root = document.querySelector('[component="home-page"]')!;
           return { count: getComponentHost(root)?.state.count, root: getComponentHost(root)?.root === root };
         })).toEqual({ count: 5, root: true });
         await expect.poll(() => page.locator("button").getAttribute("aria-expanded")).toBe("true");
@@ -470,7 +470,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         expect(await page.locator("button").evaluate(element => element.classList.contains("active"))).toBe(true);
         expect(await page.locator("button").evaluate(element => (element as HTMLElement).style.opacity)).toBe("0.5");
         await page.evaluate(async () => {
-          const root = document.querySelector('[data-component="home-page"]')!;
+          const root = document.querySelector('[component="home-page"]')!;
           root.remove(); await new Promise(done => setTimeout(done, 0));
           root.querySelector<HTMLButtonElement>("button")!.click();
           document.querySelector("main")!.append(root);
@@ -495,12 +495,12 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
       await unscripted.goto(server.url);
       expect(await unscripted.locator("main").evaluate(element => getComputedStyle(element).color)).toBe("rgb(20, 30, 40)");
-      expect(await unscripted.locator('[data-component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
+      expect(await unscripted.locator('[component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
       const page = await browser.newPage();
       const errors: string[] = [];
       page.on("pageerror", error => errors.push(error.message));
       await page.goto(server.url);
-      const subject = page.locator('[data-component="home-page"]');
+      const subject = page.locator('[component="home-page"]');
       await expect.poll(() => subject.getAttribute("data-connections")).toBe("1");
       await page.getByText("Loaded data", { exact: true }).waitFor();
       expect(await subject.getAttribute("data-production")).toBe("false");
@@ -535,7 +535,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       await page.getByRole("button", { name: "Increment", exact: true }).click();
       await expect.poll(() => page.locator("output").textContent()).toBe("2");
       await page.evaluate(() => {
-        const counter = document.querySelector('[data-component="proof-counter"]')!;
+        const counter = document.querySelector('[component="proof-counter"]')!;
         Reflect.set(window, "retainedCounter", counter);
         Reflect.set(window, "retainedCounterParent", counter.parentElement);
         counter.remove();
@@ -544,7 +544,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       await page.getByRole("button", { name: "Increment", exact: true }).click();
       await expect.poll(() => page.locator("output").textContent()).toBe("4");
       await page.getByRole("button", { name: "Toggle theme" }).click();
-      await expect.poll(() => page.locator('[data-component="proof-shell"]').evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(20, 38, 56)");
+      await expect.poll(() => page.locator('[component="proof-shell"]').evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(20, 38, 56)");
       await page.getByRole("searchbox").fill("quick-start");
       await expect.poll(() => page.locator("nav li:visible").count()).toBe(1);
       await page.getByRole("link", { name: "quick-start", exact: true }).click();
@@ -599,7 +599,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("the development poli
         // Everything else works under the policy: the page's modules, a controller's imported CSS, and reloading after an edit.
         messages.length = 0;
         await page.goto(server.url);
-        await expect.poll(() => page.locator('[data-component="home-page"]').getAttribute("data-connections")).toBe("1");
+        await expect.poll(() => page.locator('[component="home-page"]').getAttribute("data-connections")).toBe("1");
         await expect.poll(() => page.locator("button").first().evaluate(button => getComputedStyle(button).borderTopColor)).toBe("rgb(55, 66, 77)");
         await page.evaluate(() => { (window as unknown as { previous: boolean }).previous = true; });
         const source = await readFile(join(root, "app/pages/index.html"), "utf8");

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.81
+
+### Breaking
+
+- Rendered component roots use `component` by default, following the 31 October 2026 proposal snapshot. Live and compiled hydration, scoped styles and HTMLKit accept legacy `data-component` roots. A present `component`, including an empty value, takes precedence; attributes are not merged or mirrored. Component-tag invocation and delegation lineage retain their existing meaning.
+
 ## 1.0.0-alpha.80
 
 ### Added

@@ -1013,12 +1013,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("scopes styles to the region with root-only markers, :host, :state(), and :slotted()", () => {
     const artifacts = generated(featureSource);
     const css = artifacts.get("styles/x-feature.css")!;
-    assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\], \[data-slotted\]\)/);
-    assert.match(css, /:scope:where\(\[data-component~="x-feature"\]\) \{ display: block; \}/);
-    assert.match(css, /:scope:where\(\[data-component~="x-feature"\]\)\[data-x-feature-state~="open"\] \.panel/);
-    assert.match(css, /:scope:where\(\[data-component~="x-feature"\]\)\[data-x-feature-state~="size=sm"\] h2/);
-    assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\]\) \{\n:where\(\[data-slotted\], \[data-slotted\] \*\):is\(p\)/);
-    assert.match(css, /:is\(x-badge, :where\(\[data-component~="x-badge"\]\)\)/);
+    const root = ':is([component~="x-feature"]:not(template), [data-component~="x-feature"]:not([component]))';
+    const boundary = ':is([component]:not(template), [data-component]:not([component]))';
+    assert.ok(css.includes(`@scope (${root}) to (${boundary}, [data-slotted])`));
+    assert.ok(css.includes(`:scope:where(${root}) { display: block; }`));
+    assert.ok(css.includes(`:scope:where(${root})[data-x-feature-state~="open"] .panel`));
+    assert.ok(css.includes(`:scope:where(${root})[data-x-feature-state~="size=sm"] h2`));
+    assert.ok(css.includes(`@scope (${root}) to (${boundary}) {\n:where([data-slotted], [data-slotted] *):is(p)`));
+    assert.ok(css.includes(':is(x-badge, :where(:is([component~="x-badge"]:not(template), [data-component~="x-badge"]:not([component]))))'));
     assert.doesNotMatch(css, /data-component-root/);
 
     const vue = artifacts.get("vue/XFeature.vue")!;
@@ -1035,11 +1037,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /<h2 data-hn-x-feature>/);
     assert.match(vue, /<XBadge\s+class="x-badge"\s/);
     assert.doesNotMatch(vue, /<XBadge[^>]*data-hn/);
-    assert.doesNotMatch(vue, /data-component/);
+    assert.doesNotMatch(vue, /component/);
     assert.match(vue, /:data-x-feature-state="hostState \|\| undefined"/);
 
     const vanilla = artifacts.get("vanilla/XFeature.js")!;
-    assert.equal([...vanilla.matchAll(/setAttribute\("data-component"/g)].length, 1, "only the vanilla root is marked");
+    assert.equal([...vanilla.matchAll(/setAttribute\("component"/g)].length, 1, "only the vanilla root is marked");
   });
 
   it("marks a slotless Vue component's root and gives it the live runtime's selectors", () => {

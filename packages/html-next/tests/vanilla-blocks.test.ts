@@ -1673,7 +1673,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await flush();
     window.document.body.append(roots[1]!);
     await flush();
-    assert.equal(window.document.querySelectorAll("[data-component]").length, 3 + 3 * 2 * 2 + 2 * 2);
+    assert.equal(window.document.querySelectorAll("[component]").length, 3 + 3 * 2 * 2 + 2 * 2);
     // Every compiled root, parent or invoked, shares the document's one lifecycle observer.
     assert.equal(observers, 1);
   });
@@ -1896,7 +1896,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       const result = await run([page, shell, leaf], direct, [host => { host.root.querySelector("button.load").click(); }]);
       assert.deepEqual(result.errors, []);
       const { window } = new JSDOM(result.snapshots[1]);
-      const row = window.document.querySelector('[data-component="x-result"]')!;
+      const row = window.document.querySelector('[component="x-result"]')!;
       assert.equal(row.textContent, "First");
       assert.equal(row.getAttribute("aria-current"), "true");
       assert.equal(row.parentElement!.getAttribute("data-href"), "/first", direct ? "compiled" : "live");

@@ -141,7 +141,7 @@ describe("generated lifecycle coordinator", () => {
   it("disconnects a removed root without querying unrelated subtrees", async () => {
     const log: string[] = [];
     const root = document.createElement("div");
-    root.setAttribute("data-component", "x-a");
+    root.setAttribute("component", "x-a");
     const list = document.createElement("ul");
     document.body.append(root, list);
     managed(root, log, "a");
@@ -167,12 +167,12 @@ describe("generated lifecycle coordinator", () => {
     document.body.append(host);
     const shadow = host.attachShadow({ mode: "open" });
     const inner = document.createElement("div");
-    inner.setAttribute("data-component", "x-inner");
+    inner.setAttribute("component", "x-inner");
     shadow.append(inner);
     managed(inner, log, "inner");
     // A light root moved into a connected shadow tree, then removed there, is out of scope too.
     const moved = document.createElement("div");
-    moved.setAttribute("data-component", "x-moved");
+    moved.setAttribute("component", "x-moved");
     document.body.append(moved);
     managed(moved, log, "moved");
     shadow.append(moved);
@@ -187,7 +187,7 @@ describe("generated lifecycle coordinator", () => {
 
   it("retains no root that moved into a shadow tree and was removed there", async () => {
     const keep = document.createElement("div");
-    keep.setAttribute("data-component", "x-keep");
+    keep.setAttribute("component", "x-keep");
     document.body.append(keep);
     managed(keep, [], "keep");
     const host = document.createElement("div");
@@ -195,7 +195,7 @@ describe("generated lifecycle coordinator", () => {
     const shadow = host.attachShadow({ mode: "open" });
     const collected = await (async () => {
       const moved = document.createElement("div");
-      moved.setAttribute("data-component", "x-moved");
+      moved.setAttribute("component", "x-moved");
       document.body.append(moved);
       managed(moved, [], "moved");
       await flush();
@@ -217,7 +217,7 @@ describe("generated lifecycle coordinator", () => {
     const log: string[] = [];
     const root = (name: string): Element => {
       const element = document.createElement("div");
-      element.setAttribute("data-component", `x-${name}`);
+      element.setAttribute("component", `x-${name}`);
       return element;
     };
     const a = root("a");
@@ -254,9 +254,9 @@ describe("generated lifecycle coordinator", () => {
   it("indexes roots that other generated output registers while it is installed", async () => {
     const log: string[] = [];
     const direct = document.createElement("div");
-    direct.setAttribute("data-component", "x-direct");
+    direct.setAttribute("component", "x-direct");
     const older = document.createElement("div");
-    older.setAttribute("data-component", "x-older");
+    older.setAttribute("component", "x-older");
     document.body.append(direct, older);
     managed(direct, log, "direct");
     const installed = lifecycle();
@@ -279,9 +279,9 @@ describe("generated lifecycle coordinator", () => {
   it("lets a coordinator installed first serve direct-extend roots with the exact walk", async () => {
     const log: string[] = [];
     const older = document.createElement("div");
-    older.setAttribute("data-component", "x-older");
+    older.setAttribute("component", "x-older");
     const direct = document.createElement("div");
-    direct.setAttribute("data-component", "x-direct");
+    direct.setAttribute("component", "x-direct");
     const holder = document.createElement("section");
     holder.append(direct);
     document.body.append(older);
@@ -307,7 +307,7 @@ describe("generated lifecycle coordinator", () => {
     }
     const log: string[] = [];
     const direct = document.createElement("div");
-    direct.setAttribute("data-component", "x-direct");
+    direct.setAttribute("component", "x-direct");
     document.body.append(direct);
     managed(direct, log, "direct");
     const definition = parseComponent(`<template component="x-action" status="early" summary="Button or link.">
@@ -318,13 +318,13 @@ describe("generated lifecycle coordinator", () => {
   </template>
 </template>`, "https://example.test/x-action.html");
     const button = document.createElement("button");
-    button.setAttribute("data-component", "x-action");
+    button.setAttribute("component", "x-action");
     manageComponentLifecycle(button, definition, { props: {} });
     document.body.append(button);
     await flush();
     componentRegistry.update(button, { as: "a" });
     await flush();
-    const link = document.querySelector("a[data-component]")!;
+    const link = document.querySelector("a[component]")!;
     const record = (link as unknown as Record<symbol, { disconnect?: unknown }>)[Symbol.for("@nextwebwg/html-next.lifecycle.v1")];
     assert.notEqual(record?.disconnect, undefined);
     link.remove();
@@ -337,7 +337,7 @@ describe("generated lifecycle coordinator", () => {
     const log: string[] = [];
     const roots = ["a", "b", "c"].map((name) => {
       const element = document.createElement("div");
-      element.setAttribute("data-component", `x-${name}`);
+      element.setAttribute("component", `x-${name}`);
       managed(element, log, name);
       return element;
     });

@@ -55,7 +55,7 @@ describe("the error page", () => {
       expect(response.status).toBe(500);
       const html = await response.text();
       expect(html).toContain(">Trouble</title>");
-      expect(html).toContain('data-component="site-shell"');
+      expect(html).toContain('component="site-shell"');
       expect(html).toContain("<h1>500</h1><p>Internal Server Error</p>");
       expect(html).not.toContain("secret");
       expect(logged).toHaveBeenCalledWith(expect.objectContaining({ message: "database secret" }));

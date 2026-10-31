@@ -61,7 +61,7 @@ describe("HTML Next unplugin", () => {
     assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
     assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
     assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
-    assert.match(css, /@scope\s*\(\[data-component~="x-a"\], \[data-component~="x-b"\]\)/);
+    assert.ok(css.includes('@scope (:is([component~="x-a"]:not(template), [data-component~="x-a"]:not([component])), :is([component~="x-b"]:not(template), [data-component~="x-b"]:not([component])))'));
     assert.ok(css.indexOf("border-box") < css.indexOf("content-box"));
     assert.match(css, /data:image\/svg\+xml/);
     assert.equal(css.match(new RegExp(`font-weight: ${isProduction ? 700 : 400}`, "g"))?.length, 1, css);
@@ -132,7 +132,7 @@ describe("HTML Next unplugin", () => {
     assert.doesNotMatch(output, /UNUSED_COMPONENT_MARKER|parse5|source-parser|browser-source/);
     assertClosedOverEntries(output);
     const css = await readFile(join(root, "dist", "components.css"), "utf8");
-    assert.match(css, /data-component/);
+    assert.match(css, /component/);
     assert.match(css, /rebeccapurple/);
     assert.doesNotMatch(css, /:host/);
   });
@@ -362,7 +362,8 @@ describe("HTML Next unplugin", () => {
     // +5 B: the lifecycle observer reads each mutation's nodes by index, faster than a NodeList's iterator.
     // +11 B: a render counts its nesting, so components a row or block builds inside projected content
     // are created once the outermost render has inserted them; the step itself ships only with projection.
-    assert.ok(gzip <= 9_381, `direct benchmark entry is ${gzip} B gzip-6`);
+    // +12 B: lifecycle walks recognize canonical and legacy identity roots.
+    assert.ok(gzip <= 9_393, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
@@ -403,8 +404,8 @@ describe("HTML Next unplugin", () => {
     assert.match(output, /invoke\(I, createXChild\b/);
     assert.doesNotMatch(output, /createElement\("x-child"\)|function manageComponentLifecycle/);
     // Only component roots carry a marker, naming their own component.
-    assert.match(output, /setAttribute\("data-component", "x-child"\)/);
-    assert.doesNotMatch(output, /data-component-root|getAttribute\("data-component"\)/);
+    assert.match(output, /setAttribute\("component", "x-child"\)/);
+    assert.doesNotMatch(output, /data-component-root/);
     assert.deepEqual(manifest.publicEntries.map(({ tag }) => tag), ["x-app", "x-child"]);
     assert.deepEqual(manifest.components.map(({ tag }) => tag), ["x-app", "x-child"]);
 
@@ -768,7 +769,7 @@ describe("HTML Next unplugin", () => {
     assertClosedOverEntries(output);
     const css = await readFile(join(root, "dist/components.css"), "utf8");
     assert.match(css, /rebeccapurple/);
-    assert.match(css, /@scope\s*\(\[data-component~="x-child"\]\)/);
+    assert.ok(css.includes('@scope (:is([component~="x-child"]:not(template), [data-component~="x-child"]:not([component])))'));
   });
 
   it("compiles dynamic linked invocation inputs and projected children", async () => {

@@ -93,3 +93,15 @@ Preact's core element factory and supply the initial selection once, so its comp
 layer does not rewrite option selection when surrounding state changes. Preact 11 is required
 because generated components receive refs as props; see its
 [upgrade guide](https://preactjs.com/guide/v11/upgrade-guide/#refs-are-forwarded-by-default).
+
+
+## Rendered component identity
+
+On 2026-10-31, the rendered identity contract selected `component` as canonical output with a
+`data-component` polyfill fallback. DOM attribute reads distinguish an absent attribute from an
+empty value; nullish fallback preserves canonical precedence. Native selector matching, `:is`,
+`:not` and `@scope` express the same precedence for styles and boundaries. Definition carriers
+remain `template[component]`, so root discovery excludes them. No additional observer or attribute
+mirroring is needed. Hydration reads either spelling in place; serialization normalizes only its
+cloned output. Cross-browser scoped-style coverage checks both spellings, conflicting values,
+empty canonical values and fallback after removing the canonical attribute.

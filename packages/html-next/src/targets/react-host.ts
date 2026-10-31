@@ -320,7 +320,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           const currentRoot = latest.current.root.current;
           if (currentRoot === null) return [];
           return Array.from(currentRoot.querySelectorAll("[data-slotted]"))
-            .filter((element) => element.parentElement?.closest("[data-component]") === currentRoot &&
+            .filter((element) => element.parentElement?.closest(':is([component]:not(template), [data-component]:not([component]))') === currentRoot &&
               (element.getAttribute("slot") ?? "default") === name);
         },
         has: (_target, name) => typeof name === "string" && host.slots[name]!.length > 0,

@@ -10,16 +10,18 @@ import { cases, compiledFixtures, definitions } from "./hydration-fixtures.js";
 
 interface Bundle {
   readonly factories: Readonly<Record<string, (options: object, html: undefined, root: Element) => Element>>;
-  getComponentHost(element: Element): { state: Record<string, unknown>; refs: Record<string, unknown> } | undefined;
+  getComponentHost(element: Element, tag?: string): { state: Record<string, unknown>; refs: Record<string, unknown> } | undefined;
   inspectInstance(element: Element): unknown;
   registerComponentDefinitions(definitions: readonly unknown[]): void;
   lowerDocument(): number;
+  serializeRenderedForm(container: Element): string;
+  attachComponent(element: Element, definition: unknown): () => void;
 }
 
 /** Every fixture compiled for hydration, beside the live runtime in one bundle. */
 let code: string;
 beforeAll(async () => {
-  code = await compiledFixtures("esm", 'export { getComponentHost, inspectInstance, registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";');
+  code = await compiledFixtures("esm", 'export { getComponentHost, inspectInstance, registerComponentDefinitions, lowerDocument, serializeRenderedForm, attachComponent } from "@nextwebwg/html-next/runtime";');
 });
 
 /** A fresh document holding `html` twice, and the bundle loaded against it. */
@@ -44,6 +46,71 @@ afterEach(() => {
 });
 
 describe("compiled hydration of Node output", () => {
+  for (const attribute of ["component", "data-component"]) {
+    it(`adopts ${attribute} roots without mirroring identity`, async () => {
+      const rendered = await renderComponents('<ssr-delegate id="subject">Kept</ssr-delegate>', { definitions });
+      assert.match(rendered.html, /component="ssr-delegate ssr-counter"/);
+      assert.doesNotMatch(rendered.html, /data-component=/);
+      const html = attribute === "component" ? rendered.html : rendered.html.replaceAll('component="', 'data-component="');
+      const { document, runtime } = await page(html);
+      const compiled = document.querySelector("#compiled #subject")!;
+      const live = document.querySelector("#live #subject")!;
+      runtime.factories["ssr-delegate"]!({}, undefined, compiled);
+      runtime.registerComponentDefinitions(definitions);
+      runtime.lowerDocument();
+      await flush();
+      for (const [container, root] of [["compiled", compiled], ["live", live]] as const) {
+        assert.equal(document.querySelector(`#${container} #subject`), root);
+        assert.equal(root.getAttribute(attribute), "ssr-delegate ssr-counter");
+        assert.equal(root.hasAttribute(attribute === "component" ? "data-component" : "component"), false);
+        root.querySelector("button")!.click();
+      }
+      await flush();
+      assert.equal(compiled.querySelector("button span")!.textContent, "1");
+      assert.equal(live.querySelector("button span")!.textContent, "1");
+      const serialized = runtime.serializeRenderedForm(document.querySelector("#live")!);
+      assert.match(serialized, /component="ssr-delegate ssr-counter"/);
+      assert.doesNotMatch(serialized, /data-component=/);
+      assert.equal(live.getAttribute(attribute), "ssr-delegate ssr-counter");
+    });
+  }
+
+  it("attaches a framework-owned legacy root without adding a canonical mirror", async () => {
+    const rendered = await renderComponents('<ssr-inline id="subject"></ssr-inline>', { definitions });
+    const { document, runtime } = await page(rendered.html.replaceAll('component="', 'data-component="'));
+    const root = document.querySelector("#live #subject")!;
+    const release = runtime.attachComponent(root, definitions.find(definition => definition.contract.tag === "ssr-inline"));
+    assert.ok(runtime.getComponentHost(root));
+    assert.equal(root.getAttribute("data-component"), "ssr-inline");
+    assert.equal(root.hasAttribute("component"), false);
+    release();
+  });
+
+  it("uses canonical identity instead of merging a conflicting or empty fallback during discovery", async () => {
+    const rendered = await renderComponents('<ssr-inline id="subject"></ssr-inline>', { definitions });
+    const canonical = rendered.html.replace(/(?:data-)?component="ssr-inline"/, 'component="ssr-inline" data-component="ssr-counter"');
+    const { document, runtime } = await page(canonical);
+    const root = document.querySelector("#live #subject")!;
+    runtime.registerComponentDefinitions(definitions);
+    runtime.lowerDocument();
+    assert.ok(runtime.getComponentHost(root));
+    assert.equal(runtime.getComponentHost(root, "ssr-counter"), undefined);
+    assert.equal(root.getAttribute("component"), "ssr-inline");
+    assert.equal(root.getAttribute("data-component"), "ssr-counter");
+    const empty = document.createElement("section");
+    empty.innerHTML = root.innerHTML;
+    empty.setAttribute("component", "");
+    empty.setAttribute("data-component", "ssr-inline");
+    document.body.append(empty);
+    runtime.lowerDocument();
+    assert.equal(runtime.getComponentHost(empty), undefined);
+    assert.equal(empty.getAttribute("component"), "");
+    empty.removeAttribute("component");
+    runtime.lowerDocument();
+    assert.ok(runtime.getComponentHost(empty));
+    assert.equal(empty.hasAttribute("component"), false);
+  });
+
   it("keeps structured prop hydration data while rendering current content in live and compiled components", async () => {
     const components = [
       `<template component="snapshot-value"><defs><prop name="content" type="object({ text: string })">The current document content.</prop></defs><p>{$content.text}</p></template>`,
@@ -91,7 +158,7 @@ describe("compiled hydration of Node output", () => {
       await flush();
       runtime.lowerDocument();
       await flush();
-      const row = box.querySelector('[data-component="x-result"]');
+      const row = box.querySelector('[component="x-result"]');
       assert.ok(row, box.outerHTML);
       assert.equal(row.textContent, "First");
       assert.equal(row.getAttribute("aria-current"), "true");
@@ -118,14 +185,14 @@ describe("compiled hydration of Node output", () => {
 
       // A component an earlier pass adopted is the one its parent then binds.
       const earlier = "earlierPass" in fixture ? fixture.earlierPass : undefined;
-      if (earlier !== undefined) for (const nested of compiled.querySelectorAll(`[data-component~="${earlier}"]`)) runtime.factories[earlier]!({}, undefined, nested);
-      const tag = root.getAttribute("data-component")!.split(/\s+/)[0]!;
+      if (earlier !== undefined) for (const nested of compiled.querySelectorAll(`[component~="${earlier}"]`)) runtime.factories[earlier]!({}, undefined, nested);
+      const tag = root.getAttribute("component")!.split(/\s+/)[0]!;
       assert.equal(runtime.factories[tag]!({}, undefined, root), root, "the factory adopts the server root");
       runtime.registerComponentDefinitions(definitions);
       runtime.lowerDocument();
       await flush();
 
-      const inspect = (box: Element): unknown[] => Array.from(box.querySelectorAll("[data-component]"), (element) => runtime.inspectInstance(element));
+      const inspect = (box: Element): unknown[] => Array.from(box.querySelectorAll("[component]"), (element) => runtime.inspectInstance(element));
       assert.deepEqual(inspect(compiled), inspect(live));
       assert.ok(originalNodes.every((node) => compiled.contains(node)), "existing nodes stay in place");
       assert.equal(compiled.querySelector("[data-html-next-instance], [data-html-next-form-defaults]"), null, "hydration metadata is consumed");
@@ -145,9 +212,9 @@ describe("compiled hydration of Node output", () => {
       const retained = compiled.querySelector("li");
       for (const box of [compiled, live]) box.querySelector<HTMLButtonElement>("button")?.click();
       await flush();
-      const nested = compiled.querySelector<HTMLElement>('[data-component~="ssr-bound-button"]');
+      const nested = compiled.querySelector<HTMLElement>('[component~="ssr-bound-button"]');
       if (nested !== null) {
-        for (const box of [compiled, live]) box.querySelector<HTMLElement>('[data-component~="ssr-bound-button"]')!.click();
+        for (const box of [compiled, live]) box.querySelector<HTMLElement>('[component~="ssr-bound-button"]')!.click();
         await flush();
         assert.deepEqual({
           tag: nested.localName, count: nested.querySelector("span")!.textContent, expanded: nested.getAttribute("aria-expanded"),
@@ -202,7 +269,7 @@ describe("compiled hydration of Node output", () => {
     await flush();
     assert.equal(output.textContent, "4");
     assert.equal(root.querySelector("output"), output);
-    assert.equal(root.querySelector('[data-component="ssr-classed"] output')?.textContent, "0", "the nested root renders its own state");
+    assert.equal(root.querySelector('[component="ssr-classed"] output')?.textContent, "0", "the nested root renders its own state");
   });
 
   it("creates a block afresh where the server markup does not match its template", async () => {

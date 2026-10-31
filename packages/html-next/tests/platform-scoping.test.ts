@@ -35,25 +35,49 @@ async function inEachEngine(html: string, check: (page: Page, engine: string) =>
 }
 
 describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
+
+  it("styles either identity spelling with canonical precedence and native attribute updates", async () => {
+    const definition = parseComponent('<template component="x-identity"><article><span>Own</span></article></template>');
+    const css = compileComponentStylesForBuild(':host { outline: 2px solid rgb(1, 2, 3); } span { color: rgb(4, 5, 6); }', definition).css;
+    await inEachEngine(`<!doctype html><style>${css}</style>
+      <article id="canonical" component="x-identity" data-component="x-other"><span>Canonical</span></article>
+      <article id="legacy" data-component="x-identity"><span>Legacy</span></article>
+      <article id="conflict" component="x-other" data-component="x-identity"><span>Conflict</span></article>
+      <article id="empty" component="" data-component="x-identity"><span>Empty</span></article>`, async (page, engine) => {
+      const result = await page.evaluate(() => {
+        const styles = (id: string) => {
+          const root = document.getElementById(id)!;
+          return [getComputedStyle(root).outlineStyle, getComputedStyle(root.querySelector("span")!).color];
+        };
+        const before = Object.fromEntries(["canonical", "legacy", "conflict", "empty"].map(id => [id, styles(id)]));
+        document.getElementById("conflict")!.removeAttribute("component");
+        return { before, after: styles("conflict") };
+      });
+      for (const id of ["canonical", "legacy"]) assert.deepEqual(result.before[id], ["solid", "rgb(4, 5, 6)"], `${engine}: ${id}`);
+      for (const id of ["conflict", "empty"]) assert.notEqual(result.before[id]![0], "solid", `${engine}: ${id}`);
+      assert.deepEqual(result.after, ["solid", "rgb(4, 5, 6)"], `${engine}: fallback after removal`);
+    });
+  });
+
   it("scopes a region with native @scope and lets conditions before :scope reach outside", async () => {
     await inEachEngine(`<!doctype html>
       <style>
-        @scope ([data-component~="x-card"]) to ([data-component], [data-slotted]) {
+        @scope ([component~="x-card"]) to ([component], [data-slotted]) {
           :scope { outline: 1px solid; }
           .own { color: rgb(1, 1, 1); }
           .dark :scope .context { color: rgb(2, 2, 2); }
           .dark .relative { color: rgb(3, 3, 3); }
-          :is(x-page, :where([data-component~="x-page"])) :scope .by-tag { color: rgb(4, 4, 4); }
+          :is(x-page, :where([component~="x-page"])) :scope .by-tag { color: rgb(4, 4, 4); }
           :scope ~ .sibling { color: rgb(5, 5, 5); }
           .projected, .nested { color: rgb(6, 6, 6); }
         }
       </style>
-      <div class="dark"><main data-component="x-page">
-        <article data-component="x-card">
+      <div class="dark"><main component="x-page">
+        <article component="x-card">
           <span class="own">own</span><span class="context">context</span>
           <span class="relative">relative</span><span class="by-tag">by tag</span>
           <span data-slotted class="projected">projected</span>
-          <section data-component="x-inner"><span class="nested">nested</span></section>
+          <section component="x-inner"><span class="nested">nested</span></section>
         </article>
         <p class="sibling">sibling</p>
       </main></div>`, async (page, engine) => {
@@ -74,10 +98,10 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
 
   it("compiles :host, :host(:state()), and deep :slotted() by renaming, parsing, and routing rules", async () => {
     await inEachEngine(`<!doctype html>
-      <article data-component="x-prose" data-x-prose-state="size=sm">
+      <article component="x-prose" data-x-prose-state="size=sm">
         <p class="label" id="own">own</p>
         <div data-slotted><h2 id="h2">heading</h2><ul><li id="li">item</li></ul><span class="label" id="consumer">x</span></div>
-        <section data-component="x-inner"><h2 id="inner">nested</h2></section>
+        <section component="x-inner"><h2 id="inner">nested</h2></section>
       </article>`, async (page, engine) => {
       const result = await page.evaluate(() => {
         const tag = "x-prose";
@@ -95,7 +119,7 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
             : name === undefined ? match : `:where([--state]):is([${name}${value === undefined ? "" : `="${value}"`}])`);
         const parsed = new CSSStyleSheet();
         parsed.replaceSync(renamed);
-        const root = `[data-component~="${tag}"]`;
+        const root = `[component~="${tag}"]`;
         const stateTest = (tests: string) => tests.replace(/\[([\w-]+)(?:="([^"]*)")?\]/g, (_m, name: string, value?: string) =>
           `[data-${tag}-state~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`);
         const groups: Record<"own" | "slotted", string[]> = { own: [], slotted: [] };
@@ -117,8 +141,8 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
         route(parsed.cssRules);
         const sheet = new CSSStyleSheet();
         sheet.replaceSync([
-          `@scope (${root}) to ([data-component], [data-slotted]) { ${groups.own.join("\n")} }`,
-          `@scope (${root}) to ([data-component]) { ${groups.slotted.join("\n")} }`,
+          `@scope (${root}) to ([component], [data-slotted]) { ${groups.own.join("\n")} }`,
+          `@scope (${root}) to ([component]) { ${groups.slotted.join("\n")} }`,
         ].join("\n"));
         document.adoptedStyleSheets = [sheet];
         const style = (id: string) => getComputedStyle(document.getElementById(id)!);
@@ -157,14 +181,14 @@ describe.skipIf(!enabled)("compiled SVG scope boundaries", () => {
     const cssB = ':host { fill: orange; } .shape { fill: purple; }';
     const bundled = await build({ entryPoints: [new URL('../src/component-styles.ts', import.meta.url).pathname],
       bundle: true, write: false, format: 'iife', globalName: 'Styles', platform: 'browser', target: 'es2022' });
-    const html = `<div data-component="x-a" data-x-a-state="on">
+    const html = `<div component="x-a" data-x-a-state="on">
       <svg><rect id="own" class="shape conditional"></rect></svg>
       <svg id="projection" data-slotted><rect id="projected" class="shape conditional"></rect></svg>
       <section data-slotted><svg><rect id="slotted" class="shape projected"></rect></svg>
-        <div data-component="x-empty"><svg><rect id="empty" class="shape projected"></rect></svg></div></section>
-      <div data-component="x-b"><svg><rect id="other" class="shape"></rect></svg>
+        <div component="x-empty"><svg><rect id="empty" class="shape projected"></rect></svg></div></section>
+      <div component="x-b"><svg><rect id="other" class="shape"></rect></svg>
         <svg data-slotted><rect id="other-projected" class="shape"></rect></svg></div>
-      <div data-component="x-a"><svg><rect id="same" class="shape conditional"></rect></svg></div>
+      <div component="x-a"><svg><rect id="same" class="shape conditional"></rect></svg></div>
     </div>`;
     const ids = ['own', 'projected', 'slotted', 'empty', 'other', 'other-projected', 'same'];
     const expected = [['rgb(255, 0, 0)', 'rgb(0, 128, 0)'], ['rgb(0, 128, 0)', 'none'], ['rgb(0, 0, 255)', 'none'],
@@ -191,7 +215,7 @@ describe.skipIf(!enabled)("compiled SVG scope boundaries", () => {
           assert.deepEqual(await read(), expected, `${engine} ${target} layered=${layers}`);
           await page.evaluate(() => { document.getElementById('projection')!.append(document.getElementById('own')!); });
           assert.deepEqual((await read())[0], ['rgb(0, 128, 0)', 'none'], `${engine} ${target}: move into projection`);
-          await page.evaluate(() => { document.querySelector('[data-component="x-a"] > svg')!.append(document.getElementById('own')!); });
+          await page.evaluate(() => { document.querySelector('[component="x-a"] > svg')!.append(document.getElementById('own')!); });
           assert.deepEqual(await read(), expected, `${engine} ${target}: move back`);
         }
       }

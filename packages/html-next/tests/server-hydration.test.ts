@@ -66,8 +66,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
               const factories = (window as unknown as { HtmlCompiled: { factories: Record<string, (options: object, html: undefined, root: Element) => Element> } })
                 .HtmlCompiled.factories;
               const subject = document.querySelector("#server #subject")!;
-              if (earlierPass !== undefined) for (const nested of subject.querySelectorAll(`[data-component~="${earlierPass}"]`)) factories[earlierPass]!({}, undefined, nested);
-              factories[subject.getAttribute("data-component")!.split(" ")[0]!]!({}, undefined, subject);
+              if (earlierPass !== undefined) for (const nested of subject.querySelectorAll(`[component~="${earlierPass}"]`)) factories[earlierPass]!({}, undefined, nested);
+              factories[subject.getAttribute("component")!.split(" ")[0]!]!({}, undefined, subject);
             }
             // A child adopted before its parent is registered has already committed when the parent binds it.
             const first = compiled ? [] : definitions.filter((definition) => (definition as { contract: { tag: string } }).contract.tag === earlierPass);
@@ -84,7 +84,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             const host = runtime.getComponentHost(clientRoot)!;
             for (const [name, value] of Object.entries(state)) host.state[name] = value;
             await new Promise((resolve) => setTimeout(resolve, 0));
-            const inspect = (box: Element) => Array.from(box.querySelectorAll("[data-component]"), (element) => runtime.inspectInstance(element));
+            const inspect = (box: Element) => Array.from(box.querySelectorAll("[component]"), (element) => runtime.inspectInstance(element));
             const initial = { server: inspect(server), client: inspect(client) };
             const identity = root === context.originalRoot && context.originalNodes.every((node) => server.contains(node));
             const metadataRemoved = server.querySelector("[data-html-next-instance], [data-html-next-form-defaults]") === null;
@@ -96,12 +96,12 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             server.querySelector<HTMLButtonElement>("button")?.click();
             client.querySelector<HTMLButtonElement>("button")?.click();
             await new Promise((resolve) => setTimeout(resolve, 0));
-            const nested = server.querySelector<HTMLElement>('[data-component~="ssr-bound-button"]');
+            const nested = server.querySelector<HTMLElement>('[component~="ssr-bound-button"]');
             let parentBindings = null;
             if (nested !== null) {
               nested.click();
               await new Promise((resolve) => setTimeout(resolve, 0));
-              client.querySelector<HTMLElement>('[data-component~="ssr-bound-button"]')!.click();
+              client.querySelector<HTMLElement>('[component~="ssr-bound-button"]')!.click();
               await new Promise((resolve) => setTimeout(resolve, 0));
               parentBindings = {
                 tag: nested.localName, count: nested.querySelector("span")!.textContent,
@@ -114,7 +114,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             // Compiled rows are their element; live keeps item markers around each (owner decision 2a).
             const markup = (box: Element): string => box.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "");
             const after = { server: inspect(server), client: inspect(client), html: [markup(server), markup(client)] };
-            const namedHosts = root.getAttribute("data-component")?.split(" ").includes("ssr-delegate") ? {
+            const namedHosts = root.getAttribute("component")?.split(" ").includes("ssr-delegate") ? {
               distinct: runtime.getComponentHost(root, "ssr-delegate") !== runtime.getComponentHost(root, "ssr-counter"),
               owner: Object.keys(runtime.getComponentHost(root, "ssr-delegate")!.state),
               count: runtime.getComponentHost(root, "ssr-counter")!.state.count,
@@ -173,7 +173,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
           const runtime = (window as unknown as { HtmlRuntime: {
             getComponentHost(element: Element): { slots: Record<string, readonly Element[]> } | undefined;
           } }).HtmlRuntime;
-          const toggle = runtime.getComponentHost(document.querySelector('[data-component~="ssr-lazy-toggle"]')!)!;
+          const toggle = runtime.getComponentHost(document.querySelector('[component~="ssr-lazy-toggle"]')!)!;
           return { detail: document.querySelector("b")?.textContent ?? null, img: document.querySelectorAll("img").length,
             templates: document.querySelectorAll("main template").length, details: toggle.slots.details!.map((element) => element.localName) };
         });

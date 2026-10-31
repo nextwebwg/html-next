@@ -281,7 +281,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
         <div><p $if="$open" $transition="fade">Shown</p></div></template><x-live></x-live><x-live></x-live>`);
       await page.addScriptTag({ path: live });
       await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
-      await page.waitForSelector("[data-component~='x-live'] p", { state: "attached" });
+      await page.waitForSelector("[component~='x-live'] p", { state: "attached" });
       assert.deepEqual(warnings.filter((text) => text.includes("HT024")).length, 1);
       assert.match(warnings.find((text) => text.includes("HT024"))!, /live runtime does not support; `x-live` renders without animation/);
     } finally {

@@ -496,7 +496,7 @@ createApp({ render: () => h("div", [h(DemoCounter, { id: "counter", onCountChang
               className: panel.className,
               role: panel.getAttribute("role"),
             },
-            provenance: root.getAttribute("data-component"),
+            provenance: root.getAttribute("component"),
           };
         });
         assert.deepEqual(result, {
@@ -3167,7 +3167,7 @@ createApp({ render: () => [
           await new Promise((resolve) => setTimeout(resolve));
           return Array.from(document.querySelectorAll("main > *"), (element) => ({
             tag: element.localName,
-            component: element.getAttribute("data-component"),
+            component: element.getAttribute("component"),
             href: element.getAttribute("href"),
             type: element.getAttribute("type"),
             disabled: element.hasAttribute("disabled"),

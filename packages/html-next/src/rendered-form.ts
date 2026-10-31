@@ -1,4 +1,4 @@
-import { COMPONENT_ATTRIBUTE } from "./component-styles.js";
+import { COMPONENT_ROOT_SELECTOR, componentIdentity } from "./component-identity.js";
 import { fail } from "./diagnostics.js";
 import { decodeHydrationValue } from "./hydration-value.js";
 import type { InputStatus } from "./inputs.js";
@@ -191,7 +191,7 @@ export function fromCarrier(node: Node): boolean {
 export function serverRanges(root: Element, consume = true, tag?: string): { ranges: HydrationRange[]; carried: Node[] } | undefined {
   const ranges: HydrationRange[] = [];
   const inRanges = new Set<Node>();
-  const lineage = (root.getAttribute(COMPONENT_ATTRIBUTE) ?? "").split(/\s+/);
+  const lineage = componentIdentity(root).split(/\s+/);
   const tagIndex = tag === undefined ? -1 : lineage.indexOf(tag);
   // The innermost delegated component wraps the outer component's projection in its own ranges.
   const delegatedDepth = tagIndex < 0 ? 0 : lineage.length - tagIndex - 1;
@@ -221,7 +221,7 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
         continue;
       }
       if (!(node instanceof Element)) continue;
-      if (node !== root && node.hasAttribute("data-component")) {
+      if (node !== root && node.matches(COMPONENT_ROOT_SELECTOR)) {
         const nested = serverRanges(node, false);
         for (const range of nested?.ranges ?? []) collect(range.content, into, depth);
       } else collect(Array.from(node.childNodes), into, depth);

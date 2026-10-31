@@ -48,12 +48,12 @@ describe("shared component CSS resources", () => {
     assert.match(compiled, /file:\/\/\/pkg\/styles\/nested\/fonts\/example.woff2/);
     assert.match(compiled, /"url\(leave-me.svg\)"/);
     assert.match(compiled, /url\("#local-filter"\)/);
-    assert.match(compiled, /@scope \(\[data-component~="x-a"\]\)/);
+    assert.ok(compiled.includes('@scope (:is([component~="x-a"]:not(template), [data-component~="x-a"]:not([component])))'));
     assert.match(compiled, /@supports/);
     assert.match(compiled, /@layer base/);
     assert.match(compiled, /@keyframes pulse/);
     assert.match(compiled, /@font-face/);
-    assert.match(compileSharedComponentStylesForBuild(b.stylesheets!.at(-1)!.css, [b]).css, /data-component~="x-b"/);
+    assert.match(compileSharedComponentStylesForBuild(b.stylesheets!.at(-1)!.css, [b]).css, /component~="x-b"/);
     assert.deepEqual(requests.sort(), Object.keys(files).sort());
     assert.deepEqual(graph.stylesheetInputs, Object.keys(files).filter(file => file.endsWith(".css")).sort());
   });

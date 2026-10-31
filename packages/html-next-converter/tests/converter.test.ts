@@ -149,7 +149,7 @@ describe("framework converter", () => {
     const card = await readFile(join(outDirectory, "react/components/nested/XCard.tsx"), "utf8");
     assert.match(app, /from "\.\/nested\/XCard\.tsx"/);
     assert.match(card, /import "\.\/XCard\.css"/);
-    assert.match(await readFile(join(outDirectory, "react/components/nested/XCard.css"), "utf8"), /data-component/);
+    assert.match(await readFile(join(outDirectory, "react/components/nested/XCard.css"), "utf8"), /component/);
     for (const component of manifest.components) {
       await transform(await readFile(join(outDirectory, component.artifact), "utf8"), { loader: "tsx" });
     }
@@ -170,7 +170,7 @@ describe("framework converter", () => {
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!, { id: "case", className: "outer" })),
-      '<main id="case" class="outer" data-component="x-app"><article aria-label="Hello" class="card ready" style="border-radius:2px;color:red" data-x-card-prop-label="Hello" data-x-card-state="label label=Hello" data-component="x-card"></article></main>');
+      '<main id="case" class="outer" component="x-app"><article aria-label="Hello" class="card ready" style="border-radius:2px;color:red" data-x-card-prop-label="Hello" data-x-card-state="label label=Hello" component="x-card"></article></main>');
   });
 
   it("writes each controller's typed host beside its definition when asked, as the CLI does", async () => {
@@ -317,7 +317,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" } });
     const module = { exports: {} as { render(): string } };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-    assert.equal(module.exports.render(), '<section data-component="x-provider"><span data-slotted="" data-component="x-reader">7</span></section>');
+    assert.equal(module.exports.render(), '<section component="x-provider"><span data-slotted="" component="x-reader">7</span></section>');
   });
 
   it("renders native React property bindings through their DOM property", async () => {
@@ -417,7 +417,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XRefActions!)),
-      '<section data-component="x-ref-actions"><form><input required="" aria-label="Name" data-component="x-field"/></form><button type="button">Submit</button><output>0</output></section>');
+      '<section component="x-ref-actions"><form><input required="" aria-label="Name" component="x-field"/></form><button type="button">Submit</button><output>0</output></section>');
   });
 
   it("converts sequential nested state writes with dynamic index paths", async () => {
@@ -448,7 +448,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XNestedSet!)),
-      '<section data-component="x-nested-set"><button type="button">Rename</button><button type="button">Missing</button> <output>Ada</output><output>Bea</output> <output>1</output></section>');
+      '<section component="x-nested-set"><button type="button">Rename</button><button type="button">Missing</button> <output>Ada</output><output>Bea</output> <output>1</output></section>');
   });
 
   it("emits declared React data reads without a request during SSR", async () => {
@@ -485,7 +485,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XFeed!)),
-      '<section data-component="x-feed"><output class="value"></output> <output class="pending">true</output><output class="ok">false</output></section>');
+      '<section component="x-feed"><output class="value"></output> <output class="pending">true</output><output class="ok">false</output></section>');
   });
 
   it("typechecks native React control bindings and emits only their helper", async () => {
@@ -526,7 +526,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!)),
-      '<section data-component="x-card"><input value="Bea"/><output>Bea</output></section>');
+      '<section component="x-card"><input value="Bea"/><output>Bea</output></section>');
   });
 
   it("renders read-only native control properties without turning them into React-controlled fields", async () => {
@@ -659,7 +659,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})),
-      '<ul data-component="x-card"><li data-i="0">1</li><li data-i="1">2</li><li data-i="2" data-last="">3</li></ul>');
+      '<ul component="x-card"><li data-i="0">1</li><li data-i="1">2</li><li data-i="2" data-last="">3</li></ul>');
   });
 
   it("server-renders a React $match branch inside a table", async () => {
@@ -678,7 +678,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, { status: "bad" })),
-      '<table data-status="bad" data-x-card-prop-status="bad" data-component="x-card"><tbody><tr><td>No</td></tr></tbody></table>');
+      '<table data-status="bad" data-x-card-prop-status="bad" component="x-card"><tbody><tr><td>No</td></tr></tbody></table>');
   });
 
   it("checks and reflects typed React props at the public boundary", async () => {
@@ -699,11 +699,11 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     const render = (props: Record<string, unknown>): string => renderToStaticMarkup(createElement(module.exports.XCard!, props));
     assert.equal(render({ count: 42, active: "" }),
-      '<output data-count="42" data-x-card-prop-active="false" data-x-card-prop-count="42" data-component="x-card">42</output>');
+      '<output data-count="42" data-x-card-prop-active="false" data-x-card-prop-count="42" component="x-card">42</output>');
     assert.equal(render({ count: "42", active: "" }),
-      '<output data-x-card-prop-active="false" data-component="x-card"></output>');
-    assert.equal(render({}), '<output data-component="x-card"></output>');
-    assert.equal(render({ count: "wrong" }), '<output data-component="x-card"></output>');
+      '<output data-x-card-prop-active="false" component="x-card"></output>');
+    assert.equal(render({}), '<output component="x-card"></output>');
+    assert.equal(render({ count: "wrong" }), '<output component="x-card"></output>');
   });
 
   it("typechecks generated reactive React TSX", async () => {
@@ -834,7 +834,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, { children: "Projected" })),
-      '<article data-component="x-card"><button type="button">Increase</button><output>0</output>Projected</article>');
+      '<article component="x-card"><button type="button">Increase</button><output>0</output>Projected</article>');
   });
 
   it("server-renders an important inline style in React without an HTML Next runtime import", async () => {
@@ -880,7 +880,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const markup = renderToStaticMarkup(createElement(module.exports.XPrimary!, { id: "case", children: "Projected" }));
     assert.match(markup, /^<button\b/);
     assert.match(markup, /class="base primary"/);
-    assert.match(markup, /data-component="x-primary x-base-button"/);
+    assert.match(markup, /component="x-primary x-base-button"/);
     assert.match(markup, />Projected<\/button>$/);
   });
 
@@ -904,7 +904,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.match(renderToStaticMarkup(createElement(module.exports.XSwitch!, { id: "case" })),
-      /^<button\b[^>]*id="case"[^>]*data-component="x-switch"[^>]*>Button<\/button>$/);
+      /^<button\b[^>]*id="case"[^>]*component="x-switch"[^>]*>Button<\/button>$/);
   });
 
   it("converts a generic React two-way attribute binding", async () => {
@@ -1004,7 +1004,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     });
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-    assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})), '<div data-component="x-card">Ada</div>');
+    assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})), '<div component="x-card">Ada</div>');
   });
 
   it("exports every named component from one HTML resource and tracks its source", async () => {
@@ -1530,7 +1530,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, { body: "<b title='safe'>One</b><img src=x onerror=alert(1)>" })),
-      '<article data-x-card-prop-body="&lt;b title=&#x27;safe&#x27;&gt;One&lt;/b&gt;&lt;img src=x onerror=alert(1)&gt;" data-component="x-card"><div><b title="safe">One</b></div><p>Before <b title="safe">One</b> after</p></article>');
+      '<article data-x-card-prop-body="&lt;b title=&#x27;safe&#x27;&gt;One&lt;/b&gt;&lt;img src=x onerror=alert(1)&gt;" component="x-card"><div><b title="safe">One</b></div><p>Before <b title="safe">One</b> after</p></article>');
   });
 
   it("projects named React slots through nested generated components and preserves fallbacks", async () => {
@@ -1573,7 +1573,7 @@ void [named, functionSlot, undeclared];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<article data-component="x-app"><section data-component="x-panel"><header><h2 slot="title" data-slotted="">Title</h2></header><main><p data-slotted="">Body</p></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section data-component="x-panel"><header><h2 data-slotted="">Deferred</h2></header><main><i>Empty</i></main></section></article>');
+      '<article component="x-app"><section component="x-panel"><header><h2 slot="title" data-slotted="">Title</h2></header><main><p data-slotted="">Body</p></main></section> <section component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section component="x-panel"><header><b>Untitled</b></header><main><i>Empty</i></main></section> <section component="x-panel"><header><h2 data-slotted="">Deferred</h2></header><main><i>Empty</i></main></section></article>');
   });
 
   it("renders repeated React scoped slots with outlet props and consumer lexical state", async () => {
@@ -1608,7 +1608,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><output>Parent</output> <ul data-component="x-rows"><li data-slotted=""><b>Ada</b><em>Team</em><small>0</small></li><li data-slotted=""><b>Bea</b><em>Team</em><small>1</small></li></ul> <ul data-component="x-rows"><li>Missing</li><li>Missing</li></ul></main>');
+      '<main component="x-app"><output>Parent</output> <ul component="x-rows"><li data-slotted=""><b>Ada</b><em>Team</em><small>0</small></li><li data-slotted=""><b>Bea</b><em>Team</em><small>1</small></li></ul> <ul component="x-rows"><li>Missing</li><li>Missing</li></ul></main>');
   });
 
   it("reports the live diagnostic when a React scoped slot has no template carrier", async () => {
@@ -1655,7 +1655,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><div data-component="x-panel"><b data-slotted=""><em>Hi</em></b><span data-slotted="">There</span></div></main>');
+      '<main component="x-app"><div component="x-panel"><b data-slotted=""><em>Hi</em></b><span data-slotted="">There</span></div></main>');
   });
 
   it("reads React context from the nearest logical provider through projected children", async () => {
@@ -1689,7 +1689,7 @@ void [scoped, staticNode];`);
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!)),
-      '<main data-component="x-app"><section data-start="1" data-x-steps-prop-start="1" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Outer one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Outer two</p> <section data-slotted="" data-start="2" data-x-steps-prop-start="2" data-component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" data-component="x-step">Inner one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" data-component="x-step">Inner two</p></section></section></main>');
+      '<main component="x-app"><section data-start="1" data-x-steps-prop-start="1" component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" component="x-step">Outer one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" component="x-step">Outer two</p> <section data-slotted="" data-start="2" data-x-steps-prop-start="2" component="x-steps"><p data-slotted="" data-active="yes" data-x-step-prop-number="1" component="x-step">Inner one</p><p data-slotted="" data-active="no" data-x-step-prop-number="2" component="x-step">Inner two</p></section></section></main>');
     assert.throws(() => renderToStaticMarkup(createElement(module.exports.XStep!, { number: 1 })), (error: unknown) => {
       const diagnostic = error as Error & { diagnostic?: { code?: string; message?: string } };
       return diagnostic.name === "HtmlDiagnosticError" && diagnostic.diagnostic?.code === "HR009" &&

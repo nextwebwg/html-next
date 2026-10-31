@@ -1860,7 +1860,7 @@ export function emitBlocks(
     const waits = inProjection(block);
     return [
       waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, -1, new Map()))) {` : `  if (r.h${index} === undefined) {`,
-      ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.hasAttribute("data-component");`] : [],
+      ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.matches(':is([component]:not(template), [data-component]:not([component]))');`] : [],
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
       `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
       // A bound prop is first its attribute's text, which the component reads as HTML input, then its value.
@@ -1883,8 +1883,8 @@ export function emitBlocks(
         `    I.e = ${site};`,
         `    I.L = delegateLifecycle(r.h${index});`,
         // Outer to inner, as live's lineage lists a delegated root's components; an adopted root lists them already.
-        hydrate ? `    { const t = I.e.getAttribute("data-component"); if (!t.split(" ").includes(${JSON.stringify(contract.tag)})) I.e.setAttribute("data-component", \`${contract.tag} \${t}\`); }`
-          : `    I.e.setAttribute("data-component", \`${contract.tag} \${I.e.getAttribute("data-component")}\`);`,
+        hydrate ? `    { const t = I.e.getAttribute("component") ?? I.e.getAttribute("data-component") ?? ""; if (!t.split(/\\s+/).includes(${JSON.stringify(contract.tag)})) I.e.setAttribute("component", \`${contract.tag} \${t}\`); }`
+          : `    I.e.setAttribute("component", \`${contract.tag} \${I.e.getAttribute("component") ?? I.e.getAttribute("data-component")}\`);`,
       ] : [],
       ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (${prop.snapshot ? `!s${at}.ready || ` : ""}y${at} !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
         ? `bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at});`
@@ -2528,7 +2528,7 @@ export function emitBlocks(
       `${indent}  element.setAttribute(name, value === true ? "" : String(value));`,
       `${indent}}`,
       ...literals,
-      `${indent}element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
+      `${indent}element.setAttribute("component", ${JSON.stringify(contract.tag)});`,
     ];
   }
   /** An arm's literals merged with the factory's attributes, as the root's are: the factory's win; class and style combine. */

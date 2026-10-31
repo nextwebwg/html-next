@@ -133,7 +133,7 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
 
   // A native request event reaches the controller through the rendered root.
   // The outermost element carrying the component's lineage is its lowered root.
-  await page.evaluate(`document.querySelector('[data-component~="pantry-app"]').dispatchEvent(new Event('restock-request'))`);
+  await page.evaluate(`document.querySelector('[component~="pantry-app"]').dispatchEvent(new Event('restock-request'))`);
   await settle();
   await snapshot("restockedAll");
 

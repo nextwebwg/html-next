@@ -61,7 +61,7 @@ export function liveReference(definition: ComponentDefinition, others: readonly 
     "    if (attribute.name === \"class\" || attribute.name === \"style\") element.setAttribute(attribute.name, [attribute.value, element.getAttribute(attribute.name)].filter(Boolean).join(attribute.name === \"class\" ? \" \" : \"; \"));",
     "    else if (!element.hasAttribute(attribute.name)) element.setAttribute(attribute.name, attribute.value);",
     "  }",
-    `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
+    `  element.setAttribute("component", ${JSON.stringify(definition.contract.tag)});`,
     // A factory's children and named slots, as the general runtime's factories projected them.
     "  const projected = [];",
     "  for (const [name, nodes] of [[\"\", children], ...Object.entries(slots)]) for (const child of nodes) projected.push([typeof child === \"string\" ? document.createTextNode(child) : child, name]);",

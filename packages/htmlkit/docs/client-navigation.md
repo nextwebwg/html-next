@@ -89,7 +89,7 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    path between versions and stays in place within each.
 2. **Which layers persist, and their new props.** Layers carry `data-hk-layer="N"`; older output's
    `hk-layer-N` IDs also remain readable. An authored `id` does not identify the layer. From the
-   outermost, a layer whose root renders the same component (`data-component`) as the next page's
+   outermost, a layer whose root renders the same component (`component`) as the next page's
    layer at that depth persists. The page layer is always replaced, and so is everything below the
    first layer that differs. A persisted layer keeps its DOM, state, and module instance, but its loader
    may compute new props, such as `<hk-nav>`'s `current` item. `adoptRenderedProps(element, rendered)`

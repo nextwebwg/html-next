@@ -22,7 +22,7 @@ async function snapshot(page: Page) {
     behavior: await page.locator("#case").evaluate((root) => ({
       tag: root.localName,
       text: root.textContent,
-      component: root.getAttribute("data-component"),
+      component: root.getAttribute("component"),
       controllerRoot: root.getAttribute("data-controller-root"),
       focused: document.activeElement === root,
     })),

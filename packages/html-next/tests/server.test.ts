@@ -277,7 +277,7 @@ describe("Node component rendering", () => {
       </defs><ul><li $each="item of $items">{$item.label}<x-tree $if="$item.children.length" from:items="$item.children"></x-tree></li></ul></template>`);
     const items = JSON.stringify([{ label: "a", children: [{ label: "b", children: [{ label: "c", children: [] }] }] }]).replaceAll('"', "&quot;");
     const rendered = await renderComponents(`<x-tree items="${items}"></x-tree>`, { definitions: [definition] });
-    const html = rendered.html.replace(/ data-[a-z-]+="[^"]*"/g, "").replace(/<!--[^>]*-->/g, "");
+    const html = rendered.html.replace(/ (?:data-[a-z-]+|component)="[^"]*"/g, "").replace(/<!--[^>]*-->/g, "");
     assert.equal(html, "<ul><li>a<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>");
     assert.doesNotMatch(rendered.html, /aria-invalid/);
   });
@@ -322,7 +322,7 @@ describe("Node component rendering", () => {
     const rendered = await renderComponents('<x-server-counter label="Visits">Hello</x-server-counter>', {
       definitions: [counter],
     });
-    assert.match(rendered.html, /<section[^>]*data-component="x-server-counter"/);
+    assert.match(rendered.html, /<section[^>]*component="x-server-counter"/);
     assert.match(rendered.html, /<h2>Visits<\/h2>/);
     assert.match(rendered.html, /<span>0<\/span>/);
     assert.match(rendered.html, /<\?start slot=""\?>Hello<\?end\?>/);
