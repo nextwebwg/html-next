@@ -68,6 +68,37 @@ describe("compiled hydration of Node output", () => {
     }
   });
 
+  it("hydrates native attributes on repeated roots projected through a named slot", async () => {
+    const components = [
+      `<template component="x-result"><defs><prop name="selected" type="boolean" default="false">Whether selected.</prop></defs><button from:aria-current="$selected"><slot name="title"></slot></button></template>`,
+      `<template component="x-results"><section><slot name="body"></slot></section></template>`,
+      `<template component="x-page"><defs>
+        <state name="items" type="list(object({ href: string, label: string }))" value="[]"></state><state name="selected" type="string" value="''"></state>
+        <handler name="load"><set name="items" expr:value="[{ href: '/first', label: 'First' }]"></set><set name="selected" expr:value="'/first'"></set></handler>
+        </defs><article><button class="load" on:click="load">Load</button><x-results><div slot="body">
+        <div $each="item of $items" from:data-href="$item.href"><x-result from:selected="$item.href = $selected"><span slot="title">{$item.label}</span></x-result></div>
+        </div></x-results></article></template>`,
+    ].map(source => parseComponent(source));
+    const rendered = await renderComponents('<x-page id="subject"></x-page>', { definitions: components });
+    const code = await compiledFixtures("esm", 'export { registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";', components);
+    const { document, runtime } = await page(rendered.html, code);
+    runtime.factories["x-page"]!({}, undefined, document.querySelector("#compiled #subject")!);
+    runtime.registerComponentDefinitions(components);
+    runtime.lowerDocument();
+    await flush();
+    for (const box of document.querySelectorAll("main")) {
+      box.querySelector<HTMLButtonElement>("button.load")!.click();
+      await flush();
+      runtime.lowerDocument();
+      await flush();
+      const row = box.querySelector('[data-component="x-result"]');
+      assert.ok(row, box.outerHTML);
+      assert.equal(row.textContent, "First");
+      assert.equal(row.getAttribute("aria-current"), "true");
+      assert.equal(row.parentElement!.getAttribute("data-href"), "/first", box.id);
+    }
+  });
+
   // A <template slot> written in the document needs the live delivery's parser; compiled consumers project their own.
   for (const fixture of cases.filter((candidate) => !candidate.html.includes("<template slot"))) {
     it(`adopts ${fixture.name} in place, as the live runtime does`, async () => {

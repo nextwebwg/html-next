@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const root of temporary.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture({ optionalEditor = false }: { optionalEditor?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "html-next-framework-"));
   temporary.push(root);
   const library = join(root, "node_modules", "@example", "controls");
@@ -41,7 +41,7 @@ async function fixture() {
   await writeFile(join(root, "package.json"), JSON.stringify({ type: "module", dependencies: { "@example/controls": "1.0.0" } }));
   await writeFile(join(library, "package.json"), JSON.stringify({ name: "@example/controls", type: "module", exports: {
     ".": { "html-next": "./index.js" }, "./direct": { "html-next": "./controls.html" },
-  } }));
+  }, ...(optionalEditor ? { peerDependencies: { "@example/optional-editor": "*" }, peerDependenciesMeta: { "@example/optional-editor": { optional: true } } } : {}) }));
   await writeFile(join(library, "index.js"), 'export { UiButton as Button, UiBadge, UiUnused } from "./controls.html";\n');
   await writeFile(join(library, "controls.html"), `<template component="ui-button" status="early" summary="Button.">
   <defs>
@@ -54,8 +54,9 @@ async function fixture() {
   <style>:host { color: rgb(1, 2, 3); }</style>
 </template>
 <template component="ui-badge" status="early" summary="Badge."><span>Badge</span></template>
-<template component="ui-unused" status="early" summary="Unused."><aside>UNUSED_COMPONENT_MARKER</aside>
+<template component="ui-unused" ${optionalEditor ? 'module="./optional-editor.js"' : ""} status="early" summary="Unused."><aside>UNUSED_COMPONENT_MARKER</aside>
   <style>:host { --unused-component-style: keep-out; }</style></template>`);
+  if (optionalEditor) await writeFile(join(library, "optional-editor.js"), 'import { extension } from "@example/optional-editor"; export function connect() { extension(); }');
   return { root, library };
 }
 
@@ -139,11 +140,11 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
   }, 60_000);
 
   it("omits unused component markup and CSS from a client build", async () => {
-    const { root } = await fixture();
+    const { root } = await fixture({ optionalEditor: true });
     const entry = join(root, "src", target === "vue" ? "client.ts" : "client.tsx");
+    if (target === "vue") await writeFile(join(root, "src", "App.vue"), `<script setup lang="ts">import { Button } from "@example/controls";</script><template><Button label="Save" /></template>`);
     await writeFile(entry, target === "vue"
-      ? `import { createApp, h } from "vue"; import { Button } from "@example/controls";
-        createApp({ render: () => h(Button, { label: "Save" }) }).mount("#app");`
+      ? `import { createApp } from "vue"; import App from "./App.vue"; createApp(App).mount("#app");`
       : `import React from "react"; import { createRoot } from "react-dom/client";
         import { Button } from "@example/controls";
         createRoot(document.getElementById("app")!).render(<Button label="Save" />);`);
@@ -156,6 +157,10 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
     assert.match(content, /rgb\(1, ?2, ?3\)/);
     assert.equal(content.includes("UNUSED_COMPONENT_MARKER"), false, "unused component markup entered the client bundle");
     assert.equal(content.includes("--unused-component-style"), false, "unused component CSS entered the client bundle");
+    await writeFile(entry, `import { UiUnused } from "@example/controls"; console.log(UiUnused);`);
+    await assert.rejects(build({ root, configFile: false, logLevel: "silent",
+      plugins: [htmlNext({ target }), target === "vue" ? vue() : react()],
+      build: { rollupOptions: { input: entry }, write: false } }), /optional-editor/);
   }, 60_000);
 
   it("resolves TypeScript ESM specifiers and TSX hops in a source barrel", async () => {
@@ -326,6 +331,21 @@ for (const target of ["vue", "react"] as const) it(`${target} supplies the sanit
 
 
 describe("svelte source adapter", () => {
+  it("omits an unused controller with an absent optional peer from a Svelte script import", async () => {
+    const { root } = await fixture({ optionalEditor: true });
+    await writeFile(join(root, "src", "App.svelte"), `<script>import { Button } from "@example/controls";</script><Button label="Save" />`);
+    const entry = join(root, "src", "client.ts");
+    await writeFile(entry, `import { mount } from "svelte"; import App from "./App.svelte"; mount(App, { target: document.getElementById("app")! });`);
+    const result = await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { rollupOptions: { input: entry }, write: false } });
+    const bundles = Array.isArray(result) ? result : [result];
+    const content = bundles.flatMap(bundle => "output" in bundle ? bundle.output : []).map(item => item.type === "asset" ? String(item.source) : item.code).join("\n");
+    assert.doesNotMatch(content, /UNUSED_COMPONENT_MARKER|--unused-component-style|optional-editor/);
+    await writeFile(entry, `import { UiUnused } from "@example/controls"; console.log(UiUnused);`);
+    await assert.rejects(build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { rollupOptions: { input: entry }, write: false } }), /optional-editor/);
+  }, 60_000);
+
   it("consumes a packed component folder without an authored index or build script", async () => {
     const { root, library } = await fixture();
     await installSourcePackage(root, {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.73
+
+- Resolve named framework imports through generated component entries and pure re-export barrels before bundling. Ordinary controls no longer pull in unused editor controllers or require their optional peers. Vue and Svelte script blocks retain their native parser boundaries and source maps; imports of the optional component itself still fail when its peer is missing.
+
+- Apply all initial bindings when a projected component finishes placement during an outer-state update. A repeated row no longer skips its own native attributes, such as a search destination, when its child first initializes while the selected result changes. Regression cases cover both fresh rendering and hydration against the live runtime.
+
 ## 1.0.0-alpha.72
 
 - Model React computed reads as nullable while their inputs are unavailable. Native attribute forwarding now omits that absence instead of passing null to boolean-only React props such as `inert`; a converted composition is checked with strict TypeScript.

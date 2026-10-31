@@ -8,6 +8,7 @@ import { convertComponents, type FrameworkTarget } from "@nextwebwg/html-next-co
 import ts from "typescript";
 import type { Plugin, ViteDevServer } from "vite";
 import { assertPackageSource, componentSources, packageDirectory, sourcePackages } from "./source-packages.js";
+import { FrameworkImports } from "./framework-imports.js";
 
 const run = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -90,6 +91,7 @@ function isSourceModule(path: string): boolean { return /\.(?:html|[cm]?[jt]sx?)
 
 class FrameworkCompiler {
   readonly aliases = new Map<string, string>();
+  readonly componentArtifacts = new Set<string>();
   readonly sources = new Set<string>();
   readonly root: string;
   readonly declarationsFile: string;
@@ -214,6 +216,7 @@ class FrameworkCompiler {
     const output = resolve(cache, "resources");
     await rm(output, { recursive: true, force: true });
     const manifest = await convertComponents({ ...this.conversion, root: packageRoot, entries: [...html], outDirectory: output, hostTypes });
+    for (const component of manifest.components) this.componentArtifacts.add(resolve(output, component.artifact));
     for (const path of manifest.sourceFiles) this.sources.add(resolve(packageRoot, path));
     await rm(resolve(cache, "resource-entries"), { recursive: true, force: true });
     const names = new Map(manifest.components.map((item) => [item.tag, item.name]));
@@ -413,6 +416,7 @@ export async function syncHtmlNext(options: FrameworkPluginOptions): Promise<Fra
 
 export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
   let compiler: FrameworkCompiler;
+  let imports: FrameworkImports;
   let current: FrameworkSyncResult;
   let server: ViteDevServer | undefined;
   let updates: Promise<void> = Promise.resolve();
@@ -420,6 +424,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
   const initialize = async (root: string) => {
     compiler = new FrameworkCompiler({ ...options, root: await realpath(resolve(options.root ?? root)) }, outDir);
     current = await compiler.prepare();
+    imports = new FrameworkImports(compiler.root, options.target, current.aliases, compiler.componentArtifacts);
   };
   /** Converts the app again, after a component file changes, appears or goes away. */
   const reload = (): Promise<void> => {
@@ -474,7 +479,10 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       server?.watcher.add([...compiler.sources]);
       return entry;
     },
-    transform(code, id) {
+    async transform(code, id) {
+      await updates;
+      const rewritten = await imports.rewrite(code, id);
+      if (rewritten !== undefined) return rewritten;
       if (!(options.target === "react" && id.endsWith(".tsx") || options.target === "svelte" && id.endsWith(".svelte")) ||
         !slash(id).includes(`/node_modules/.html-next/${options.target}/`)) return null;
       // A component has no import-time effect of its own. Its CSS must disappear with an unused export.
