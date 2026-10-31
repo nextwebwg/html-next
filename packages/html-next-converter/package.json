@@ -1,7 +1,7 @@
 {
   "name": "@nextwebwg/html-next-converter",
-  "version": "1.0.0-alpha.79",
-  "description": "Vue, React, and Svelte conversion for Declarative HTML Components.",
+  "version": "1.0.0-alpha.80",
+  "description": "Vue, React, Preact, and Svelte conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -28,7 +28,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.79"
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.80",
+    "typescript": "5.9.3"
   },
   "devDependencies": {
     "@formatjs/intl-durationformat": "0.11.1",
@@ -41,10 +42,11 @@
     "esbuild": "catalog:",
     "parse5": "catalog:",
     "playwright": "catalog:",
+    "preact": "11.1.0",
+    "preact-render-to-string": "6.8.2",
     "react": "catalog:",
     "react-dom": "catalog:",
     "svelte": "catalog:",
-    "typescript": "5.9.3",
     "vitest": "catalog:",
     "vue": "catalog:",
     "vue-tsc": "catalog:"

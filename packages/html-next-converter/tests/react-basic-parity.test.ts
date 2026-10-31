@@ -9,6 +9,8 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { createElement, type ComponentType } from "react";
 import { renderToString } from "react-dom/server";
+import * as Preact from "preact";
+import { renderToString as renderPreact } from "preact-render-to-string";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import ts from "typescript";
 
@@ -61,7 +63,7 @@ async function snapshot(page: Page): Promise<{ readonly text: string; readonly p
   };
 }
 
-describe.skipIf(!enabled)("React basic visual and behavior parity", () => {
+for (const target of ["react", "preact"] as const) describe.skipIf(!enabled)(`${target} basic visual and behavior parity`, () => {
   let directory = "";
   let liveBundle = "";
   const outputs = new Map<"application" | "library", { reactBundle: string; css: string; serverMarkup: string }>();
@@ -73,7 +75,7 @@ describe.skipIf(!enabled)("React basic visual and behavior parity", () => {
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, `out-${mode}`);
       const manifest = await convertComponents({
-        mode, target: "react", root: directory, outDirectory, entries: ["counter.html"],
+        mode, target, root: directory, outDirectory, entries: ["counter.html"],
       });
       const typeOptions: ts.CompilerOptions = {
         noEmit: true, strict: true, skipLibCheck: true, allowImportingTsExtensions: true,
@@ -93,9 +95,10 @@ describe.skipIf(!enabled)("React basic visual and behavior parity", () => {
       const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
       const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
       const reactEntry = join(outDirectory, "entry.tsx");
-      await writeFile(reactEntry, `import React from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
-import { XCounter } from "./react/${mode === "application" ? "application" : "index"}";
+      await writeFile(reactEntry, `/** @jsxImportSource ${target} */
+import React from "${target === "preact" ? "preact/compat" : "react"}";
+import { createRoot, hydrateRoot } from "${target === "preact" ? "preact/compat/client" : "react-dom/client"}";
+import { XCounter } from "./${target}/${mode === "application" ? "application" : "index"}";
 const mount = document.querySelector("main")!;
 if (mount.hasChildNodes()) hydrateRoot(mount, <XCounter />);
 else createRoot(mount).render(<XCounter />);`);
@@ -111,7 +114,8 @@ else createRoot(mount).render(<XCounter />);`);
       });
       const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
       new Function("require", "module", "exports", server.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-      const serverMarkup = renderToString(createElement(module.exports.XCounter!));
+      const serverMarkup = target === "preact" ? renderPreact(Preact.createElement(module.exports.XCounter! as unknown as Preact.ComponentType, {}))
+        : renderToString(createElement(module.exports.XCounter!));
       outputs.set(mode, { reactBundle, css, serverMarkup });
     }
     liveBundle = join(directory, "live.js");

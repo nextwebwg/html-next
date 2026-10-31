@@ -255,7 +255,7 @@ process.stdout.write("ok");
     writeFileSync(source, `<template component="ui-label" status="early" summary="Label."><defs><prop name="label" type="string" required>Label.</prop></defs><output $value="$label"></output></template>`);
     const checkCli = join(consumer, "node_modules/@nextwebwg/html-next-unplugin/dist/check-cli.js");
     const filesBeforeCheck = readdirSync(consumer, { recursive: true }).map(String).sort();
-    for (const target of ["native", "vue", "react", "svelte"]) {
+    for (const target of ["native", "vue", "react", "preact", "svelte"]) {
       const output = execFileSync(process.execPath, [checkCli, "--target", target, "--mode", "library", "controls.html", "--json"],
         { cwd: consumer, encoding: "utf8" });
       expect(JSON.parse(output)).toEqual({ diagnostics: [] });
@@ -266,6 +266,8 @@ process.stdout.write("ok");
     expect(existsSync(join(consumer, "bin-build/vanilla/UiLabel.js"))).toBe(true);
     runBin(consumer, "html-next-convert", ["vue", "controls.html", "--mode", "library", "--out-dir", "bin-vue"]);
     expect(existsSync(join(consumer, "bin-vue/vue/UiLabel.vue"))).toBe(true);
+    runBin(consumer, "html-next-convert", ["preact", "controls.html", "--mode", "library", "--out-dir", "bin-preact"]);
+    expect(existsSync(join(consumer, "bin-preact/preact/UiLabel.tsx"))).toBe(true);
     const invalid = join(consumer, "invalid.html");
     writeFileSync(invalid, '<template component="ui-invalid">\n  <ui-missing></ui-missing>\n</template>');
     const failedCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--json"], { cwd: consumer, encoding: "utf8" });
@@ -354,7 +356,7 @@ process.stdout.write("ok");
     // Windows runners have measured 82-133 s for this install, build and type-check sequence.
   }, 300_000);
 
-  for (const [target, viteVersion] of [["svelte", "8.3.4"], ["vue", "7.2.7"]] as const) {
+  for (const [target, viteVersion] of [["svelte", "8.3.4"], ["vue", "7.2.7"], ["preact", "8.3.4"]] as const) {
     it.skipIf(!includesPackage("html-next-converter", "html-next-unplugin"))(`builds a packed ${target} source consumer with Vite ${viteVersion}`, () => {
       const tarballs = ["html-next", "html-next-converter", "html-next-unplugin"].map(pack);
       const consumer = join(workspace, `framework-${target}`);
@@ -362,7 +364,7 @@ process.stdout.write("ok");
       writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: `framework-${target}`, private: true, type: "module" }));
       const tooling = join(root, "packages/html-next-unplugin/node_modules");
       const version = (name: string) => JSON.parse(readFileSync(join(tooling, name, "package.json"), "utf8")).version;
-      const compiler = target === "svelte" ? "@sveltejs/vite-plugin-svelte" : "@vitejs/plugin-vue";
+      const compiler = target === "svelte" ? "@sveltejs/vite-plugin-svelte" : target === "preact" ? "@preact/preset-vite" : "@vitejs/plugin-vue";
       execFileSync("npm", ["install", "--strict-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund", ...tarballs,
         `vite@${viteVersion}`, `${target}@${version(target)}`, `${compiler}@${version(compiler)}`], { cwd: consumer, shell: useCommandShell });
       execFileSync("npm", ["ls", "vite", "--all", "--json"], { cwd: consumer, encoding: "utf8" });
@@ -377,10 +379,12 @@ process.stdout.write("ok");
       writeFileSync(join(library, "components/label.html"), '<template component="ui-label"><defs><prop name="label" type="string" default="Ready">Label.</prop></defs><output>{$label}</output></template>');
       writeFileSync(join(consumer, "vite.config.mjs"), `import htmlNext from "@nextwebwg/html-next-unplugin/vite";
 ${target === "svelte" ? `import { svelte as framework } from "${compiler}";` : `import framework from "${compiler}";`}
-export default { plugins: [htmlNext({ target: "${target}" }), framework()], build: { lib: { entry: "main.js", formats: ["iife"], name: "PackedConsumer", fileName: () => "client.js" } } };`);
+export default { plugins: [htmlNext({ target: "${target}" }), framework()], build: { lib: { entry: "${target === "preact" ? "main.tsx" : "main.js"}", formats: ["iife"], name: "PackedConsumer", fileName: () => "client.js" } } };`);
       if (target === "svelte") {
         writeFileSync(join(consumer, "App.svelte"), '<script>import { UiLabel } from "@example/controls";</script><UiLabel label="Packed source" />');
         writeFileSync(join(consumer, "main.js"), 'import { mount } from "svelte"; import App from "./App.svelte"; mount(App, { target: document.body });');
+      } else if (target === "preact") {
+        writeFileSync(join(consumer, "main.tsx"), 'import { render } from "preact"; import { UiLabel } from "@example/controls"; render(<UiLabel label="Packed source" />, document.body);');
       } else {
         writeFileSync(join(consumer, "App.vue"), '<script setup>import { UiLabel } from "@example/controls";</script><template><UiLabel label="Packed source" /></template>');
         writeFileSync(join(consumer, "main.js"), 'import { createApp } from "vue"; import App from "./App.vue"; createApp(App).mount(document.body);');

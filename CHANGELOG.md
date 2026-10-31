@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.80
+
+### Added
+
+- Convert HTML component graphs to Preact 11.1 TSX with `target: "preact"` or `html-next-convert preact`. Generated components and feature helpers import `preact/compat`, use Preact JSX types and runtime, and preserve separate CSS. The Vite adapter discovers source libraries and local HTML imports, prepares consumer declarations, and prunes unused components and styles. Preact consumers do not need React installed.
+
 ## 1.0.0-alpha.79
 
 ### Fixed

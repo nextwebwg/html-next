@@ -2,7 +2,7 @@
 import { bindingRevertSource, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
-import { compilePath, type ExpressionNode } from "../expression.js";
+import { compilePath, isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
 import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
@@ -37,7 +37,7 @@ const REACT_RESERVED = new Set([
   "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
-  "props", "nativeAttrs", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "props", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
   "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
@@ -84,10 +84,12 @@ function pascal(name: string): string {
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
-const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTextarea", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
+  /** Preact shares JSX lowering while retaining its own DOM attribute and ref behavior. */
+  readonly target?: "react" | "preact";
   /**
    * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
@@ -153,6 +155,7 @@ interface EventAttachment {
 }
 
 interface RenderState {
+  readonly preact: boolean;
   readonly definition: ComponentDefinition;
   readonly observe: (scope: Scope) => Scope;
   readonly status: (name: string, read: string) => string | undefined;
@@ -528,10 +531,14 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const component = node.name.includes("-") && getDomInterface(node.name) === undefined;
   const outputValue = node.name === "output" && node.attributes.some((attribute) =>
     attribute.kind === "directive" && attribute.name === "value");
+  const controlledNames = new Set(node.attributes.filter((attribute) =>
+    attribute.kind === "attribute" && attribute.twoWay === true ||
+    attribute.kind === "property" && ["input", "textarea", "select"].includes(node.name) && ["value", "checked"].includes(attribute.name)
+  ).map((attribute) => attribute.name));
   // React DOM rewrites an input's name and type, and a textarea's default, whenever it commits one.
-  const memoControl = !component && !outputValue && !inSvg && (node.name === "input" || node.name === "textarea");
+  const memoControl = !component && !outputValue && !inSvg && (node.name === "input" || node.name === "textarea" || state.preact && node.name === "select" && controlledNames.has("value"));
   const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : memoControl
-    ? node.name === "input" ? "HtmlNextInput" : "HtmlNextTextarea" : node.name;
+    ? node.name === "input" ? "HtmlNextInput" : node.name === "select" ? "HtmlNextSelect" : "HtmlNextTextarea" : node.name;
   const svg = !component && (inSvg || node.name === "svg");
   if (component) imports.add(node.name);
   const componentContracts = component ? state.propContractsByTag?.get(node.name) : undefined;
@@ -560,12 +567,18 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const reactiveStyles: string[] = [];
   const importantStyles: Array<{ readonly name: string; readonly value: string }> = [];
   const properties: Array<{ readonly name: string; readonly value: string; readonly accepts?: string }> = [];
+  // HTML attribute names are case-insensitive; uppercase bypasses Preact's case-sensitive
+  // DOM-property lookup for attributes whose property has different behavior (output.value, constructor).
+  const nativeAttribute = (name: string): boolean => state.preact && !component && !svg &&
+    (name === "constructor" || name === "value" && !["input", "textarea", "select", "option"].includes(node.name));
+  const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string => {
+    const value = lowering.attribute(node, valueScope, name);
+    return state.preact && isEnumeratedBoolean(name) ? `(${value})?.toString()` : value;
+  };
+  const attributeBinding = (name: string, value: string): string => nativeAttribute(name)
+    ? `{...{ ${quote(name.toUpperCase())}: ${value} }}` : `${reactAttribute(name, svg)}={${value}}`;
   const genericWrites: Array<{ readonly state: string; readonly path: string; readonly dynamic: boolean }> = [];
   let scopedAttachment: { readonly attachment: EventAttachment; readonly ref: string; readonly paths: readonly string[] } | undefined;
-  const controlledNames = new Set(node.attributes.filter((attribute) =>
-    attribute.kind === "attribute" && attribute.twoWay === true ||
-    attribute.kind === "property" && ["input", "textarea", "select"].includes(node.name) && ["value", "checked"].includes(attribute.name)
-  ).map((attribute) => attribute.name));
   let control: EventAttachment["control"];
   let content: string | undefined;
   for (const attribute of node.attributes) {
@@ -582,6 +595,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
         literals.push(`${propKey(name)}={${accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`}}`);
       }
+      else if (nativeAttribute(attribute.name)) literals.push(attributeBinding(attribute.name, quote(attribute.value)));
       else if (isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
       else if (NUMERIC_ATTRIBUTES.has(attribute.name) && /^[+-]?\d+$/.test(attribute.value)) literals.push(`${reactAttribute(attribute.name, svg)}={${Number(attribute.value)}}`);
       else if (!component && ["input", "textarea", "select"].includes(node.name) && attribute.name === "value") literals.push(`defaultValue=${quote(attribute.value)}`);
@@ -638,7 +652,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           : `${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else {
         genericWrites.push({ state: attribute.writablePath[0], path: pathSource, dynamic });
-        bindings.push(`{...{ ${quote(attribute.name)}: ${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)} }}`);
+        bindings.push(`{...{ ${quote(nativeAttribute(attribute.name) ? attribute.name.toUpperCase() : attribute.name)}: ${attributeValue(attribute.expressionPlan.ast, scope, attribute.name)} }}`);
       }
     } else if (attribute.kind === "attribute" && attribute.twoWay !== true && attribute.target === undefined) {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
@@ -647,7 +661,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const componentPropContract = componentPropName === undefined ? undefined : componentContracts?.[componentPropName];
       const value = component && (componentPropName !== undefined || state.propsByTag?.get(node.name) === undefined)
         ? lowering.value(attribute.expressionPlan.ast, scope)
-        : lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
+        : attributeValue(attribute.expressionPlan.ast, scope, attribute.name);
       const nativeValue = componentPropContract === undefined && (typeOf(attribute.expressionPlan.ast, scope).nullable || typeOf(attribute.expressionPlan.ast, scope).null === true) ? `(${value}) ?? undefined` : value;
       const sourceGuard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (node.name === "input" && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
@@ -698,9 +712,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope),
           ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }) });
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
-        const rendered = lowering.attribute({ kind: "id", name: alias }, aliasScope, attribute.name);
-        bindings.push(`${reactAttribute(attribute.name, svg)}={${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered}}`);
-      } else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
+        const rendered = attributeValue({ kind: "id", name: alias }, aliasScope, attribute.name);
+        bindings.push(attributeBinding(attribute.name, typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered));
+      } else if (nativeAttribute(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
+      else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
     } else if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled property ${attribute.expression}.`);
       const value = lowering.value(attribute.expressionPlan.ast, scope);
@@ -858,7 +873,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const reflections = boundReflections.length === 0 ? rootTag?.reflections ?? []
     : [`{...(Object.assign({}, reflectedAttrs, { ${boundReflections.join(", ")} }) as Record<string, unknown>)}`];
   if (inputBindings.length > 0) bindings.push(`{...{ [BINDING_INPUTS_PROP]: { ${inputBindings.join(", ")} } }}`);
-  const attributes = [...literals, ...(rootTag === undefined ? [] : ["{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
+  const attributes = [...literals, ...(rootTag === undefined ? [] : [state.preact && !svg ? "{...nativeAttributes}" : "{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
       `data-component={[nativeAttrs["data-component"], ${quote(rootTag.tag)}].filter(Boolean).join(" ")}`,
@@ -922,6 +937,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const stateOwners = new Map(initializedStates.map(state => [state.name, allocate(`${valueNames.get(state.name)!}Seed`)] as const));
   const contextEntries = new Map(contexts.map((context, index) => [context.as ?? context.name, `__context${index}!`] as const));
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
+  const invalidateSetterName = invalidateStateName !== "" && options.target === "preact" ? allocate("rerenderTick") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
   const stateWritesName = invalidateStateName === "" ? "" : allocate("stateWrites");
   const handlerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextHandlerComputed${index}`)] as const));
@@ -1018,7 +1034,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
   const styles = compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
-  const renderState: RenderState = { definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
+  const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
       : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : declarationStatus(name, read)), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
     nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
@@ -1147,6 +1163,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ]),
     `  const { children: _children, slots: _slots, ${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
       .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
+    ...(options.target === "preact" ? [
+      "  const { constructor: _nativeConstructor, ...nativeAttributes } = nativeAttrs;",
+      '  if (Object.hasOwn(nativeAttrs, "constructor")) Object.assign(nativeAttributes, { CONSTRUCTOR: _nativeConstructor });',
+    ] : []),
     ...(target.props.length > 0 || usesNativeControls ? [
       "  const hasMounted = React.useRef(false);",
       "  React.useLayoutEffect(() => { hasMounted.current = true; }, []);",
@@ -1200,7 +1220,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }
       return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}${stateSubscriptions.has(state.name) ? `, ${stateSubscriptions.get(state.name)!}` : ""}${stateTouches.has(state.name) ? `, ${stateTouches.get(state.name)!}` : ""}] = useLiveState<${stateType(state)}>(${initial}${stateWritesName === "" ? "" : `, ${stateWritesName}.current, ${quote(state.name)}`});`;
     }),
-    ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
+    ...(invalidateStateName === "" ? [] : invalidateSetterName === "" ? [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`] : [
+      `  const [, ${invalidateSetterName}] = React.useState(0);`,
+      `  const ${invalidateStateName} = React.useCallback(() => ${invalidateSetterName}(revision => revision + 1), []);`,
+    ]),
     ...data.map((declaration) => {
       const parameters = declaration.parameters.map((parameter) =>
         `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
@@ -1259,7 +1282,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(capturesRoot ? [
       `  const rootRef = React.useRef<${publicRootType} | null>(null);`,
       ...(preservesRootFocus ? ["  const rootFocusPending = React.useRef(false);"] : []),
-      "  React.useImperativeHandle(props.ref, () => rootRef.current!, undefined);",
+      "  React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);",
     ] : []),
     ...(target.props.length === 0 ? [] : [
       `  const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { ...prop, type: validityType(prop) }])) })} as const;`,

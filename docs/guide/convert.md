@@ -7,7 +7,7 @@ eyebrow: HTML Next · Conversion
 
 # Convert once. Build with your framework.
 
-Turn your HTML component definitions into Vue, React, or Svelte source files that you can inspect, build, and distribute with ordinary framework tooling.
+Turn your HTML component definitions into Vue, React, Preact, or Svelte source files that you can inspect, build, and distribute with ordinary framework tooling.
 
 ## Install the converter
 
@@ -15,7 +15,7 @@ Turn your HTML component definitions into Vue, React, or Svelte source files tha
 npm install --save-dev @nextwebwg/html-next-converter
 ```
 
-The CLI is `html-next-convert`. The examples below use `npx` to run the installed command. Targets are Vue 3.5, React 19.3, and Svelte 5.57.1.
+The CLI is `html-next-convert`. The examples below use `npx` to run the installed command. Targets are Vue 3.5, React 19.3, Preact 11.1.0, and Svelte 5.57.1.
 
 ## Convert a library
 
@@ -24,6 +24,7 @@ Run the command for your target from your project root. Quote the glob so the co
 ```bash
 npx html-next-convert vue 'components/**' --mode library --out-dir generated/vue-target
 npx html-next-convert react 'components/**' --mode library --out-dir generated/react-target
+npx html-next-convert preact 'components/**' --mode library --out-dir generated/preact-target
 npx html-next-convert svelte 'components/**' --mode library --out-dir generated/svelte-target
 ```
 
@@ -33,9 +34,14 @@ Each component that declares a controller also gets its [typed host](/html-next/
 | --- | --- | --- |
 | Vue 3.5 | `.vue` single-file components | `<style scoped>` |
 | React 19.3 | `.tsx` components | Adjacent imported `.css` files |
+| Preact 11.1.0 | `.tsx` components using `preact/compat` | Adjacent imported `.css` files |
 | Svelte 5.57.1 | `.svelte` single-file components | `<style>` |
 
 The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
+
+Preact components use Preact JSX and public types. Build them with `@preact/preset-vite`,
+mount with `render`, hydrate with `hydrate`, and server-render with `preact-render-to-string`.
+The generated output needs Preact 11.1.0 or later and does not require React.
 
 Svelte conversion is available and uses the standard, unpatched framework. A known upstream
 limitation affects focused inputs when keyed rows reorder: the edited value and selection remain,
@@ -66,7 +72,7 @@ Use the [Usage guide](/html-next/usage). It converts local imports and installed
 
 ## Publish HTML instead {#source-libraries}
 
-For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, React, or Svelte. You do not need a library build script.
+For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, React, Preact, or Svelte. You do not need a library build script.
 
 ## Diagnostics
 

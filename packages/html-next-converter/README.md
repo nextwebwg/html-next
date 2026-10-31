@@ -1,7 +1,7 @@
 # `@nextwebwg/html-next-converter`
 
 Converts a Declarative Components application or library graph into Vue 3.5 or Svelte 5 single-file
-components, or React 19.3 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
+components, or React 19.3 and Preact 11.1 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
 its nested components, its component module (copied beside it), and only the generated helpers its
 features need. A Vue component using
 `$html` imports `vue/html.ts`; that helper requires `parse5` as an application dependency for
@@ -64,7 +64,7 @@ conversion emits an `index.ts` entry whose named exports are independently consu
 emit `html-next.conversion.json`, which records the input entries, output entry, every artifact,
 the target version, and package-shaped `dependencies` and `peerDependencies`. Copy the relevant
 fields from `package` into the published package's `package.json`. `parse5` appears in
-`dependencies` only when an emitted `$html` helper needs it; Vue, React, or Svelte appears in
+`dependencies` only when an emitted `$html` helper needs it; Vue, React, Preact, or Svelte appears in
 `peerDependencies` for its respective output. Dependencies imported by authored component
 modules remain the publisher's responsibility.
 
@@ -75,6 +75,17 @@ Invalid definitions retain HTML Next's source-located `HT` diagnostics. A valid 
 conversion cannot map produces source-located `HTC001` with the underlying code. Colliding generated
 paths produce `HTC002` before any output is written, and an unsupported target version produces
 `HTC003` before the graph is loaded.
+
+Preact output uses the shared React lowering with explicit `preact/compat` imports and
+`@jsxImportSource preact` directives. Components and helpers live under `generated/preact/`,
+with adjacent CSS and Preact's own public types. React is not a dependency of this output.
+The supported baseline is Preact 11.1.0; Preact 11 provides the ref-as-prop behavior these
+components use. Mount with Preact's `render`, hydrate with `hydrate`, and server-render with
+`preact-render-to-string`. Compile TSX with the standard `@preact/preset-vite` plugin.
+
+```sh
+html-next-convert preact 'components/**' --mode library --out-dir generated
+```
 
 React output accepts the same quoted globs and mirrors the same source
 directories under `generated/react/`, emitting `.tsx` and adjacent plain `.css` files. The CSS is
@@ -122,25 +133,26 @@ React applications use their usual `hydrateRoot` call and error options. If the 
 incompatible, React reports the recovery through `onRecoverableError` (or its default reporting);
 the converter does not generate an `HR005` hydration entry or replace React's recovery flow.
 
-For source-only distribution with automatic Vue, React, or Svelte conversion in the consuming app,
+For source-only distribution with automatic Vue, React, Preact, or Svelte conversion in the consuming app,
 use the [Vite adapter](../html-next-unplugin/README.md#framework-source-imports). It also
 generates consumer declarations, so publishers do not need separate framework copies.
 
-To distribute preconverted copies of one authored library in all four forms, assemble the native HTML Next package from
-the `.html` sources, then run the Vue, React, and Svelte library converters over the same quoted glob. Give
+To distribute preconverted copies of one authored library in all five forms, assemble the native HTML Next package from
+the `.html` sources, then run the Vue, React, Preact, and Svelte library converters over the same quoted glob. Give
 each conversion its own output directory so each `html-next.conversion.json` manifest survives:
 
 ```sh
 html-next-convert vue 'components/**' --mode library --out-dir package/converted/vue-target
 html-next-convert react 'components/**' --mode library --out-dir package/converted/react-target
+html-next-convert preact 'components/**' --mode library --out-dir package/converted/preact-target
 html-next-convert svelte 'components/**' --mode library --out-dir package/converted/svelte-target
 ```
 
-The package can expose the native entry and the converted Vue, React, and Svelte entries as
-separate subpaths. If publishing source output, point `./vue`, `./react`, and `./svelte` at the generated
-`vue/index.ts`, `react/index.ts`, and `svelte/index.ts`, include their component files and CSS, merge the conversion
+The package can expose the native entry and the converted Vue, React, Preact, and Svelte entries as
+separate subpaths. If publishing source output, point `./vue`, `./react`, `./preact`, and `./svelte` at the generated
+`vue/index.ts`, `react/index.ts`, `preact/index.ts`, and `svelte/index.ts`, include their component files and CSS, merge the conversion
 inventories' `package.dependencies` and `package.peerDependencies` into the package manifest,
-and mark Vue, React, and Svelte as optional peers when each subpath is independently usable. Consumers
+and mark Vue, React, Preact, and Svelte as optional peers when each subpath is independently usable. Consumers
 then compile `.vue`, `.tsx`, and `.svelte` with their normal bundler plugins. For precompiled distribution,
 emit JavaScript and declarations from those entries and point exports at the built files. The
 [installed-library test](./tests/library-distribution.test.ts) packs and installs the source-output
@@ -178,7 +190,7 @@ are read through `host.data.name`, including their readonly response and status 
 authored state assignments retain the prior value and warn; native control edits retain their
 ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host(:state(state))`.
 
-Vue, React and Svelte conversion support an editable initial value with `<state from="$product">`.
+Vue, React, Preact and Svelte conversion support an editable initial value with `<state from="$product">`.
 Initialization waits for the expression's inputs to become available; the first accepted local
 write takes ownership immediately. Refreshes never overwrite the draft. `$await`/`$error`/`$else`
 work with these states and their inherited context, as with typed props and computed values.
@@ -211,4 +223,4 @@ an imported component, so its page-wide head entries are left out. A declared sc
 is relative to its component, such as `./vendor/sdk.js`, resolves at conversion against the
 component's `publicRootURL` URL, which it requires, as a component-relative `<data src>` does.
 
-Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).
+Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Preact, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).

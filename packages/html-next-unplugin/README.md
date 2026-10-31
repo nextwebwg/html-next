@@ -1,6 +1,6 @@
 # `@nextwebwg/html-next-unplugin`
 
-Vite can convert imported Declarative Components sources into Vue, React, or Svelte components. Libraries
+Vite can convert imported Declarative Components sources into Vue, React, Preact, or Svelte components. Libraries
 publish their HTML definitions; consumers use their normal component imports.
 
 Named imports from component folders and pure re-export barrels resolve directly to the requested
@@ -151,6 +151,23 @@ export default defineConfig({
 ```
 
 For React, use `target: "react"` with `@vitejs/plugin-react` in place of the Vue plugin.
+For Preact 11.1.0 or later, configure the Preact target with its standard preset:
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import preact from "@preact/preset-vite";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+export default defineConfig({
+  plugins: [htmlNext({ target: "preact" }), preact()],
+});
+```
+
+Generated output imports `preact/compat` and uses Preact JSX. Consumers install `preact`;
+SSR consumers also install `preact-render-to-string`. Prepare declarations with
+`html-next-sync`, then run `tsc` with `jsx: "react-jsx"` and `jsxImportSource: "preact"`.
+
 For Svelte 5, use its standard Vite compiler after the converter:
 
 ```ts
@@ -197,7 +214,7 @@ and consumption instructions.
 
 Explicit subpaths can point to another component folder or directly to an HTML file. Only
 concrete `html-next` export conditions opt into conversion; wildcard exports are not discovered.
-The folder scan does not follow symlinks. For Vue and React, an authored JS/TS barrel can supply
+The folder scan does not follow symlinks. For Vue, React, and Preact, an authored JS/TS barrel can supply
 aliases instead of exposing every component in a folder:
 
 ```json
@@ -233,7 +250,7 @@ Vite prepares these files automatically at startup and during builds. Before sta
 }
 ```
 
-For React, replace `vue-tsc` with `tsc`; for Svelte, use `svelte-check`. `html-next-sync` loads your Vite config; you do not
+For React and Preact, replace `vue-tsc` with `tsc`; for Svelte, use `svelte-check`. `html-next-sync` loads your Vite config; you do not
 repeat the target or package list. An API is also available:
 
 ```ts

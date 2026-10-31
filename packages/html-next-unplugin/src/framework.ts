@@ -296,6 +296,7 @@ class FrameworkCompiler {
     const config = resolve(cache, "tsconfig.json");
     await writeFile(config, JSON.stringify({ compilerOptions: {
       target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "react-jsx",
+      ...(this.options.target === "preact" ? { jsxImportSource: "preact" } : {}),
       strict: true, skipLibCheck: true, allowJs: true, checkJs: false, allowImportingTsExtensions: true,
       declaration: true, emitDeclarationOnly: true, noEmitOnError: this.options.target !== "svelte",
       rootDir: cache, outDir: output, types: [], noUncheckedSideEffectImports: false,
@@ -496,7 +497,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       await updates;
       const rewritten = await imports.rewrite(code, id);
       if (rewritten !== undefined) return rewritten;
-      if (!(options.target === "react" && id.endsWith(".tsx") || options.target === "svelte" && id.endsWith(".svelte")) ||
+      if (!((options.target === "react" || options.target === "preact") && id.endsWith(".tsx") || options.target === "svelte" && id.endsWith(".svelte")) ||
         !slash(id).includes(`/node_modules/.html-next/${options.target}/`)) return null;
       // A component has no import-time effect of its own. Its CSS must disappear with an unused export.
       return { code, moduleSideEffects: false };
