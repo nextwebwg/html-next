@@ -1,7 +1,7 @@
 # `@nextwebwg/html-next-converter`
 
 Converts a Declarative Components application or library graph into Vue 3.5 or Svelte 5 single-file
-components, or React 19.3 and Preact 11.1 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
+components, React 19.3 and Preact 11.1 TSX components, or Angular 21.2 standalone components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
 its nested components, its component module (copied beside it), and only the generated helpers its
 features need. A Vue component using
 `$html` imports `vue/html.ts`; that helper requires `parse5` as an application dependency for
@@ -64,7 +64,7 @@ conversion emits an `index.ts` entry whose named exports are independently consu
 emit `html-next.conversion.json`, which records the input entries, output entry, every artifact,
 the target version, and package-shaped `dependencies` and `peerDependencies`. Copy the relevant
 fields from `package` into the published package's `package.json`. `parse5` appears in
-`dependencies` only when an emitted `$html` helper needs it; Vue, React, Preact, or Svelte appears in
+`dependencies` only when an emitted `$html` helper needs it; Vue, React, Preact, Svelte, or Angular appears in
 `peerDependencies` for its respective output. Dependencies imported by authored component
 modules remain the publisher's responsibility.
 
@@ -86,6 +86,34 @@ components use. Mount with Preact's `render`, hydrate with `hydrate`, and server
 ```sh
 html-next-convert preact 'components/**' --mode library --out-dir generated
 ```
+
+Angular output uses standalone components on native attribute selectors. Import `UiButton` into
+an Angular component's `imports` and invoke it as `<button ui-button>`. Delegated roots compose
+into one Angular component; the native host retains attributes such as `ui-action` and `ui-button`,
+and CSS identity selectors use those attributes. Angular signals own state and computed values;
+Angular templates own structural views, SSR, and hydration. Styles use the converter's native
+scoping rules with `ViewEncapsulation.None`.
+
+```sh
+html-next-convert angular 'components/**' --mode library --out-dir generated
+```
+
+Build generated TypeScript with `@angular/compiler-cli` and a TypeScript version compatible with
+your Angular installation. Publish source or use Angular's partial compilation for library output.
+The baseline is Angular 21.2.24. The manifest adds `@angular/core` as a peer, plus `@angular/common`
+when template outlets are used. See the [Angular Vite setup](../html-next-unplugin/README.md#angular)
+for compiler-visible source imports and typed `<ng-template>` slots.
+
+Declared events remain native `CustomEvent`s on the host. Bind with Angular's `(saved)="receive($event)"`;
+inside a TypeScript handler, cast `Event` to the exported `UiButtonEvents["saved"]` type for its detail.
+
+Angular conversion covers ordinary and dependent inputs, mutable and computed state, context,
+native events and declared requests, refs, browser modules/controllers, data reads, head/scripts,
+plain and scoped slots, native form bindings, and sanitized `$html` on native elements.
+Root-replacing structural flow, recursive components, component two-way bindings, multiple two-way bindings on one control, selects with
+structural or projected options, inline `<template $html>`, and raw HTML regions containing authored child
+views produce conversion diagnostics. Browser modules connect after hydration; this target does
+not prepare module outputs during SSR.
 
 React output accepts the same quoted globs and mirrors the same source
 directories under `generated/react/`, emitting `.tsx` and adjacent plain `.css` files. The CSS is

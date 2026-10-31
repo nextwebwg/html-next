@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/htmlkit",
-  "version": "1.0.0-alpha.80",
+  "version": "1.0.0-alpha.81",
   "description": "HTML Next application platform: file-based routes, layouts, loaders, and static deployment.",
   "license": "MIT",
   "type": "module",
@@ -35,7 +35,7 @@
     "measure:server": "tsx scripts/measure-server.ts"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.80",
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.81",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2",
     "vite": "catalog:",
     "parse5": "catalog:"

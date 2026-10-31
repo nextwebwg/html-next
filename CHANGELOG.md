@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-alpha.81
+
+### Added
+
+- Convert HTML component graphs to Angular 21.2 standalone components with `target: "angular"` or `html-next-convert angular`. Native attribute selectors preserve roots such as `<button ui-button>`; delegated roots compose into one component and retain identity attributes for CSS. The Vite adapter compiles generated components ahead of time, links Angular dependencies, and prepares compiler-visible input and slot types.
+
+### Fixed
+
+- Shared generated prop checks tolerate server Event implementations without a prototype type getter. Document-head rendering uses core DOM methods and URL resolution available in Angular SSR, and retains declared-script preloads through later reconciliation.
+
 ## 1.0.0-alpha.80
 
 ### Added

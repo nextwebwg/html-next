@@ -7,7 +7,7 @@ eyebrow: HTML Next · Conversion
 
 # Convert once. Build with your framework.
 
-Turn your HTML component definitions into Vue, React, Preact, or Svelte source files that you can inspect, build, and distribute with ordinary framework tooling.
+Turn your HTML component definitions into Vue, React, Preact, Svelte, or Angular source files that you can inspect, build, and distribute with ordinary framework tooling.
 
 ## Install the converter
 
@@ -15,7 +15,7 @@ Turn your HTML component definitions into Vue, React, Preact, or Svelte source f
 npm install --save-dev @nextwebwg/html-next-converter
 ```
 
-The CLI is `html-next-convert`. The examples below use `npx` to run the installed command. Targets are Vue 3.5, React 19.3, Preact 11.1.0, and Svelte 5.57.1.
+The CLI is `html-next-convert`. The examples below use `npx` to run the installed command. Targets are Vue 3.5, React 19.3, Preact 11.1.0, Svelte 5.57.1, and Angular 21.2.24.
 
 ## Convert a library
 
@@ -26,6 +26,7 @@ npx html-next-convert vue 'components/**' --mode library --out-dir generated/vue
 npx html-next-convert react 'components/**' --mode library --out-dir generated/react-target
 npx html-next-convert preact 'components/**' --mode library --out-dir generated/preact-target
 npx html-next-convert svelte 'components/**' --mode library --out-dir generated/svelte-target
+npx html-next-convert angular 'components/**' --mode library --out-dir generated/angular-target
 ```
 
 Each component that declares a controller also gets its [typed host](/html-next/usage#typed-host), `<tag>.host.d.ts`, beside its definition. A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
@@ -35,6 +36,7 @@ Each component that declares a controller also gets its [typed host](/html-next/
 | Vue 3.5 | `.vue` single-file components | `<style scoped>` |
 | React 19.3 | `.tsx` components | Adjacent imported `.css` files |
 | Preact 11.1.0 | `.tsx` components using `preact/compat` | Adjacent imported `.css` files |
+| Angular 21.2.24 | `.ts` standalone components with native attribute selectors | Native scoped CSS in component metadata |
 | Svelte 5.57.1 | `.svelte` single-file components | `<style>` |
 
 The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
@@ -72,7 +74,7 @@ Use the [Usage guide](/html-next/usage). It converts local imports and installed
 
 ## Publish HTML instead {#source-libraries}
 
-For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, React, Preact, or Svelte. You do not need a library build script.
+For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, React, Preact, Svelte, or Angular. You do not need a library build script.
 
 ## Diagnostics
 

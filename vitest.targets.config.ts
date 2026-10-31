@@ -72,6 +72,7 @@ config.test!.include = [
   "packages/html-next-converter/tests/library-distribution.test.ts",
   "packages/html-next-unplugin/tests/framework.test.ts",
   "packages/html-next-unplugin/tests/preact-framework.test.ts",
+  "packages/html-next-unplugin/tests/angular-framework.test.ts",
 ];
 
 export default config;

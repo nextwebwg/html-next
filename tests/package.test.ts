@@ -255,7 +255,7 @@ process.stdout.write("ok");
     writeFileSync(source, `<template component="ui-label" status="early" summary="Label."><defs><prop name="label" type="string" required>Label.</prop></defs><output $value="$label"></output></template>`);
     const checkCli = join(consumer, "node_modules/@nextwebwg/html-next-unplugin/dist/check-cli.js");
     const filesBeforeCheck = readdirSync(consumer, { recursive: true }).map(String).sort();
-    for (const target of ["native", "vue", "react", "preact", "svelte"]) {
+    for (const target of ["native", "vue", "react", "preact", "svelte", "angular"]) {
       const output = execFileSync(process.execPath, [checkCli, "--target", target, "--mode", "library", "controls.html", "--json"],
         { cwd: consumer, encoding: "utf8" });
       expect(JSON.parse(output)).toEqual({ diagnostics: [] });
@@ -268,6 +268,8 @@ process.stdout.write("ok");
     expect(existsSync(join(consumer, "bin-vue/vue/UiLabel.vue"))).toBe(true);
     runBin(consumer, "html-next-convert", ["preact", "controls.html", "--mode", "library", "--out-dir", "bin-preact"]);
     expect(existsSync(join(consumer, "bin-preact/preact/UiLabel.tsx"))).toBe(true);
+    runBin(consumer, "html-next-convert", ["angular", "controls.html", "--mode", "library", "--out-dir", "bin-angular"]);
+    expect(readFileSync(join(consumer, "bin-angular/angular/UiLabel.ts"), "utf8")).toContain('output[ui-label]');
     const invalid = join(consumer, "invalid.html");
     writeFileSync(invalid, '<template component="ui-invalid">\n  <ui-missing></ui-missing>\n</template>');
     const failedCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--json"], { cwd: consumer, encoding: "utf8" });

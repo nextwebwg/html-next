@@ -495,7 +495,7 @@ export interface HtmlNextCheckDiagnostic extends HtmlDiagnostic {
 export async function checkHtmlNext(options: HtmlNextCheckOptions = {}): Promise<readonly HtmlNextCheckDiagnostic[]> {
   try {
     const warnings: HtmlDiagnostic[] = [];
-    if (options.target === "vue" || options.target === "react" || options.target === "preact" || options.target === "svelte") {
+    if (options.target === "vue" || options.target === "react" || options.target === "preact" || options.target === "svelte" || options.target === "angular") {
       await checkConversion({ ...options, onWarning: (warning) => { warnings.push(warning); } });
     } else await compileGraph(options, true);
     return checkDiagnostics(warnings);

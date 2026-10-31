@@ -1,6 +1,6 @@
 # `@nextwebwg/html-next-unplugin`
 
-Vite can convert imported Declarative Components sources into Vue, React, Preact, or Svelte components. Libraries
+Vite can convert imported Declarative Components sources into Vue, React, Preact, Svelte, or Angular components. Libraries
 publish their HTML definitions; consumers use their normal component imports.
 
 Named imports from component folders and pure re-export barrels resolve directly to the requested
@@ -168,6 +168,53 @@ Generated output imports `preact/compat` and uses Preact JSX. Consumers install 
 SSR consumers also install `preact-render-to-string`. Prepare declarations with
 `html-next-sync`, then run `tsc` with `jsx: "react-jsx"` and `jsxImportSource: "preact"`.
 
+### Angular
+
+Add the Angular target to your existing Angular AOT Vite pipeline:
+
+```ts
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+// Include alongside the plugins that compile your application's Angular templates.
+const components = htmlNext({ target: "angular", entries: ["src/components/**/*.html"] });
+```
+
+Install matching Angular packages, including `@angular/compiler-cli`, and its compatible TypeScript
+version. The adapter invokes that compiler for generated components and links partial-Ivy
+Angular dependencies. Your application's Angular compiler continues to compile its authored code.
+The supported baseline is Angular 21.2.24.
+
+Run `html-next-sync` before standalone Angular typechecking. Extend the generated
+`src/html-next.angular.json` from your application tsconfig and include `src/html-next.d.ts`.
+The generated config maps HTML and source-package imports to Angular class metadata, so
+`strictTemplates` checks input bindings. `declarationsFile` relocates both generated files. If your application declares its own `paths`,
+merge the generated path entries into that object; TypeScript replaces an inherited `paths` object.
+
+```json
+{
+  "extends": "./src/html-next.angular.json",
+  "compilerOptions": { "allowArbitraryExtensions": true },
+  "angularCompilerOptions": { "strictTemplates": true },
+  "include": ["src/**/*.ts"]
+}
+```
+
+Import a generated class into your standalone component's `imports`, then use the native host:
+
+```ts
+import { UiButton } from "@example/controls";
+// imports: [UiButton]
+// template: '<button ui-button [label]="label">Send</button>'
+```
+
+A scoped `row` slot on `ui-table` exports `UiTableRowSlot`. Add it to `imports` with `UiTable`,
+then provide `<ng-template ui-table-row let-item="item">...</ng-template>` inside
+`<table ui-table>`. Template context types come from the declared slot props. Ordinary named
+slots use `slot="name"`; default slots use ordinary children. Angular's standard
+`provideClientHydration()` owns hydration. Native hosts, projected nodes, control defaults, and
+sanitized markup retain their server identities. Data reads and module connections begin in the
+browser. See the [converter limits](../html-next-converter/README.md) before converting a graph.
+
 For Svelte 5, use its standard Vite compiler after the converter:
 
 ```ts
@@ -232,7 +279,7 @@ working; assembly is optional for source libraries.
 
 ### Generated types
 
-The adapter uses `vue-tsc`, TypeScript, or `svelte2tsx` to emit declarations from the converted components.
+The adapter uses `vue-tsc`, TypeScript, `svelte2tsx`, or Angular's `ngc` to emit declarations from the converted components.
 These retain required props, allowed values, dependent prop types, and framework slot APIs.
 Runtime source and declarations live under `node_modules/.html-next/<target>/`.
 `src/html-next.d.ts` exposes the package's exports to the consumer's editor and typechecker.

@@ -122,3 +122,5 @@ export {
 export type * from "./type-system.js";
 export type * from "./template.js";
 export type * from "./types.js";
+
+export { generateAngularConversion, angularArtifacts, type AngularOptions, type AngularConversion } from "./targets/angular.js";

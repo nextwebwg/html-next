@@ -8,6 +8,7 @@ import { convertComponents, type FrameworkTarget } from "@nextwebwg/html-next-co
 import ts from "typescript";
 import type { Plugin, ViteDevServer } from "vite";
 import { assertPackageSource, componentSources, packageDirectory, sourcePackages } from "./source-packages.js";
+import { angularLinker } from "./angular.js";
 import { FrameworkImports } from "./framework-imports.js";
 
 const run = promisify(execFile);
@@ -33,6 +34,8 @@ export interface FrameworkSyncResult {
   readonly aliases: ReadonlyMap<string, string>;
   readonly sourceFiles: readonly string[];
   readonly declarationsFile: string;
+  /** Extend this generated tsconfig so Angular resolves source-library component classes. */
+  readonly angularConfigFile?: string;
 }
 
 function slash(path: string): string { return path.split(sep).join("/"); }
@@ -96,6 +99,9 @@ const preparations = new Map<string, Promise<unknown>>();
 class FrameworkCompiler {
   readonly aliases = new Map<string, string>();
   readonly componentArtifacts = new Set<string>();
+  readonly compiledModules = new Map<string, string>();
+  private readonly angularPaths: Record<string, readonly string[]> = {};
+  private get angularConfigFile(): string { return this.declarationsFile.replace(/\.d\.ts$/, "") + ".angular.json"; }
   readonly sources = new Set<string>();
   readonly root: string;
   readonly declarationsFile: string;
@@ -235,7 +241,8 @@ class FrameworkCompiler {
       const entry = resolve(cache, "resource-entries", `${identity(source)}.ts`);
       const exports = entriesBySource.get(source)!.map((component) => {
         const name = names.get(component.tag)!;
-        return `export { default as ${name} } from ${JSON.stringify(importPath(entry, resolve(output, component.artifact)))};`;
+        const path = JSON.stringify(importPath(entry, resolve(output, component.artifact)));
+        return `export { default as ${name} } from ${path};${this.options.target === "angular" ? `\nexport * from ${path};` : ""}`;
       });
       await mkdir(dirname(entry), { recursive: true });
       await writeFile(entry, exports.join("\n") + "\n", "utf8");
@@ -279,8 +286,15 @@ class FrameworkCompiler {
     const digest = createHash("sha256").update(ts.version).update(this.options.target);
     for (const path of files) digest.update(path).update(await readFile(path));
     const consumerRequire = createRequire(resolve(this.root, "package.json"));
-    for (const name of [this.options.target, ...(this.options.target === "react" ? ["@types/react"] : [])]) {
+    for (const name of [this.options.target === "angular" ? "@angular/core" : this.options.target, ...(this.options.target === "react" ? ["@types/react"] : [])]) {
       digest.update(await readFile(consumerRequire.resolve(`${name}/package.json`)));
+    }
+    let angularCompiler: string | undefined;
+    if (this.options.target === "angular") {
+      try { angularCompiler = consumerRequire.resolve("@angular/compiler-cli/package.json"); }
+      catch { throw new Error("Angular conversion needs @angular/compiler-cli and a compatible TypeScript version installed in the consuming project."); }
+      digest.update(await readFile(angularCompiler));
+      for (const file of files.filter(file => file.endsWith(".ts"))) this.compiledModules.set(file, resolve(output, relative(cache, file)).replace(/\.ts$/, ".js"));
     }
     if (this.options.target === "vue") digest.update(await readFile(require.resolve("vue-tsc/package.json")));
     if (this.options.target === "svelte") {
@@ -297,11 +311,12 @@ class FrameworkCompiler {
     await writeFile(config, JSON.stringify({ compilerOptions: {
       target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "react-jsx",
       ...(this.options.target === "preact" ? { jsxImportSource: "preact" } : {}),
+      ...(this.options.target === "angular" ? { experimentalDecorators: true, rewriteRelativeImportExtensions: true } : {}),
       strict: true, skipLibCheck: true, allowJs: true, checkJs: false, allowImportingTsExtensions: true,
-      declaration: true, emitDeclarationOnly: true, noEmitOnError: this.options.target !== "svelte",
+      declaration: true, emitDeclarationOnly: this.options.target !== "angular", noEmitOnError: this.options.target !== "svelte",
       rootDir: cache, outDir: output, types: [], noUncheckedSideEffectImports: false,
-    }, files }), "utf8");
-    const binary = this.options.target === "vue" ? require.resolve("vue-tsc/bin/vue-tsc.js") : require.resolve("typescript/bin/tsc");
+    }, ...(this.options.target === "angular" ? { angularCompilerOptions: { strictTemplates: true, compilationMode: "full" } } : {}), files }), "utf8");
+    const binary = angularCompiler !== undefined ? resolve(dirname(angularCompiler), "bundles/src/bin/ngc.js") : this.options.target === "vue" ? require.resolve("vue-tsc/bin/vue-tsc.js") : require.resolve("typescript/bin/tsc");
     try {
       if (this.options.target === "svelte") {
         const { emitDts } = await import("svelte2tsx");
@@ -327,6 +342,10 @@ class FrameworkCompiler {
 
   private async moduleDeclaration(specifier: string, entry: string, cache: string): Promise<void> {
     const declaration = await this.declarations(entry, cache);
+    if (this.options.target === "angular") {
+      this.angularPaths[specifier] = [slash(declaration)];
+      return;
+    }
     const program = ts.createProgram([declaration], { skipLibCheck: true, moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext });
     const checker = program.getTypeChecker();
     const source = program.getSourceFile(declaration)!;
@@ -380,7 +399,9 @@ class FrameworkCompiler {
     }
     for (const input of this.options.entries ?? []) await this.localResource(resolve(this.root, input));
     await writeGenerated(this.declarationsFile, header + this.modules.join("\n\n") + "\n");
-    return { aliases: this.aliases, sourceFiles: [...this.sources], declarationsFile: this.declarationsFile };
+    if (this.options.target === "angular") await writeGenerated(this.angularConfigFile, header + JSON.stringify({ compilerOptions: { paths: this.angularPaths } }, null, 2) + "\n");
+    return { aliases: this.aliases, sourceFiles: [...this.sources], declarationsFile: this.declarationsFile,
+      ...(this.options.target === "angular" ? { angularConfigFile: this.angularConfigFile } : {}) };
   }
 
   localResource(source: string): Promise<string> {
@@ -435,6 +456,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
   let server: ViteDevServer | undefined;
   let updates: Promise<void> = Promise.resolve();
   let outDir = "dist";
+  let linkAngular: Awaited<ReturnType<typeof angularLinker>> | undefined;
   const initialize = async (root: string) => {
     compiler = new FrameworkCompiler({ ...options, root: await realpath(resolve(options.root ?? root)) }, outDir);
     current = await compiler.prepare();
@@ -472,7 +494,8 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
     async config(config) {
       outDir = config.build?.outDir ?? outDir;
       await initialize(resolve(config.root ?? process.cwd()));
-      return { optimizeDeps: { exclude: [...current.aliases.keys()] }, resolve: { conditions: ["html-next", ...(config.resolve?.conditions ?? ["module", "browser", "development|production"])] } };
+      if (options.target === "angular") linkAngular = await angularLinker(compiler.root);
+      return { ...(options.target === "angular" ? { ssr: { noExternal: [/^@angular\//] } } : {}), optimizeDeps: { ...(options.target === "angular" ? { include: ["rxjs", "rxjs/operators"] } : {}), exclude: [...current.aliases.keys(), ...(options.target === "angular" ? ["@angular/core", "@angular/common", "@angular/platform-browser", "@angular/platform-server"] : [])] }, resolve: { conditions: ["html-next", ...(config.resolve?.conditions ?? ["module", "browser", "development|production"])] } };
     },
     buildStart() { for (const path of current.sourceFiles) this.addWatchFile(path); },
     configureServer(value) {
@@ -497,6 +520,10 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       await updates;
       const rewritten = await imports.rewrite(code, id);
       if (rewritten !== undefined) return rewritten;
+      if (linkAngular !== undefined && code.includes("ɵɵngDeclare")) return linkAngular(code, id);
+      const compiled = compiler.compiledModules.get(id.split("?")[0]!);
+      if (compiled !== undefined) return { code: await readFile(compiled, "utf8"), map: null,
+        ...(compiler.componentArtifacts.has(id.split("?")[0]!) ? { moduleSideEffects: false } : {}) };
       if (!((options.target === "react" || options.target === "preact") && id.endsWith(".tsx") || options.target === "svelte" && id.endsWith(".svelte")) ||
         !slash(id).includes(`/node_modules/.html-next/${options.target}/`)) return null;
       // A component has no import-time effect of its own. Its CSS must disappear with an unused export.
