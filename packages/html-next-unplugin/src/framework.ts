@@ -89,6 +89,10 @@ function sourceModuleCandidates(candidate: string): readonly string[] {
 
 function isSourceModule(path: string): boolean { return /\.(?:html|[cm]?[jt]sx?)$/.test(path); }
 
+// Framework projects in one Vite process can prepare the same cache concurrently.
+// Serialize those writes while allowing independent roots and targets to proceed.
+const preparations = new Map<string, Promise<unknown>>();
+
 class FrameworkCompiler {
   readonly aliases = new Map<string, string>();
   readonly componentArtifacts = new Set<string>();
@@ -347,6 +351,15 @@ class FrameworkCompiler {
   }
 
   async prepare(): Promise<FrameworkSyncResult> {
+    const key = `${this.root}:${this.options.target}`;
+    const previous = preparations.get(key) ?? Promise.resolve();
+    const preparing = previous.catch(() => {}).then(() => this.prepareSources());
+    preparations.set(key, preparing);
+    try { return await preparing; }
+    finally { if (preparations.get(key) === preparing) preparations.delete(key); }
+  }
+
+  private async prepareSources(): Promise<FrameworkSyncResult> {
     this.sources.add(resolve(this.root, "package.json"));
     for (const { directory, manifest, exports: paths } of await sourcePackages(this.root)) {
       this.sources.add(manifest);

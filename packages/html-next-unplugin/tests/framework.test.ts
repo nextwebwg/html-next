@@ -60,6 +60,26 @@ async function fixture({ optionalEditor = false }: { optionalEditor?: boolean } 
   return { root, library };
 }
 
+it("prepares concurrent framework consumers of the same source cache", async () => {
+  const { root } = await fixture();
+  const results = await Promise.all([
+    syncHtmlNext({ root, target: "vue", declarationsFile: "src/first.d.ts" }),
+    syncHtmlNext({ root, target: "vue", declarationsFile: "src/second.d.ts" }),
+    syncHtmlNext({ root, target: "vue", declarationsFile: "src/third.d.ts" }),
+  ]);
+  for (const prepared of results) {
+    assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
+    for (const entry of prepared.aliases.values()) assert.match(await readFile(entry, "utf8"), /export/);
+  }
+  const [failed, recovered] = await Promise.allSettled([
+    syncHtmlNext({ root, target: "vue", entries: ["src/missing.html"] }),
+    syncHtmlNext({ root, target: "vue", declarationsFile: "src/recovered.d.ts" }),
+  ]);
+  assert.equal(failed.status, "rejected");
+  assert.equal(recovered.status, "fulfilled");
+  assert.match(await readFile(join(root, "src/recovered.d.ts"), "utf8"), /export const Button:/);
+}, 60_000);
+
 for (const target of ["vue", "react"] as const) describe(`${target} source adapter`, () => {
   it("consumes a packed component folder without an authored index or build script", async () => {
     const { root, library } = await fixture();

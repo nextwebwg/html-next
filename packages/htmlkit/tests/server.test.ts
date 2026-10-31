@@ -195,7 +195,7 @@ async function answersRequests(answer: Answer, host: string): Promise<void> {
   expect((await answer("/_htmlkit/pages/account/payload.json")).status).toBe(404);
   // Two requests at once keep their own cookies.
   const [first, second] = await Promise.all(["ada", "bob"].map(async user => (await answer("/account/", { headers: { cookie: `user=${user}` } })).text()));
-  expect([first!.includes("<h1>ada</h1>") && !first!.includes("bob"), second!.includes("<h1>bob</h1>") && !second!.includes("ada")]).toEqual([true, true]);
+  expect([first!.includes("<h1>ada</h1>") && !first!.includes("bob"), second!.includes("<h1>bob</h1>") && !second!.includes("ada")], JSON.stringify({ firstHeadings: first!.match(/<h1>.*?<\/h1>/g), secondHeadings: second!.match(/<h1>.*?<\/h1>/g), firstOther: first!.match(/.{0,60}bob.{0,60}/g), secondOther: second!.match(/.{0,60}ada.{0,60}/g) })).toEqual([true, true]);
   // Prerendered pages answer through middleware too; pages accept GET and HEAD.
   const prerendered = await answer("/items/one/");
   expect([prerendered.status, prerendered.headers.get("x-middleware")]).toEqual([200, "after"]);

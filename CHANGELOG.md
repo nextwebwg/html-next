@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.78
+
+### Fixed
+
+- Serialize framework source preparation for the same project and target so parallel Vite projects cannot delete each other's generated components, dependency links or declarations. Independent project roots and framework targets can still prepare concurrently.
+
 ## 1.0.0-alpha.77
 
 ### Added
