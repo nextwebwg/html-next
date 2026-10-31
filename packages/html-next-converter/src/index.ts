@@ -7,6 +7,9 @@ import {
   getDiagnosticLocation,
   expandComponentEntries,
   generateVueComponent,
+  GENERATOR_VERSION,
+  preparedModuleRevision,
+  vueBindingsArtifact,
   generateReactConversion,
   generateSvelteConversion,
   HtmlDiagnosticError,
@@ -498,6 +501,12 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error), getDiagnosticLocation(node.definition));
         }
       }
+      const modulePreparation = options.target !== "vue" || node.module === undefined || controller === undefined ? undefined
+        : await preparedModuleRevision(controller, node.definition, GENERATOR_VERSION, async path => {
+          const artifact = controllerFiles.get(path);
+          if (artifact === undefined) throw new Error(`Missing prepared module dependency: ${path}.`);
+          return artifact.content;
+        });
       const definitionURL = browserDefinitionURL(node.definition, source, options.publicRootURL, options.target, tag);
       const scripts = browserScripts(node.definition.scripts, definitionURL);
       const definition = Object.freeze({
@@ -527,6 +536,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         };
         const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "vue" ? generateVueComponent(definition, {
+          ...(modulePreparation === undefined ? {} : { modulePreparation }),
           publishedStates: published,
           slotsByTag,
           componentGraph,
@@ -638,6 +648,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...unsupported, ...diagnostics]);
 
+  if (options.target === "vue" && neededHelpers.has("bindings")) claim(vueBindingsArtifact(), "helper");
   if (options.target === "vue" && neededHelpers.has("host")) {
     claim(vueHostArtifact(), "helper");
   }
