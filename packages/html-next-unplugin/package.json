@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-unplugin",
-  "version": "1.0.0-alpha.81",
+  "version": "1.0.0-alpha.82",
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -29,8 +29,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.81",
-    "@nextwebwg/html-next-converter": "workspace:>=1.0.0-alpha.81",
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.82",
+    "@nextwebwg/html-next-converter": "workspace:>=1.0.0-alpha.82",
     "css-tree": "catalog:",
     "cssstyle": "catalog:",
     "magic-string": "catalog:",
@@ -42,6 +42,12 @@
     "vue-tsc": "catalog:"
   },
   "devDependencies": {
+    "@angular/common": "21.2.24",
+    "@angular/compiler": "21.2.24",
+    "@angular/compiler-cli": "21.2.24",
+    "@angular/core": "21.2.24",
+    "@angular/platform-browser": "21.2.24",
+    "@angular/platform-server": "21.2.24",
     "@preact/preset-vite": "2.10.6",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@types/node": "catalog:",
@@ -54,6 +60,7 @@
     "preact-render-to-string": "6.8.2",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "rxjs": "7.8.2",
     "svelte-check": "4.7.6",
     "vite": "catalog:",
     "vitest": "catalog:",

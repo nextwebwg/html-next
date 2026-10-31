@@ -203,10 +203,12 @@ const requestGenerated = await generatedFixture("controller-request", 9_783);
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
 const headNoneGenerated = await generatedFixture("head-none", 12_470);
+// +78–79 B gzip over the component-identity baseline: core DOM mutations and base-URL fallback
+// support Angular SSR; script preloads survive reconciliation.
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
-const headStaticGenerated = await generatedFixture("head-static", 14_634);
-const headJsonGenerated = await generatedFixture("head-json", 14_777);
-const headGenerated = await generatedFixture("head-script", 16_741);
+const headStaticGenerated = await generatedFixture("head-static", 14_712);
+const headJsonGenerated = await generatedFixture("head-json", 14_856);
+const headGenerated = await generatedFixture("head-script", 16_820);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

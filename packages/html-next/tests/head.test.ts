@@ -3,6 +3,7 @@ import { afterEach, describe, it, vi } from "vitest";
 
 import { JSDOM } from "jsdom";
 
+import { joinHead, flushHead, writeServerHead } from "../src/head.js";
 import { parseComponent } from "../src/source-parser.js";
 
 /**
@@ -407,4 +408,21 @@ it("server-renders every language alternate when two tags target the same URL", 
   const rendered = await renderComponents('<language-ssr></language-ssr>', { definitions: [definition], url: "https://docs.example/" });
   const document = new JSDOM(`<head>${rendered.head}</head>`).window.document;
   assert.deepEqual(Array.from(document.head.querySelectorAll('link[rel="alternate"]'), link => link.getAttribute("hreflang")), ["en", "x-default"]);
+});
+
+
+it("writes and removes server head content with the core DOM methods available in Angular SSR", () => {
+  const { window } = new JSDOM('<!doctype html><head><title>Authored</title></head><body><main></main></body>', { url: "https://acme.example/" });
+  for (const method of ["append", "after", "remove"]) Object.defineProperty(window.Element.prototype, method, { value: undefined, configurable: true });
+  const document = window.document;
+  for (const name of ["baseURI", "scripts"]) Object.defineProperty(document, name, { get() { throw new Error("NotYetImplemented"); } });
+  const authored = document.querySelector("title");
+  const leave = joinHead(document, () => document.querySelector("main")!, [["title", [], "Managed"]]);
+  writeServerHead(document, [{ src: "/sdk.js", base: document.URL, source: document.URL, loading: "eager" }]);
+  assert.equal(document.title, "Managed");
+  assert.equal(document.querySelector('link[rel="preload"]')?.getAttribute("href"), "/sdk.js");
+  assert.equal(document.querySelector("template")?.content.firstChild, authored);
+  leave(); flushHead(document);
+  assert.equal(document.querySelector("title"), null);
+  window.close();
 });

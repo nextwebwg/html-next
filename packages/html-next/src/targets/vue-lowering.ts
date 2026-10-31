@@ -397,7 +397,7 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
   }
   return Number.isFinite(value) ? String(value) + unit : invalid;
 }`,
-  sortBy: `function sortBy(items: any[], keys: readonly string[]): any[] {
+  sortBy: `function sortBy(items: readonly any[], keys: readonly string[]): any[] {
   const field = (item: any, path: string): unknown => path !== "" && item !== null && typeof item === "object" && !Array.isArray(item)
     ? path.split(".").reduce((value, key) => value?.[key], item)
     : item;
@@ -438,13 +438,8 @@ const DECIMAL_HELPERS: Readonly<Record<string, string>> = {
   "+": "decimalAdd", "-": "decimalSubtract", "*": "decimalMultiply", "/": "decimalDivide", "%": "decimalRemainder",
 };
 
-/**
- * The expression helpers every converted Vue component shares, exported from the host module so a
- * component imports the ones it calls instead of carrying its own copies.
- */
-export function expressionHelpersSource(): string {
-  return [
-    `const warned = new Set<string>();
+/** A shared warning gate for rejected values at an authored location. */
+export const AUTHORED_CHECK_SOURCE = `const warned = new Set<string>();
 /** An authored value's check: false warns once per authored location. */
 export function warnUnless(accepted: boolean, location: string, message: string): boolean {
   if (!accepted && !warned.has(location)) {
@@ -452,9 +447,13 @@ export function warnUnless(accepted: boolean, location: string, message: string)
     console.warn(message);
   }
   return accepted;
-}
+}`;
 
-/**
+/** The shared expression helpers, imported individually by converted components. */
+export function expressionHelpersSource(): string {
+  return [
+    AUTHORED_CHECK_SOURCE,
+    `/**
  * A handler's checked write to a ref or through a setter. An invalid result, such as a number that
  * is not finite, writes nothing. A value neither null, absent nor of the destination's type warns once for
  * its authored write (the state \`path\` in \`file\`'s \`handler\`), as the live runtime does, and

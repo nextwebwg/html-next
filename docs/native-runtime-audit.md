@@ -95,6 +95,20 @@ because generated components receive refs as props; see its
 [upgrade guide](https://preactjs.com/guide/v11/upgrade-guide/#refs-are-forwarded-by-default).
 
 
+## Angular conversion
+
+Angular attribute-selected standalone components retain the authored native host. Native attributes, properties, events, focus, form validation and CSS scopes continue to belong to that element; Angular signals and template control flow own updates. Angular selector matching is static and permits one component per element. A component-root chain therefore needs compile-time composition of its scopes and template into one Angular component. Host attributes retain each component identity for CSS without activating additional Angular components. Generated selectors use the same native style compiler with identity selectors mapped to component attributes; Angular view encapsulation is disabled because the converter already establishes CSS boundaries. No shadow root or browser parser/interpreter is introduced.
+
+Angular content projection can insert consumer-authored nodes without a converter hook at insertion. Generated own markup carries an ownership attribute; a feature-specific projection directive marks foreign projected roots for the existing native CSS scoping rules. It stamps after Angular view creation (also during SSR) and uses a native MutationObserver for later child-list changes. A generic data-hn root boundary, shared with the other framework outputs, keeps scopes bounded by separately converted libraries whose component names are unknown at generation time. Component identity itself remains the authored tag attribute.
+
+Separately converted source libraries share Angular context-token identities through a Symbol.for registry on the current global object. The registry holds tokens only; Angular injectors and signals continue to own provider scope and state. Native control setters, default restoration and pre-hydration snapshots reuse the existing target-independent control module through an Angular directive.
+
+Angular pipes own per-view retention of accepted expression output, including keyed loop views. Host bindings retain their value on the generated component instance. Angular computed signals own computed caching; the shared input-observation protocol supplies readiness when a state initializer reads a prop. Browser module and controller hosts use the existing shared native connection observer, activation cancellation, controller namespaces and input-port protocol. Angular signals, computed values, effects and injector-scoped disposal own their reactive work.
+
+Sanitized markup has no Angular child views. Its helper composes the existing sanitizer and parse5 policy with Renderer2 node creation instead of assigning innerHTML, which would reparse table fragments in a different element context. Matching server-rendered markup is compared before mutation so hydration retains node identity and native selection. Inline fragment markup and authored Angular child views inside a raw-markup region need a separate ownership decision and remain explicit conversion diagnostics. Data reads use Angular effects, a shared native connection observer, fetch and AbortController; sampled parameters are read outside dependency tracking, while live parameter keys trigger cancellation and replacement.
+
+Scoped slots use Angular's `TemplateRef`, content queries, `NgTemplateOutlet`, and template context guards. The compiler composes delegated slot content and emits typed directives for external templates. Each embedded view owns independent retained slot values. Native `CustomEvent` dispatch stays on the host; exported event maps supply consumer payload types. Binding declared events through the native listener avoids duplicate delivery from an Angular output of the same name. The shared document-head manager uses core DOM mutations and falls back from an unimplemented server `baseURI` getter to the document URL and authored base element. Declared-script preload ownership survives later head reconciliation. Those interoperability changes add 78–79 B gzip to the component-identity baseline for the existing head fixtures, with no interpreter added to generated bundles.
+
 ## Rendered component identity
 
 On 2026-10-31, the rendered identity contract selected `component` as canonical output with a
@@ -105,3 +119,5 @@ remain `template[component]`, so root discovery excludes them. No additional obs
 mirroring is needed. Hydration reads either spelling in place; serialization normalizes only its
 cloned output. Cross-browser scoped-style coverage checks both spellings, conflicting values,
 empty canonical values and fallback after removing the canonical attribute.
+
+Framework style conversion normalizes canonical and legacy identity selectors in one shared build stage. React and Preact emit canonical `component` selectors; Vue and Svelte use their component classes; Angular uses native host attributes. The shared stage handles imported sheets, scope boundaries, namespace prefixes and authored identity selectors while preserving quoted values.

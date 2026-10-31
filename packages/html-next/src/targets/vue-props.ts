@@ -14,7 +14,7 @@ export function importsVueProps(source: string): boolean {
 const SOURCE = `
 const CSS_NAMED_COLOR_SET = new Set<string>(${JSON.stringify(CSS_COLOR_KEYWORDS)});
 const HTML_EMAIL_PATTERN = ${HTML_EMAIL_PATTERN.toString()};
-const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!;
+const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")?.get;
 const eventBrands = new WeakMap<object, boolean>();
 function nativeEvent(value: unknown): boolean {
   if (typeof value !== "object" || value === null || !("type" in value) || eventType === undefined) return false;

@@ -1,5 +1,28 @@
 import type { GeneratedArtifact } from "../generate.js";
 
+/** Native immutable path writes shared by generated control and state adapters. */
+export const NATIVE_PATH_WRITE_SOURCE = `/** Clone the state containers along a writable path so the framework observes nested native edits. */
+export function writeBoundPath<T>(root: T, path: readonly (string | number)[], value: unknown): T {
+  if (path.length === 0) return value as T;
+  if (path.some((segment) => typeof segment !== "string" && typeof segment !== "number")) return root;
+  if (root === null || typeof root !== "object") return root;
+  const result = Array.isArray(root) ? root.slice() : { ...root };
+  let source = root as Record<string | number, unknown>;
+  let target = result as Record<string | number, unknown>;
+  for (const key of path.slice(0, -1)) {
+    const next = source[key];
+    if (next === null || typeof next !== "object") return root;
+    const copy = Array.isArray(next) ? next.slice() : { ...next };
+    target[key] = copy;
+    source = next as Record<string | number, unknown>;
+    target = copy as Record<string | number, unknown>;
+  }
+  const leaf = path[path.length - 1]!;
+  if (Object.is(source[leaf], value)) return root;
+  target[leaf] = value;
+  return result as T;
+}`;
+
 const SOURCE = `type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type BoundName = "value" | "checked";
 export interface BoundDefaults {
@@ -187,27 +210,7 @@ export function syncBoundControl(element: Element | null, name: BoundName, value
   restoreDefault(element, name, defaults);
 }
 
-/** Clone the state containers along a writable path so React observes nested native edits. */
-export function writeBoundPath<T>(root: T, path: readonly (string | number)[], value: unknown): T {
-  if (path.length === 0) return value as T;
-  if (path.some((segment) => typeof segment !== "string" && typeof segment !== "number")) return root;
-  if (root === null || typeof root !== "object") return root;
-  const result = Array.isArray(root) ? root.slice() : { ...root };
-  let source = root as Record<string | number, unknown>;
-  let target = result as Record<string | number, unknown>;
-  for (const key of path.slice(0, -1)) {
-    const next = source[key];
-    if (next === null || typeof next !== "object") return root;
-    const copy = Array.isArray(next) ? next.slice() : { ...next };
-    target[key] = copy;
-    source = next as Record<string | number, unknown>;
-    target = copy as Record<string | number, unknown>;
-  }
-  const leaf = path[path.length - 1]!;
-  if (Object.is(source[leaf], value)) return root;
-  target[leaf] = value;
-  return result as T;
-}
+${NATIVE_PATH_WRITE_SOURCE}
 `;
 
 /** Native setters, input reads, reset defaults and hydration capture shared by target attachments. */

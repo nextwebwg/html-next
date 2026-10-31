@@ -11,7 +11,7 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type Compone
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
-import { compileComponentStylesForBuild, componentStateNames } from "../component-styles-build.js";
+import { compileComponentStylesForConversion, componentStateNames } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
@@ -1032,7 +1032,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)` : undefined;
   });
   const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
-  const styles = compileComponentStylesForBuild(definition.css, definition, undefined, undefined, true, options.componentGraph);
+  const styles = compileComponentStylesForConversion(definition.css, definition, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
   const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
