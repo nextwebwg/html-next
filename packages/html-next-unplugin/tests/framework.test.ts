@@ -245,6 +245,14 @@ for (const target of ["vue", "react"] as const) it.skipIf(process.env.HTMLNEXT_T
   } finally { await browser.close(); await server.close(); }
 }, 60_000);
 
+for (const target of ["vue", "react"] as const) it(`${target} prepares explicitly imported components in hidden directories`, async () => {
+  const { root, library } = await fixture();
+  await mkdir(join(root, ".components"));
+  await writeFile(join(root, ".components/controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+  await syncHtmlNext({ target, root, entries: [".components/controls.html"] });
+  assert.match(await readFile(join(root, ".components/controls.d.html.ts"), "utf8"), /export \*/);
+});
+
 for (const target of ["vue", "react"] as const) it(`${target} supports named local HTML imports and TypeScript sidecars`, async () => {
   const { root, library } = await fixture();
   await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.76
+## 1.0.0-alpha.77
 
 ### Added
 
@@ -14,6 +14,13 @@
 - Initially empty retained inline text has a comment placeholder during SSR, preserving slot fragment boundaries through Vue hydration. Later accepted text and invalid-result retention keep their existing behavior.
 - Restoring a Vue-hydrated input's form-reset default preserves an unfinished native date/time or numeric entry. An input with native `badInput` already owns a dirty editing state, so updating its default no longer rewrites the opaque live value.
 - HTMLKit development servers retain Vite's dependency optimization so a component's transitive CommonJS dependencies can be imported in the browser.
+
+## 1.0.0-alpha.76
+
+- Keep imports of components under hidden directories relative. A generated entry now imports `./.components/Card` instead of treating `.components/Card` as a package name; converter output and local Vite declarations cover all framework targets.
+
+- Load Vue and Svelte compiler entry points through Node’s module loader when rewriting source-package imports. Packed Svelte builds now receive the compiler’s actual CommonJS exports instead of an ES-module namespace without `parse`.
+- Admit Vite 7.2.7 alongside Vite 8 in the adapter peer range. Packed Vue and Svelte consumers verify their dependency graphs and compile single-file components through the public Vite plugin, using the application’s Vite version.
 
 ## 1.0.0-alpha.75
 
