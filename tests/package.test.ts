@@ -353,6 +353,22 @@ process.stdout.write("ok");
     // Windows runners have measured 82-133 s for this install, build and type-check sequence.
   }, 300_000);
 
+  it.skipIf(!includesPackage("html-next-unplugin"))("installs packed compiler tools without undeclared framework peers", () => {
+    const tarball = pack("html-next-unplugin");
+    const manifest = JSON.parse(execFileSync("tar", ["-xOzf", tarball, "package/package.json"], { encoding: "utf8", shell: useCommandShell }));
+    // Internal SDK packages are exercised above. Isolate the shipped compiler closure from dev dependencies.
+    const dependencies = Object.fromEntries(Object.entries(manifest.dependencies).filter(([name]) => !name.startsWith("@nextwebwg/")));
+    const consumer = join(workspace, "compiler-dependencies");
+    mkdirSync(consumer);
+    const manager = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager;
+    writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "compiler-dependency-consumer", private: true, type: "module", packageManager: manager, dependencies }));
+    execFileSync("corepack", ["pnpm", "install", "--ignore-scripts", "--strict-peer-dependencies", "--config.auto-install-peers=false"],
+      { cwd: consumer, encoding: "utf8", shell: useCommandShell });
+    execFileSync(process.execPath, ["--input-type=module", "--eval",
+      'import { svelte2tsx } from "svelte2tsx"; svelte2tsx("<p>Compiler SDK</p>");'],
+    { cwd: consumer, encoding: "utf8", shell: useCommandShell });
+  }, 120_000);
+
   it("publishes every workspace package publicly on the latest tag under MIT", () => {
     const versions = new Set<string>();
     for (const packageDirectory of releaseDirectories) {

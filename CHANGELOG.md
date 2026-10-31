@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.75
+
+- Preserve shared controller modules as one module instance across converted components. Components that coordinate through an imported registry no longer receive isolated copies; each source package keeps its own relocation namespace. Regression cases verify shared object identity in Vue, React and Svelte output.
+
+- Ship the Svelte compiler required by the framework conversion tools as a regular dependency. Vue-only consumers can install the Vite plugin with strict peer checks and peer auto-installation disabled without declaring an unused framework. A packed compiler dependency test verifies installation and conversion.
+
 ## 1.0.0-alpha.74
 
 - Resolve named framework imports through generated component entries and pure re-export barrels before bundling. Ordinary controls no longer pull in unused editor controllers or require their optional peers. Vue and Svelte script blocks retain their native parser boundaries and source maps; imports of the optional component itself still fail when its peer is missing.

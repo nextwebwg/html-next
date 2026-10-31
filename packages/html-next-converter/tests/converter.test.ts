@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
 
@@ -1333,6 +1333,24 @@ export default function initialize(host) { host.on("connect", () => connect(host
     }
   });
 
+  it("preserves one shared module instance across converted component controllers", async () => {
+    const root = await fixture();
+    await mkdir(join(root, "shared"));
+    await writeFile(join(root, "shared", "coordination.js"), "export const selections = new WeakMap();\n");
+    for (const name of ["parent", "child"]) {
+      await mkdir(join(root, name));
+      await writeFile(join(root, name, "component.html"), `<template component="x-${name}" module="./controller.js"><div></div></template>`);
+      await writeFile(join(root, name, "controller.js"), 'import { selections } from "../shared/coordination.js";\nexport const state = selections;\nexport function connect() {}\n');
+    }
+    for (const target of ["vue", "react", "svelte"] as const) {
+      const outDirectory = join(root, `shared-${target}`);
+      const manifest = await convertComponents({ mode: "application", root, target, outDirectory, entries: ["parent/component.html", "child/component.html"] });
+      const [parent, child] = await Promise.all(manifest.components.map(component => import(pathToFileURL(join(outDirectory, component.module!)).href)));
+      assert.equal(parent.state, child.state, `${target} controllers share their authored module instance`);
+      assert.equal(manifest.output.artifacts.filter(file => file.path.endsWith("shared/coordination.js")).length, 1);
+    }
+  });
+
   it("copies the controller beside the component and imports it", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-converter-controller-"));
     temporary.push(root);
@@ -1349,10 +1367,10 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const manifest = await convertComponents({ mode: "library", entries: ["components/x-toggle/x-toggle.html"], target: "vue", root, outDirectory });
     const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
 
-    assert.match(source, /\(\) => import\('\.\.\/\.\.\/controllers\/x-toggle\/x-toggle\/x-toggle\.js'\)/);
-    assert.equal(manifest.components[0]?.controller, "vue/controllers/x-toggle/x-toggle/x-toggle.js");
-    await access(join(outDirectory, "vue", "controllers", "x-toggle", "x-toggle", "x-toggle.js"));
-    await access(join(outDirectory, "vue", "controllers", "x-toggle", "shared", "flip.js"));
+    assert.match(source, /\(\) => import\('\.\.\/\.\.\/modules\/0\/components\/x-toggle\/x-toggle\.js'\)/);
+    assert.equal(manifest.components[0]?.controller, "vue/modules/0/components/x-toggle/x-toggle.js");
+    await access(join(outDirectory, "vue", "modules", "0", "components", "x-toggle", "x-toggle.js"));
+    await access(join(outDirectory, "vue", "modules", "0", "components", "shared", "flip.js"));
     assert.ok(manifest.output.artifacts.some(({ path, kind }) => kind === "controller" && path.endsWith("shared/flip.js")));
   });
 

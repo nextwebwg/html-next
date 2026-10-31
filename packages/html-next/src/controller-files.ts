@@ -66,7 +66,9 @@ export function commonDirectory(paths: readonly string[]): string {
 /**
  * Copies a controller and its relative imports under `targetRoot`, named relative to the deepest
  * directory that holds the whole graph: the component's own directory unless the controller imports
- * a shared module beside it. The graph must stay inside the component's package (`trustRoot`).
+ * a shared module beside it. `relativeToTrustRoot` retains package-relative paths so a converter can
+ * combine several controller graphs without duplicating their shared modules. The graph must stay
+ * inside the component's package (`trustRoot`).
  */
 export async function addControllerGraph(
   sourceURL: string,
@@ -74,6 +76,7 @@ export async function addControllerGraph(
   targetRoot: string,
   artifacts: Map<string, GeneratedArtifact>,
   sourceFiles?: Set<string>,
+  options?: { readonly relativeToTrustRoot?: boolean },
 ): Promise<string> {
   const files = new Map<string, string>();
   const root = fileURLToPath(trustRoot);
@@ -86,7 +89,7 @@ export async function addControllerGraph(
       throw new Error(`Controller module escaped its component root: ${path}.`);
     }
   }
-  const base = commonDirectory(paths);
+  const base = options?.relativeToTrustRoot === true ? root : commonDirectory(paths);
   const target = (path: string) => `${targetRoot}/${relative(base, path).split(sep).join("/")}`;
   for (const [url, content] of files) {
     sourceFiles?.add(fileURLToPath(url));
