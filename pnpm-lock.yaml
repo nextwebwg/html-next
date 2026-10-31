@@ -280,7 +280,7 @@ importers:
   packages/html-next-converter:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.73
+        specifier: workspace:>=1.0.0-alpha.74
         version: link:../html-next
     devDependencies:
       '@formatjs/intl-durationformat':
@@ -338,10 +338,10 @@ importers:
   packages/html-next-unplugin:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.73
+        specifier: workspace:>=1.0.0-alpha.74
         version: link:../html-next
       '@nextwebwg/html-next-converter':
-        specifier: workspace:>=1.0.0-alpha.73
+        specifier: workspace:>=1.0.0-alpha.74
         version: link:../html-next-converter
       css-tree:
         specifier: 'catalog:'
@@ -414,7 +414,7 @@ importers:
   packages/htmlkit:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.73
+        specifier: workspace:>=1.0.0-alpha.74
         version: link:../html-next
       parse5:
         specifier: 'catalog:'
