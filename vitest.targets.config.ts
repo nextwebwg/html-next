@@ -45,6 +45,7 @@ const config = mergeConfig(baseConfig, {
 
 // mergeConfig concatenates arrays, so do not retain the base Node-test include list.
 config.test!.include = [
+  "packages/html-next/tests/vue-binding-preparation.test.ts",
   "packages/html-next/tests/targets.test.ts",
   "packages/html-next/tests/target-runtime.test.ts",
   "packages/html-next/tests/target-transitions.test.ts",

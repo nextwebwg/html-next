@@ -36,6 +36,25 @@ async function assemble() {
 }
 
 describe("component package assembler", () => {
+  it("discovers prepared module exports without evaluating them and revisions their relative dependencies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-prepared-package-"));
+    temporary.push(root);
+    await writeFile(join(root, "card.html"), '<template component="x-card" module="./card.js"><article>Card</article></template>');
+    await writeFile(join(root, "card.js"), 'throw new Error("Never execute while assembling"); export * from "./source.js";');
+    await writeFile(join(root, "source.js"), 'export const { prepare, adopt } = {}; export function connect() {}');
+    const outDirectory = join(root, "output");
+    const assemble = () => assembleComponentPackage({ name: "@example/library", version: "1.0.0", outDirectory,
+      components: [{ source: join(root, "card.html") }] });
+    await assemble();
+    const first = await readFile(join(outDirectory, "vue/XCard.vue"), "utf8");
+    assert.match(first, /usePreparedModule/);
+    assert.match(await readFile(join(outDirectory, "vue/bindings.ts"), "utf8"), /decodeHydrationValue/);
+    await writeFile(join(root, "source.js"), 'export const { prepare, adopt } = {}; export function connect() { return () => {}; }');
+    await assemble();
+    const second = await readFile(join(outDirectory, "vue/XCard.vue"), "utf8");
+    assert.notEqual(first, second, "a changed relative module invalidates prepared transfer identities");
+  });
+
   it("relocates named component modules without creating a legacy controller", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-module-package-"));
     temporary.push(root);

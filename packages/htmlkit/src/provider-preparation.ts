@@ -14,7 +14,7 @@ const sourceInputs = packagedInputs.replace(/[/\\]dist[/\\]component-inputs\.js$
 const inputsModule = pathToFileURL(fileURLToPath(import.meta.url).endsWith(".ts") && existsSync(sourceInputs) ? sourceInputs : packagedInputs).href;
 export const preparationModule = import.meta.url;
 
-export interface ProviderModule { readonly module: string; readonly source: string; readonly client?: boolean; readonly readers?: readonly string[] }
+export interface ProviderModule { readonly module: string; readonly source: string; readonly bound?: true; readonly client?: boolean; readonly readers?: readonly string[] }
 export interface ProviderPreparationData {
   readonly phase: "build" | "request";
   readonly modules: Readonly<Record<string, ProviderModule>>;
@@ -27,11 +27,16 @@ export async function prepare({ document, host, flush, signal, port, data: input
   const { componentInputs } = await import(inputsModule) as typeof import("@nextwebwg/html-next/inputs");
   const remote = port === undefined ? undefined : readChannel(port, library);
   const modules = new Map(await Promise.all(Object.entries(data.modules).map(async ([tag, descriptor]) => {
+    const module = await import(descriptor.module);
+    if (descriptor.bound) {
+      for (const name of ["connect", "prepare", "adopt"]) if (typeof module[name] !== "function") throw new TypeError(`Prepared component ${tag} must export ${name}.`);
+      return [tag, { descriptor, binding: module as ReturnType<typeof library.bindModule<ComponentHost>> }] as const;
+    }
     const props = Object.fromEntries((descriptor.readers ?? []).map(name => [name, { load: (input: unknown, operation: import("@nextwebwg/html-next/bindings").BindingOperation) => {
       if (remote === undefined) throw new TypeError("Private reader channel was not supplied.");
       return remote.read(tag, name, input, operation);
     } }]));
-    return [tag, { descriptor, binding: library.bindModule(componentModule(await import(descriptor.module) as ComponentBindingModule<ComponentHost>, { props }, descriptor.client)) }] as const;
+    return [tag, { descriptor, binding: library.bindModule(componentModule(module as ComponentBindingModule<ComponentHost>, { props }, descriptor.client)) }] as const;
   })));
   const known = new WeakSet<object>();
   const owned: { host: ComponentHost; tag: string; scope: BindingPreparation }[] = [];

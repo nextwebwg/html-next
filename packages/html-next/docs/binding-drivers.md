@@ -65,6 +65,42 @@ Retained stale values can remain visible, but a new dependent read waits for a c
 
 ## Application preparation and adoption
 
+### Converted Vue modules
+
+Vue conversion can integrate a module's existing `prepare` and `adopt` functions.
+These are ordinary binding-library functions; browser `connect` retains its
+existing lifecycle. The generated adapter uses Vue's server-prefetch hook, calls
+`prepare` without connecting browser behavior, and transfers accepted output
+values and read identities through the rendered root. Before client hydration it
+restores typed producer inputs, then calls `adopt` before browser connection.
+Caller-supplied fixtures retain precedence. Transfer metadata is removed after
+hydration.
+
+`assembleComponentPackage` recognizes modules exporting both functions, including
+relative re-exports, without importing or executing those modules. It generates a
+source revision covering the definition, package version and relative module
+graph. A direct `generateVueComponent` or `generateComponent` caller opts in with
+`modulePreparation: { source: buildRevision }` and ships `vueBindingsArtifact()`
+beside the other required generated helpers. `importsVueBindings` identifies that
+helper import. A relocated conversion can supply its `bindings` helper specifier.
+The preparation helper imports the existing bindings/inputs SDK; ordinary
+controller helpers still depend on Vue alone.
+
+The module remains responsible for its binding adapter's source identity. For a
+direct conversion, `browser.source` and `modulePreparation.source` use the same
+application build revision. An instance-local module wrapper can instead create
+its browser adapter when `adopt(host, adoption)` first arrives, using the checked
+`adoption.snapshot.source`, and retain it for subsequent `connect` calls. An
+already connected adapter never changes source identity to accept another build's
+record. A mismatched transfer revision fails before hydrating incompatible data.
+
+Both client-render-function libraries used with Vue SSR and separately compiled
+SSR templates are supported. Providers still obey their declared `initial`
+policy. Server preparation does not open browser subscriptions or supply private
+request services; application-owned private readers need their host integration.
+
+### Native application hosts
+
 An application host that already owns a rendered component instance can prepare its providers separately from browser behavior:
 
 ```ts

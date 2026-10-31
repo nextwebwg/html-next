@@ -37,6 +37,7 @@ import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
+import { VUE_BINDINGS_SPECIFIER } from "./vue-bindings.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
 
 /** The request steps a Vue component that declares requests imports. */
@@ -62,7 +63,7 @@ const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentI
 const RESERVED = new Set([
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
-  "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
+  "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
@@ -148,6 +149,7 @@ function writableTarget(path: readonly WritablePathSegment[], scope: Scope, lowe
 }
 
 interface Context {
+  readonly modulePreparation: boolean;
   readonly availability: ReadonlyMap<string, string>;
   readonly observe: (scope: Scope) => Scope;
   readonly definition: ComponentDefinition;
@@ -770,7 +772,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     // The consumer's attributes win over the template's literals and lose to its bindings, as in
     // the runtime; Vue combines class and style itself.
     const tag = context.definition.contract.tag;
-    literals.push(inputs === undefined ? "v-bind=\"nativeAttrs($attrs)\"" : `v-bind=${bound(`{ ...nativeAttrs($attrs), ${inputs} }`)}`);
+    const rootAttrs = context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)";
+    literals.push(inputs === undefined ? `v-bind=${bound(rootAttrs)}` : `v-bind=${bound(`{ ...${rootAttrs}, ${inputs} }`)}`);
     if (context.validityValues !== undefined) {
       attributes.push(`v-prop-validity=${bound(`{ contract: propValidityContract, values: ${context.validityValues} }`)}`);
     }
@@ -933,6 +936,8 @@ function stateTokens(name: string, scope: Scope, lowering: Lowering): string[] {
 }
 
 export interface VueConversionOptions {
+  /** Opt into the existing binding module prepare/adopt protocol; the application owns its source revision. */
+  readonly modulePreparation?: { readonly source: string };
   /** Resolve projected slot props from the receiving component, including names shadowing consumer state. */
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   /** Type an invocation's literal props, as the live runtime parses its attributes. */
@@ -943,7 +948,7 @@ export interface VueConversionOptions {
   readonly guardNestedDepth?: boolean;
   /** Public graph output can relocate components into nested source-mirrored directories. */
   readonly importSpecifier?: (tag: string) => string;
-  readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests" | "head") => string;
+  readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests" | "head" | "bindings") => string;
   /**
    * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
@@ -954,6 +959,9 @@ export interface VueConversionOptions {
 }
 
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
+  if (options.modulePreparation !== undefined && (definition.module === undefined || options.modulePreparation.source.trim() === "")) {
+    throw new TypeError("Module preparation requires a component module and a nonempty source revision.");
+  }
   definition = condenseWhitespace(definition);
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -1084,6 +1092,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const availability = new Map([...seeded.map(state => [state.name, `declarationStatus(${quote(state.name)})`] as const),
     ...contexts.map(context => [context.as ?? context.name, `declarationStatus(${quote(context.as ?? context.name)})`] as const)]);
   const context: Context = {
+    modulePreparation: options.modulePreparation !== undefined,
     availability,
     definition,
     observe: source => inputScope(source, (name, read) => read !== templateScope.code.get(name) ? undefined
@@ -1389,7 +1398,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       context: new Map(contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!])),
       hydrationInstanceName,
       scripts: scriptNames.size > 0,
-    }, options.controllerSpecifier ?? (definition.module ?? definition.controller)),
+    }, options.controllerSpecifier ?? (definition.module ?? definition.controller), options.modulePreparation),
   );
   // `props` is named only when the script reads it; the template reads props by name.
   if (!body.some((line) => /\bprops\b/.test(line) && !line.startsWith("const props = ")) && !/\bprops\b/.test(rootMarkup)) {
@@ -1416,6 +1425,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(!context.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(target.props.length === 0 && !context.usesInputStatus && computedValues.length === 0 && seeded.length === 0 && availability.size === 0 ? [] : [`import { ${target.props.length === 0 ? computedValues.length === 0 && seeded.length === 0 && availability.size === 0 && !context.usesInputExpressions ? "" : "BINDING_INPUTS_PROP, " : "checkedProp, vPropValidity, checkPropInput, vuePropInputs, BINDING_INPUTS_PROP, type InputBindings, "}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computedValues.length === 0 ? "" : ", inputComputed"}${computedValues.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : ", inputRead, inputDefault"}${context.usesInputExpressions || seeded.length > 0 ? ", evaluateInput" : ""}${seeded.length > 0 ? ", copyStateSeed" : ""}${(definition.module ?? definition.controller) === undefined || target.props.length === 0 ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
+    ...(options.modulePreparation === undefined ? [] : [`import { usePreparedModule } from ${quote(options.helperSpecifier?.("bindings") ?? VUE_BINDINGS_SPECIFIER)};`]),
     ...(target.requests.length === 0 ? [] : [
       ...(requestHelpers.length === 0 ? [] : [
         `import { ${REQUEST_CHECK} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`,
@@ -1465,6 +1475,7 @@ function hostSource(
     readonly scripts: boolean;
   },
   controllerSpecifier?: string,
+  modulePreparation?: { readonly source: string },
 ): string[] {
   if ((definition.module ?? definition.controller) === undefined) return [];
   const { requests } = targetComponent(definition);
@@ -1474,7 +1485,7 @@ function hostSource(
     declaration.kind === "state" && declarationTypeNode(declaration.type, declaration.shape) !== undefined
       ? [[declaration.name, declarationTypeNode(declaration.type, declaration.shape)]] : []));
   const call = [
-    `useComponentHost(() => import(${quote((definition.module ?? definition.controller)!)}), {`,
+    `${modulePreparation === undefined ? "" : "const host = "}useComponentHost(${modulePreparation === undefined ? `() => import(${quote((definition.module ?? definition.controller)!)})` : "moduleBindings.load"}, {`,
     "  root,",
     ...(definition.module === undefined ? [] : ["  module: true,"]),
     "  dispatch,",
@@ -1510,7 +1521,11 @@ function hostSource(
     ]),
     "})",
   ].join("\n");
-  return [`${call};`];
+  return modulePreparation === undefined ? [`${call};`] : [
+    `const moduleBindings = usePreparedModule(() => import(${quote(definition.module!)}), { tag: ${quote(definition.contract.tag)}, source: ${quote(modulePreparation.source)} });`,
+    `${call};`,
+    "moduleBindings.attach(host);",
+  ];
 }
 
 /** `query-change` as `QueryChange`, for a name derived from a declared event. */

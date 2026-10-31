@@ -85,6 +85,11 @@ function restoreDefault(element: Control, binding: Pick<BoundControl, "name" | "
     element.checked = current;
   } else if (!(element instanceof HTMLSelectElement)) {
     if (element.defaultValue === (binding.defaultValue ?? "")) return;
+    // badInput holds opaque native segments; rewriting value would erase that dirty editing state.
+    if (element instanceof HTMLInputElement && element.validity.badInput) {
+      element.defaultValue = binding.defaultValue ?? "";
+      return;
+    }
     const current = element.value;
     element.value = current;
     element.defaultValue = binding.defaultValue ?? "";
