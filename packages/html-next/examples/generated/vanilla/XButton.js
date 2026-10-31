@@ -15,7 +15,7 @@ export function createXButton(options = {}, html) {
     if (value === null || value === undefined || value === false) continue;
     element.setAttribute(name, value === true ? "" : String(value));
   }
-  element.setAttribute("data-component", "x-button");
+  element.setAttribute("component", "x-button");
   element.append((P0 ??= buildTemplate(T0)).cloneNode(true));
   const v = [null, null];
   const B = acceptProps(element, D, S.n, v, componentProps, [], html);

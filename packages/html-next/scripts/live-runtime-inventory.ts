@@ -12,6 +12,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/template.ts",
   ],
   discoveryAndLifecycle: [
+    "packages/html-next/src/component-identity.ts",
     "packages/html-next/src/browser.ts",
     "packages/html-next/src/browser-loader.ts",
     "packages/html-next/src/component-registry.ts",

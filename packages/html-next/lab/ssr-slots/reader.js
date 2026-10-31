@@ -2,7 +2,7 @@
 // the component definitions in the document. Accepts ProcessingInstruction nodes and, in engines that
 // do not parse PIs, the comments they become.
 (() => {
-  const RECORD = new Set(["data-component", "data-component-root", "data-slotted"]);
+  const RECORD = new Set(["component", "data-component-root", "data-slotted"]);
   const piParsing = (() => {
     const probe = document.createElement("div");
     probe.setHTMLUnsafe("<?probe x=\"1\"?>");

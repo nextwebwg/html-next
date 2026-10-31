@@ -26,7 +26,7 @@ async function observe(page: Page): Promise<{ readonly behavior: Record<string, 
   const root = page.locator("#case");
   const behavior = await root.evaluate((element) => ({
     tag: element.localName,
-    // Svelte scopes the root's styles by its tag as a class, as live roots carry data-component: target styling markers.
+    // Svelte scopes the root's styles by its tag as a class, as live roots carry component: target styling markers.
     className: element.getAttribute("class")?.split(" ").filter((name) => name !== "x-action").join(" ") ?? null,
     href: element.getAttribute("href"),
     type: element.getAttribute("type"),

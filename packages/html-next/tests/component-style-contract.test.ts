@@ -12,8 +12,8 @@ import type { ComponentDefinition } from "../src/template.js";
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
 
 it("preserves an implicit universal selector before a descendant pseudo-element", () => {
-  assert.equal(guardComponentPseudoElements(".item ::before"), '.item :where(:not([data-component], [data-slotted]))::before');
-  assert.equal(guardComponentPseudoElements(".item > ::after"), '.item > :where(:not([data-component], [data-slotted]))::after');
+  assert.equal(guardComponentPseudoElements(".item ::before"), '.item :where(:not(:is([component]:not(template), [data-component]:not([component])), [data-slotted]))::before');
+  assert.equal(guardComponentPseudoElements(".item > ::after"), '.item > :where(:not(:is([component]:not(template), [data-component]:not([component])), [data-slotted]))::after');
 });
 
 it("scopes Svelte selectors by the hash Svelte gives the component's own markup", () => {
@@ -78,7 +78,7 @@ describe("resolved prop and state selectors", () => {
     for (const compile of compilers) {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
-      assert.match(result.css, compile === compileComponentStylesForBuild ? /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/
+      assert.match(result.css, compile === compileComponentStylesForBuild ? /:scope:where\(:is\(\[component~="x-style-contract"\]:not\(template\), \[data-component~="x-style-contract"\]:not\(\[component\]\)\)\)\.active/
         : /:scope\.active/);
     }
   });
@@ -141,7 +141,7 @@ describe("resolved prop and state selectors", () => {
     const graph = definitionGraph([list, item, toggle]);
     for (const result of [compileComponentStylesForBuild(list.css, list, undefined, undefined, true, graph),
       compileComponentStylesForSvelte(list.css, list, undefined, graph), compileComponentStylesForVue(list.css, list, undefined, graph)]) {
-      assert.match(result.css, /\.row:has\(:is\(x-item, :where\([^)]*\)\)\[data-x-item-state~="tone=cool"\]\)/);
+      assert.match(result.css, /\.row:has\(:is\(x-item, :where\(.*?\)\)\[data-x-item-state~="tone=cool"\]\)/);
       assert.match(result.css, /\[data-x-toggle-state~="selected"\] \+ label/);
       // Without `of`, the test matches whichever component declaring the state is rendered there.
       assert.match(result.css, /\.row:has\(:is\(\[data-x-item-state~="selected"\], \[data-x-toggle-state~="selected"\]\)\)/);
@@ -235,7 +235,7 @@ it("gives Vue host subjects the live runtime's selectors, with the owner test in
   const css = `:host { color: red; } :host::after { content: "x"; } :host(.a) { color: blue; }
     .wide :host { color: red; } .wide :host::after { content: "x"; } .wide > :host(.a) { color: blue; }
     .wide :host(:not(.c)) { color: green; } .wide :host .in { color: navy; }`;
-  // Live: `:scope:where([data-component~="ui-x"])` for `:host`, with the same tests and context.
+  // Live: `:scope:where([component~="ui-x"])` for `:host`, with the same tests and context.
   assert.equal(vueScoped(css, button), "@scope (.ui-x) to ([data-hn]) {:scope:where([data-hn-ui-x]) { color: red; }"
     + ':scope:where([data-hn-ui-x])::after { content: "x"; }'
     + ":scope.a:where([data-hn-ui-x]) { color: blue; }"
@@ -251,7 +251,7 @@ it("selects a component by tag with the live runtime's selectors in Vue and Svel
   const css = ":host:is(ui-x) { color: red; } x-kid > b { color: blue; }";
   const svelte = compileSvelte(`<p class="ui-x"><x-kid></x-kid><b></b></p><style>${compileComponentStylesForSvelte(css, card).css}</style>`,
     { css: "external", filename: "UiX.svelte" }).css!.code;
-  // Live: `:is(x-kid, :where([data-component~="x-kid"]))`, the type selector's (0,0,1).
+  // Live: `:is(x-kid, :where([component~="x-kid"]))`, the type selector's (0,0,1).
   // Without slots nothing is projected, so a subject needs no owner test.
   assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
     + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");

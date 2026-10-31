@@ -17,7 +17,7 @@ async function snapshot(page: Page) {
   return {
     behavior: await page.locator("#case").evaluate((element) =>
       [...element.querySelectorAll<HTMLElement | SVGElement>("article, button, i, g")].map((root) => ({
-        // Live roots carry data-component, and Svelte scopes styles by component tags as classes: both are target styling markers.
+        // Live roots carry component, and Svelte scopes styles by component tags as classes: both are target styling markers.
         tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"),
         classValue: root.getAttribute("class")?.split(" ").filter((name) => !/^x-styled-|^x-empty-class$/.test(name)).join(" ") ?? null,
         classes: [...root.classList].filter((name) => !/^x-styled-|^x-empty-class$/.test(name)),

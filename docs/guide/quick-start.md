@@ -101,6 +101,9 @@ export type XCounterProps = Omit<React.ComponentPropsWithoutRef<"div">, "style">
 
 export default function XCounter(props: XCounterProps) {
   const { children: _children, slots: _slots, ...nativeAttrs } = props;
+  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];
+  delete nativeAttrs["component"];
+  delete nativeAttrs["data-component"];
   const [count, setCount, getCount] = useLiveState<number>(0);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);
@@ -116,7 +119,7 @@ export default function XCounter(props: XCounterProps) {
     <div
       {...nativeAttrs}
       ref={rootRef}
-      data-component={[nativeAttrs["data-component"], "x-counter"].filter(Boolean).join(" ")}
+      {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}
     >
       <button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}
       <button type="button" ref={resetEvents}>Reset</button>

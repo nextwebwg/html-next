@@ -19,7 +19,7 @@ it("builds existing Markdown, heading links, generated reference data, and an au
     const reference = await readFile(join(result.outDir, "reference/counter/index.html"), "utf8");
     expect(reference).toContain("Increment amount.");
     expect(reference).toContain('<meta name="description" content="Generated component contract and live counter." data-component-head="">');
-    expect(reference).toContain('data-component="proof-counter"');
+    expect(reference).toContain('component="proof-counter"');
     expect(reference).toContain('href="/proof/guide/quick-start/"');
     expect(result.browserInputs.some(path => /(?:marked|\.server\.|proof\.ts)/.test(path))).toBe(false);
   } finally { await rm(root, { recursive: true, force: true }); }

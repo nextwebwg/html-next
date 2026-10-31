@@ -477,7 +477,7 @@ async function smokeEntry(browser: Browser, name: string, removals: number): Pro
   const checkpoint = async (): Promise<void> => {
     // Rows may omit per-item markers (element-as-boundary, owner decision 2a), so they are not compared.
     markup.push(await page.evaluate(() =>
-      document.querySelector('[data-component="benchmark-app"]')!.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "")));
+      document.querySelector('[component="benchmark-app"]')!.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "")));
   };
   const rows = page.locator("#tbody tr");
   const waitRows = (expected: number) => page.waitForFunction((n) => document.querySelectorAll("#tbody tr").length === n, expected);
@@ -514,7 +514,7 @@ async function smokeEntry(browser: Browser, name: string, removals: number): Pro
   await waitRows(2000 - removals);
   await checkpoint();
   await page.evaluate(async () => {
-    const component = document.querySelector('[data-component="benchmark-app"]')!;
+    const component = document.querySelector('[component="benchmark-app"]')!;
     component.remove();
     await new Promise((done) => setTimeout(done, 0));
     document.body.prepend(component);

@@ -159,7 +159,7 @@ const successes: ConformanceCase[] = [
       result: {
         tag: "section",
         attributes: [
-          ["data-component", "x-root-with"],
+          ["component", "x-root-with"],
           ["data-label", "Ada"],
           ["id", "person"],
         ],
@@ -173,7 +173,7 @@ const successes: ConformanceCase[] = [
         result: {
           tag: "section",
           attributes: [
-            ["data-component", "x-root-with"],
+            ["component", "x-root-with"],
             ["data-label", "Bea"],
             ["id", "person"],
           ],
@@ -200,7 +200,7 @@ const successes: ConformanceCase[] = [
         attributes: [
           ["aria-label", "Save"],
           ["class", "cta"],
-          ["data-component", "x-btn"],
+          ["component", "x-btn"],
           ["data-x-btn-prop-label", "Save"],
           ["id", "b"],
           ["type", "button"],

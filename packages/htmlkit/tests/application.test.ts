@@ -343,12 +343,12 @@ describe("application platform", () => {
     const application = await createApplication(options);
     try {
       expect(application.routes[0]!.pageName).toBe("page-products");
-      expect((await application.render("/products/")).body).toContain('data-component="admin-shell"');
+      expect((await application.render("/products/")).body).toContain('component="admin-shell"');
       expect((await application.render("/products/")).body).toContain("Helper");
       expect(titleOf(await application.render("/products/"))).toBe("Products");
       expect((await application.render("/plain/")).body).not.toContain("shell");
-      expect((await application.render("/default/")).body).toContain('data-component="default-shell"');
-      expect((await application.render("/admin/")).body).toContain('data-component="admin-shell"');
+      expect((await application.render("/default/")).body).toContain('component="default-shell"');
+      expect((await application.render("/admin/")).body).toContain('component="admin-shell"');
     } finally { await application.close(); }
     await write(root, "extra/products.html", '<template component="product-label"><p>Label</p></template><template component="page-products"><p>Page</p></template>');
     await expect(discoverRoutes(root, options)).rejects.toThrow(/hk:page/);
@@ -466,7 +466,7 @@ describe("application platform", () => {
     // Both graphs start with the layout; each page still links its own styles, not the last page's.
     for (const [page, own, other] of [["index.html", "home-page", "guide-page"], ["guide/index.html", "guide-page", "home-page"]] as const) {
       const styles = await css(page);
-      expect([styles.includes(`[data-component~=${own}]`), styles.includes(`[data-component~=${other}]`), styles.includes("#070707")]).toEqual([true, false, true]);
+      expect([styles.includes(`[component~=${own}]`), styles.includes(`[component~=${other}]`), styles.includes("#070707")]).toEqual([true, false, true]);
     }
   }, 60_000);
 
@@ -484,7 +484,7 @@ describe("application platform", () => {
       const { html } = await application.render("/");
       expect(html).toContain(">From @/</title>");
       expect(html).toContain("Card");
-      expect(html).toMatch(/<nav[^>]*data-component="hk-nav"/);
+      expect(html).toMatch(/<nav[^>]*component="hk-nav"/);
     } finally { await application.close(); }
     const result = await buildApplication({ root });
     expect(result.browserInputs.some(input => input.endsWith("controllers/card.ts"))).toBe(true);
@@ -512,7 +512,7 @@ describe("application platform", () => {
         const page = await application.render("/");
         expect(titleOf(page)).toBe(selected === "first" ? "First title" : "Second title");
         expect(page.head.html).toContain(`content="${selected === "first" ? "First description" : "Second description"}"`);
-        expect(page.body.includes('data-component="app-layout"')).toBe(selected === "second");
+        expect(page.body.includes('component="app-layout"')).toBe(selected === "second");
         expect(page.body).not.toMatch(/<title|<meta/);
       } finally { await application.close(); }
     }
@@ -582,7 +582,7 @@ describe("application platform", () => {
       expect(one.html).toContain("a &lt; b");
       expect(one.html).toContain("HTMLKit");
       expect(one.html).toContain(">one</title>");
-      expect(one.html).toContain('data-component="items-layout"');
+      expect(one.html).toContain('component="items-layout"');
       expect(one.css).toContain("rgb(20, 30, 40)");
       expect((await application.render("/docs/missing/")).status).toBe(404);
     } finally { await application.close(); }
@@ -664,7 +664,7 @@ describe("application platform", () => {
       // Outer to inner, each loader receives the data of the ones before it as parent.
       const intro = await application.render("/docs/guide/intro/");
       expect(intro.layers.map(layer => layer.component)).toEqual(["app-layout", "docs-shell", "guide-shell", "intro-page"]);
-      const order = ["app-layout", "docs-shell", "guide-shell", "intro-page"].map(tag => intro.body.indexOf(`data-component="${tag}"`));
+      const order = ["app-layout", "docs-shell", "guide-shell", "intro-page"].map(tag => intro.body.indexOf(`component="${tag}"`));
       expect(order.every((position, i) => position >= 0 && (i === 0 || position > order[i - 1]!))).toBe(true);
       expect(intro.body).toContain('data-trail="kit"');
       expect(intro.body).toContain('data-trail="kit/docs"');
@@ -676,7 +676,7 @@ describe("application platform", () => {
     } finally { await application.close(); }
     const result = await buildApplication({ root });
     const built = await readFile(join(result.outDir, "docs/guide/intro/index.html"), "utf8");
-    for (const tag of ["app-layout", "docs-shell", "guide-shell"]) expect(built).toContain(`data-component="${tag}"`);
+    for (const tag of ["app-layout", "docs-shell", "guide-shell"]) expect(built).toContain(`component="${tag}"`);
     expect(built).toContain("Intro kit/docs/guide");
     expect(existsSync(join(result.outDir, "docs/_layout/index.html"))).toBe(false);
   }, 60_000);
@@ -694,7 +694,7 @@ describe("application platform", () => {
       const missing = await application.render("/nowhere/");
       expect(missing.status).toBe(404);
       expect(missing.body).toContain("Nothing at /nowhere/");
-      expect(missing.body).toContain('data-component="app-layout"');
+      expect(missing.body).toContain('component="app-layout"');
       expect(titleOf(missing)).toBe("Lost");
       expect((await application.render("/404/")).status).toBe(404);
       const response = await application.fetch(new Request("http://localhost/nowhere/"));
@@ -707,7 +707,7 @@ describe("application platform", () => {
     expect(existsSync(join(result.outDir, "404/index.html"))).toBe(false);
     const document = await readFile(join(result.outDir, "404.html"), "utf8");
     expect(document).toContain(">Lost</title>");
-    expect(document).toContain('data-component="app-layout"');
+    expect(document).toContain('component="app-layout"');
     // A static host serves 404.html at any missing path, so its modules are absolute.
     expect(document).toMatch(/<script type="module" src="\/_htmlkit\/[^"]+\.js"><\/script>/);
     const manifest = JSON.parse(await readFile(join(result.outDir, "_htmlkit/manifest.json"), "utf8"));

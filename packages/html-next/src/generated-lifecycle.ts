@@ -1,3 +1,4 @@
+import { COMPONENT_LIFECYCLE_SELECTOR } from "./component-identity.js";
 /** The document-level lifecycle coordinator every generated (and live) bundle in a realm shares. */
 
 export interface ManagedComponentLifecycle {
@@ -91,7 +92,7 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       const element = node as Element;
       if ((element as RuntimeElement)[lifecycleKey] !== undefined) changed.push(element);
       if (element.childElementCount === 0) return;
-      for (const descendant of element.querySelectorAll("[data-component]")) {
+      for (const descendant of element.querySelectorAll(COMPONENT_LIFECYCLE_SELECTOR)) {
         if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
       }
     };

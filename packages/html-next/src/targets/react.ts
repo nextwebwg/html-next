@@ -37,7 +37,7 @@ const REACT_RESERVED = new Set([
   "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
-  "props", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
   "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
@@ -876,7 +876,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const attributes = [...literals, ...(rootTag === undefined ? [] : [state.preact && !svg ? "{...nativeAttributes}" : "{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
-      `data-component={[nativeAttrs["data-component"], ${quote(rootTag.tag)}].filter(Boolean).join(" ")}`,
+      `{...{ component: [renderedIdentity, ${quote(rootTag.tag)}].filter(Boolean).join(" ") }}`,
     ])];
   const opening = `<${tag}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}`;
   const markup = component && children === "" || !component && isVoidElement(node.name)
@@ -1163,6 +1163,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ]),
     `  const { children: _children, slots: _slots, ${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
       .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
+    '  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];',
+    '  delete nativeAttrs["component"];',
+    '  delete nativeAttrs["data-component"];',
     ...(options.target === "preact" ? [
       "  const { constructor: _nativeConstructor, ...nativeAttributes } = nativeAttrs;",
       '  if (Object.hasOwn(nativeAttrs, "constructor")) Object.assign(nativeAttributes, { CONSTRUCTOR: _nativeConstructor });',

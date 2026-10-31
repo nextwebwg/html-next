@@ -70,8 +70,8 @@ it("keeps head scripts apart, refuses private files, and lays out an alias like 
   const application = await createApplication({ root, plugins: [notes(root)], layoutDefaults: { "/install/": "guide" } });
   try {
     expect((await application.render("/install/")).html).toContain("<script>window.notes = true;</script><script>(() => {");
-    expect((await application.render("/install/")).html).toContain('data-component="guide-shell"');
-    expect((await application.render("/start/")).html).toContain('data-component="guide-shell"');
+    expect((await application.render("/install/")).html).toContain('component="guide-shell"');
+    expect((await application.render("/start/")).html).toContain('component="guide-shell"');
   } finally { await application.close(); }
   for (const secret of [".env", ".git/config", "docs/server.pem"]) {
     await write(root, secret, "SECRET=1");
@@ -150,10 +150,10 @@ it("adds a plugin's page folders, stylesheets, and folder layout to the site's o
   try {
     expect(application.routes.map(route => route.pattern).sort()).toEqual(["/about/", "/docs/", "/docs/hidden/", "/docs/install/", "/docs/start/"]);
     // The site's page keeps the site's default layout; the plugin's pages get the folder's layout.
-    expect((await application.render("/about/")).html).toContain('data-component="site-shell"');
+    expect((await application.render("/about/")).html).toContain('component="site-shell"');
     const install = (await application.render("/docs/install/")).html;
-    expect(install).toContain('data-component="notes-shell"');
-    expect(install).not.toContain('data-component="site-shell"');
+    expect(install).toContain('component="notes-shell"');
+    expect(install).not.toContain('component="site-shell"');
   } finally { await application.close(); }
 }, 60_000);
 
@@ -172,7 +172,7 @@ it("names plugin layouts that hk:layout selects, with their own loaders and decl
   const application = await createApplication({ root, plugins: [notes(root), plugin, later] });
   try {
     const { body } = await application.render("/landing/");
-    expect(body).toContain('data-component="home-shell"');
+    expect(body).toContain('component="home-shell"');
     expect(body).toContain("<h1>Welcome</h1>");
     expect(seen).toEqual([["title"]]);
   } finally { await application.close(); }
@@ -181,7 +181,7 @@ it("names plugin layouts that hk:layout selects, with their own loaders and decl
   await write(root, "app/own.html", '<template component="own-home"><main><slot name="page"></slot></main></template>');
   for (const [layouts, shell] of [[undefined, "site-home"], [{ home: { component: "app/own.html" } }, "own-home"]] as const) {
     const site = await createApplication({ root, plugins: [notes(root), plugin], ...(layouts === undefined ? {} : { layouts }) });
-    try { expect((await site.render("/landing/")).body).toContain(`data-component="${shell}"`); }
+    try { expect((await site.render("/landing/")).body).toContain(`component="${shell}"`); }
     finally { await site.close(); }
   }
   // Plugins' layouts stay apart from the site's layouts option.
@@ -212,7 +212,7 @@ it("makes a page directory's 404 page the not-found page only at /, with that di
     expect(application.routes.map(route => route.pattern).filter(pattern => pattern.includes("404"))).toEqual([]);
     for (const path of ["/v/one/404/", "/v/one/missing/", "/missing/"]) {
       const page = await application.render(path);
-      expect([page.status, page.body.includes("Nothing here"), page.body.includes('data-component="notes-shell"')]).toEqual([404, true, true]);
+      expect([page.status, page.body.includes("Nothing here"), page.body.includes('component="notes-shell"')]).toEqual([404, true, true]);
     }
   } finally { await application.close(); }
   // Two not-found pages at / are a conflict that names both.

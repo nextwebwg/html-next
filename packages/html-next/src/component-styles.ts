@@ -1,8 +1,9 @@
+import { COMPONENT_ROOT_SELECTOR, componentOwnerSelector } from "./component-identity.js";
 import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-browser.js";
 /**
  * Component style compilation (nextwebwg.org/html-next/styling).
  *
- * A style block applies to its component's region: from the root (`[data-component~="tag"]`) down
+ * A style block applies to its component's region: from the root (`[component~="tag"]`) down
  * to nested component roots and projected content. `:host` selects the root, `:host([prop])` and
  * `:host(:state(name))` the root while resolved props and state match, and `:slotted()` projected
  * content at any depth.
@@ -17,8 +18,8 @@ import type { ComponentDefinition, TemplateNode } from "./template.js";
 import { parseTypeExpression } from "./type-system.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 
-/** Names a component on its root, and only its root. Delegated roots list every owner. */
-export const COMPONENT_ATTRIBUTE = "data-component";
+export { COMPONENT_ATTRIBUTE } from "./component-identity.js";
+
 /** Marks each top-level projected node. */
 export const PROJECTED_ATTRIBUTE = "data-slotted";
 
@@ -26,8 +27,8 @@ export const PROJECTED_ATTRIBUTE = "data-slotted";
 // Roots override the normal reset even when their authored sheet is in a cascade layer.
 const SCOPE_OWNER = "--html-next-scope-owner";
 export const COMPONENT_STYLE_BOUNDARIES = `@supports (-moz-appearance: none) {
-:where([data-component], [data-slotted]) { --html-next-scope-owner: boundary; }
-:where([data-slotted]:not([data-component])) { --html-next-scope-owner: projected !important; }
+:where(${COMPONENT_ROOT_SELECTOR}, [data-slotted]) { --html-next-scope-owner: boundary; }
+:where([data-slotted]:not(${COMPONENT_ROOT_SELECTOR})) { --html-next-scope-owner: projected !important; }
 }`;
 
 export function addAttributeToken(element: Element, attribute: string, token: string): void {
@@ -58,7 +59,7 @@ export function projectsIntoComponents(node: ComponentDefinition["template"] | T
  * root itself is outside that scope, so a rule whose subject is `:host` matches nothing there.
  */
 export function projectingHost(tag: string): string {
-  return `:where([${COMPONENT_ATTRIBUTE}~="${tag}"])`;
+  return `:where(${componentOwnerSelector(tag)})`;
 }
 
 /** The attribute carrying the resolved prop and state values a definition's rules test. */
@@ -270,11 +271,11 @@ const NO_GRAPH: ForeignStateResolver = () =>
   fail("HY006", "`:state()` outside `:host()` tests another component's state, which needs the component graph to resolve.");
 
 /**
- * What a component's root is in the default build: its `data-component` owner list. `namespace` is
+ * What a component's root is in the default build: its `component` owner list. `namespace` is
  * the type selector's authored prefix (`n|`), which the root test keeps.
  */
 const componentOwner = (tag: string, namespace = ""): string =>
-  `:where(${namespace === "" ? "" : namespace + "*"}[${COMPONENT_ATTRIBUTE}~="${tag}"])`;
+  `:where(${componentOwnerSelector(tag, namespace)})`;
 
 /** Type selectors naming components, outside brackets and strings. */
 function rewriteComponentTags(selector: string, componentRoot: (tag: string, namespace: string) => string): string {
@@ -401,7 +402,7 @@ export function nestedRootDiagnostic(owner: string, selector: string, tag: strin
 
 /** Firefox can leak a selector list containing pseudo-elements through an @scope limit. */
 export function guardComponentPseudoElements(selector: string,
-  boundary = `:where(:not([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]))`, always = false): string {
+  boundary = `:where(:not(${COMPONENT_ROOT_SELECTOR}, [${PROJECTED_ATTRIBUTE}]))`, always = false): string {
   if (!always && !selector.includes("::")) return selector;
   const parts: string[] = [];
   let start = 0;
@@ -445,7 +446,7 @@ export function guardComponentPseudoElements(selector: string,
  * ponytail: context above the receiving component is reached only through `:host`, and compounds
  * between `:host` and the projected node may match the receiving component's markup.
  */
-export function guardProjectingSelector(selector: string, tags: readonly string[], hosts: readonly string[], root = `[${COMPONENT_ATTRIBUTE}]`): string {
+export function guardProjectingSelector(selector: string, tags: readonly string[], hosts: readonly string[], root = COMPONENT_ROOT_SELECTOR): string {
   const boundary = `:not(${root}, [${PROJECTED_ATTRIBUTE}]:not(${tags.map((tag) => `[${PROJECTED_ATTRIBUTE}~="${tag}"]`).join(", ")}))`;
   return complexSelectors(selector).map((complex) => hosts.some((host) => complex.includes(host))
     ? guardComponentPseudoElements(complex, `:where(:scope, ${boundary})`, true)
@@ -471,7 +472,7 @@ function withinFirstCompound(complex: string, test: string): string {
 }
 
 /** The scope of the copy of own rules that styles projected markup: each projected node the tags wrote, down to component roots (`root`) and other projected nodes. */
-export function projectingScope(tags: readonly string[], root = `[${COMPONENT_ATTRIBUTE}]`): string {
+export function projectingScope(tags: readonly string[], root = COMPONENT_ROOT_SELECTOR): string {
   return `(${tags.map(name => `[${PROJECTED_ATTRIBUTE}~="${name}"]:not(${root})`).join(", ")}) to (${root}, [${PROJECTED_ATTRIBUTE}])`;
 }
 
@@ -484,15 +485,15 @@ export function projectingScope(tags: readonly string[], root = `[${COMPONENT_AT
 export function assembleComponentStyles(tag: string | readonly string[], own: string, slotted: string, hoisted: string,
   includeBoundaryReset = true, projecting = ""): string {
   const tags = typeof tag === "string" ? [tag] : tag;
-  const root = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"]`).join(", ");
+  const root = tags.map(name => componentOwnerSelector(name)).join(", ");
   const scoped = own.trim() !== "" || slotted.trim() !== "";
-  const identities = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"] { ${SCOPE_OWNER}: "${name}" !important; }`).join("\n");
+  const identities = tags.map(name => `${componentOwnerSelector(name)} { ${SCOPE_OWNER}: "${name}" !important; }`).join("\n");
   return [
     hoisted,
     scoped && includeBoundaryReset ? COMPONENT_STYLE_BOUNDARIES : "",
     scoped ? `@supports (-moz-appearance: none) {\n${identities}\n}` : "",
-    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]) {\n${own}\n}`,
-    slotted.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) {\n${slotted}\n}`,
+    own.trim() === "" ? "" : `@scope (${root}) to (${COMPONENT_ROOT_SELECTOR}, [${PROJECTED_ATTRIBUTE}]) {\n${own}\n}`,
+    slotted.trim() === "" ? "" : `@scope (${root}) to (${COMPONENT_ROOT_SELECTOR}) {\n${slotted}\n}`,
     projecting.trim() === "" ? "" : `@scope ${projectingScope(tags)} {\n${projecting}\n}`,
   ].filter((part) => part !== "").join("\n");
 }
@@ -600,7 +601,7 @@ export function compileComponentStyles(
     }
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
       rewriteComponentSelector(rule.selectorText, owner.contract.tag, projecting ? projectingHost(owner.contract.tag)
-        : `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
+        : `:scope:where(${componentOwnerSelector(owner.contract.tag)})`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
     rule.selectorText = styleRuleKind(rule.selectorText) !== "own" ? rewritten
       : projecting ? guardProjectingSelector(rewritten, tagList, tagList.map(projectingHost)) : guardComponentPseudoElements(rewritten);
     for (const child of Array.from(rule.cssRules ?? [])) {

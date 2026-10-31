@@ -84,12 +84,12 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           await page.evaluate(async () => { await (window as unknown as { HtmlNextLoader: { startBrowserComponents(root: Document, options: { onError(error: unknown): void }): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents(document, { onError(error) { throw error; } }); });
           const read = () => page.evaluate(() => {
             const style = (selector: string) => { const element = document.querySelector(selector); if (element === null) throw new Error(selector + ': ' + document.body.innerHTML); return getComputedStyle(element); };
-            return { nestedScopeWidth: style('[data-component~="x-a"] > svg circle').strokeWidth, hostBorder: style('[data-component~="x-a"]').borderTopColor, rect: style('[data-component~="x-a"] > svg rect').fill,
-              circle: style('[data-component~="x-b"] > svg circle').fill,
-              pFill: style('[data-component~="x-a"] > p').fill,
-              pColor: style('[data-component~="x-a"] > p').color,
-              background: style('[data-component~="x-a"] > p').backgroundColor,
-              stroke: style('[data-component~="x-a"] > p').stroke,
+            return { nestedScopeWidth: style('[component~="x-a"] > svg circle').strokeWidth, hostBorder: style('[component~="x-a"]').borderTopColor, rect: style('[component~="x-a"] > svg rect').fill,
+              circle: style('[component~="x-b"] > svg circle').fill,
+              pFill: style('[component~="x-a"] > p').fill,
+              pColor: style('[component~="x-a"] > p').color,
+              background: style('[component~="x-a"] > p').backgroundColor,
+              stroke: style('[component~="x-a"] > p').stroke,
               projected: style('#projected rect').fill, projectedComponent: style('#projected-component svg rect').fill, nestedProjectedComponent: style('#nested-projected-component svg rect').fill };
           });
           const expected = { nestedScopeWidth: '2px', hostBorder: 'rgb(16, 17, 18)', rect: 'rgb(1, 2, 3)', circle: 'rgb(4, 5, 6)', pFill: 'rgb(0, 0, 0)', pColor: 'rgb(10, 11, 12)', background: 'rgb(13, 14, 15)', stroke: 'rgb(7, 8, 9)', projected: 'rgb(0, 0, 0)', projectedComponent: 'rgb(1, 2, 3)', nestedProjectedComponent: 'rgb(1, 2, 3)' };

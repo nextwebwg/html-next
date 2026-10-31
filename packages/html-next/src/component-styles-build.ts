@@ -1,3 +1,4 @@
+import { componentOwnerSelector } from "./component-identity.js";
 import { normalizeStylesheetNamespacesForBuild } from "./stylesheet-resources-build.js";
 import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 /**
@@ -17,7 +18,6 @@ import {
   guardProjectingSelector,
   projectingScope,
   projectsIntoComponents,
-  COMPONENT_ATTRIBUTE,
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
   type ComponentPseudoClass,
@@ -139,7 +139,7 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   const selector = (input: string): string => {
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
       rewriteComponentSelector(input, owner.contract.tag, projecting ? projectingHost(owner.contract.tag)
-        : `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
+        : `:scope:where(${componentOwnerSelector(owner.contract.tag)})`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
     return styleRuleKind(input) !== "own" ? rewritten
       : projecting ? guardProjectingSelector(rewritten, tagList, tagList.map(projectingHost)) : guardComponentPseudoElements(rewritten);
   };
@@ -226,7 +226,7 @@ function vueOwnerAttribute(tag: string): string {
  * tests it in `:where()`, which keeps the selector's specificity, and `:slotted()` selects what lacks
  * it. Without slots, nothing is projected, and `:slotted()` selects nothing. `:host` is `:scope`,
  * and a component selected by tag is its class in `:where()`, which keeps the type selector's
- * specificity, as the live runtime's `:where([data-component~="…"])` does.
+ * specificity, as the live runtime's `:where([component~="…"])` does.
  *
  * They are emitted as `<style scoped>`, since Vite drops the scoped styles of a component a build
  * leaves out, with each selector in `:global()`, which Vue's scoped styles keep as written. Vue

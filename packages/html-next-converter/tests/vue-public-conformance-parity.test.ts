@@ -74,7 +74,7 @@ function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unkno
       ? entry.flatMap((attribute) => {
         if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
         const [name, text] = attribute as [string, string];
-        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-") || name === "data-hn" || name.startsWith("data-hn-")) return [];
+        if (name === "data-slotted" || name === "component" || name.startsWith("data-v-") || name === "data-hn" || name.startsWith("data-hn-")) return [];
         // Vue selects a root, or a styled child, through its component tag as a class.
         if (name !== "class") return [attribute];
         const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token)).join(" ");

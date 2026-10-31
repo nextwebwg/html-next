@@ -1,3 +1,4 @@
+import { COMPONENT_ROOT_SELECTOR, componentIdentity, componentOwnerSelector } from "./component-identity.js";
 import type { ComponentModule, ControllerModule } from "./controller.js";
 import { activateModule } from "./module-connection.js";
 import { createInputPort, evaluateInput, INPUT_PORT, observingInputs, readInputStatus, READY_INPUT, UNRESOLVED_INPUT, withoutInputObservation, type ComponentInputs, type InputSnapshot, type InputStatus } from "./inputs.js";
@@ -418,7 +419,7 @@ function recordTestedStates(document: Document, tested: Readonly<Record<string, 
     const next = [...new Set([...current, ...added])];
     if (next.length === current.length) continue;
     names.set(next);
-    for (const root of document.querySelectorAll(`[${COMPONENT_ATTRIBUTE}~="${tag}"]`)) {
+    for (const root of document.querySelectorAll(componentOwnerSelector(tag))) {
       const owner = runtimeInstances.get(root);
       for (const instance of owner === undefined ? [] : [owner, ...owner.delegates]) {
         if (instance.definition.contract.tag === tag && !stateWriters.has(instance)) installStateAttribute(instance);
@@ -681,7 +682,7 @@ function discoverySelector(registry: DocumentRegistry): string {
   return registry.discoverySelector ??=
     [
       "template[component]",
-      "[data-component]",
+      COMPONENT_ROOT_SELECTOR,
       ...Array.from(registry.definitions.keys()),
     ].join(",");
 }
@@ -2520,7 +2521,7 @@ function renderInstance(
     context.frameworkOwned &&
     candidate instanceof Element &&
     candidate.localName !== elementName &&
-    (candidate.getAttribute("data-component") ?? "").split(/\s+/).includes(node.name)
+    componentIdentity(candidate).split(/\s+/).includes(node.name)
   ) {
     // A framework renders nested declarative components as their native roots,
     // not as the authored invocation tag. That child owns its already-adopted
@@ -2536,7 +2537,7 @@ function renderInstance(
     !context.frameworkOwned &&
     candidate instanceof Element &&
     candidate.localName !== elementName &&
-    (candidate.getAttribute("data-component") ?? "").split(/\s+/).includes(node.name)
+    componentIdentity(candidate).split(/\s+/).includes(node.name)
   ) {
     // A nested component the server already lowered. Keep its root, and bind this
     // definition's nodes that were projected into it: they sit in the nested root's slot ranges (or its
@@ -2655,7 +2656,7 @@ function renderInstance(
         if (index < cursor) return false;
         return candidate instanceof Element && (
           candidate.localName === child.name ||
-          (candidate.getAttribute("data-component") ?? "").split(/\s+/).includes(child.name)
+          componentIdentity(candidate).split(/\s+/).includes(child.name)
         );
       });
       if (matchingIndex < 0 && child.flow !== undefined) {
@@ -2943,6 +2944,10 @@ export function serializeRenderedForm(container: Element): string {
   const written: DocumentFragment[] = [];
   originals.forEach((original, index) => {
     const copy = copies[index]!;
+    if (original.matches(COMPONENT_ROOT_SELECTOR)) {
+      copy.setAttribute(COMPONENT_ATTRIBUTE, componentIdentity(original));
+      copy.removeAttribute("data-component");
+    }
     if (original instanceof HTMLInputElement && copy instanceof HTMLInputElement) {
       const defaults: { value?: string; valuePresent?: boolean; checked?: boolean } = {};
       if (original.type !== "file" && original.value !== original.defaultValue) {
@@ -2981,7 +2986,7 @@ export function serializeRenderedForm(container: Element): string {
       const records = Object.fromEntries([compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, compiledRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     }
-    // One carrier for each component on this root, outer to inner as `data-component` lists them.
+    // One carrier for each component on this root, outer to inner as `component` lists them.
     const owners: [tag: string, nodes: readonly Node[] | undefined][] = instance !== undefined
       ? [instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, entry.projection?.nodes])
       : compiled === undefined ? [] : [compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, entry.J?.map(([node]) => node)]);
@@ -3332,7 +3337,7 @@ function prepareRuntimeInvocation(
       typeof focusedSelection[1] === "number"
     ) focusedControl.setSelectionRange(focusedSelection[0], focusedSelection[1]);
   }
-  addAttributeToken(nativeRoot, COMPONENT_ATTRIBUTE, definition.contract.tag);
+  if (!hydration) addAttributeToken(nativeRoot, COMPONENT_ATTRIBUTE, definition.contract.tag);
   instance.element = nativeRoot;
   if (rootArms(definition.template) !== undefined) installRootSwitch(instance, context);
   return {
@@ -3403,7 +3408,7 @@ export function renderServerHead(root: Document): void {
     eager.push(...instance.scripts?.eager ?? []);
     for (const delegate of instance.delegates) visit(delegate);
   };
-  for (const element of Array.from(root.querySelectorAll("[data-component]"))) {
+  for (const element of Array.from(root.querySelectorAll(COMPONENT_ROOT_SELECTOR))) {
     const instance = runtimeInstance(element);
     if (instance !== undefined) visit(instance);
   }
@@ -3772,9 +3777,9 @@ function collectWithin(scope: QueryRoot, selector: string, elements: Set<Element
 
 function visitComponentRoots(scope: QueryRoot, visit: (element: Element) => void): void {
   const element = scope.nodeType === 1 ? scope as Element : undefined;
-  if (element?.matches("[data-component]") === true) visit(element);
+  if (element?.matches(COMPONENT_ROOT_SELECTOR) === true) visit(element);
   if (element?.childElementCount === 0) return;
-  for (const descendant of scope.querySelectorAll("[data-component]")) visit(descendant);
+  for (const descendant of scope.querySelectorAll(COMPONENT_ROOT_SELECTOR)) visit(descendant);
 }
 
 interface LoweredScopes {
@@ -3843,7 +3848,7 @@ function lowerScopes(
     for (const element of elements) {
       const live = byTag.get(element.localName);
       if (live !== undefined) prepare(live, element, false);
-      if (!element.hasAttribute("data-component")) continue;
+      if (!element.matches(COMPONENT_ROOT_SELECTOR)) continue;
       const existing = runtimeInstance(element);
       if (existing !== undefined) {
         if (!existing.frameworkOwned) roots.add(element);
@@ -3852,7 +3857,7 @@ function lowerScopes(
       // Generated output registered this root's lifecycle itself; it is rendered and owned, not server markup.
       if ((element as RuntimeElement)[lifecycleKey] !== undefined) continue;
       let accepted = false;
-      for (const tag of new Set((element.getAttribute("data-component") ?? "").split(/\s+/))) {
+      for (const tag of new Set(componentIdentity(element).split(/\s+/))) {
         const owner = byTag.get(tag);
         if (owner !== undefined && prepare(owner, element, true)) accepted = true;
       }
@@ -3863,7 +3868,7 @@ function lowerScopes(
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
     const pendingSelector = [
-      "[data-component]",
+      COMPONENT_ROOT_SELECTOR,
       ...Array.from(newDefinitions.keys()),
     ].join(",");
     const existing = new Set<Element>();
@@ -4141,7 +4146,10 @@ function attachRuntimeComponent(
       projectedSlotNames.set(node, slot);
       markProjectedRoot(node);
     }
-    addAttributeToken(element, COMPONENT_ATTRIBUTE, definition.contract.tag);
+    if (!componentIdentity(element).split(/\s+/).includes(definition.contract.tag)) {
+      addAttributeToken(element, element.hasAttribute("component") || !element.hasAttribute("data-component")
+        ? COMPONENT_ATTRIBUTE : "data-component", definition.contract.tag);
+    }
     // The framework's explicit props become the same recorded attributes hydration reads; defaults
     // stay implicit, exactly as for HTML authors.
     for (const [name, prop] of Object.entries(definition.contract.props)) {
@@ -4764,7 +4772,7 @@ export function observeDocument(
     }
     const start = removed.length;
     for (const [element] of connected) {
-      if (node.contains(element) && element.matches("[data-component]")) removed.push(element);
+      if (node.contains(element) && element.matches(COMPONENT_ROOT_SELECTOR)) removed.push(element);
     }
     if (removed.length - start > 1) {
       removed.push(...removed.splice(start).sort((a, b) => a.compareDocumentPosition(b) & 4 ? -1 : 1));

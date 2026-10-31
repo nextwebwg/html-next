@@ -305,7 +305,7 @@ const cases: readonly ParityCase[] = [
     invocation: `<x-card id="case" class="consumer" label="Save"><strong>Now</strong></x-card>`,
     vueRender: `h(XCard, { id: "case", class: "consumer", label: "Save" }, { default: () => h("strong", "Now") })`,
     root: "#case",
-    // The component's own tag is Vue's styling class for :host, as data-component is live's; both are target markers.
+    // The component's own tag is Vue's styling class for :host, as component is live's; both are target markers.
     probe: `({ tag: root.localName, label: root.getAttribute("aria-label"), className: [...root.classList].filter((name) => name !== "x-card").join(" "), text: root.textContent?.trim(), background: getComputedStyle(root).backgroundColor, childColor: getComputedStyle(root.querySelector("strong")).color })`,
     action: `root.setAttribute("data-probe", "untouched")`,
   },
@@ -1075,7 +1075,7 @@ function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unkno
       ? entry.flatMap((attribute) => {
         if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
         const [name, text] = attribute as [string, string];
-        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-") || name === "data-hn" || name.startsWith("data-hn-")) return [];
+        if (name === "data-slotted" || name === "component" || name.startsWith("data-v-") || name === "data-hn" || name.startsWith("data-hn-")) return [];
         // Vue selects a root, or a styled child, through its component tag as a class.
         if (name !== "class") return [attribute];
         const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token)).join(" ");

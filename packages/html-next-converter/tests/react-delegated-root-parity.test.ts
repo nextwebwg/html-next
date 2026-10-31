@@ -29,7 +29,7 @@ async function snapshot(page: Page) {
   return {
     behavior: await page.locator("#case").evaluate((root) => ({
       tag: root.localName,
-      component: root.getAttribute("data-component"),
+      component: root.getAttribute("component"),
       classes: root.className,
       active: root.getAttribute("data-active"),
       padding: getComputedStyle(root).padding,
@@ -72,7 +72,7 @@ else createRoot(mount).render(element);`);
     new Function("require", "module", "exports", server.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     serverMarkup = renderToString(createElement(module.exports.XPrimary!, { id: "case", children: "Go" }));
     assert.match(serverMarkup, /^<button\b/);
-    assert.match(serverMarkup, /data-component="x-primary x-base-button"/);
+    assert.match(serverMarkup, /component="x-primary x-base-button"/);
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/live.ts", import.meta.url))],
       outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });

@@ -1,3 +1,4 @@
+import { COMPONENT_LIFECYCLE_SELECTOR } from "./component-identity.js";
 /**
  * The direct-extend lifecycle coordinator: the generated coordinator plus a weak index of its roots,
  * so a mutation batch that reaches no registered root costs no subtree query. Only direct-extend
@@ -44,7 +45,7 @@ function indexedCoordinatorFor(root: Document) {
   const reaches = (mutations: readonly MutationRecord[], element: Element): boolean => {
     const within = (nodes: NodeList): boolean => {
       for (const node of nodes) {
-        if (node === element || node.nodeType === 1 && node.contains(element) && element.matches("[data-component]")) return true;
+        if (node === element || node.nodeType === 1 && node.contains(element) && element.matches(COMPONENT_LIFECYCLE_SELECTOR)) return true;
       }
       return false;
     };
@@ -76,7 +77,7 @@ function indexedCoordinatorFor(root: Document) {
       const element = node as Element;
       if ((element as RuntimeElement)[lifecycleKey] !== undefined) changed.push(element);
       if (element.childElementCount === 0) return;
-      for (const descendant of element.querySelectorAll("[data-component]")) {
+      for (const descendant of element.querySelectorAll(COMPONENT_LIFECYCLE_SELECTOR)) {
         if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
       }
     };

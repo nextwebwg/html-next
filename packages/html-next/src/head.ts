@@ -130,9 +130,9 @@ function managerFor(document: Document): HeadManager {
 /** How many component roots enclose `root`: its depth in the component tree. */
 function depthOf(root: Element, manager: HeadManager): number {
   let depth = 0;
-  // `data-component` marks live, compiled and React roots, `data-hn` converted Vue roots.
+  // `component` (or its polyfill fallback) marks live, compiled and React roots, `data-hn` converted Vue roots.
   for (let element = root.parentElement; element !== null; element = element.parentElement) {
-    if (element.hasAttribute("data-component") || element.hasAttribute("data-hn") || manager.roots.has(element)) depth += 1;
+    if (element.matches(':is([component]:not(template), [data-component]:not([component]))') || element.hasAttribute("data-hn") || manager.roots.has(element)) depth += 1;
   }
   return depth;
 }

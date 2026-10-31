@@ -76,7 +76,7 @@ its own `generated-runtime` export, so only hydrating bundles carry them.
 | Find the nodes to bind | The parsed server DOM; `firstChild`, `nextSibling`, `localName` | `adoptTree` walks a block's prototype spec beside the server nodes, steps over region contents (comment and processing-instruction marks), inserts the empty `Text` a `""` value left out, and returns each prototype node's server node |
 | Instance values | `getAttribute`, `JSON.parse` | The `data-html-next-instance` record restores props, prop inputs and state, through the live decoder, then the attribute is removed |
 | Conditions, lists, slots | The marks already in the DOM | Each region adopts its server content on its first render; rows adopt their item ranges, slots their projected nodes, fallback or scoped rendering |
-| Nested components | `data-component` on each server root | An invocation adopts the server root where its placeholder would be; a parent binds what it projected inside the child's slot ranges |
+| Nested components | `component` on each server root | An invocation adopts the server root where its placeholder would be; a parent binds what it projected inside the child's slot ranges |
 | Edits before startup | `value`, `checked`, `selectionStart`/`selectionEnd`, `defaultValue`, `defaultChecked`, `defaultSelected` | Control values and selection are captured before the first render and restored after it; `data-html-next-form-defaults` restores the template's defaults |
 | Markup that changed before startup | `remove()`, `insertBefore` | A block whose server nodes do not match its spec is created afresh in place of them; the blocks around it are still adopted |
 

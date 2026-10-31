@@ -81,7 +81,7 @@ it("orders and labels (group) folders in navigation without adding a URL segment
       ["/docs/tuning/", "Advanced"], ["/docs/api/", "Reference"], ["/docs/faq/", undefined]]);
     expect(Object.keys(items[0]!)).not.toContain("group");
     const { body } = await application.render("/docs/intro/");
-    expect(body).toContain('data-component="start-shell"');
+    expect(body).toContain('component="start-shell"');
     // <hk-nav> labels each group where its pages start.
     expect([...body.matchAll(/<li data-group[^>]*>([^<]+)<\/li>/g)].map(match => match[1])).toEqual(["Getting started", "Advanced", "Reference"]);
     expect(body.replace(/<!--[^>]*-->/g, "").replace(/>\s+</g, "><")).toContain('<li data-group="" data-depth="1">Getting started</li><li data-depth="1"><a href="/docs/intro/" aria-current="page">intro</a></li>');
@@ -160,8 +160,8 @@ it("renders a tree's first three levels inline in <hk-nav>, and deeper levels th
   const application = await createApplication({ root });
   try {
     const body = (await application.render("/a/b/c/d/e/leaf/")).body.replace(/<!--[^>]*-->/g, "").replace(/>\s+</g, "><");
-    const nav = /<nav [^>]*data-component="hk-nav"[^>]*>([\s\S]*?)<\/nav>/.exec(body)![1]!;
-    expect([...nav.matchAll(/<details open=""><summary><span>(\w)<\/span><\/summary><ul( data-component="hk-nav-items")?/g)].map(match => [match[1], match[2] !== undefined]))
+    const nav = /<nav [^>]*component="hk-nav"[^>]*>([\s\S]*?)<\/nav>/.exec(body)![1]!;
+    expect([...nav.matchAll(/<details open=""><summary><span>(\w)<\/span><\/summary><ul( component="hk-nav-items")?/g)].map(match => [match[1], match[2] !== undefined]))
       .toEqual([["a", false], ["b", false], ["c", true], ["d", true], ["e", true]]);
     expect(nav).toContain('<a href="/a/b/c/d/e/leaf/" aria-current="page">leaf</a>');
     // The tree reaches the page in <hk-nav>'s props, and each deeper instance holds only its own levels.
