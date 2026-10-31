@@ -479,18 +479,21 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     planned.push({ artifact, kind, ...(source === undefined ? {} : { source }) });
   };
 
+  const controllerRoots = new Map([...new Set([...graph.nodes.values()].map(node => node.trustRoot))].sort()
+    .map((root, index) => [root, `${options.target}/modules/${index}`]));
+  const emittedControllerFiles = new Map<string, string>();
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     try {
       const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
       const tag = node.definition.contract.tag;
       const componentPath = pathsByTag.get(tag)!;
-      // The controller and its relative imports are copied beside the component, which imports them.
+      // Preserve each package's module graph once, including imports shared by separate components.
       const controllerFiles = new Map<string, GeneratedArtifact>();
       let controller: string | undefined;
       const edge = node.module ?? node.controller;
       if (edge !== undefined) {
         try {
-          controller = await addControllerGraph(edge.url, node.trustRoot, `${options.target}/${node.module === undefined ? "controllers" : "modules"}/${tag}`, controllerFiles, sourceFiles);
+          controller = await addControllerGraph(edge.url, node.trustRoot, controllerRoots.get(node.trustRoot)!, controllerFiles, sourceFiles, { relativeToTrustRoot: true });
         } catch (error) {
           throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error), getDiagnosticLocation(node.definition));
         }
@@ -610,6 +613,12 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       if (svelteConversion !== undefined) for (const helper of svelteConversion.helpers) neededHelpers.add(helper);
       for (const helper of helpers) neededHelpers.add(helper);
       for (const file of controllerFiles.values()) {
+        const previous = emittedControllerFiles.get(file.path);
+        if (previous !== undefined) {
+          if (previous !== file.content) throw new FrameworkOutputCollisionError(options.target, file.path, [file.path, source]);
+          continue;
+        }
+        emittedControllerFiles.set(file.path, file.content);
         claim(file, node.module === undefined ? "controller" : "module", source);
         if (/\.(?:js|mjs|cjs)$/.test(file.path)) {
           const declarationPath = file.path.replace(/\.mjs$/, ".d.mts").replace(/\.cjs$/, ".d.cts").replace(/\.js$/, ".d.ts");
