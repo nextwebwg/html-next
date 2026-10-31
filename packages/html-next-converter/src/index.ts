@@ -21,7 +21,7 @@ import {
   type HtmlDiagnostic,
   loadNodeComponents,
   collectSharedStylesheets,
-  compileComponentGraphStylesForBuild,
+  compileComponentGraphStylesForConversion,
   wrapStylesheetConditions,
   vueHostArtifact,
   vueHtmlArtifact,
@@ -752,7 +752,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     claim({ path: `${options.target}/styles.d.ts`, content: 'declare module "*.css";\n' }, "helper");
   }
   if (sharedStyles.length > 0 && reactTarget) {
-    const css = compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition));
+    const css = compileComponentGraphStylesForConversion([...graph.nodes.values()].map(node => node.definition));
     claim({ path: sharedStylePath, content: wrapStylesheetConditions(css, []) + "\n" }, "style");
   }
 

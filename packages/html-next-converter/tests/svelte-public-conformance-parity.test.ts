@@ -832,7 +832,7 @@ function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unkno
       ? entry.flatMap((attribute) => {
         if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
         const [name, text] = attribute as [string, string];
-        if (["data-slotted", "data-component", "data-html-next-owner", "data-hn"].includes(name)) return [];
+        if (["data-slotted", "component", "data-html-next-owner", "data-hn"].includes(name)) return [];
         // Svelte scopes a root, or an invoked component, by its tag as a class, and owned markup by its hash.
         if (name !== "class") return [attribute];
         const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token) && !/^svelte-\w+$/.test(token)).join(" ");

@@ -50,7 +50,7 @@ describe.skipIf(!enabled)("Svelte projected context parity", () => {
           outDirectory: join(outDirectory, "reader"), entries: ["components/step.html"] });
         appSource = `<script>import XSteps from "./provider/${provider.components[0]!.artifact}";
 import XStep from "./reader/${reader.components[0]!.artifact}";</script>
-<main data-component="x-app"><XSteps id="outer"><XStep id="outer-one" number={1}>Outer one</XStep><XStep id="outer-two" number={2}>Outer two</XStep>
+<main component="x-app"><XSteps id="outer"><XStep id="outer-one" number={1}>Outer one</XStep><XStep id="outer-two" number={2}>Outer two</XStep>
 <XSteps id="inner"><XStep id="inner-one" number={1}>Inner one</XStep><XStep id="inner-two" number={2}>Inner two</XStep></XSteps></XSteps></main>`;
       } else {
         const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["components/**"] });

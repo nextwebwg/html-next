@@ -1,3 +1,4 @@
+import { COMPONENT_ROOT_SELECTOR, componentOwnerSelector } from "./component-identity.js";
 import { normalizeStylesheetNamespacesForBuild } from "./stylesheet-resources-build.js";
 import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 /**
@@ -17,7 +18,6 @@ import {
   guardProjectingSelector,
   projectingScope,
   projectsIntoComponents,
-  COMPONENT_ATTRIBUTE,
   COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
   type ComponentPseudoClass,
@@ -123,6 +123,67 @@ export function compileComponentGraphStylesForBuild(definitions: readonly Compon
   return hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body);
 }
 
+/** Converted roots have one target identity; consume canonical/legacy CSS together here. */
+function normalizeConversionStyleIdentities(css: string, identity: "component" | "class" | "attribute"): string {
+  const boundary = identity === "component" ? "[component]" : `[${VUE_ROOT_ATTRIBUTE}]`;
+  const ownerSelector = (tag: string, namespace = ""): string => identity === "class" ? tagClassSelector(tag, namespace)
+    : `${namespace === "" ? "" : namespace + "*"}[${identity === "attribute" ? tag : `component~="${tag}"`}]`;
+  function normalizeSelector(selector: string): string {
+    let result = "";
+    for (let index = 0; index < selector.length;) {
+      const start = index;
+      if (selector.startsWith(COMPONENT_ROOT_SELECTOR, index)) {
+        result += boundary; index += COMPONENT_ROOT_SELECTOR.length; continue;
+      }
+      // Collapse the shared canonical/legacy selector as one unit, including namespace prefixes.
+      const owner = /^:is\(([^[]*)\[component~="([a-z][a-z0-9-]*)"\]/.exec(selector.slice(index));
+      if (owner !== null) {
+        const namespace = owner[1] === "" ? "" : owner[1]!.slice(0, -1);
+        const compatible = componentOwnerSelector(owner[2]!, namespace);
+        if (selector.startsWith(compatible, index)) {
+          result += ownerSelector(owner[2]!, namespace); index += compatible.length; continue;
+        }
+      }
+      if (selector[index] === "\\") { result += selector.slice(index, index + 2); index += 2; continue; }
+      if (selector[index] === '"' || selector[index] === "'") {
+        const delimiter = selector[index++];
+        while (index < selector.length) { if (selector[index++] === "\\") index++; else if (selector[index - 1] === delimiter) break; }
+      } else if (selector[index] === "[") {
+        index++;
+        let delimiter = "";
+        while (index < selector.length) {
+          const character = selector[index++];
+          if (character === "\\") { index++; continue; }
+          if (delimiter !== "") { if (character === delimiter) delimiter = ""; }
+          else if (character === '"' || character === "'") delimiter = character;
+          else if (character === "]") break;
+        }
+        const attribute = selector.slice(start, index);
+        const named = /^\[(?:data-)?component~="([a-z][a-z0-9-]*)"\]$/.exec(attribute);
+        if (named !== null) { result += ownerSelector(named[1]!); continue; }
+        if (attribute === "[component]" || attribute === "[data-component]") { result += boundary; continue; }
+      } else index++;
+      result += selector.slice(start, index);
+    }
+    return result;
+  }
+  const root = postcss.parse(css);
+  root.walkRules(rule => { rule.selector = normalizeSelector(rule.selector); });
+  root.walkAtRules("scope", rule => { rule.params = normalizeSelector(rule.params); });
+  return root.toString();
+}
+
+/** Native-style framework output shares the same identity normalization as class-scoped output. */
+export function compileComponentStylesForConversion(css: string, definition: ComponentDefinition, graph?: ComponentStyleGraph): CompiledComponentStyles {
+  const compiled = compileComponentStylesForBuild(css, definition, undefined, undefined, true, graph);
+  return { ...compiled, css: normalizeConversionStyleIdentities(compiled.css, "component") };
+}
+
+export function compileComponentGraphStylesForConversion(definitions: readonly ComponentDefinition[], identity: "component" | "attribute" = "component",
+  graph: ComponentStyleGraph = definitionGraph(definitions)): string {
+  return normalizeConversionStyleIdentities(compileComponentGraphStylesForBuild(definitions, graph), identity);
+}
+
 function compileStyles(css: string, definition: ComponentDefinition, source?: string,
   adopters: readonly ComponentDefinition[] = [definition], includeBoundaryReset = true, graph: ComponentStyleGraph = adopterGraph(adopters)): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
@@ -139,7 +200,7 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   const selector = (input: string): string => {
     const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
       rewriteComponentSelector(input, owner.contract.tag, projecting ? projectingHost(owner.contract.tag)
-        : `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
+        : `:scope:where(${componentOwnerSelector(owner.contract.tag)})`, ownerNames, canonical, undefined, undefined, foreign)))].join(", ");
     return styleRuleKind(input) !== "own" ? rewritten
       : projecting ? guardProjectingSelector(rewritten, tagList, tagList.map(projectingHost)) : guardComponentPseudoElements(rewritten);
   };
@@ -226,7 +287,7 @@ function vueOwnerAttribute(tag: string): string {
  * tests it in `:where()`, which keeps the selector's specificity, and `:slotted()` selects what lacks
  * it. Without slots, nothing is projected, and `:slotted()` selects nothing. `:host` is `:scope`,
  * and a component selected by tag is its class in `:where()`, which keeps the type selector's
- * specificity, as the live runtime's `:where([data-component~="…"])` does.
+ * specificity, as the live runtime's `:where([component~="…"])` does.
  *
  * They are emitted as `<style scoped>`, since Vite drops the scoped styles of a component a build
  * leaves out, with each selector in `:global()`, which Vue's scoped styles keep as written. Vue
@@ -345,11 +406,11 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
     }
   }
   if (scope.nodes === undefined || scope.nodes.length === 0) {
-    return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
+    return withImportedStateNames({ css: normalizeConversionStyleIdentities(root.toString().trim(), "class"), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
   }
   root.append(scope);
   if (projecting?.nodes !== undefined && projecting.nodes.length > 0) root.append(projecting);
-  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
+  return withImportedStateNames({ css: normalizeConversionStyleIdentities(root.toString().trim(), "class"), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
 }
 
 /** One complex selector as `:global()`, with any test of its subject's ownership before its pseudo-element. */

@@ -62,7 +62,7 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.match(client.css?.code ?? "", /@scope \(\.x-card\) \{\s*:scope \{\s*display: block;/);
     assert.deepEqual(client.warnings.filter((warning) => warning.code.startsWith("css_")), []);
     const html = await serverHtml(outDirectory, "XCard", source, { label: "Hello", id: "case", class: "outside" });
-    assert.doesNotMatch(html, /data-component/);
+    assert.doesNotMatch(html, /component/);
     assert.match(html, /aria-label="Hello"/);
     assert.match(html, /id="case"/);
     // Only the root is styled, so Svelte gives no element its hash class.

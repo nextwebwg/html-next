@@ -1582,8 +1582,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
       try {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-form-record"><input value="authored"></template>
-          <input id="primitive" data-component="x-form-record" value="server" data-html-next-form-defaults="null">
-          <input id="syntax" data-component="x-form-record" value="server" data-html-next-form-defaults="not-json">`);
+          <input id="primitive" component="x-form-record" value="server" data-html-next-form-defaults="null">
+          <input id="syntax" component="x-form-record" value="server" data-html-next-form-defaults="not-json">`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
@@ -1913,7 +1913,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="observed-card" status="early" summary="Observation filter fixture.">' +
           '<article><slot></slot></article></template>' +
-          '<main><article id="owned" data-component="observed-card" data-owned>Owned</article></main>',
+          '<main><article id="owned" component="observed-card" data-owned>Owned</article></main>',
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -2051,7 +2051,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           (document.querySelector("section > button") as HTMLButtonElement).click();
           await Promise.resolve();
           await Promise.resolve();
-          return { before, after: read(), roots: document.querySelectorAll("[data-component]").length };
+          return { before, after: read(), roots: document.querySelectorAll("[component]").length };
         });
         assert.deepEqual(result, { before: ["step", null], after: [null, "step"], roots: 3 });
       } finally {
@@ -2176,7 +2176,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const shown = (): Promise<unknown> => page.evaluate(() => {
           const leaf = document.querySelector("section > .leaf");
           return {
-            root: leaf?.getAttribute("data-component") ?? null,
+            root: leaf?.getAttribute("component") ?? null,
             text: leaf?.textContent ?? null,
             host: leaf === null ? false : (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): unknown } })
               .HtmlRuntime.getComponentHost(leaf) !== undefined,
@@ -2221,7 +2221,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.waitForSelector("section", { state: "attached" });
         assert.deepEqual(await page.evaluate((root) => {
           const leaf = document.querySelector("section > .leaf");
-          return { same: leaf === root, root: leaf?.getAttribute("data-component") ?? null, invocations: document.querySelectorAll("x-leaf").length };
+          return { same: leaf === root, root: leaf?.getAttribute("component") ?? null, invocations: document.querySelectorAll("x-leaf").length };
         }, first), { same: true, root: "x-leaf", invocations: 0 });
       } finally {
         await browser.close();
@@ -2266,14 +2266,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const runtime = (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): {
             refs: Record<string, unknown>; slots: Record<string, readonly Element[]>;
           } } }).HtmlRuntime;
-          const pageHost = runtime.getComponentHost(document.querySelector('[data-component~="x-page"]')!)!;
-          const toggleHost = runtime.getComponentHost(document.querySelector('[data-component~="x-toggle"]')!)!;
+          const pageHost = runtime.getComponentHost(document.querySelector('[component~="x-page"]')!)!;
+          const toggleHost = runtime.getComponentHost(document.querySelector('[component~="x-toggle"]')!)!;
           const detail = document.querySelector("b");
           const leaf = document.querySelector(".leaf");
           const tag = (element: Element): string => element.localName + (element.className === "" ? "" : `.${element.className}`);
           return {
             detail: detail?.textContent ?? null,
-            leaf: leaf === null ? null : [leaf.getAttribute("data-component"), leaf.textContent],
+            leaf: leaf === null ? null : [leaf.getAttribute("component"), leaf.textContent],
             invocations: document.querySelectorAll("x-leaf").length,
             inert: document.querySelectorAll("template[slot]").length,
             ref: detail !== null && pageHost.refs.detail === detail,
@@ -2287,7 +2287,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         // host.slots reads the closed slot's plain projection; the same element renders on open.
         await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): { slots: Record<string, readonly Element[]> } } }).HtmlRuntime;
-          Object.assign(window, { note: runtime.getComponentHost(document.querySelector('[data-component~="x-toggle"]')!)!.slots.note![0] });
+          Object.assign(window, { note: runtime.getComponentHost(document.querySelector('[component~="x-toggle"]')!)!.slots.note![0] });
         });
 
         const lazy = page.waitForRequest("https://assets.example/lazy.png");
@@ -2391,7 +2391,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           own: document.querySelector(".own")?.textContent,
           heading: document.querySelector(".heading")?.textContent,
           feed: document.querySelector(".feed")?.textContent,
-          lineage: document.querySelector("section.frame")?.getAttribute("data-component"),
+          lineage: document.querySelector("section.frame")?.getAttribute("component"),
           // The component the author invoked owns the shared root, so page code reaching that root
           // gets the outer component's host and state, not the component it delegates to.
           hostState: (() => {
@@ -2578,7 +2578,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             { name: "$each row added later", html: '<rf-list rows="[&quot;a&quot;]"><span slot="row">B</span></rf-list>', change: ["attr", "data-rows", '["a","b"]'] },
             { name: "slot passthrough into a nested component", html: '<rf-wrap><em slot="heading">H</em>Inner</rf-wrap>' },
           ];
-          const shapes = (box) => JSON.stringify([...box.querySelectorAll("[data-component]")].map((el) => R.inspectInstance(el)));
+          const shapes = (box) => JSON.stringify([...box.querySelectorAll("[component]")].map((el) => R.inspectInstance(el)));
           const failures = [];
           for (const { name, html, change } of cases) {
             const lowered = document.createElement("div");
@@ -2677,8 +2677,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
           Element.prototype.querySelectorAll = function(selector) {
             if (selector === "*") wildcardQueries += 1;
-            if (selector === "[data-component]") rootMarkerQueries += 1;
-            if (["template[component]", "[data-component]", "demo-local", "demo-unused-a", "demo-unused-b"].every(part => selector.includes(part))) {
+            if (selector === "[component]") rootMarkerQueries += 1;
+            if (["template[component]", "[component]", "demo-local", "demo-unused-a", "demo-unused-b"].every(part => selector.includes(part))) {
               discoveryQueries += 1;
             }
             return nativeElementQuery.call(this, selector);
@@ -2942,7 +2942,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const inserted = errors.length;
           host.state.rows = [1, 2, 3];
           await Promise.resolve();
-          root.querySelectorAll("li")[2].setAttribute("data-component", "demo-cell");
+          root.querySelectorAll("li")[2].setAttribute("component", "demo-cell");
           await tick();
           const marked = errors.splice(0);
           root.querySelector("li").append(cell("later"));
@@ -4001,7 +4001,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             outer: {
               padding: value(outer, "padding-left"),
               color: value(outer, "color"),
-              provenance: outer.getAttribute("data-component"),
+              provenance: outer.getAttribute("component"),
             },
             own: {
               bare: value(own, "--bare"),
@@ -4014,7 +4014,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             nested: {
               margin: value(nested, "margin-left"),
               border: value(nested, "border-top-width"),
-              provenance: nested.getAttribute("data-component"),
+              provenance: nested.getAttribute("component"),
             },
             inside: {
               background: value(inside, "background-color"),
@@ -4032,7 +4032,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
               element: delegated.localName,
               border: value(delegated, "border-right-width"),
               padding: value(delegated, "padding-right"),
-              provenance: delegated.getAttribute("data-component"),
+              provenance: delegated.getAttribute("component"),
               baseStyles: document.querySelectorAll("#base-style").length,
               primaryStyles: document.querySelectorAll("#primary-style").length,
             },
@@ -4278,7 +4278,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             tag: element.localName,
             id: element.id,
             className: element.className,
-            component: element.getAttribute('data-component'),
+            component: element.getAttribute('component'),
             href: element.getAttribute('href'),
             dataHref: element.getAttribute('data-x-action-prop-href'),
             type: element.getAttribute('type'),
@@ -4496,7 +4496,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           await settle();
           return {
             tags: [before.localName, root.localName],
-            component: root.getAttribute('data-component'),
+            component: root.getAttribute('component'),
             tone: [root.querySelector('output').textContent, root.getAttribute('data-x-card-prop-tone')],
             host: window.HtmlRuntime.getComponentHost(root) !== undefined,
           };
@@ -4726,7 +4726,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-hydrated" status="early" summary="Hydration.">` +
             `<defs><prop name="label" type="string" default="Default">Label.</prop></defs>` +
             `<article><h2 $value="$label"></h2><input .value="$label"><slot></slot></article></template>` +
-          `<article id="server" data-component="x-hydrated" data-x-hydrated-prop-label="Server">` +
+          `<article id="server" component="x-hydrated" data-x-hydrated-prop-label="Server">` +
             `<h3>stale</h3>` +
             `<input value="server"><?start slot=""?><em id="projected" data-slotted>Projected</em><?end?>` +
           `</article>`,
@@ -4773,7 +4773,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const unsafe = await browser.newPage();
         await unsafe.setContent(
           `<template component="x-safe-root" status="early" summary="Safe root."><article>Expected</article></template>` +
-          `<section id="unsafe" data-component="x-safe-root">Untouched</section>`,
+          `<section id="unsafe" component="x-safe-root">Untouched</section>`,
         );
         await unsafe.addScriptTag({ path: bundlePath });
         const rejected = await unsafe.evaluate(`(() => {
@@ -4848,7 +4848,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             attributes: [
               ["aria-label", "Save changes"],
               ["class", "cta"],
-              ["data-component", "x-button"],
+              ["component", "x-button"],
               // The template binds data-size and data-variant; the author's explicit size is recorded as well.
               ["data-size", "lg"],
               ["data-trace", "runtime"],
@@ -4876,7 +4876,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             namespace: "http://www.w3.org/1999/xhtml",
             tag: "button",
             attributes: [
-              ["data-component", "x-button"],
+              ["component", "x-button"],
               ["data-size", "md"],
               ["data-variant", "solid"],
               ["data-x-button", ""],
@@ -4892,7 +4892,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             namespace: "http://www.w3.org/1999/xhtml",
             tag: "output",
             attributes: [
-              ["data-component", "x-status"],
+              ["component", "x-status"],
               ["data-x-status-prop-message", "Ready"],
               ["id", "status"],
             ],

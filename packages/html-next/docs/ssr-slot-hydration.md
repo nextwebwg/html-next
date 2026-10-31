@@ -1,7 +1,7 @@
 # The rendered form (design study)
 
 > **Superseded in part.** The proposal and runtime now mark slots with `<?start slot="…"?>` … `<?end?>`
-> and `<?marker slot="…"?>`, and only component roots carry `data-component` (there is no
+> and `<?marker slot="…"?>`, and only component roots carry `component` (there is no
 > `data-component-root`). The study below keeps its original notation.
 
 Status: design study behind the [Rendered form](https://nextwebwg.org/declarative-components/rendered-form) section of the proposal. Every claim
@@ -35,7 +35,7 @@ text, and fallback state have no representation.
 
 The format must stay small, and must not change accessibility, SEO, layout, selectors, or native
 element and form behavior. Measured on a component library's docs pages, today's record is already 22-23% of
-component markup, most of it `data-component` stamped on every authored element (P7).
+component markup, most of it `component` stamped on every authored element (P7).
 
 The record has two readers with different abilities:
 
@@ -238,7 +238,7 @@ Reviewer positions worth adopting or arguing:
   explicitness mark would be a second source of truth; "equal to default means absent" breaks controlled
   props and version skew.
 - **F4:** specify the merge normatively (consumer wins scalars; `class` token union; `style` appended),
-  recover by subtracting what the definition produces, and reserve `data-component*` and declared-prop
+  recover by subtracting what the definition produces, and reserve `component*` and declared-prop
   names against consumer input.
 - **Vendors:** a single namespaced target with the role in its data (for example following DOM Parts'
   ChildNodePart) is likelier to be accepted than a new global target per concept. "Browser hydration"
@@ -337,7 +337,7 @@ and an explicit (controlled) prop "is authoritative while present".
 ### The carrier
 
 Serialization appends an inert `<template carrier="<tag>">` to a component root for each component on it
-holding projected nodes that no slot currently renders, outer to inner as the root's `data-component`
+holding projected nodes that no slot currently renders, outer to inner as the root's `component`
 lists them. Precedent: `getHTML({ serializableShadowRoots })` writes a `<template shadowrootmode>` that
 the live DOM does not hold, and the parser consumes it. The carrier exists only in the serialized form:
 the lowered live DOM never contains it, and hydration gives its nodes to the component it names and
@@ -402,7 +402,7 @@ pass unchanged with the prototype (unit 173, targets 225, browser 274).
 - **Q2** Can each framework target hand HTML Next its projected nodes from its own tree, with no
   markup markers? React is the hard case (no DOM refs for arbitrary children).
 - **Q3** Does anything besides style boundaries need projected nodes on a framework-owned root?
-- **Q4** Which parts of today's record exist only for CSS (per-element `data-component` lineage) and
+- **Q4** Which parts of today's record exist only for CSS (per-element `component` lineage) and
   could be derived instead, so the rendered form is complete *and* smaller?
 - **Q6** Composition. When component X passes its slot into a nested component Y
   (`<y-card><slot></slot></y-card>` in X's template), X's range sits inside Y's range, and consumer

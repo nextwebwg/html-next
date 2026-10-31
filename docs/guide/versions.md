@@ -12,6 +12,8 @@ eyebrow: HTML Next · Versions
 > [!warn] Today: alpha releases
 > The tools are `1.0.0-alpha` releases. They follow the proposal's live draft, so any alpha can break your components. From 1.0.0-alpha.41, the [changelog](https://github.com/nextwebwg/html-next/blob/main/CHANGELOG.md) lists each break under **Breaking**; earlier releases did not always, so read their **Changed** entries too. The promise on this page starts at 1.0. Items marked *planned* are not built yet.
 
+Rendered roots use `component` by default, following the [31 October 2026 snapshot](https://nextwebwg.org/declarative-components/2026-10-31/). Hydration and scoped styles also read `data-component` when `component` is absent. A present canonical attribute wins even when empty; adoption leaves the existing spelling in place. Upgrade JavaScript and generated CSS together when moving from older output. Controllers continue to use the component host and slot APIs.
+
 ## What a version means
 
 All four packages (`html-next`, `html-next-unplugin`, `html-next-converter`, and `htmlkit`) share one version. From 1.0, each major version implements one dated [snapshot](https://nextwebwg.org/declarative-components/#stability) of the proposal: a copy published on one day that never changes afterwards.

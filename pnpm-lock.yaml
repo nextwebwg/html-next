@@ -280,7 +280,7 @@ importers:
   packages/html-next-converter:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.81
+        specifier: workspace:>=1.0.0-alpha.82
         version: link:../html-next
       typescript:
         specifier: 5.9.3
@@ -365,10 +365,10 @@ importers:
   packages/html-next-unplugin:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.81
+        specifier: workspace:>=1.0.0-alpha.82
         version: link:../html-next
       '@nextwebwg/html-next-converter':
-        specifier: workspace:>=1.0.0-alpha.81
+        specifier: workspace:>=1.0.0-alpha.82
         version: link:../html-next-converter
       css-tree:
         specifier: 'catalog:'
@@ -471,7 +471,7 @@ importers:
   packages/htmlkit:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.81
+        specifier: workspace:>=1.0.0-alpha.82
         version: link:../html-next
       parse5:
         specifier: 'catalog:'

@@ -100,7 +100,7 @@ describe("head declarations in the live runtime", () => {
     const title = document.querySelector("title")!;
     assert.equal(document.title, "Install · Docs");
     // A bound title updates the same element.
-    runtime.componentRegistry.update(main.querySelector("[data-component~=page-a]")!, { section: "Upgrade" });
+    runtime.componentRegistry.update(main.querySelector("[component~=page-a]")!, { section: "Upgrade" });
     await settle();
     assert.equal(document.title, "Upgrade · Docs");
     assert.equal(document.querySelector("title"), title);
@@ -108,13 +108,13 @@ describe("head declarations in the live runtime", () => {
     main.querySelector("article")!.append(document.createElement("x-note"));
     await settle();
     assert.equal(document.title, "Note");
-    main.querySelector("[data-component~=layout], .layout")!.append(document.createElement("page-b"));
+    main.querySelector("[component~=layout], .layout")!.append(document.createElement("page-b"));
     await settle();
     assert.equal(document.title, "Note");
-    main.querySelector("[data-component~=x-note]")!.remove();
+    main.querySelector("[component~=x-note]")!.remove();
     await settle();
     assert.equal(document.title, "Configure · Docs");
-    main.querySelector("[data-component~=page-b]")!.remove();
+    main.querySelector("[component~=page-b]")!.remove();
     await settle();
     assert.equal(document.title, "Upgrade · Docs");
     assert.equal(document.querySelector("title"), title, "every change reused the managed element");
@@ -131,7 +131,7 @@ describe("head declarations in the live runtime", () => {
     assert.deepEqual(images, ['<meta property="og:image" content="/a-1.png" *>', '<meta property="og:image:width" content="1200" *>',
       '<meta property="og:image" content="/a-2.png" *>']);
     // page-b declares og:image:width without og:image: it never describes the layout's image.
-    main.querySelector("[data-component~=page-a]")!.replaceWith(main.ownerDocument.createElement("page-b"));
+    main.querySelector("[component~=page-a]")!.replaceWith(main.ownerDocument.createElement("page-b"));
     await settle();
     assert.deepEqual(head().filter((line) => line.includes('property="og:image')), ['<meta property="og:image" content="/layout.png" *>',
       '<meta property="og:image:alt" content="Acme" *>']);
@@ -148,7 +148,7 @@ describe("head declarations in the live runtime", () => {
       titles.push(document.title);
       for (const record of records) removed.push(...record.removedNodes);
     }).observe(document.head, { subtree: true, childList: true, characterData: true, attributes: true });
-    main.querySelector("[data-component~=page-a]")!.replaceWith(document.createElement("page-b"));
+    main.querySelector("[component~=page-a]")!.replaceWith(document.createElement("page-b"));
     await settle();
     assert.deepEqual(titles, ["Configure · Docs"]);
     assert.equal(document.querySelector('link[rel="preconnect"]'), preconnect);

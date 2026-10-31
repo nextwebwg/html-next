@@ -98,7 +98,7 @@ export {
   PROJECTED_ATTRIBUTE,
   stateAttribute,
 } from "./component-styles.js";
-export { compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
+export { compileComponentStylesForConversion, compileComponentGraphStylesForConversion, compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
 export { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 export {
   NATIVE_FLAG,

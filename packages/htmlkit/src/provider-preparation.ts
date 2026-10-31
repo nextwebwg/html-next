@@ -44,8 +44,8 @@ export async function prepare({ document, host, flush, signal, port, data: input
   try {
     for (;;) {
       let found = false;
-      for (const root of document.querySelectorAll("[data-component]")) {
-        for (const tag of root.getAttribute("data-component")!.split(/\s+/)) {
+      for (const root of document.querySelectorAll(':is([component]:not(template), [data-component]:not([component]))')) {
+        for (const tag of (root.getAttribute("component") ?? root.getAttribute("data-component") ?? "").split(/\s+/)) {
           const module = modules.get(tag);
           if (module === undefined) continue;
           const instance = host(root, tag);

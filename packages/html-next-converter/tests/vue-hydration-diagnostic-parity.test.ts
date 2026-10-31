@@ -77,7 +77,7 @@ app.mount(document.querySelector("main"));
           try {
             const tag = kind === "static" ? "x-hydration-static" : "x-hydration-switch";
             const serverRoot = kind === "static" ? "div" : "article";
-            const markup = `<main><${serverRoot} id="case" data-component="${tag}">Wrong server root</${serverRoot}></main>`;
+            const markup = `<main><${serverRoot} id="case" component="${tag}">Wrong server root</${serverRoot}></main>`;
             await live.setContent(`${staticSource}${switchSource}${markup}`);
             await live.addScriptTag({ path: liveBundle });
             const liveDiagnostic = await live.evaluate((): Diagnostic | null => {

@@ -162,7 +162,7 @@ const { parseComponent, add, subtract, multiply, divide } = await import("@nextw
 const compiled = await import("@nextwebwg/html-next/generated-runtime");
 if (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");
 const rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });
-if (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");
+if (!rendered.html.includes('component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");
 const prepared = await renderComponents('<x-prepared id="prepared"></x-prepared>', {
   definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs><p>{$draft}</p></template>')],
   prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Installed preparation' } }
@@ -451,7 +451,7 @@ export default { plugins: [htmlNext({ target: "${target}" }), framework()], buil
     const html = readFileSync(join(consumer, "dist/index.html"), "utf8");
     expect(html).toContain("Installed platform");
     expect(html).toContain(">Installed platform</title>");
-    expect(html).toContain('data-component="packed-shell"');
+    expect(html).toContain('component="packed-shell"');
     expect(html).toContain("Packaged helper");
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('href="/packed/"');

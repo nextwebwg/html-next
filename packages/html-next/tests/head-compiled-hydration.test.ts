@@ -129,11 +129,11 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
         // The application adopts its server-rendered roots, the page inside its layout first.
         await tab.evaluate(() => {
           const { factories } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options: object, html: undefined, root: Element) => Element> } }).HtmlCompiled;
-          factories["page-a"]!({}, undefined, document.querySelector('[data-component~="page-a"]')!);
-          factories["docs-layout"]!({}, undefined, document.querySelector('[data-component~="docs-layout"]')!);
-          factories["x-product"]!({}, undefined, document.querySelector('[data-component~="x-product"]')!);
+          factories["page-a"]!({}, undefined, document.querySelector('[component~="page-a"]')!);
+          factories["docs-layout"]!({}, undefined, document.querySelector('[component~="docs-layout"]')!);
+          factories["x-product"]!({}, undefined, document.querySelector('[component~="x-product"]')!);
         });
-        await tab.waitForFunction(() => document.querySelector('[data-component~="page-a"]')?.getAttribute("data-loads") === "1");
+        await tab.waitForFunction(() => document.querySelector('[component~="page-a"]')?.getAttribute("data-loads") === "1");
         const read = () => tab.evaluate(() => {
           const kept = globalThis as unknown as Record<string, unknown>;
           const managed = Array.from(document.head.querySelectorAll("[data-component-head]"));
@@ -142,7 +142,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
             head: managed.map((element) => element.outerHTML.replace(' data-component-head=""', " *")),
             adopted: (kept.server as Element[]).filter((element) => managed.includes(element)).length,
             runs: (globalThis as unknown as { runs?: number }).runs ?? 0,
-            loads: document.querySelector('[data-component~="page-a"]')?.getAttribute("data-loads") ?? null,
+            loads: document.querySelector('[component~="page-a"]')?.getAttribute("data-loads") ?? null,
           };
         });
         const hydrated = await read();
@@ -161,7 +161,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
         const updated = await tab.evaluate(async () => {
           const { factories, componentRegistry } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options?: object) => Element>; componentRegistry: { update(element: Element, props: object): void }; } }).HtmlCompiled;
           const settle = () => new Promise((done) => setTimeout(done, 20));
-          const pageRoot = document.querySelector('[data-component~="page-a"]')!;
+          const pageRoot = document.querySelector('[component~="page-a"]')!;
           const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
           const note = factories["x-note"]!();
           pageRoot.append(note);
@@ -187,7 +187,7 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
           const preconnect = document.querySelector('link[rel="preconnect"]');
           const observer = new MutationObserver((records) => { seen.push(document.title); for (const record of records) removed.push(...record.removedNodes); });
           observer.observe(document.head, { subtree: true, childList: true, characterData: true, attributes: true });
-          document.querySelector('[data-component~="page-a"]')!.replaceWith(factories["page-b"]!());
+          document.querySelector('[component~="page-a"]')!.replaceWith(factories["page-b"]!());
           await new Promise((done) => setTimeout(done, 20));
           observer.disconnect();
           return { seen: [...new Set(seen)], kept: preconnect === document.querySelector('link[rel="preconnect"]') && !removed.includes(preconnect!),
@@ -242,9 +242,9 @@ describe.skipIf(!enabled)("head declarations through compiled hydration, in ever
         await tab.addScriptTag({ content: compiled });
         await tab.evaluate(() => {
           const { factories } = (window as unknown as { HtmlCompiled: { factories: Record<string, (options: object, html: undefined, root: Element) => Element> } }).HtmlCompiled;
-          factories["x-widget"]!({}, undefined, document.querySelector('[data-component~="x-widget"]')!);
+          factories["x-widget"]!({}, undefined, document.querySelector('[component~="x-widget"]')!);
         });
-        await tab.waitForFunction(() => document.querySelector('[data-component~="x-widget"]')?.hasAttribute("data-ok") === true);
+        await tab.waitForFunction(() => document.querySelector('[component~="x-widget"]')?.hasAttribute("data-ok") === true);
         const result = await tab.evaluate(() => {
           const kept = globalThis as unknown as Record<string, unknown>;
           return { preload: (kept.preload as HTMLLinkElement).href, kept: kept.preload === document.querySelector('link[rel="preload"]'),

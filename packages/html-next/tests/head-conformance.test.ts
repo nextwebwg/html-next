@@ -31,7 +31,7 @@ function livePage(listed: boolean): string {
 }
 
 const liveApp = `const mount = () => document.querySelector("#mount");
-const root = (tag) => mount().querySelector('[data-component~="' + tag + '"]');
+const root = (tag) => mount().querySelector('[component~="' + tag + '"]');
 globalThis.alert = () => { globalThis.alerted = true; };
 globalThis.app = {
   mount() {
@@ -40,7 +40,7 @@ globalThis.app = {
   },
   section(text) { HtmlNextLive.componentRegistry.update(root("page-a"), { section: text }); },
   note(shown) { if (shown) root("page-a").append(document.createElement("x-note")); else root("x-note").remove(); },
-  cards(count) { const cards = mount().querySelectorAll('[data-component~="img-card"]'); for (const card of [...cards].slice(count)) card.remove(); },
+  cards(count) { const cards = mount().querySelectorAll('[component~="img-card"]'); for (const card of [...cards].slice(count)) card.remove(); },
   schema(value) { HtmlNextLive.componentRegistry.update(root("x-product"), { schema: value }); },
   page(name) { root("page-a").replaceWith(document.createElement("page-" + name)); },
   unmount() { mount().replaceChildren(); },

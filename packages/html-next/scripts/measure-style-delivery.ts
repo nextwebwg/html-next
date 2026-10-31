@@ -61,7 +61,7 @@ const invocations = sources.map((_, index) =>
   Array.from({ length: instances }, () => `<bench-card-${index}></bench-card-${index}>`).join(""));
 const nativeRoots = sources.map((source, index) => {
   const markup = source.match(/<article[\s\S]*?<\/article>/)![0]
-    .replace('<article class="card">', `<article class="card" data-component="bench-card-${index}">`);
+    .replace('<article class="card">', `<article class="card" component="bench-card-${index}">`);
   return markup.repeat(instances);
 }).join("");
 const backdrop = Array.from({ length: background }, (_, index) =>
@@ -227,7 +227,7 @@ async function exercise(page: Page, variant: Variant): Promise<Result> {
         if (mode === "native-frames") await nextFrame();
         else if (mode !== "native-batch") {
           // A deliberate application geometry read after each stylesheet; expose forced reflow.
-          const root = document.querySelector(`[data-component="bench-card-${index}"]`) as HTMLElement;
+          const root = document.querySelector(`[component="bench-card-${index}"]`) as HTMLElement;
           void root.offsetHeight;
         }
       }

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-alpha.81
+## 1.0.0-alpha.82
 
 ### Added
 
@@ -8,7 +8,14 @@
 
 ### Fixed
 
+- Normalize canonical `component` and legacy `data-component` CSS identities in the shared framework conversion pipeline. Vue, React, Preact, Svelte, and Angular render those identities using their target root markers.
 - Shared generated prop checks tolerate server Event implementations without a prototype type getter. Document-head rendering uses core DOM methods and URL resolution available in Angular SSR, and retains declared-script preloads through later reconciliation.
+
+## 1.0.0-alpha.81
+
+### Breaking
+
+- Rendered component roots use `component` by default, following the 31 October 2026 proposal snapshot. Live and compiled hydration, scoped styles and HTMLKit accept legacy `data-component` roots. A present `component`, including an empty value, takes precedence; attributes are not merged or mirrored. Component-tag invocation and delegation lineage retain their existing meaning.
 
 ## 1.0.0-alpha.80
 

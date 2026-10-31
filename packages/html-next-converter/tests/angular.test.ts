@@ -18,7 +18,7 @@ import { angularControls, angularController, angularRequestController, angularTy
 for (const mode of ["application", "library"] as const) it(`converts an Angular ${mode} with native hosts and collapsed root identities`, async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-angular-")); roots.push(root);
   await mkdir(join(root, "out"));
-  await writeFile(join(root, "controls.html"), angularControls);
+  await writeFile(join(root, "controls.html"), angularControls.replace("<style>", '<style>[component~="ui-button"], [data-component~="ui-button"] { outline-width: 2px; }'));
   await writeFile(join(root, "connected.js"), angularController);
   await writeFile(join(root, "ask.js"), angularRequestController);
   await writeFile(join(root, "typed.ts"), angularTypedController);
@@ -31,7 +31,7 @@ for (const mode of ["application", "library"] as const) it(`converts an Angular 
   assert.match(code, /button\[ui-action\]/);
   assert.match(code, /"ui-action": ""/);
   assert.match(code, /"ui-button": ""/);
-  assert.doesNotMatch(code, /data-component|<ui-button|<button/);
+  assert.doesNotMatch(code, /(?:data-)?component[~\]=]|<ui-button|<button/);
   assert.match(code, /\[ui-action\]/);
   assert.match(code, /\[ui-button\]/);
   assert.match(code, /Action/);

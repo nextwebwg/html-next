@@ -84,7 +84,7 @@ describe.skipIf(!enabled)("components in rows added to an $each inside projected
     }
     // Compiled modules create the app, or adopt the server's root in place.
     await writeFile(join(app, "vanilla-entry.ts"), `import { createXApp } from "./XApp.js";
-const server = document.querySelector("#mount > [data-component]");
+const server = document.querySelector("#mount > [component]");
 if (server) createXApp({}, undefined, server); else document.querySelector("#mount")!.append(createXApp());`);
     await build({ ...browserBuild, entryPoints: [join(app, "vanilla-entry.ts")], outfile: join(directory, "vanilla.js"), plugins: [emptyStyles],
       alias: { "@nextwebwg/html-next/generated-runtime": join(htmlNextSource, "generated-runtime.ts") } });

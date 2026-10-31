@@ -1,10 +1,9 @@
 /** Standalone Angular components on their declared native hosts. Root delegation is composed at build time. */
-import postcss from "postcss";
 import { kebabCase, componentName as pascalCase } from "../names.js";
 import { parseDuration } from "../duration.js";
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
-import { componentStateNames, compileComponentGraphStylesForBuild, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
+import { componentStateNames, compileComponentGraphStylesForConversion, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import type { ComponentDefinition, ElementNode, HandlerDeclaration, TemplateNode } from "../template.js";
 import { elementMatchRoot, iteratedRefNames } from "../template.js";
@@ -49,34 +48,6 @@ interface Names extends Scope {
 }
 interface Projection { readonly nodes: readonly TemplateNode[]; readonly names: Names; readonly parent?: Projection }
 
-/** Rewrite identity attribute tokens, leaving strings, authored attribute values and declarations intact. */
-function identitySelectors(selector: string): string {
-  let result = "";
-  for (let index = 0; index < selector.length;) {
-    const start = index;
-    if (selector[index] === "\\") { result += selector.slice(index, index + 2); index += 2; continue; }
-    if (selector[index] === '"' || selector[index] === "'") {
-      const delimiter = selector[index++];
-      while (index < selector.length) { if (selector[index++] === "\\") index++; else if (selector[index - 1] === delimiter) break; }
-    } else if (selector[index] === "[") {
-      index++;
-      let delimiter = "";
-      while (index < selector.length) {
-        const character = selector[index++];
-        if (character === "\\") { index++; continue; }
-        if (delimiter !== "") { if (character === delimiter) delimiter = ""; }
-        else if (character === '"' || character === "'") delimiter = character;
-        else if (character === "]") break;
-      }
-      const attribute = selector.slice(start, index);
-      const named = /^\[data-component~="([a-z][a-z0-9-]*)"\]$/.exec(attribute);
-      if (named !== null) { result += `[${named[1]}]`; continue; }
-      if (attribute === "[data-component]") { result += `[${VUE_ROOT_ATTRIBUTE}]`; continue; }
-    } else index++;
-    result += selector.slice(start, index);
-  }
-  return result;
-}
 
 function unsupported(message: string): never { return fail("HT018", `Angular conversion: ${message}`); }
 
@@ -625,9 +596,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const method = field(); methods.push(`${method}(): string { return stateTokens({ ${values.join(", ")} }); }`);
     host[`[attr.${stateAttribute(current.contract.tag)}]`] = `${method}()`;
   }
-  const styles = postcss.parse(compileComponentGraphStylesForBuild([...graph.values()].filter(item => chain.includes(item)), graph));
-  styles.walkRules(rule => { rule.selector = identitySelectors(rule.selector); });
-  styles.walkAtRules("scope", rule => { rule.params = identitySelectors(rule.params); });
+  const styles = compileComponentGraphStylesForConversion([...graph.values()].filter(item => chain.includes(item)), "attribute", graph);
   const usesProjection = template.includes("<ng-content") || slotDirectives.size > 0;
   if (usesProjection) helpers.add("projection");
   const usesSlots = helpers.has("slots");
@@ -649,7 +618,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
 export class ${slot.name} {
   readonly template = inject<TemplateRef<${slot.type}>>(TemplateRef);
   static ngTemplateContextGuard(_directive: ${slot.name}, _context: unknown): _context is ${slot.type} { return true; }
-}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(usesHtml ? ["HtmlNextHtml"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext ? `providers: [${providers.join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles.toString())}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootControls.length === 0 && rootHtml === undefined ? "" : `hnRootBindings(): string { ${rootControls.length === 0 ? "" : `this.hnControl.bindings = [${rootControls.join(", ")}];`} ${rootHtml === undefined ? "" : `this.hnHtml.binding = ${rootHtml};`} return ""; }`}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
+}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(usesHtml ? ["HtmlNextHtml"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext ? `providers: [${providers.join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootControls.length === 0 && rootHtml === undefined ? "" : `hnRootBindings(): string { ${rootControls.length === 0 ? "" : `this.hnControl.bindings = [${rootControls.join(", ")}];`} ${rootHtml === undefined ? "" : `this.hnHtml.binding = ${rootHtml};`} return ""; }`}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
   return { component, helpers };
 }
 

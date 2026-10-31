@@ -190,7 +190,7 @@ else createRoot(main).render(<XControls />);`);
         await page.locator(".read-only-multiple").evaluate((select: HTMLSelectElement) => { select.value = "b"; });
         await page.locator(".read-only-note").evaluate((textarea: HTMLTextAreaElement) => { textarea.value = "Unsent"; });
         await page.addScriptTag({ path: hydrateBundle });
-        await page.waitForFunction(() => document.querySelector("form")?.getAttribute("data-component") === "x-controls");
+        await page.waitForFunction(() => document.querySelector("form")?.getAttribute("component") === "x-controls");
         const hydrated = await snapshot(page);
         assert.equal(hydrated.values[5], "Unsent", "hydration must preserve textarea's pre-hydration edit");
         assert.deepEqual(hydrated.propertyValues, ["Local", true, "b", ["b"], "Unsent"]);
