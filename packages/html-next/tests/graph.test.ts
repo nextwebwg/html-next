@@ -37,6 +37,43 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 }
 
 describe("component graph", () => {
+  it("stops a checked implementation boundary before web dependencies, styles and controller resolution", async () => {
+    const source = `${root}button.html`;
+    const fixtures = fetcher({ [source]: component("x-button", '<link rel="component" href="./missing-web-only.html">', './missing-controller.js') });
+    const graph = await buildComponentGraph(["@ui/button.html"], {
+      resolver: resolver(), fetchComponent: fixtures.fetchComponent,
+      isImplementationBoundary: (definition, id) => definition.contract.tag === "x-button" && id === source,
+      prepareStyles: async () => { throw new Error("Replaced web styles must not load"); },
+      inspectDefinitions: definitions => { assert.deepEqual(definitions, []); return []; },
+    });
+    assert.deepEqual([...fixtures.counts.keys()], [source]);
+    const node = graph.nodes.get(source)!;
+    assert.equal(node.implementationBoundary, true);
+    assert.equal(node.controller, undefined);
+    assert.deepEqual(node.dependencies, []);
+    assert.equal(node.definition.controller, "./missing-controller.js");
+  });
+
+  it("keeps normal dependency and controller traversal for unbound siblings of a checked boundary", async () => {
+    const source = `${root}mixed.html`, child = `${root}child.html`;
+    const fixtures = fetcher({
+      [source]: component("x-bound", '<link rel="component" href="./child.html">', './browser.js') + component("x-unbound", "", './normal.js'),
+      [child]: component("x-child"),
+    });
+    const styled: string[] = [];
+    const graph = await buildComponentGraph(["@ui/mixed.html"], {
+      resolver: resolver(), fetchComponent: fixtures.fetchComponent,
+      isImplementationBoundary: (_definition, id) => id === `${source}#x-bound`,
+      prepareStyles: async definition => { styled.push(definition.contract.tag); return definition; },
+    });
+    assert.deepEqual([...fixtures.counts.keys()], [source, child]);
+    assert.deepEqual(graph.nodes.get(`${source}#x-bound`)!.dependencies, []);
+    assert.equal(graph.nodes.get(`${source}#x-bound`)!.controller, undefined);
+    assert.deepEqual(graph.nodes.get(`${source}#x-unbound`)!.dependencies, [child]);
+    assert.equal(graph.nodes.get(`${source}#x-unbound`)!.controller!.url, `${root}normal.js`);
+    assert.deepEqual(styled.toSorted(), ["x-child", "x-unbound"]);
+  });
+
   it("ignores build metadata with or without head wrappers while retaining component edges", async () => {
     const metadata = '<meta name="hk:layout" content="admin"><meta name="app:page" content="x-app">';
     for (const prefix of [metadata, `<head>${metadata}</head>`]) {

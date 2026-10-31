@@ -33,6 +33,8 @@ export interface ComponentGraphNode {
    * leaves out the page-wide head entries only an application component contributes.
    */
   readonly imported?: true;
+  /** A checked target implementation replaces this definition's web dependencies. */
+  readonly implementationBoundary?: true;
 }
 
 export interface ComponentGraph {
@@ -52,6 +54,8 @@ export interface BuildGraphOptions {
   readonly fetchComponent: ComponentFetcher;
   readonly parseComponentResource: ComponentResourceParser;
   readonly prepareStyles?: (definition: ComponentDefinition, resource: ResolvedResource) => Promise<ComponentDefinition>;
+  /** Host-owned identity/interface checks select a replacement before web styles, modules or links load. */
+  readonly isImplementationBoundary?: (definition: ComponentDefinition, id: string) => boolean;
   readonly isCustomElementRegistered?: (tag: string) => boolean;
   /** Whether a definition's final URL supplies application components; a bare specifier never does. */
   readonly isApplicationURL?: (url: string) => boolean;
@@ -95,6 +99,7 @@ interface DraftNode {
   module?: ControllerEdge;
   shadowedByCustomElement: boolean;
   complete: boolean;
+  implementationBoundary?: true;
 }
 
 export async function buildComponentGraph(
@@ -159,11 +164,13 @@ export async function buildComponentGraph(
         fail("HL007", `Both \`${drafts.get(prior)!.url}\` and \`${finalURL}\` declare <${tag}>.`, finalURL);
       }
       const id = parsed.definitions.length === 1 ? finalURL : `${finalURL}#${tag}`;
+      const implementationBoundary = options.isImplementationBoundary?.(definition, id) ?? false;
       tags.set(tag, id);
       if (!listed) imports.add(id);
       drafts.set(id, {
         url: finalURL, trustRoot: resource.trustRoot, definition, dependencies: [],
         shadowedByCustomElement: options.isCustomElementRegistered?.(tag) ?? false,
+        ...(implementationBoundary ? { implementationBoundary: true as const } : {}),
         complete: false,
       });
       return id;
@@ -173,11 +180,13 @@ export async function buildComponentGraph(
     if (options.prepareStyles !== undefined) {
       for (const id of ids) {
         const draft = drafts.get(id)!;
+        if (draft.implementationBoundary) continue;
         draft.definition = await options.prepareStyles(draft.definition, { url: finalURL, trustRoot: resource.trustRoot });
       }
     }
     const dependencies = new Set<string>();
-    for (const specifier of parsed.dependencies) {
+    const replaced = ids.length > 0 && ids.every(id => drafts.get(id)!.implementationBoundary);
+    for (const specifier of replaced ? [] : parsed.dependencies) {
       try {
         const dependency = options.resolver.resolveDependency(specifier, finalURL, resource.trustRoot);
         for (const id of await load(dependency, specifier)) dependencies.add(id);
@@ -186,6 +195,7 @@ export async function buildComponentGraph(
     for (const id of ids) {
       const draft = drafts.get(id)!;
       const definition = draft.definition;
+      if (draft.implementationBoundary) { draft.complete = true; continue; }
       const specifier = definition.module ?? definition.controller;
       if (specifier !== undefined) {
         let controller: ResolvedResource;
@@ -245,9 +255,10 @@ export async function buildComponentGraph(
       ...(draft.controller === undefined ? {} : { controller: draft.controller }),
       ...(draft.module === undefined ? {} : { module: draft.module }),
       shadowedByCustomElement: draft.shadowedByCustomElement,
+      ...(draft.implementationBoundary ? { implementationBoundary: true as const } : {}),
     })]);
   }
-  for (const warning of options.inspectDefinitions?.(nodeEntries.map(([, node]) => node.definition)) ?? []) warn(warning);
+  for (const warning of options.inspectDefinitions?.(nodeEntries.filter(([, node]) => !node.implementationBoundary).map(([, node]) => node.definition)) ?? []) warn(warning);
   return Object.freeze({
     roots: Object.freeze(roots),
     nodes: new Map(nodeEntries),

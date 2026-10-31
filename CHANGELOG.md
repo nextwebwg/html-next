@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.72
+
+- Expose checked implementation boundaries through the component graph and Node loader. Native generators can qualify the exact source definition and interface before replacing its browser implementation; unbound definitions keep their normal dependency, controller and style traversal.
+
 ## 1.0.0-alpha.71
 
 - Publish minimum-version HTML Next dependency ranges without a 1.0 or later major-version ceiling. Assembled packages use the same open-ended runtime peer; lockfiles retain the exact verified workspace graph.

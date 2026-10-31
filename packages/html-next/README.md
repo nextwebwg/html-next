@@ -80,6 +80,7 @@ npm install @nextwebwg/html-next
 | `@nextwebwg/html-next/live` | Runtime plus parsing for definitions authored in a document. |
 | `@nextwebwg/html-next/browser` | Start the live runtime automatically. |
 | `@nextwebwg/html-next/server` | Render in Node and hydrate in the browser. |
+| `@nextwebwg/html-next/node-loader` | Load a checked build graph, with optional [host implementation boundaries](docs/native-build-boundaries.md). |
 | `@nextwebwg/html-next/forms` | Build native form requests with validation, encoding, and cancellation. |
 | `@nextwebwg/html-next/validation` | Use the shared validity model. |
 
