@@ -88,7 +88,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
     mode: "development", plugins: [browserPlugin(sources), {
       name: "htmlkit-watch-ready", configureServer(server) { server.watcher.once("ready", watchReady); },
       async closeBundle() { await refreshing?.catch(() => {}); await application?.close(); },
-    }], optimizeDeps: { noDiscovery: true, include: [] },
+    }],
     server: { host: options.host ?? "127.0.0.1", port: options.port ?? 3000,
       // Page-wide stylesheets may live outside the root, as a plugin's own stylesheet does.
       fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../..")), ...css.map(file => dirname(file))] } },

@@ -8,7 +8,45 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, preparedFixture, retainedProviderFixture, universalFixture, write } from "./fixture.js";
+
+for (const [delivery, commonJS] of [["development", false], ["built", false], ["development", true]] as const) {
+  describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} prepared library module${commonJS ? " with CommonJS dependency" : ""}`, () => {
+    it("Chromium adopts the server value without another read and keeps drafts through later updates", async () => {
+      const root = await preparedFixture(commonJS);
+      let server: ApplicationServer | undefined;
+      const browser = await chromium.launch({ headless: true });
+      try {
+        server = delivery === "built"
+          ? await startApplication({ outDir: (await buildApplication({ root })).outDir, port: 0 })
+          : await devApplication({ root, port: 0 });
+        const page = await browser.newPage(); const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.addInitScript(() => {
+          const observer = new MutationObserver(() => {
+            const heading = document.querySelector("h1");
+            if (heading) { Reflect.set(window, "originalHeading", heading); observer.disconnect(); }
+          });
+          observer.observe(document, { childList: true, subtree: true });
+        });
+        await page.goto(server.url);
+        await page.waitForFunction(() => document.querySelector("main")?.dataset.connected === "true");
+        expect(await page.locator("h1").textContent()).toBe("build:A");
+        expect(await page.evaluate(() => Reflect.get(window, "originalHeading") === document.querySelector("h1"))).toBe(true);
+        expect(await page.evaluate(() => Reflect.get(window, "preparedReads"))).toBeUndefined();
+        await page.locator("input").fill("My draft");
+        await page.getByRole("button", { name: "Next" }).click();
+        await expect.poll(() => page.locator("h1").textContent()).toBe("browser:B");
+        expect(await page.locator("input").inputValue()).toBe("My draft");
+        expect(await page.evaluate(() => Reflect.get(window, "preparedReads"))).toEqual(["B"]);
+        await page.getByRole("link", { name: "Fixture" }).click();
+        await expect.poll(() => page.locator("h1").textContent()).toBe("Caller");
+        expect(await page.evaluate(() => Reflect.get(window, "preparedReads"))).toEqual(["B"]);
+        expect(errors).toEqual([]);
+      } finally { await browser.close(); await server?.close(); await rm(root, { recursive: true, force: true }); }
+    });
+  });
+}
 
 for (const delegated of [false, true]) for (const delivery of ["development", "built"] as const) {
   describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${delivery} ${delegated ? "delegated " : ""}retained layout providers`, () => {

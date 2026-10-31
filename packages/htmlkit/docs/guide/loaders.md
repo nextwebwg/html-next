@@ -78,6 +78,24 @@ If both `.js` and `.ts` companions exist, select one explicitly. A file declarin
 also uses explicit module pointers rather than attaching one companion to every component.
 Existing `controller` components keep their legacy lifecycle.
 
+## Prepared library modules
+
+A library may own its binding instance and export its named `connect`, `prepare`
+and `adopt` functions, rather than exporting a raw provider definition. HTMLKit
+recognizes the `prepare`/`adopt` pair through runtime exports and re-exports
+without evaluating browser behavior during discovery. All three exports must be
+functions. Server preparation uses the existing binding preparation context;
+browser connection and navigation adopt matching read identities before running
+the module's interactions. Supplied props keep precedence over providers.
+
+The library retains the same instance for preparation/adoption and connection.
+When creating a browser adapter in `adopt`, use the host-checked
+`adoption.snapshot.source` as its source revision. An ordinary `{ props, connect }`
+or `create()` module remains preferable when HTMLKit should compose environment
+readers. A prepared module owns its providers internally and cannot also attach
+`.client` or `.server` provider overrides; expose a raw definition to use those
+overrides.
+
 ## Browser-only companion modules
 
 Use a `.client.js` or `.client.ts` companion for browser-only imports and readers. HTMLKit imports it

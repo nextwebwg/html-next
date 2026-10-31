@@ -14,6 +14,9 @@ const runtime = source && existsSync(sourceRuntime) ? sourceRuntime : packagedRu
 const packagedBindings = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/bindings"));
 const sourceBindings = packagedBindings.replace(/[/\\]dist[/\\]bindings\.js$/, "/src/bindings.ts");
 const bindings = source && existsSync(sourceBindings) ? sourceBindings : packagedBindings;
+const packagedInputs = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/inputs"));
+const sourceInputs = packagedInputs.replace(/[/\\]dist[/\\]component-inputs\.js$/, "/src/component-inputs.ts");
+const inputs = source && existsSync(sourceInputs) ? sourceInputs : packagedInputs;
 const client = fileURLToPath(new URL(source ? "./client.ts" : "./client.js", import.meta.url));
 const moduleComposition = fileURLToPath(new URL(source ? "./component-module.ts" : "./component-module.js", import.meta.url));
 const privateClient = fileURLToPath(new URL(source ? "./private-client.ts" : "./private-client.js", import.meta.url));
@@ -68,19 +71,30 @@ export function browserSources(components: readonly BrowserDefinition[], options
       const commonModule = privateNames.length === 0 ? "behavior" : privateModule;
       const composed = component.client === undefined ? commonModule : `componentModule(${commonModule}, environment)`;
       sources.set(moduleId, `${component.binding === undefined ? "" : `import { preparedBinding } from ${JSON.stringify(client)};
-import { generatedHost, renderedInstanceRecord, READY_INPUT } from ${JSON.stringify(runtime)};\n`}${common}${environment}
-let adapter, bound;
-const binding = () => adapter ??= import(${JSON.stringify(bindings)}).then(library => bound = library.bindModule(${composed}${options}));
-export const connect = "props" in behavior || "create" in behavior${component.client === undefined ? "" : ' || "props" in environment || "create" in environment'}
+import { generatedHost, renderedInstanceRecord, READY_INPUT } from ${JSON.stringify(runtime)};\n`}${component.binding?.bound ? `import { componentInputs } from ${JSON.stringify(inputs)};\n` : ""}${common}${environment}
+${component.binding?.bound ? "const binding = () => Promise.resolve(behavior);" : `let adapter;
+const binding = () => adapter ??= import(${JSON.stringify(bindings)}).then(library => library.bindModule(${composed}${options}));`}
+export const connect = ${component.binding?.bound ? `(host, context) => {
+  context.signal.throwIfAborted();
+  const snapshot = preparedBinding(host.root, ${JSON.stringify(component.definition.contract.tag)});
+  if (snapshot?.source === ${JSON.stringify(component.binding.source)}) {
+    const port = componentInputs(host);
+    const inputs = Object.fromEntries(Object.entries(snapshot.reads).flatMap(([name, read]) =>
+      !port.names.includes(name) || port.supplied(name) || port.revision(name) !== read.revision ? [] :
+        [[name, { value: port.read(name), status: port.status(name) }]]));
+    behavior.adopt(host, { snapshot, inputs });
+  }
+  return behavior.connect(host, context);
+};` : `"props" in behavior || "create" in behavior${component.client === undefined ? "" : ' || "props" in environment || "create" in environment'}
   ? (host, context) => binding().then(module => module.connect(host, context))
-  : ${component.client === undefined ? 'Reflect.get(behavior, "connect")' : 'connectModules(Reflect.get(behavior, "connect"), Reflect.get(environment, "connect"))'};
+  : ${component.client === undefined ? 'Reflect.get(behavior, "connect")' : 'connectModules(Reflect.get(behavior, "connect"), Reflect.get(environment, "connect"))'};`}
 ${component.binding === undefined ? "" : `
 export async function adoption() {
-  await binding();
+  const bound = await binding();
   return (root, rendered, update) => {
     const snapshot = preparedBinding(rendered, ${JSON.stringify(component.definition.contract.tag)});
     const record = renderedInstanceRecord(rendered, ${JSON.stringify(component.definition.contract.tag)});
-    if (snapshot === undefined || record === undefined) { update(); return; }
+    if (snapshot === undefined || snapshot.source !== ${JSON.stringify(component.binding.source)} || record === undefined) { update(); return; }
     const inputs = Object.fromEntries(Object.entries(snapshot.reads).flatMap(([name, read]) =>
       record.revisions?.[name] !== read.revision || !record.inputs[name]?.producer ? [] :
         [[name, { value: record.props[name], status: record.availability?.[name] ?? READY_INPUT }]]));

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-alpha.76
+
+### Added
+
+- HTMLKit prepares library-owned modules exporting the existing `connect`, `prepare` and `adopt` binding functions. Discovery follows runtime re-exports without executing browser behavior. Initial connection and rendered navigation adopt matching producer read identities while preserving caller values; libraries retain ownership of their binding instances.
+- Converted Vue binding modules can prepare their outputs during server rendering and retain producer ownership through hydration. Modules export the existing `prepare` and `adopt` binding functions; package assembly discovers them without evaluating source and revisions their relative module graph. Direct converters can provide `modulePreparation.source`. The feature-specific helper uses Vue server-prefetch, existing typed inputs and the hydration codec, preserves caller overrides, and avoids repeating accepted reads on connection.
+
+### Fixed
+
+- Converted Vue components can initialize a state from a late input while a computed value reads it without reporting a false `HR006` dependency cycle. The first usable seed remains available synchronously; existing consumers are notified after the initializing read finishes. Subsequent edits keep Vue's nested reactivity and genuine computed cycles still report `HR006`.
+- Vue component input subscriptions run during explicit server preparation before DOM connection. Preparing dependent providers through the existing binding API now produces their values before rendering; disposing the preparation releases those subscriptions without running browser behavior.
+- Initially empty retained inline text has a comment placeholder during SSR, preserving slot fragment boundaries through Vue hydration. Later accepted text and invalid-result retention keep their existing behavior.
+- Restoring a Vue-hydrated input's form-reset default preserves an unfinished native date/time or numeric entry. An input with native `badInput` already owns a dirty editing state, so updating its default no longer rewrites the opaque live value.
+- HTMLKit development servers retain Vite's dependency optimization so a component's transitive CommonJS dependencies can be imported in the browser.
+
 ## 1.0.0-alpha.75
 
 - Preserve shared controller modules as one module instance across converted components. Components that coordinate through an imported registry no longer receive isolated copies; each source package keeps its own relocation namespace. Regression cases verify shared object identity in Vue, React and Svelte output.

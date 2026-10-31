@@ -23,7 +23,7 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, ref, shallowRef, useSlots, watch, watchEffect } from "vue";
+import { computed, createCommentVNode, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, ref, shallowRef, useSlots, watch, watchEffect } from "vue";
 import type { PropType, Ref, VNode } from "vue";
 ${INPUT_STATUS_SOURCE}
 
@@ -337,7 +337,8 @@ export function useComponentHost(
           read: () => host.state[name], status: () => options.availability?.[name]?.() ?? READY_INPUT,
         }])),
         track: (name, kind) => options.inputTracking!.track(name, kind),
-        watch: run => host.effect(run),
+        // Input sources own their subscriptions, including preparation before DOM connection.
+        watch: run => watchEffect(run, { flush: "post" }),
         untracked: run => options.inputTracking!.untracked(run),
       });
     },
@@ -662,12 +663,16 @@ export function initializedState<T>(evaluate: () => { value: unknown; status: In
     if (!accepts(next.value)) { warn(); return; }
     claim();
     cell.value = copy(next.value) as T;
-    notify();
+    // The first usable seed may be claimed inside a computed read. Notify its
+    // existing consumers after that read finishes, rather than re-entering it.
+    queueMicrotask(notify);
   };
   const state = customRef<T | null | undefined>((track, trigger) => {
     notify = trigger;
     return {
-      get() { track(); initialize(); return cell.value; },
+      // Pending consumers track the custom ref and seed, not the unowned cell:
+      // filling that cell must not synchronously invalidate an active computed.
+      get() { track(); initialize(); return initialized ? cell.value : undefined; },
       set(value) {
         if (value != null && !accepts(value)) { warn(); return; }
         const first = !initialized;
@@ -734,10 +739,14 @@ export const RetainedInlineText = /* @__PURE__ */ defineComponent({
   props: { segments: { type: Array as PropType<InlineTextSegment[]>, required: true } },
   setup(props) {
     const previous: string[] = [];
-    return () => createTextVNode(props.segments.map((segment, index) => {
-      if (segment.accepted && segment.value !== Symbol.for("html-next.invalid-result")) previous[index] = segment.text;
-      return previous[index] ?? "";
-    }).join(""));
+    return () => {
+      const text = props.segments.map((segment, index) => {
+        if (segment.accepted && segment.value !== Symbol.for("html-next.invalid-result")) previous[index] = segment.text;
+        return previous[index] ?? "";
+      }).join("");
+      // Empty text has no serialized SSR node; a comment preserves this component's hydration position.
+      return text === "" ? createCommentVNode() : createTextVNode(text);
+    };
   },
 });
 

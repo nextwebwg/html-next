@@ -8,13 +8,38 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodeHydrationValue, decodeHydrationValue } from "../../html-next/src/bindings.js";
 
 import { buildApplication, createApplication, discoverRoutes, devApplication, previewApplication } from "../src/index.js";
-import { bindingFixture, environmentFixture, fixture, privateFixture, retainedProviderFixture, universalFixture, titleOf, write } from "./fixture.js";
+import { bindingFixture, environmentFixture, fixture, privateFixture, preparedFixture, retainedProviderFixture, universalFixture, titleOf, write } from "./fixture.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
+  it("prepares a library-owned binding before render and preserves caller overrides", async () => {
+    const root = await preparedFixture(); roots.push(root);
+    const application = await createApplication({ root });
+    try {
+      const page = await application.render("/");
+      expect(page.body).toContain("<h1>build:A</h1>");
+      expect(page.body).toContain('value="build:A"');
+      expect(page.body).toContain("data-htmlkit-bindings=");
+      expect(page.body).not.toContain('data-connected="true"');
+      expect((await application.render("/fixture/")).body).toContain("<h1>Caller</h1>");
+    } finally { await application.close(); }
+  });
+  it("diagnoses invalid prepared-module functions and unsupported environment overrides", async () => {
+    const root = await preparedFixture(); roots.push(root);
+    await write(root, "lib/entry.client.ts", "export const props = { label: { load: () => 'Override' } };");
+    const application = await createApplication({ root });
+    try { await expect(application.render("/")).rejects.toThrow(/environment provider overrides require an unbound props\/create module/); }
+    finally { await application.close(); }
+    await rm(join(root, "lib/entry.client.ts"));
+    const source = await readFile(join(root, "lib/binding.ts"), "utf8");
+    await write(root, "lib/binding.ts", source.replace("adopt(host, options) { return binding(host, options.snapshot.source).adopt(host, options); }", "adopt: 42"));
+    const invalid = await createApplication({ root });
+    try { await expect(invalid.render("/")).rejects.toThrow(/Prepared component prepared-index must export adopt/); }
+    finally { await invalid.close(); }
+  });
   it.each([false, true])("prepares a layout provider when a typed id prop supplies the native root id (delegated: %s)", async delegated => {
     const root = await retainedProviderFixture(delegated); roots.push(root);
     const application = await createApplication({ root, services: { read: (id: string) => "Product:" + id } });

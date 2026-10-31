@@ -77,7 +77,7 @@ async function writeServer({ root, base, canonicalOrigin, stage, redirects, file
     const page: ServerPage = { definitions: graph.definitions, assets,
       clientModules: graph.components.filter(component => component.client !== undefined).map(component => component.definition.contract.tag),
       providers: Object.fromEntries(graph.components.flatMap(component => component.binding === undefined ? [] : [[component.definition.contract.tag,
-        { module: module(component.module!, "provider"), source: component.binding.source, ...component.binding.client === undefined ? {} : { client: component.binding.client },
+        { module: module(component.module!, "provider"), source: component.binding.source, ...component.binding.bound ? { bound: true } : {}, ...component.binding.client === undefined ? {} : { client: component.binding.client },
           ...component.binding.readers === undefined ? {} : { readers: component.binding.readers } }]])),
       layers: graph.layers.map((layer, i) => {
         const loader = layers[i]!.server;

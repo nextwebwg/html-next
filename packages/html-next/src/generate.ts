@@ -29,6 +29,8 @@ import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
 import { VUE_PROPS_PATH, vuePropsModule } from "./targets/vue-props.js";
+import { VUE_BINDINGS_PATH, vueBindingsModule } from "./targets/vue-bindings.js";
+export { importsVueBindings } from "./targets/vue-bindings.js";
 import { requestsArtifact as makeRequestsArtifact } from "./targets/request-host-source.js";
 import { headHelperArtifact as makeHeadArtifact } from "./targets/head-target.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
@@ -36,7 +38,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.75";
+export const GENERATOR_VERSION = "1.0.0-alpha.76";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -44,6 +46,8 @@ export interface GeneratedArtifact {
 }
 
 export interface GenerationOptions {
+  /** Integrate an existing bound module's prepare/adopt exports using this application source revision. */
+  readonly modulePreparation?: { readonly source: string };
   /** A closed component graph proves no descendant reads this definition's state through <context>. */
   readonly noContextReaders?: boolean;
   /**
@@ -97,6 +101,7 @@ export function generateComponent(
     slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
     propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
     componentGraph: graph,
+    ...(options?.modulePreparation === undefined ? {} : { modulePreparation: options.modulePreparation }),
   });
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
@@ -126,6 +131,11 @@ export function generateHostTypes(definition: ComponentDefinition, definitions?:
 /** The one module the converted Vue components share; every package that emits Vue ships it once. */
 export function vueHostArtifact(): GeneratedArtifact {
   return Object.freeze({ path: VUE_HOST_PATH, content: vueHostModule(GENERATOR_VERSION) });
+}
+
+/** Feature-specific producer preparation and hydration for converted Vue binding modules. */
+export function vueBindingsArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_BINDINGS_PATH, content: vueBindingsModule(GENERATOR_VERSION) });
 }
 
 /** Feature-specific safe-markup helper for Vue components that author `$html`. */

@@ -408,7 +408,7 @@ export interface BrowserDefinition {
   /** App-owned private reader module; never part of the browser import graph. */
   readonly server?: string;
   /** The server bundle and matching browser completion identity of a prop-provider module. */
-  readonly binding?: { readonly module: string; readonly source: string; readonly client?: boolean; readonly readers?: readonly string[] };
+  readonly binding?: { readonly module: string; readonly source: string; readonly bound?: true; readonly client?: boolean; readonly readers?: readonly string[] };
   readonly styles: { readonly css: string; readonly stateNames: readonly string[] };
 }
 export interface RenderedPage {
