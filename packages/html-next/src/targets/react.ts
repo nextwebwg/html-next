@@ -191,7 +191,7 @@ const REACT_ATTRIBUTES: Readonly<Record<string, string>> = {
   class: "className", for: "htmlFor", tabindex: "tabIndex", readonly: "readOnly",
   autofocus: "autoFocus", autocomplete: "autoComplete", maxlength: "maxLength",
   minlength: "minLength", crossorigin: "crossOrigin", srcset: "srcSet",
-  contenteditable: "contentEditable", colspan: "colSpan", rowspan: "rowSpan",
+  contenteditable: "contentEditable", inputmode: "inputMode", spellcheck: "spellCheck", colspan: "colSpan", rowspan: "rowSpan",
 };
 
 /** Keep JavaScript lookup semantics while allowing HTML Next's absent keys in strict TSX. */
@@ -582,7 +582,8 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
         literals.push(`${propKey(name)}={${accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`}}`);
       }
-      else if (!component && isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
+      else if (isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
+      else if (NUMERIC_ATTRIBUTES.has(attribute.name) && /^[+-]?\d+$/.test(attribute.value)) literals.push(`${reactAttribute(attribute.name, svg)}={${Number(attribute.value)}}`);
       else if (!component && ["input", "textarea", "select"].includes(node.name) && attribute.name === "value") literals.push(`defaultValue=${quote(attribute.value)}`);
       else literals.push(NUMERIC_ATTRIBUTES.has(attribute.name) && !component
         ? `${reactAttribute(attribute.name, svg)}={${quote(attribute.value)} as any}`
@@ -647,7 +648,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const value = component && (componentPropName !== undefined || state.propsByTag?.get(node.name) === undefined)
         ? lowering.value(attribute.expressionPlan.ast, scope)
         : lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
-      const nativeValue = !component && typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${value}) ?? undefined` : value;
+      const nativeValue = componentPropContract === undefined && (typeOf(attribute.expressionPlan.ast, scope).nullable || typeOf(attribute.expressionPlan.ast, scope).null === true) ? `(${value}) ?? undefined` : value;
       const sourceGuard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (node.name === "input" && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
       else if (node.name === "input" && attribute.name === "checked") bindings.push(`defaultChecked={Boolean(${lowering.value(attribute.expressionPlan.ast, scope)})}`);
@@ -665,8 +666,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
               : parseTypedValue(selectorLiteral.value, selectorContract.type, "$", "html");
             return JSON.stringify(parsed?.ok ? parsed.value : selectorLiteral.value);
           })() : selectorContract !== undefined && "default" in selectorContract ? JSON.stringify(selectorContract.default) : "undefined");
+        const fixedSelector = selectorAlias !== undefined || selectorValue === undefined || selectorValue === "undefined"
+          ? undefined : JSON.parse(selectorValue) as unknown;
+        const fixedOption = select?.options.find(option => option.value === fixedSelector);
         const typeCheck = select === undefined || selectorContract === undefined
           ? destinationTypeCheck(normalizeType(componentPropContract.type), "candidate")
+          : selectorAlias === undefined ? fixedOption === undefined ? "false" : destinationTypeCheck(fixedOption.type, "candidate")
           : `(${select.options.map((option) => `(${selectorValue} === ${JSON.stringify(option.value)} && ${destinationTypeCheck(option.type, "candidate")})`).join(" || ")})`;
         const accepts = `(candidate) => ${sourceGuard === undefined ? "" : `(${sourceGuard}) && `}(candidate === undefined${componentPropContract.required ? "" : " || candidate === null"} || ${typeCheck})`;
         const snapshot = boundPropSnapshots.has(componentPropName!);
@@ -1038,6 +1043,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     : [...new Set(rootArms(template)!.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
   const preservesRootFocus = rootArms(template) !== undefined;
   const publicRootType = rootType;
+  const rootTags = [...new Set((rootArms(template) ?? [template]).map(root => root.name))];
+  const nativeProps = rootTags.length === 1 && getDomInterface(rootTags[0]!) !== undefined
+    ? `React.ComponentPropsWithoutRef<${quote(rootTags[0]!)}>` : `React.HTMLAttributes<${rootType}>`;
   const generics = selectorGenerics(definition.contract.props);
   const genericDeclaration = generics.length === 0 ? "" : `<${generics.map((generic) => generic.declaration).join(", ")}>`;
   const genericArguments = generics.length === 0 ? "" : `<${generics.map((generic) => generic.parameter).join(", ")}>`;
@@ -1098,7 +1106,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(nestedDepthLimit === undefined ? [] : [`import { NestedDepthContext } from ${quote(options.depthSpecifier ?? "./depth")};`]),
     RENDER_IMPORT,
     ...(styles.css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${name}.css`)};`]),
-    ...[...imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.tsx`)};`),
+    ...[...imports].filter(tag => tag !== definition.contract.tag).sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.tsx`)};`),
     ...[...new Map(contexts.filter((context) => context.from !== definition.contract.tag || !providedContexts.has(context.name))
       .map((context) => [`${context.from}:${context.name}`, context] as const)).values()]
       .map((context) => `const ${contextExportName(context.from, context.name)} = componentContext<${types.get(context.as ?? context.name) === UNKNOWN ? "unknown" : `${typeScript(types.get(context.as ?? context.name)!)} | undefined`}>(${quote(context.from)}, ${quote(context.name)});`),
@@ -1109,7 +1117,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(states.filter((state) => providedContexts.has(state.name)).map((state) =>
       `export const ${contextExportName(definition.contract.tag, state.name)} = componentContext<${stateType(state)}>(${quote(definition.contract.tag)}, ${quote(state.name)});`)),
     "",
-    `export type ${name}Props${genericDeclaration} = Omit<React.HTMLAttributes<${rootType}>, ${["style", ...target.props.map((prop) => prop.name)].map(quote).join(" | ")}> & {`,
+    `export type ${name}Props${genericDeclaration} = Omit<${nativeProps}, ${["style", ...target.props.map((prop) => prop.name)].map(quote).join(" | ")}> & {`,
     ...props,
     // Each request is a function prop that answers it, and an event form that hears it.
     ...target.requests.flatMap((request) => [

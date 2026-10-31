@@ -3152,6 +3152,9 @@ function installPropReflection(instance: RuntimeInstance): void {
       // writing text that would not parse back.
       const selected = selectedPropType(instance.definition.contract, prop,
         prop.select === undefined ? {} : { [prop.select.from]: instance.scope.get(prop.select.from) });
+      // Structured prop metadata is hydration wire data, not a live serialization of the input.
+      // Authored attribute bindings still own their current output.
+      if (!bound && value !== null && typeof value === "object" && root.hasAttribute(attributeName)) return;
       const serialized = value === undefined || value === ABSENT || value === null
         ? null : reflectedPropValue(value, selected);
       if (serialized === null) root.removeAttribute(attributeName);
@@ -4282,9 +4285,11 @@ function applyComponentProps(
       if (!bound) element.removeAttribute(attributeName);
     } else {
       instance.explicit.add(name);
-      const selected = selectedPropType(contract, prop, next);
-      const reflected = reflectedPropValue(input, selected);
-      if (!bound && element.getAttribute(attributeName) !== reflected) element.setAttribute(attributeName, reflected);
+      if (!bound && !(typeof input === "object" && element.hasAttribute(attributeName))) {
+        const selected = selectedPropType(contract, prop, next);
+        const reflected = reflectedPropValue(input, selected);
+        if (element.getAttribute(attributeName) !== reflected) element.setAttribute(attributeName, reflected);
+      }
     }
     if (!Object.is(untracked(() => instance.scope.get(name)), value)) instance.scope.set(name, value);
     if (acceptedNames.has(name)) {

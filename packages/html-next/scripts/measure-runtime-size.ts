@@ -125,6 +125,8 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // slot is created only once a slot places it. Every fixture carries the platform-object check
 // (`isPlatformObject`, about 70 B gzip) that keeps DOM nodes in state unwrapped, since a browser
 // rejects a proxy as a native getter's receiver.
+// +17–25 B on prop-bearing fixtures: structured hydration data keeps its initial snapshot,
+// avoiding whole-document serialization on updates while preserving typed inputs and authored bindings.
 // +80 B on every fixture: `host.on` records each listener as a known responder on the document's
 // record and tells `hasResponder` readers, so a component that asks sees a consumer's controller
 // that registered first (javascript#has-responder).
@@ -172,11 +174,11 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_849);
 // Counters allocate only when queried; neither capability duplicates accepted values.
 // +132–148 B on SDK fixtures for read-only state/computed/context declaration reads and
 // status observation; +17 B on computed-counter for existing-property notification of status.
-const propGenerated = await generatedFixture("prop-button", 14_049);
-const awaitGenerated = await generatedFixture("await-card", 14_617);
+const propGenerated = await generatedFixture("prop-button", 14_074);
+const awaitGenerated = await generatedFixture("await-card", 14_634);
 // +55 B gzip: the seed-copy cold path recognizes ordinary foreign-realm records,
 // retaining local/foreign class and platform identities. Local record/list copies keep their fast path.
-const seededGenerated = await generatedFixture("state-seed", 16_111);
+const seededGenerated = await generatedFixture("state-seed", 16_134);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
 const computedGenerated = await generatedFixture("computed-counter", 8_540);
@@ -198,11 +200,11 @@ const requestGenerated = await generatedFixture("controller-request", 9_634);
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
-const headNoneGenerated = await generatedFixture("head-none", 12_444);
+const headNoneGenerated = await generatedFixture("head-none", 12_466);
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
-const headStaticGenerated = await generatedFixture("head-static", 14_573);
-const headJsonGenerated = await generatedFixture("head-json", 14_717);
-const headGenerated = await generatedFixture("head-script", 16_690);
+const headStaticGenerated = await generatedFixture("head-static", 14_594);
+const headJsonGenerated = await generatedFixture("head-json", 14_741);
+const headGenerated = await generatedFixture("head-script", 16_709);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

@@ -44,3 +44,8 @@
 - Before handoff, run `pnpm verify:pr` and report commands, results, skips, and remaining judgment.
 - Keep each CI check within 15 minutes. Shard a long suite across parallel jobs instead of extending a job, and flag any check that approaches the limit.
 - Keep package license metadata aligned with the repository's MIT license. Packages remain private until the repository owner explicitly selects public visibility and a protected release workflow.
+
+- Use minimum-version ranges for Threadlabs and Nextwebwg dependencies without a
+  speculative 1.0 or later major-version ceiling. Lockfiles record exact tested
+  resolutions. Restrict a range only for a demonstrated API requirement or verified
+  incompatible release, and record the reason.

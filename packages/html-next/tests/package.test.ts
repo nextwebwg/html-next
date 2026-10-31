@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "vitest";
 
 import { assembleComponentPackage } from "../src/package.js";
+import { GENERATOR_VERSION } from "../src/generate.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/package/", import.meta.url));
 const temporary: string[] = [];
@@ -72,6 +73,7 @@ describe("component package assembler", () => {
     assert.match(await readFile(join(outDirectory, "vue/index.d.ts"), "utf8"), /const Button/);
     const manifest = JSON.parse(await readFile(join(outDirectory, "package.json"), "utf8"));
     assert.equal(manifest.exports["."]["html-next"], "./html-next/index.js");
+    assert.equal(manifest.peerDependencies["@nextwebwg/html-next"], `>=${GENERATOR_VERSION}`);
     assert.match(await readFile(join(outDirectory, "html-next/index.js"), "utf8"), /export \{ UiButton \} from "\.\.\/components\/library\.html"/);
   });
 

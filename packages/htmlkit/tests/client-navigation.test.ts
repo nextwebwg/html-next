@@ -304,9 +304,9 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
 }
 
 /**
- * The layers a page shows once its read has loaded, without the hydration record that only server HTML
- * carries. Each element's attributes are in name order: a compiled component created in the browser
- * writes the same attributes as the server's renderer, in its own order.
+ * The layers a page shows once its read has loaded, excluding internal hydration records.
+ * Structured prop metadata is an initial wire snapshot; current bindings own visible output.
+ * Sort authored attributes so their insertion order does not affect server/client parity.
  */
 async function layers(page: Page) {
   await page.getByText("Loaded data", { exact: true }).waitFor();
@@ -314,8 +314,11 @@ async function layers(page: Page) {
     markup: [0, 1].map(index => {
       const copy = document.getElementById(`hk-layer-${index}`)!.cloneNode(true) as Element;
       for (const element of [copy, ...copy.querySelectorAll("*")]) {
-        const attributes = [...element.attributes].map(({ name, value }) => [name, value] as const).sort(([a], [b]) => a < b ? -1 : 1);
-        for (const [name] of attributes) element.removeAttribute(name);
+        const wirePrefixes = (element.getAttribute("data-component") ?? "").split(/\s+/).filter(Boolean).map(tag => `data-${tag}-prop-`);
+        const original = [...element.attributes];
+        const attributes = original.filter(({ name, value }) => !wirePrefixes.some(prefix => name.startsWith(prefix)) || !(value.startsWith("[") || value.startsWith("{")))
+          .map(({ name, value }) => [name, value] as const).sort(([a], [b]) => a < b ? -1 : 1);
+        for (const { name } of original) element.removeAttribute(name);
         for (const [name, value] of attributes) element.setAttribute(name, value);
       }
       return copy.outerHTML.replace(/ data-html-next-instance="[^"]*"/g, "");
@@ -331,9 +334,14 @@ async function parity(browser: Browser, url: string): Promise<void> {
     const { page, errors, count } = await open(context);
     await page.goto(url);
     await page.waitForFunction(() => document.querySelector('[data-component="site-shell"]')?.getAttribute("data-connections") === "1");
+    const shell = page.locator('[data-component="site-shell"]');
+    const initialNavigationWire = await shell.getAttribute("data-site-shell-prop-navigation");
     await mark(page);
     await page.locator("#counter").click();
     await settled(page, "Counter");
+    // The retained shell updates its actual navigation without reserializing its structured input.
+    expect(await shell.getAttribute("data-site-shell-prop-navigation")).toBe(initialNavigationWire);
+    expect(await page.locator('nav a[aria-current="page"]').count()).toBe(0);
     const client = await layers(page);
     expect([await marked(page), count("/kit/counter/", "fetch"), count(payloadPath("counter/"))]).toEqual([true, 0, 1]);
     expect(client).toMatchObject({ connections: "1", value: "server" });

@@ -135,6 +135,12 @@ export const definitions = [
     <handler name="toggle"><set name="open" expr:value="not $open"></set><set name="tags" expr:value="$open ? [] : ['docs', 'guide']"></set></handler>
     </defs><section><button type="button" on:click="toggle">Toggle</button>
     <ssr-slot-row><b slot="meta" $if="$open">Opened</b><i slot="leading" $each="tag of $tags">#{$tag}</i>Body</ssr-slot-row></section></template>`,
+  `<template component="ssr-slot-text"><defs>
+    <state name="label" type="string" value="Bold"></state>
+    <state name="shortcut" type="string" value="Mod-b"></state>
+    <handler name="toggle"><set name="shortcut" expr:value="$shortcut = '' ? 'Mod-b' : ''"></set></handler>
+    </defs><section><button type="button" on:click="toggle">Toggle</button>
+    <ssr-slot-row>{$label}<kbd slot="meta" $if="$shortcut">{$shortcut}</kbd></ssr-slot-row></section></template>`,
   // `<template $slot>` outlets in table parts, where the HTML parser would move a `<slot>` out of the table.
   `<template component="ssr-grid"><defs><slot name="row"><prop name="item" type="string" required>The row.</prop></slot>
     <state name="rows" type="list(string)" value="['Ada']"></state>
@@ -180,6 +186,8 @@ export const cases = [
   { name: "conditional and repeated content for named slots, shown after the server's fallback", html: '<ssr-slot-form id="subject"></ssr-slot-form>', state: {} },
   { name: "conditional and repeated content for named slots, replaced by their fallback", html: '<ssr-slot-form id="subject"></ssr-slot-form>',
     state: { open: true, tags: ["x"] } },
+  { name: "dynamic text before a conditional named-slot region", html: '<ssr-slot-text id="subject"></ssr-slot-text>', state: {} },
+  { name: "dynamic text before an empty conditional named-slot region", html: '<ssr-slot-text id="subject"></ssr-slot-text>', state: { shortcut: "" } },
   { name: "<template $slot> outlets in table parts, showing their fallback", html: '<ssr-grid id="subject"></ssr-grid>', state: { rows: ["Ada", "Bea"] } },
   { name: "<template $slot> outlets in table parts, rendering a consumer's rows and header cells", html: '<ssr-grid-page id="subject"></ssr-grid-page>', state: {} },
 ] as const;

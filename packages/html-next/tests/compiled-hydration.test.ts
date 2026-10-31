@@ -44,6 +44,30 @@ afterEach(() => {
 });
 
 describe("compiled hydration of Node output", () => {
+  it("keeps structured prop hydration data while rendering current content in live and compiled components", async () => {
+    const components = [
+      `<template component="snapshot-value"><defs><prop name="content" type="object({ text: string })">The current document content.</prop></defs><p>{$content.text}</p></template>`,
+      `<template component="snapshot-page"><defs><state name="content" type="object({ text: string })" value="{ text: 'First' }"></state>
+        <handler name="change"><set name="content" expr:value="{ text: 'Changed' }"></set></handler></defs>
+        <section><button on:click="change">Change</button><snapshot-value from:content="$content"></snapshot-value></section></template>`,
+    ].map(source => parseComponent(source));
+    const rendered = await renderComponents('<snapshot-page id="subject"></snapshot-page>', { definitions: components });
+    const code = await compiledFixtures("esm", 'export { registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";', components);
+    const { document, runtime } = await page(rendered.html, code);
+    runtime.factories["snapshot-page"]!({}, undefined, document.querySelector("#compiled #subject")!);
+    runtime.registerComponentDefinitions(components);
+    runtime.lowerDocument();
+    await flush();
+    for (const box of document.querySelectorAll("main")) {
+      const child = box.querySelector("p")!;
+      const initial = child.getAttribute("data-snapshot-value-prop-content");
+      box.querySelector<HTMLButtonElement>("button")!.click();
+      await flush();
+      assert.equal(child.textContent, "Changed");
+      assert.equal(child.getAttribute("data-snapshot-value-prop-content"), initial);
+    }
+  });
+
   // A <template slot> written in the document needs the live delivery's parser; compiled consumers project their own.
   for (const fixture of cases.filter((candidate) => !candidate.html.includes("<template slot"))) {
     it(`adopts ${fixture.name} in place, as the live runtime does`, async () => {
