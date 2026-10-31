@@ -212,7 +212,7 @@ function frameworkEntry(
 
 function relativeImport(from: string, to: string): string {
   const path = relative(dirname(from), to).split(sep).join("/");
-  return path.startsWith(".") ? path : `./${path}`;
+  return path.startsWith("./") || path.startsWith("../") ? path : `./${path}`;
 }
 
 function componentArtifact(projectRoot: string, url: string, tag: string, name: string, target: FrameworkTarget): string {

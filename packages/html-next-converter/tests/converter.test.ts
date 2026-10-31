@@ -1333,6 +1333,17 @@ export default function initialize(host) { host.on("connect", () => connect(host
     }
   });
 
+  it("keeps hidden component directories in relative entry imports", async () => {
+    const root = await fixture();
+    await mkdir(join(root, ".components"));
+    await writeFile(join(root, ".components/card.html"), await readFile(join(root, "x-card.html"), "utf8"));
+    for (const target of ["vue", "react", "svelte"] as const) {
+      const outDirectory = join(root, `hidden-${target}`);
+      const manifest = await convertComponents({ mode: "application", root, target, outDirectory, entries: [".components/card.html"] });
+      assert.match(await readFile(join(outDirectory, manifest.output.entry), "utf8"), /from ["']\.\/\.components\/XCard/);
+    }
+  });
+
   it("preserves one shared module instance across converted component controllers", async () => {
     const root = await fixture();
     await mkdir(join(root, "shared"));
