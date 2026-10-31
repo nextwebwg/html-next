@@ -22,7 +22,9 @@ it("typechecks recursive compositions, selected props and native attribute forwa
         </defs><input from:type="$type" from:value="$value"></template>`,
       "page.html": `<link rel="component" href="./leaf.html"><link rel="component" href="./field.html">
         <template component="x-page"><defs><prop name="label" type="string">An optional label.</prop><prop name="hidden" type="boolean">Optional native visibility.</prop>
-        <state name="selected" type="boolean" value="false"></state></defs><section>
+        <state name="selected" type="boolean" value="false"></state>
+        <computed name="unavailable" from="not $selected"></computed><computed name="caption" from="concat($selected)"></computed></defs><section>
+        <div from:inert="$unavailable" from:title="$caption"></div>
         <x-leaf hidden></x-leaf><x-leaf from:title="$label" from:aria-label="$label" from:hidden="$hidden" from:aria-pressed="concat($selected)"></x-leaf>
         <x-field type="text" from:value="$label" name="explicit" inputmode="decimal" spellcheck="false"></x-field>
         <x-field from:value="$label"></x-field></section></template>`,

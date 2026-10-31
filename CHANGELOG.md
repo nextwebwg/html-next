@@ -1,8 +1,12 @@
 # Changelog
 
-## 1.0.0-alpha.72
+## 1.0.0-alpha.73
 
 - Expose checked implementation boundaries through the component graph and Node loader. Native generators can qualify the exact source definition and interface before replacing its browser implementation; unbound definitions keep their normal dependency, controller and style traversal.
+
+## 1.0.0-alpha.72
+
+- Model React computed reads as nullable while their inputs are unavailable. Native attribute forwarding now omits that absence instead of passing null to boolean-only React props such as `inert`; a converted composition is checked with strict TypeScript.
 
 ## 1.0.0-alpha.71
 

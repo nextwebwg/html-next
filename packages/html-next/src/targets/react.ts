@@ -994,8 +994,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   for (const value of computed) {
     code.set(value.name, `${valueNames.get(value.name)!}.get()`);
     const inferred = value.expression === undefined ? UNKNOWN : typeOf(value.expression.ast, { code, types });
-    types.set(value.name, value.expression !== undefined && mayProduceInvalidResult(value.expression.ast, { code, types })
-      ? { ...inferred, nullable: true } : inferred);
+    // Even a non-null expression reads null while its inputComputed cell is unavailable.
+    types.set(value.name, { ...inferred, nullable: true });
   }
   const imports = new Set<string>();
   const attachments: EventAttachment[] = [];
