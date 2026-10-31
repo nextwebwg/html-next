@@ -29,6 +29,7 @@ catalog:
   cssstyle: 6.2.0
   decimal.js: 10.6.0
   esbuild: 0.28.2
+  magic-string: 0.30.21
   mobx: 7.0.6
   oxlint: 1.87.0
   parse5: 8.0.1

@@ -1895,6 +1895,9 @@ export function emitBlocks(
       ...[...invocation.controls, ...block.bindings.filter((binding) => binding.site === invocation.site && binding.kind === "control").map((binding) => binding.path!)]
         .map((path) => `    r.z.push(bindRootControl(I, r.h${index}, ${path}));`),
       ...projection === undefined ? [] : [`    r.z.push(() => dispose(r.j${index}));`],
+      // Placement can finish during an outer-only update, before its deferred callback runs.
+      // The block's native bindings still need their first write, including loop-alias reads.
+      ...waits ? ["    c = -1;"] : [],
       waits ? `  } else return; } else {` : `  } else {`,
       ...projection === undefined ? [] : [`    p${projection.id}(r.j${index}, c, d);`],
       ...invocation.props.flatMap((prop, at) => [

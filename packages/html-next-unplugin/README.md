@@ -3,6 +3,11 @@
 Vite can convert imported Declarative Components sources into Vue, React, or Svelte components. Libraries
 publish their HTML definitions; consumers use their normal component imports.
 
+Named imports from component folders and pure re-export barrels resolve directly to the requested
+framework components. Bundling an ordinary control therefore does not require an unused editor's
+optional peers. Namespace imports, side-effect imports and barrels with authored runtime code keep
+their ordinary module semantics. An imported optional component still requires its own peers.
+
 ## Check components in CI
 
 Run `html-next-check` to check an authored component graph without writing generated components,

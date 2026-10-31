@@ -1883,6 +1883,27 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
   });
 
+  it("updates native attributes on repeated roots projected through a named slot", async () => {
+    const leaf = `<template component="x-result"><defs><prop name="selected" type="boolean" default="false">Whether selected.</prop></defs><button from:aria-current="$selected"><slot name="title"></slot></button></template>`;
+    const shell = `<template component="x-results"><section><slot name="body"></slot></section></template>`;
+    const page = `<template component="x-page"><defs>
+      <state name="items" type="list(object({ href: string, label: string }))" value="[]"></state><state name="selected" type="string" value="''"></state>
+      <handler name="load"><set name="items" expr:value="[{ href: '/first', label: 'First' }]"></set><set name="selected" expr:value="'/first'"></set></handler>
+      </defs><article><button class="load" on:click="load">Load</button><x-results><div slot="body">
+      <div $each="item of $items" from:data-href="$item.href"><x-result from:selected="$item.href = $selected"><span slot="title">{$item.label}</span></x-result></div>
+      </div></x-results></article></template>`;
+    for (const direct of [false, true]) {
+      const result = await run([page, shell, leaf], direct, [host => { host.root.querySelector("button.load").click(); }]);
+      assert.deepEqual(result.errors, []);
+      const { window } = new JSDOM(result.snapshots[1]);
+      const row = window.document.querySelector('[data-component="x-result"]')!;
+      assert.equal(row.textContent, "First");
+      assert.equal(row.getAttribute("aria-current"), "true");
+      assert.equal(row.parentElement!.getAttribute("data-href"), "/first", direct ? "compiled" : "live");
+      window.close();
+    }
+  });
+
   it("creates a component projected into a closed slot only when a slot renders it, like live", async () => {
     const leaf = `<template component="x-leaf" status="early" summary="Leaf."><defs><prop name="text" type="string" default="none">Text.</prop></defs>
       <p class="leaf" data-id="leaf" $value="$text"></p></template>`;
