@@ -76,10 +76,13 @@ restores typed producer inputs, then calls `adopt` before browser connection.
 Caller-supplied fixtures retain precedence. Transfer metadata is removed after
 hydration.
 
-`assembleComponentPackage` recognizes modules exporting both functions, including
-relative re-exports, without importing or executing those modules. It generates a
+`assembleComponentPackage` and ordinary Vue source conversion recognize modules
+exporting both functions, including relative re-exports, without importing or
+executing those modules. They generate a
 source revision covering the definition, package version and relative module
-graph. A direct `generateVueComponent` or `generateComponent` caller opts in with
+graph. `preparedModuleRevision` shares that detection and hashing for tooling
+that supplies an already approved module graph through its source reader.
+A direct `generateVueComponent` or `generateComponent` caller opts in with
 `modulePreparation: { source: buildRevision }` and ships `vueBindingsArtifact()`
 beside the other required generated helpers. `importsVueBindings` identifies that
 helper import. A relocated conversion can supply its `bindings` helper specifier.

@@ -51,6 +51,7 @@ export { addControllerGraph } from "./controller-files.js";
 export { writeHostDeclarations } from "./host-declarations.js";
 export { parseComponent } from "./source-parser.js";
 export { parseSourceComponent } from "./source.js";
+export { preparedModuleRevision } from "./module-preparation.js";
 export { assembleComponentPackage } from "./package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";

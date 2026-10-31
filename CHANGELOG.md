@@ -1,10 +1,16 @@
 # Changelog
 
-## 1.0.0-alpha.79
+## 1.0.0-alpha.80
 
 ### Added
 
 - Convert HTML component graphs to Preact 11.1 TSX with `target: "preact"` or `html-next-convert preact`. Generated components and feature helpers import `preact/compat`, use Preact JSX types and runtime, and preserve separate CSS. The Vite adapter discovers source libraries and local HTML imports, prepares consumer declarations, and prunes unused components and styles. Preact consumers do not need React installed.
+
+## 1.0.0-alpha.79
+
+### Fixed
+
+- Vue source conversion recognizes modules exporting `prepare` and `adopt`, including relative re-exports, and uses the generator’s existing server preparation and hydration transfer helpers. Converted inputs are populated before server rendering instead of waiting for browser connection. Module detection and revision hashing share the package assembler’s implementation and do not execute component code.
 
 ## 1.0.0-alpha.78
 
