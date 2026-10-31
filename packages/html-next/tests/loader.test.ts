@@ -9,6 +9,33 @@ import { loadNodeComponents } from "../src/node-loader.js";
 import { ComponentGraphRegistry } from "../src/registry.js";
 
 describe("package loader and registry", () => {
+  it("forwards a checked implementation boundary using the final definition identity before web work", async () => {
+    const original = "file:///pkg/alias.html", final = "file:///pkg/native.html";
+    const calls: string[] = [];
+    const graph = await loadNodeComponents([original], {
+      baseURL: "file:///pkg/",
+      readComponent: async url => {
+        calls.push(url);
+        assert.equal(url, original);
+        return { url: final, source: '<link rel="component" href="./missing-web.html"><template component="x-native" controller="./missing-controller.js"><div></div><style>@import "./missing-web.css";</style></template>' };
+      },
+      isImplementationBoundary: (definition, id) => {
+        assert.equal(id, final);
+        assert.equal(definition.source.file, final);
+        assert.equal(definition.contract.tag, "x-native");
+        return true;
+      },
+      readStylesheet: async () => { throw new Error("Replaced stylesheet fetched"); },
+      inspectModule: async () => { throw new Error("Replaced controller inspected"); },
+    });
+    assert.deepEqual(calls, [original]);
+    assert.deepEqual(graph.roots, [final]);
+    assert.equal(graph.nodes.get(final)!.implementationBoundary, true);
+    assert.equal(graph.nodes.get(final)!.definition.controller, "./missing-controller.js");
+    assert.deepEqual(graph.moduleInputs, []);
+    assert.deepEqual(graph.stylesheetInputs, []);
+  });
+
   it("resolves a package subpath, walks HTML edges, and records ESM inputs without execution", async () => {
     const files: Record<string, string> = {
       "file:///pkg/components/app.html":

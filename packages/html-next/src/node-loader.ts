@@ -3,7 +3,7 @@ import { glob, lstat, readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ComponentGraph } from "./graph.js";
+import type { BuildGraphOptions, ComponentGraph } from "./graph.js";
 import { buildComponentGraph } from "./source-graph.js";
 import {
   isWithinTrustRoot,
@@ -25,6 +25,8 @@ export interface InspectedModule {
 }
 
 export interface NodeLoaderOptions {
+  /** Checked host implementation boundary; preserves the source contract while excluding replaced web work. */
+  readonly isImplementationBoundary?: BuildGraphOptions["isImplementationBoundary"];
   /** Check-only recovery. Rejects with all collected compiler diagnostics. */
   readonly collectDiagnostics?: boolean;
   readonly baseURL?: string;
@@ -160,6 +162,7 @@ export async function loadNodeComponents(
     fetchComponent: readComponent,
     prepareStyles: styles.prepare,
     inspectDefinitions: nestedRootStyleWarnings,
+    ...(options.isImplementationBoundary === undefined ? {} : { isImplementationBoundary: options.isImplementationBoundary }),
     ...(options.collectDiagnostics === undefined ? {} : { collectDiagnostics: options.collectDiagnostics }),
     ...(options.isApplicationURL === undefined ? {} : { isApplicationURL: options.isApplicationURL }),
   });
