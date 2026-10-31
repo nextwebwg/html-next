@@ -1786,3 +1786,18 @@ void [scoped, staticNode];`);
     await assert.rejects(() => access(outDirectory));
   });
 });
+
+
+it("prepares exported binding modules through ordinary Vue conversion", async () => {
+  const root = await fixture();
+  await writeFile(join(root, "x-card.html"), `<template component="x-card" module="./module.js"><defs><prop name="rows" type="list(string)">Produced rows.</prop></defs><section><template $each="row of $rows"><p>{$row}</p></template></section></template>`);
+  await writeFile(join(root, "module.js"), `export { prepare, adopt } from './provider.js'; export function connect() {}`);
+  await writeFile(join(root, "provider.js"), `throw new Error('conversion must not execute modules'); export function prepare() {} export function adopt() {}`);
+  const outDirectory = join(root, "converted");
+  const manifest = await convertComponents({ mode: "application", target: "vue", root, entries: ["x-card.html"], outDirectory });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  assert.match(source, /usePreparedModule/);
+  assert.match(source, /moduleBindings\.attach\(host\)/);
+  assert.match(await readFile(join(outDirectory, "vue/bindings.ts"), "utf8"), /onServerPrefetch/);
+  compileVue(source, "UiCard.vue");
+});

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.79
+
+### Fixed
+
+- Vue source conversion recognizes modules exporting `prepare` and `adopt`, including relative re-exports, and uses the generator’s existing server preparation and hydration transfer helpers. Converted inputs are populated before server rendering instead of waiting for browser connection. Module detection and revision hashing share the package assembler’s implementation and do not execute component code.
+
 ## 1.0.0-alpha.78
 
 ### Fixed
