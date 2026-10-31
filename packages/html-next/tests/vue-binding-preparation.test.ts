@@ -54,6 +54,7 @@ async function preparedFixture(hydrate: boolean, ssrTemplate = false, partial = 
         return { contents: helper.content, loader: "ts", resolveDir: root };
       });
       bundler.onResolve({ filter: /^@nextwebwg\/html-next\/bindings$/ }, () => ({ path: join(root, "src/bindings.ts") }));
+      bundler.onResolve({ filter: /^@nextwebwg\/html-next\/inputs$/ }, () => ({ path: join(root, "src/component-inputs.ts") }));
     } };
     for (const server of [true, false]) {
       const descriptor = parse(source, { filename: "PreparedRows.vue" }).descriptor;
