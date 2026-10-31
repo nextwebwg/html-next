@@ -38,7 +38,7 @@ export interface FrameworkSyncResult {
 function slash(path: string): string { return path.split(sep).join("/"); }
 function importPath(from: string, to: string): string {
   const path = slash(relative(dirname(from), to));
-  return path.startsWith(".") ? path : `./${path}`;
+  return path.startsWith("./") || path.startsWith("../") ? path : `./${path}`;
 }
 function identity(path: string): string {
   return createHash("sha256").update(path).digest("hex").slice(0, 20);
