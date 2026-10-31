@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -352,6 +353,42 @@ process.stdout.write("ok");
     expect(() => execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8", stdio: "pipe" })).toThrow();
     // Windows runners have measured 82-133 s for this install, build and type-check sequence.
   }, 300_000);
+
+  for (const [target, viteVersion] of [["svelte", "8.3.4"], ["vue", "7.2.7"]] as const) {
+    it.skipIf(!includesPackage("html-next-converter", "html-next-unplugin"))(`builds a packed ${target} source consumer with Vite ${viteVersion}`, () => {
+      const tarballs = ["html-next", "html-next-converter", "html-next-unplugin"].map(pack);
+      const consumer = join(workspace, `framework-${target}`);
+      mkdirSync(consumer);
+      writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: `framework-${target}`, private: true, type: "module" }));
+      const tooling = join(root, "packages/html-next-unplugin/node_modules");
+      const version = (name: string) => JSON.parse(readFileSync(join(tooling, name, "package.json"), "utf8")).version;
+      const compiler = target === "svelte" ? "@sveltejs/vite-plugin-svelte" : "@vitejs/plugin-vue";
+      execFileSync("npm", ["install", "--strict-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund", ...tarballs,
+        `vite@${viteVersion}`, `${target}@${version(target)}`, `${compiler}@${version(compiler)}`], { cwd: consumer, shell: useCommandShell });
+      execFileSync("npm", ["ls", "vite", "--all", "--json"], { cwd: consumer, encoding: "utf8" });
+      const installedAdapter = createRequire(join(consumer, "node_modules/@nextwebwg/html-next-unplugin/package.json"));
+      expect(JSON.parse(readFileSync(installedAdapter.resolve("vite/package.json"), "utf8")).version).toBe(viteVersion);
+      const library = join(consumer, "node_modules/@example/controls");
+      mkdirSync(join(library, "components"), { recursive: true });
+      writeFileSync(join(library, "package.json"), JSON.stringify({ name: "@example/controls", version: "1.0.0", type: "module", exports: { ".": { "html-next": "./components/" } } }));
+      const manifest = JSON.parse(readFileSync(join(consumer, "package.json"), "utf8"));
+      manifest.dependencies["@example/controls"] = "1.0.0";
+      writeFileSync(join(consumer, "package.json"), JSON.stringify(manifest));
+      writeFileSync(join(library, "components/label.html"), '<template component="ui-label"><defs><prop name="label" type="string" default="Ready">Label.</prop></defs><output>{$label}</output></template>');
+      writeFileSync(join(consumer, "vite.config.mjs"), `import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+${target === "svelte" ? `import { svelte as framework } from "${compiler}";` : `import framework from "${compiler}";`}
+export default { plugins: [htmlNext({ target: "${target}" }), framework()], build: { lib: { entry: "main.js", formats: ["iife"], name: "PackedConsumer", fileName: () => "client.js" } } };`);
+      if (target === "svelte") {
+        writeFileSync(join(consumer, "App.svelte"), '<script>import { UiLabel } from "@example/controls";</script><UiLabel label="Packed source" />');
+        writeFileSync(join(consumer, "main.js"), 'import { mount } from "svelte"; import App from "./App.svelte"; mount(App, { target: document.body });');
+      } else {
+        writeFileSync(join(consumer, "App.vue"), '<script setup>import { UiLabel } from "@example/controls";</script><template><UiLabel label="Packed source" /></template>');
+        writeFileSync(join(consumer, "main.js"), 'import { createApp } from "vue"; import App from "./App.vue"; createApp(App).mount(document.body);');
+      }
+      execFileSync(process.execPath, [join(consumer, "node_modules/vite/bin/vite.js"), "build"], { cwd: consumer, encoding: "utf8" });
+      expect(readFileSync(join(consumer, "dist/client.js"), "utf8")).toContain("Packed source");
+    }, 180_000);
+  }
 
   it.skipIf(!includesPackage("html-next-unplugin"))("installs packed compiler tools without undeclared framework peers", () => {
     const tarball = pack("html-next-unplugin");

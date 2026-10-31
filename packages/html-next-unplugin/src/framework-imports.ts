@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import MagicString from "magic-string";
 import ts from "typescript";
 import type { FrameworkTarget } from "@nextwebwg/html-next-converter";
@@ -50,11 +49,11 @@ export class FrameworkImports {
     let ranges: readonly { start: number; end: number; jsx?: boolean }[] = [{ start: 0, end: code.length, jsx: /\.[jt]sx$/.test(id.split("?")[0]!) }];
     const require = createRequire(resolve(this.root, "package.json"));
     if (this.target === "vue" && id.endsWith(".vue")) {
-      const compiler = await import(pathToFileURL(require.resolve("vue/compiler-sfc")).href) as typeof import("vue/compiler-sfc");
+      const compiler: typeof import("vue/compiler-sfc") = require("vue/compiler-sfc");
       const { descriptor } = compiler.parse(code, { filename: id });
       ranges = [descriptor.script, descriptor.scriptSetup].flatMap(script => script ? [{ start: script.loc.start.offset, end: script.loc.end.offset, jsx: script.lang === "tsx" || script.lang === "jsx" }] : []);
     } else if (this.target === "svelte" && id.endsWith(".svelte")) {
-      const compiler = await import(pathToFileURL(require.resolve("svelte/compiler")).href) as typeof import("svelte/compiler");
+      const compiler: typeof import("svelte/compiler") = require("svelte/compiler");
       const parsed = compiler.parse(code, { filename: id, modern: true });
       ranges = [parsed.instance, parsed.module].flatMap(script => {
         if (!script) return [];
