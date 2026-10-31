@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-converter",
-  "version": "1.0.0-alpha.71",
+  "version": "1.0.0-alpha.72",
   "description": "Vue, React, and Svelte conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -28,7 +28,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.71"
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.72"
   },
   "devDependencies": {
     "@formatjs/intl-durationformat": "0.11.1",

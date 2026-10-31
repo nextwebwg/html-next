@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.72
+
+- Model React computed reads as nullable while their inputs are unavailable. Native attribute forwarding now omits that absence instead of passing null to boolean-only React props such as `inert`; a converted composition is checked with strict TypeScript.
+
 ## 1.0.0-alpha.71
 
 - Publish minimum-version HTML Next dependency ranges without a 1.0 or later major-version ceiling. Assembled packages use the same open-ended runtime peer; lockfiles retain the exact verified workspace graph.
