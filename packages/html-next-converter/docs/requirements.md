@@ -186,8 +186,8 @@ failures use the shared parser and style validator; the browser corpus and publi
 the same codes. Runtime failures for typed props/events, duplicate keys, hydration, computed cycles,
 scoped slots, recursion, missing context, and controller loading/exports have three-engine
 differential fixtures in both graph modes. Graph, controller-resource, collision, and target-version
-errors are checked before output is written. Duplicate live registration (`HR001`) and duplicate
-build-graph tags (`HL007`) both reject the invalid graph. `HB001`, `HR003`, `HL008`, and `HS005`
+errors are checked before output is written. Two live definitions of one tag discovered together
+(`HR001`) and duplicate build-graph tags (`HL007`) both reject the invalid graph. `HB001`, `HR003`, `HL008`, and `HS005`
 guard direct runtime APIs or unreachable post-validation states, not authored Vue features;
 `HV001` reports unreadable cross-origin CSS in the separate HTML Forms validity-style shim.
 The target's `HT030`, `HT031`, `HT033`, and `HT034` guards require a malformed programmatic

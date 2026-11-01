@@ -6,6 +6,7 @@ export { evaluateInput, inputRead, inputDefault, requireInputStatus, READY_INPUT
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
+import { COMPONENT_LIFECYCLE_SELECTOR } from "./component-identity.js";
 import { checkProps, registerEntry, registryRecord } from "./component-registry.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
@@ -189,6 +190,8 @@ export function invoke(
   instance: GeneratedInstance, factory: GeneratedFactory, placeholder: ChildNode, options: object,
   html: Readonly<Record<string, string>>, follow: (root: Element, previous: Element) => void, stops: (() => void)[],
 ): GeneratedInstance {
+  // A component whose module was evaluated again creates through its latest factory.
+  if (replacedFactories !== undefined) while (replacedFactories.has(factory)) factory = replacedFactories.get(factory)!;
   const root = factory(options, html);
   // A placeholder that is its block's own node has no parent yet; the block takes the root instead.
   if (placeholder.parentNode !== null) placeholder.replaceWith(root);
@@ -569,6 +572,13 @@ export function manageData(
 /** A compiled root's prop channel, which `componentRegistry.update` finds. */
 const generatedChannel = (element: Element) => generatedPropUpdaters.get(element);
 
+/** Each factory a changed module's evaluation replaced, with the factory that replaced it. */
+let replacedFactories: WeakMap<GeneratedFactory, GeneratedFactory> | undefined;
+/** What each factory's template writes on its root, by arm, where its module records it. */
+const factoryRoots = new WeakMap<GeneratedFactory, readonly ArmRoot[]>();
+/** The handles a replaced instance's parent can still hold, by the handle that now answers for them. */
+const forwarded = new WeakMap<GeneratedInstance, GeneratedInstance[]>();
+
 /**
  * Defines a compiled component in the document's `componentRegistry` when its module is evaluated,
  * so `create` makes it: `content` goes to the slot each node's `slot` attribute names, or the default.
@@ -595,6 +605,97 @@ export function defineComponent(
     k: factory,
   }, true);
   registryRecord(document).i.add(generatedChannel);
+}
+
+/**
+ * `defineComponent` for a module a development server evaluates again (`GenerationOptions.hot`): a
+ * new factory replaces the registered one, and its connected instances re-render (`replaceInstances`).
+ * `roots` is what the template writes on its root, by `$match` arm.
+ */
+export function replaceComponent(tag: string, factory: GeneratedFactory, props: readonly string[], roots?: readonly ArmRoot[]): void {
+  if (typeof document === "undefined") return;
+  const existing = registryRecord(document).d.get(tag)?.k;
+  if (roots !== undefined) factoryRoots.set(factory, roots);
+  defineComponent(tag, factory, props);
+  if (typeof existing === "function" && existing !== factory) replaceInstances(tag, existing as GeneratedFactory, factory, props);
+}
+
+/**
+ * Rebuilds each connected instance of `tag` with `next`: it disconnects, the new factory builds its
+ * root from its prop inputs, the attributes it received from outside its template and its projected
+ * nodes, and the new root takes the old one's place and connects. A state the new factory declares
+ * under the same name keeps its value when that value has the declared type. A parent keeps the old
+ * handle, which from then on answers with the new root and prop channel.
+ */
+function replaceInstances(tag: string, previous: GeneratedFactory, next: GeneratedFactory, props: readonly string[]): void {
+  (replacedFactories ??= new WeakMap()).set(previous, next);
+  const roots = factoryRoots.get(previous);
+  for (const element of Array.from(document.querySelectorAll(COMPONENT_LIFECYCLE_SELECTOR))) {
+    const record = (element as RuntimeElement)[lifecycleKey];
+    const old = record?.h as GeneratedInstance | undefined;
+    // ponytail: the component that owns its root rebuilds; one it delegates its root to keeps its definition.
+    if (old?.S.g !== tag || old.e !== element || !element.isConnected || record!.disconnect === undefined) continue;
+    const arm = roots?.find((candidate) => candidate[0] === element.localName);
+    const attributes: Record<string, string> = {};
+    // Without a record of its root, every attribute but the component's own outputs carries over.
+    for (const { name, value } of (arm === undefined ? element : armElement(element, arm, [element.localName, {}, [], "", [], []])).attributes) {
+      if (!name.startsWith(`data-${tag}-`) && name !== "component" && name !== "data-component" && name !== "data-html-next-instance") attributes[name] = value;
+    }
+    const options: Record<string, unknown> = { attributes, children: [], slots: {} };
+    const html: Record<string, string> = {};
+    for (const name of props) {
+      const input = old.B?.i[name];
+      if (input?.present !== true) continue;
+      if (input.source === "html") html[name] = String(input.value);
+      else options[name] = input.value;
+    }
+    for (const [node, slot] of old.J ?? []) {
+      if (slot === "") (options.children as Node[]).push(node);
+      else ((options.slots as Record<string, Node[]>)[slot] ??= []).push(node);
+    }
+    const rendered = renderedHandles(element, old);
+    documentState(document).lifecycle!.remove(element, record!);
+    const root = next(options, html);
+    const handle = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
+    carryState(old, handle);
+    // Each component instance the template renders, at any depth, keeps its state too: the new
+    // template's nth instance of a tag takes the state of the old template's nth instance of it.
+    for (const [name, handles] of renderedHandles(root, handle)) handles.forEach((each, index) => {
+      const from = rendered.get(name)?.[index];
+      if (from !== undefined) carryState(from, each);
+    });
+    element.replaceWith(root);
+    follows(element, root);
+    (element as Element & { [replacedKey]?: unknown })[replacedKey] = handle;
+    const holders = [old, ...forwarded.get(old) ?? []];
+    forwarded.set(handle, holders);
+    for (const holder of holders) {
+      const was = holder.e;
+      (holder as { B?: GeneratedPropRecord | undefined }).B = handle.B;
+      holder.e = root;
+      notifyPropertySet(holder, "e", was, root, undefined);
+    }
+  }
+}
+
+/** The handles of the component instances `owner`'s template renders under `root`, at any depth and by tag in tree order; not those projected into it. */
+function renderedHandles(root: Element, owner: GeneratedInstance): Map<string, GeneratedInstance[]> {
+  const rendered = new Map<string, GeneratedInstance[]>();
+  for (const element of Array.from(root.querySelectorAll(COMPONENT_LIFECYCLE_SELECTOR))) {
+    const handle = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+    if (handle?.e !== element || owner.J?.some(([node]) => node.contains(element)) === true) continue;
+    rendered.set(handle.S.g, [...rendered.get(handle.S.g) ?? [], handle]);
+  }
+  return rendered;
+}
+
+/** Gives `to` each writable state value of `from` whose name `to` declares, when the value has its declared type. */
+function carryState(from: GeneratedInstance, to: GeneratedInstance): void {
+  const writable = from.S.k ?? from.S.n.length;
+  for (let index = 0; index < (to.S.k ?? to.S.n.length); index += 1) {
+    const at = from.S.n.indexOf(to.S.n[index]!);
+    if (at >= 0 && at < writable && conforms(from.v![at], to.S.t[index]!)) to.w(index, from.v![at]);
+  }
 }
 
 interface PropInput {
