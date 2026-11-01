@@ -83,7 +83,7 @@ Next.js (`next-route-announcer`) do, HTMLKit adds a visually hidden `aria-live="
    registers each page's compiled components by tag, adopts the first page's server DOM, and starts
    navigation once. Pages that share a component share its compiled module, so a tag keeps one
    factory per document; a page that defines a tag differently throws when navigation imports its
-   module, as HTML Next's `HR001` does, before anything renders. Only a document of its own can hold
+   module, before anything renders, rather than re-render the current page's instances. Only a document of its own can hold
    that definition, so the page loads as one directly, without the HTML fallback, and logs nothing.
    A versioned documentation site whose archived pages define their own `<demo-counter>` takes this
    path between versions and stays in place within each.

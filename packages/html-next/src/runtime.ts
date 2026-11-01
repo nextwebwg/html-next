@@ -199,6 +199,8 @@ interface RuntimeInstance {
   readonly delegates: RuntimeInstance[];
   /** What a parent bound on this component's invocation; each follows the root when it is replaced. */
   readonly followers: ((root: Element) => void)[];
+  /** Those bindings, which a replacement of this instance's definition hands to the instance that replaces it. */
+  bindings?: InvocationBinding[];
   /** What the current rendering of the root owns. */
   owned: RenderOwned;
   validityCleanup?: () => void;
@@ -257,6 +259,7 @@ function committedComponent(root: Element, tag: string): RuntimeInstance | undef
 
 function followComponent(binding: InvocationBinding, component: RuntimeInstance): void {
   binding.component = component;
+  (component.bindings ??= []).push(binding);
   component.followers.push(() => {
     binding.reapplying = true;
     try { for (const effect of binding.effects) effect.execute(); }
@@ -552,14 +555,115 @@ function warnUnsupportedTransitions(definition: ComponentDefinition): void {
 
 function registerDefinition(root: Document, registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
   warnUnsupportedTransitions(definition.definition);
+  const replace = registry.definitions.has(tag);
   registry.definitions.set(tag, definition);
-  if (registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
+  if (!replace && registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
   registerEntry(root, {
     d: Object.freeze({ tag }),
     p: Object.keys(definition.definition.contract.props),
     c: (props, nodes) => createInstance(root, tag, props, nodes),
     k: definition.wrapper ?? definition.definition,
-  });
+  }, replace);
+}
+
+/** Whether two parsed definitions are the same definition, wherever each was read from. */
+function sameDefinition(left: ComponentDefinition, right: ComponentDefinition): boolean {
+  return JSON.stringify({ ...left, source: undefined }) === JSON.stringify({ ...right, source: undefined });
+}
+
+/**
+ * `define` step 5 for a tag that is already registered: `live` replaces its definition, with its own
+ * styles, and every connected instance re-renders from it.
+ */
+function replaceDefinition(root: Document, registry: DocumentRegistry, live: LiveDefinition, styles = styleGraph(registry, [live.definition])): void {
+  const tag = live.definition.contract.tag;
+  // ponytail: only a style node this tag owns alone goes; a shared graph stylesheet keeps the old rules.
+  root.head.querySelector(`style[data-html-next-component-styles="${tag}"]`)?.remove();
+  const carried = live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined;
+  registerDefinition(root, registry, tag, { ...live, style: installComponentStyles(live.definition, root, carried, undefined, styles) });
+  live.wrapper?.remove();
+  replaceInstances(root, registry, tag);
+}
+
+/**
+ * Rebuilds each connected instance whose root `tag` renders, from the definitions registered now: it
+ * disconnects, its root is built again with its prop inputs, the attributes it received from outside
+ * its template and its projected nodes, and the new root takes the old one's place and connects. The
+ * components its template renders are created and connected with it. A state the new definition
+ * declares under the same name keeps its value when that value has the declared type.
+ */
+function replaceInstances(root: Document, registry: DocumentRegistry, tag: string): void {
+  for (const element of Array.from(root.querySelectorAll(COMPONENT_ROOT_SELECTOR))) {
+    const previous = runtimeInstances.get(element);
+    // A root that another replaced root held has already left the document with it.
+    if (previous === undefined || previous.frameworkOwned || !previous.connected || !element.isConnected || previous.element !== element ||
+      ![previous, ...previous.delegates].some((instance) => instance.definition.contract.tag === tag)) continue;
+    // A component whose root is the replaced one's rebuilds as a whole, with its own definition.
+    const definition = registry.definitions.get(previous.definition.contract.tag)!.definition;
+    const invocation = root.createElement(definition.contract.tag);
+    for (const { name, value } of carriedAttributes(previous, element)) {
+      if (name !== COMPONENT_ATTRIBUTE && name !== "data-component") invocation.setAttribute(name, value);
+    }
+    const props: Record<string, unknown> = {};
+    for (const name of Object.keys(definition.contract.props)) {
+      const input = previous.propInputs[name] === undefined ? undefined : untracked(() => previous.propInputs[name]!.get());
+      if (input?.present !== true) continue;
+      // An input keeps its form: HTML text parses as an attribute does, a value as a framework's prop.
+      if (input.source === "html") invocation.setAttribute(kebabCase(name), String(input.value));
+      else props[name] = input.value;
+    }
+    const rendered = renderedInstances(previous, element);
+    documentState(root).release?.(element);
+    disconnectRuntimeInstance(previous);
+    element.replaceWith(invocation);
+    invocation.append(...previous.projection?.nodes ?? []);
+    const prepared = [prepareRuntimeInvocation(invocation, definition, false, undefined, undefined, false, previous.parent, props)];
+    commitRuntimeInvocations(registry, prepared);
+    lowerRenderedComponents(root, registry, prepared);
+    const next = prepared[0]!.instance;
+    applyComponentProps(next, props);
+    // What the parent bound on the old instance's invocation now acts on this one, and follows its root.
+    if (previous.bindings !== undefined) {
+      for (const binding of previous.bindings) binding.component = next;
+      next.bindings = previous.bindings;
+    }
+    next.followers.push(...previous.followers);
+    followRoot(next, untracked(() => next.rootElement.get())!);
+    // The instance, and each component instance its template renders at any depth, keeps its state:
+    // the new template's nth instance of a tag takes the state of the old template's nth instance of it.
+    const before = new Map([previous, ...previous.delegates].map((instance) => [instance.definition.contract.tag, [instance]]));
+    const after = new Map([next, ...next.delegates].map((instance) => [instance.definition.contract.tag, [instance]]));
+    for (const [tag, instances] of renderedInstances(next, untracked(() => next.rootElement.get())!)) after.set(tag, [...after.get(tag) ?? [], ...instances]);
+    for (const [tag, instances] of rendered) before.set(tag, [...before.get(tag) ?? [], ...instances]);
+    for (const [tag, instances] of after) instances.forEach((instance, index) => {
+      const old = before.get(tag)?.[index];
+      if (old !== undefined) carryState(old, instance);
+    });
+  }
+}
+
+/** The component instances `instance`'s template renders under `rootElement`, at any depth and by tag in tree order; not those projected into it. */
+function renderedInstances(instance: RuntimeInstance, rootElement: Element): Map<string, RuntimeInstance[]> {
+  const rendered = new Map<string, RuntimeInstance[]>();
+  const projected = instance.projection?.nodes ?? [];
+  for (const element of Array.from(rootElement.querySelectorAll(COMPONENT_ROOT_SELECTOR))) {
+    const found = runtimeInstances.get(element);
+    if (found === undefined || found.element !== element || projected.some((node) => node.contains(element))) continue;
+    for (const each of [found, ...found.delegates]) {
+      const tag = each.definition.contract.tag;
+      rendered.set(tag, [...rendered.get(tag) ?? [], each]);
+    }
+  }
+  return rendered;
+}
+
+/** Gives `to` each state value of `from` whose name `to` declares, when the value conforms to its declared type. */
+function carryState(from: RuntimeInstance, to: RuntimeInstance): void {
+  for (const declaration of to.definition.declarations ?? []) {
+    if (declaration.kind !== "state" || !from.definition.declarations?.some((kept) => kept.kind === "state" && kept.name === declaration.name)) continue;
+    const value = untracked(() => from.scope.get(declaration.name))!;
+    if (conformsAtDestination(value, declaredTypeAt(to.definition, declaration.name, to.scope))) to.scope.set(declaration.name, value);
+  }
 }
 
 /** `componentRegistry.define(carrier)` steps 2 to 5, with the live delivery's parser. */
@@ -580,10 +684,15 @@ function defineCarrier(root: Document, carrier: HTMLTemplateElement): void {
   if (definition === undefined) return;
   const tag = definition.contract.tag;
   const registry = registryFor(root);
-  if (checkDefinable(root, tag, carrier, () =>
-    JSON.stringify(registry.definitions.get(tag)?.definition) === JSON.stringify(definition))) return;
+  const registered = registry.definitions.get(tag)?.definition;
+  if (checkDefinable(root, tag, carrier, () => registered !== undefined && sameDefinition(registered, definition))) return;
   const style = Array.from(carrier.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style");
+  if (registered !== undefined) {
+    // ponytail: a replacement applies its styles at once; stylesheet imports it adds load on the next reload.
+    replaceDefinition(root, registry, { wrapper: carrier, style, definition });
+    return;
+  }
   // Stylesheet imports load asynchronously, as a document's own do: the definition registers and lowers
   // now, and its styles apply once its imports are in.
   const deferred = definitionPreparer !== undefined && hasUnresolvedImports(definition.css);
@@ -758,7 +867,11 @@ export function installComponentGraph(
   for (const node of graph.nodes.values()) {
     if (node.shadowedByCustomElement) continue;
     const tag = node.definition.contract.tag;
-    if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
+    const registered = registry.definitions.get(tag)?.definition;
+    if (registered !== undefined) {
+      if (!sameDefinition(registered, node.definition)) replaceDefinition(root, registry, { definition: node.definition, style: undefined }, styles);
+      continue;
+    }
     const style = installComponentStyles(node.definition, root, undefined, undefined, styles);
     registerDefinition(root, registry, tag, {
       definition: node.definition,
@@ -3507,61 +3620,70 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
  * native root takes the old one's place. It keeps every attribute the old arm's template did not
  * write, so the invocation's, a factory's, and page code's attributes carry over.
  */
+/**
+ * The attributes a root received from outside its template: every attribute of `previous` that the
+ * instance's current root template did not write, so the invocation's, a factory's, and page code's.
+ */
+function carriedAttributes(instance: RuntimeInstance, previous: Element): RootAttribute[] {
+  const { definition } = instance;
+  const tag = definition.contract.tag;
+  // Reflected props, the state attribute, and bound attributes are rewritten by their own effects.
+  // A literal is the old arm's only when it still holds the arm's value; a different value is the
+  // consumer's override, which carries over as it would have applied to any arm.
+  const literals = new Map<string, string>();
+  const written = new Set([
+    stateAttribute(tag),
+    ...Object.keys(definition.contract.props).map((name) => propAttribute(tag, name)),
+  ]);
+  // Class tokens and style properties are shared with the consumer, so only the old arm's own go.
+  // The browser's CSS parser names the properties its style writes, shorthands as their longhands.
+  const ownClasses = new Set<string>();
+  const ownStyle = previous.ownerDocument.createElement("div").style;
+  for (const attribute of instance.rootNode.attributes) {
+    if (attribute.kind === "literal" && attribute.name === "class") {
+      for (const token of attribute.value.split(/\s+/)) ownClasses.add(token);
+    } else if (attribute.kind === "attribute" && attribute.target === "class") {
+      ownClasses.add(attribute.name);
+    } else if (attribute.kind === "literal" && attribute.name === "style") {
+      ownStyle.cssText += `;${attribute.value}`;
+    } else if (attribute.kind === "attribute" && attribute.target === "style") {
+      ownStyle.setProperty(attribute.name, "initial");
+    } else if (attribute.kind === "literal") {
+      literals.set(attribute.name, attribute.value);
+    } else if (attribute.kind === "attribute") {
+      written.add(attribute.name);
+    } else if (attribute.kind === "property") {
+      // A reflecting property writes its attribute: `.disabled` writes `disabled`.
+      // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
+      written.add(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
+    }
+  }
+  const ownStyles = new Set(Array.from(ownStyle));
+  const carried: RootAttribute[] = [];
+  for (const attribute of Array.from(previous.attributes)) {
+    if (attribute.name === "class") {
+      const value = attribute.value.split(/\s+/).filter((token) => token !== "" && !ownClasses.has(token)).join(" ");
+      if (value !== "") carried.push({ name: "class", value });
+    } else if (attribute.name === "style") {
+      const style = (previous as HTMLElement).style;
+      const value = Array.from(style).filter((property) => !ownStyles.has(property)).map((property) =>
+        `${property}: ${style.getPropertyValue(property)}${style.getPropertyPriority(property) === "" ? "" : " !important"}`
+      ).join("; ");
+      if (value !== "") carried.push({ name: "style", value });
+    } else if (!written.has(attribute.name) && literals.get(attribute.name) !== attribute.value) {
+      carried.push({ name: attribute.name, value: attribute.value });
+    }
+  }
+  return carried;
+}
+
 function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderContext): void {
   const { definition, scope } = instance;
-  const tag = definition.contract.tag;
   instance.effects.push(createEffect(scope.scheduler, () => {
     const next = componentRoot(definition, scope);
     const previous = instance.element;
     if (next === instance.rootNode || !context.committed || previous === undefined) return;
-    // Reflected props, the state attribute, and bound attributes are rewritten by their own effects.
-    // A literal is the old arm's only when it still holds the arm's value; a different value is the
-    // consumer's override, which carries over as it would have applied to any arm.
-    const literals = new Map<string, string>();
-    const written = new Set([
-      stateAttribute(tag),
-      ...Object.keys(definition.contract.props).map((name) => propAttribute(tag, name)),
-    ]);
-    // Class tokens and style properties are shared with the consumer, so only the old arm's own go.
-    // The browser's CSS parser names the properties its style writes, shorthands as their longhands.
-    const ownClasses = new Set<string>();
-    const ownStyle = (previous.ownerDocument.createElement("div")).style;
-    for (const attribute of instance.rootNode.attributes) {
-      if (attribute.kind === "literal" && attribute.name === "class") {
-        for (const token of attribute.value.split(/\s+/)) ownClasses.add(token);
-      } else if (attribute.kind === "attribute" && attribute.target === "class") {
-        ownClasses.add(attribute.name);
-      } else if (attribute.kind === "literal" && attribute.name === "style") {
-        ownStyle.cssText += `;${attribute.value}`;
-      } else if (attribute.kind === "attribute" && attribute.target === "style") {
-        ownStyle.setProperty(attribute.name, "initial");
-      } else if (attribute.kind === "literal") {
-        literals.set(attribute.name, attribute.value);
-      } else if (attribute.kind === "attribute") {
-        written.add(attribute.name);
-      } else if (attribute.kind === "property") {
-        // A reflecting property writes its attribute: `.disabled` writes `disabled`.
-        // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
-        written.add(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
-      }
-    }
-    const ownStyles = new Set(Array.from(ownStyle));
-    const carried: RootAttribute[] = [];
-    for (const attribute of Array.from(previous.attributes)) {
-      if (attribute.name === "class") {
-        const value = attribute.value.split(/\s+/).filter((token) => token !== "" && !ownClasses.has(token)).join(" ");
-        if (value !== "") carried.push({ name: "class", value });
-      } else if (attribute.name === "style") {
-        const style = (previous as HTMLElement).style;
-        const value = Array.from(style).filter((property) => !ownStyles.has(property)).map((property) =>
-          `${property}: ${style.getPropertyValue(property)}${style.getPropertyPriority(property) === "" ? "" : " !important"}`
-        ).join("; ");
-        if (value !== "") carried.push({ name: "style", value });
-      } else if (!written.has(attribute.name) && literals.get(attribute.name) !== attribute.value) {
-        carried.push({ name: attribute.name, value: attribute.value });
-      }
-    }
-
+    const carried = carriedAttributes(instance, previous);
     instance.owned.stop();
     instance.owned = context.owned = renderOwned();
     for (const ref of Object.keys(instance.refs)) delete instance.refs[ref];
@@ -3805,18 +3927,24 @@ function lowerScopes(
     }
   }
   const newDefinitions = new Map<string, LiveDefinition>();
+  // A definition for a registered tag replaces it once this batch has lowered; the same one changes nothing.
+  const replacing: LiveDefinition[] = [];
+  const fresh: LiveDefinition[] = [];
   for (const live of definitions) {
     const tag = live.definition.contract.tag;
-    if (registry.definitions.has(tag) || newDefinitions.has(tag)) {
+    if (newDefinitions.has(tag) || replacing.some((other) => other.definition.contract.tag === tag)) {
       fail("HR001", `More than one definition declares <${tag}>.`);
     }
-    newDefinitions.set(tag, live);
+    const registered = registry.definitions.get(tag)?.definition;
+    if (registered === undefined) { newDefinitions.set(tag, live); fresh.push(live); }
+    else if (sameDefinition(registered, live.definition)) live.wrapper!.remove();
+    else replacing.push(live);
   }
 
   // Parent bindings can run while their child invocations are being prepared. Make every newly
   // parsed contract available for the bound-value type check before preparing any parent.
   const existingDefinitions = new Map(registry.definitions);
-  for (const live of definitions) registerDefinition(root, registry, live.definition.contract.tag, live);
+  for (const live of fresh) registerDefinition(root, registry, live.definition.contract.tag, live);
 
   const roots = new Set<Element>();
   const lowered: Element[] = [];
@@ -3876,8 +4004,8 @@ function lowerScopes(
     collect(newDefinitions, existing);
   }
 
-  const styles = styleGraph(registry, definitions.map((live) => live.definition));
-  for (const live of definitions) {
+  const styles = styleGraph(registry, fresh.map((live) => live.definition));
+  for (const live of fresh) {
     const style = installComponentStyles(live.definition, live.wrapper!.ownerDocument,
       live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined, undefined, styles);
     registry.definitions.set(live.definition.contract.tag, { ...live, style });
@@ -3894,6 +4022,7 @@ function lowerScopes(
     lowered.push(element);
     roots.add(element);
   }
+  for (const live of replacing) replaceDefinition(root, registry, live);
 
   return { lowered, roots: Array.from(roots) };
 }
@@ -4081,12 +4210,14 @@ export function registerComponentDefinitions(
 ): void {
   const registry = registryFor(root);
   const styles = styleGraph(registry, definitions);
+  const given = new Set<string>();
   for (const definition of definitions) {
-    const existing = registry.definitions.get(definition.contract.tag);
+    const tag = definition.contract.tag;
+    if (given.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
+    given.add(tag);
+    const existing = registry.definitions.get(tag);
     if (existing !== undefined) {
-      if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {
-        fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
-      }
+      if (!sameDefinition(existing.definition, definition)) replaceDefinition(root, registry, { definition, style: undefined }, styles);
       continue;
     }
     registerDefinition(root, registry, definition.contract.tag, {

@@ -363,7 +363,8 @@ describe("HTML Next unplugin", () => {
     // +11 B: a render counts its nesting, so components a row or block builds inside projected content
     // are created once the outermost render has inserted them; the step itself ships only with projection.
     // +12 B: lifecycle walks recognize canonical and legacy identity roots.
-    assert.ok(gzip <= 9_393, `direct benchmark entry is ${gzip} B gzip-6`);
+    // -15 B: a definition replaces a registered one instead of raising HR001; replacing instances ships only in hot output.
+    assert.ok(gzip <= 9_378, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

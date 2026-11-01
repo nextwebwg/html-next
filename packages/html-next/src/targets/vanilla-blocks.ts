@@ -1762,6 +1762,8 @@ export function emitBlocks(
   hydrate = false,
   /** A bundler module whose default export is a relative declared script's URL (`GenerationOptions.scriptURL`). */
   scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
+  /** Record what the template writes on its root, which replacing this module's definition reads (`GenerationOptions.hot`). */
+  hot = false,
 ): string {
   const { contract } = definition;
   // A script relative to the definition resolves at build time, through the bundler, to the URL it serves.
@@ -2679,7 +2681,7 @@ export function emitBlocks(
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && (definition.module ?? definition.controller) !== undefined) helpers.push("scriptHost");
   // Evaluating the module defines the component in the document's componentRegistry.
-  helpers.push("defineComponent");
+  helpers.push(hot ? "replaceComponent" : "defineComponent");
   if (definition.module !== undefined) helpers.push("activateModule");
   // Decimal operations are `binaryValue`'s last argument; their names are also common authored names.
   helpers.push(...Object.values(DECIMAL).filter((name) => `${source}\n${stateSpec}`.includes(`, ${name})`)));
@@ -2726,7 +2728,8 @@ export function emitBlocks(
         .reduce((wrapped, wrap) => `${wrap}(${wrapped}, I)`, "host")});`]),
     "",
     source,
-    `defineComponent(${JSON.stringify(contract.tag)}, create${contract.name}, ${JSON.stringify(propNames)});`,
+    `${hot ? "replaceComponent" : "defineComponent"}(${JSON.stringify(contract.tag)}, create${contract.name}, ${JSON.stringify(propNames)}${!hot || plan.root.spec === 5 ? ""
+      : `, ${plan.arms === undefined ? JSON.stringify([armRoot(definition.template as ElementNode, definition)]) : "A"}`});`,
     "",
   ].join("\n");
 }

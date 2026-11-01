@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.82
+
+### Changed
+
+- A different definition of a registered tag replaces it instead of raising `HR001`, through `componentRegistry.define`, a discovered inline definition, or a compiled module evaluated again. Each connected instance disconnects, re-renders with its prop inputs, outside attributes and slotted children, and connects with its sub-components. The instance, and each component instance its template renders at any depth, keeps every state the new definitions still declare when its value has the declared type: the new template's nth instance of a tag takes the old template's nth instance's state. New state takes its default. The same definition changes nothing, a registered custom element still wins, and two definitions of one tag discovered together still raise `HR001`. Generation with `hot: true` emits `replaceComponent` for development servers; other output is unchanged.
+
 ## 1.0.0-alpha.81
 
 ### Breaking
