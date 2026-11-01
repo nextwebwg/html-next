@@ -3928,18 +3928,18 @@ function lowerScopes(
   }
   const newDefinitions = new Map<string, LiveDefinition>();
   // A definition for a registered tag replaces it once this batch has lowered; the same one changes nothing.
-  const replacing = new Map<string, LiveDefinition>();
+  const replacing: LiveDefinition[] = [];
+  const fresh: LiveDefinition[] = [];
   for (const live of definitions) {
     const tag = live.definition.contract.tag;
-    if (newDefinitions.has(tag) || replacing.has(tag)) {
+    if (newDefinitions.has(tag) || replacing.some((other) => other.definition.contract.tag === tag)) {
       fail("HR001", `More than one definition declares <${tag}>.`);
     }
     const registered = registry.definitions.get(tag)?.definition;
-    if (registered === undefined) newDefinitions.set(tag, live);
+    if (registered === undefined) { newDefinitions.set(tag, live); fresh.push(live); }
     else if (sameDefinition(registered, live.definition)) live.wrapper!.remove();
-    else replacing.set(tag, live);
+    else replacing.push(live);
   }
-  const fresh = [...newDefinitions.values()];
 
   // Parent bindings can run while their child invocations are being prepared. Make every newly
   // parsed contract available for the bound-value type check before preparing any parent.
@@ -4022,7 +4022,7 @@ function lowerScopes(
     lowered.push(element);
     roots.add(element);
   }
-  for (const live of replacing.values()) replaceDefinition(root, registry, live);
+  for (const live of replacing) replaceDefinition(root, registry, live);
 
   return { lowered, roots: Array.from(roots) };
 }
