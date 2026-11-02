@@ -180,6 +180,27 @@ export function replaceRoot(instance: GeneratedInstance, previous: Element, next
 /** A compiled factory: options, and the HTML input an invocation's literal props carry. */
 export type GeneratedFactory = (options: object, html?: Readonly<Record<string, string>>) => Element;
 
+let componentCreationDepth = 0;
+
+/** A native factory's creation frame, restored even when a nested factory fails. */
+export function enterComponentCreation(limit: number): number {
+  if (componentCreationDepth >= limit) fail("HR008", "Component invocations nested deeper than the lowering limit.");
+  return componentCreationDepth++;
+}
+export function leaveComponentCreation(previous: number): void { componentCreationDepth = previous; }
+
+/** Later updates create children at their retained parent's depth. */
+export function invokeNested(...args: Parameters<typeof invoke>): GeneratedInstance {
+  const previous = componentCreationDepth;
+  componentCreationDepth = Math.max(previous, args[0].nd ?? 0);
+  try { return invoke(...args); } finally { componentCreationDepth = previous; }
+}
+export function adoptNestedInvoke(...args: Parameters<typeof adoptInvoke>): GeneratedInstance {
+  const previous = componentCreationDepth;
+  componentCreationDepth = Math.max(previous, args[0].nd ?? 0);
+  try { return adoptInvoke(...args); } finally { componentCreationDepth = previous; }
+}
+
 /**
  * Creates an invoked component through its factory where `placeholder` sits, as live lowering puts
  * the component's root in its invocation's place, and follows its root: when a root switch replaces
@@ -1296,6 +1317,8 @@ export interface GeneratedChannel {
 
 /** The instance internals generated handlers, listeners and refs use; each is imported only when used. */
 export interface GeneratedInstance {
+  /** Creation depth, retained only by graphs with recursive invocation edges. */
+  readonly nd?: number;
   readonly U?: GeneratedStateInitializers;
   readonly X?: GeneratedChannel | undefined;
   P?: ComponentInputs;

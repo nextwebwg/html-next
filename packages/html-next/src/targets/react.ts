@@ -1,3 +1,4 @@
+import { TypeScriptLowering } from "./typed-lowering.js";
 /** React output is compiled from the same checked component definition as the browser runtime. */
 import { bindingRevertSource, controllerInitials, revertSource, withRevert } from "./state-roots.js";
 import { isScriptIdentifier } from "./shared.js";
@@ -37,7 +38,7 @@ const REACT_RESERVED = new Set([
   "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
-  "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
   "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
@@ -88,6 +89,8 @@ const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTexta
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
+  readonly modulePreparation?: { readonly source: string };
+  readonly bindingsSpecifier?: string;
   /** Preact shares JSX lowering while retaining its own DOM attribute and ref behavior. */
   readonly target?: "react" | "preact";
   /**
@@ -121,7 +124,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
+  readonly helpers: readonly ("bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
 }
 
 interface RootAttributes {
@@ -196,21 +199,6 @@ const REACT_ATTRIBUTES: Readonly<Record<string, string>> = {
   minlength: "minLength", crossorigin: "crossOrigin", srcset: "srcSet",
   contenteditable: "contentEditable", inputmode: "inputMode", spellcheck: "spellCheck", colspan: "colSpan", rowspan: "rowSpan",
 };
-
-/** Keep JavaScript lookup semantics while allowing HTML Next's absent keys in strict TSX. */
-class ReactLowering extends Lowering {
-  override value(node: ExpressionNode, scope: Scope): string {
-    if (node.kind !== "index") return super.value(node, scope);
-    const object = this.value(node.object, scope);
-    const typed = typeOf(node.object, scope);
-    const target = typed.type.kind === "object" ? `(${object} as Record<string, any>)` : `(${object})`;
-    const index = this.value(node.index, scope);
-    if (mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope)) {
-      return `((objectValue: any, indexValue: any) => objectValue === Symbol.for("html-next.invalid-result") || indexValue === Symbol.for("html-next.invalid-result") ? Symbol.for("html-next.invalid-result") : objectValue${typed.nullable ? "?." : ""}[indexValue])(${object}, ${index})`;
-    }
-    return `${target}${typed.nullable ? "?." : ""}[${index} as any]`;
-  }
-}
 
 /** A value as HTML Next text: absent and null are empty, as in the live runtime. */
 function nullableText(value: string, lowering: Lowering): string {
@@ -575,8 +563,13 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const value = lowering.attribute(node, valueScope, name);
     return state.preact && isEnumeratedBoolean(name) ? `(${value})?.toString()` : value;
   };
+  // Serialized HTML attributes may have values outside JSX's ARIA enums. Keep their
+  // DOM string representation without narrowing the public component prop types.
   const attributeBinding = (name: string, value: string): string => nativeAttribute(name)
-    ? `{...{ ${quote(name.toUpperCase())}: ${value} }}` : `${reactAttribute(name, svg)}={${value}}`;
+    ? `{...{ ${quote(name.toUpperCase())}: ${value} }}`
+    : state.preact && isEnumeratedBoolean(name)
+      ? `{...({ ${quote(reactAttribute(name, svg))}: ${value} } as Record<string, unknown>)}`
+      : `${reactAttribute(name, svg)}={${value}}`;
   const genericWrites: Array<{ readonly state: string; readonly path: string; readonly dynamic: boolean }> = [];
   let scopedAttachment: { readonly attachment: EventAttachment; readonly ref: string; readonly paths: readonly string[] } | undefined;
   let control: EventAttachment["control"];
@@ -595,7 +588,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
         literals.push(`${propKey(name)}={${accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`}}`);
       }
-      else if (nativeAttribute(attribute.name)) literals.push(attributeBinding(attribute.name, quote(attribute.value)));
+      else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) literals.push(attributeBinding(attribute.name, quote(attribute.value)));
       else if (isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
       else if (NUMERIC_ATTRIBUTES.has(attribute.name) && /^[+-]?\d+$/.test(attribute.value)) literals.push(`${reactAttribute(attribute.name, svg)}={${Number(attribute.value)}}`);
       else if (!component && ["input", "textarea", "select"].includes(node.name) && attribute.name === "value") literals.push(`defaultValue=${quote(attribute.value)}`);
@@ -714,7 +707,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
         const rendered = attributeValue({ kind: "id", name: alias }, aliasScope, attribute.name);
         bindings.push(attributeBinding(attribute.name, typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered));
-      } else if (nativeAttribute(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
+      } else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
       else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
     } else if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled property ${attribute.expression}.`);
@@ -873,7 +866,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const reflections = boundReflections.length === 0 ? rootTag?.reflections ?? []
     : [`{...(Object.assign({}, reflectedAttrs, { ${boundReflections.join(", ")} }) as Record<string, unknown>)}`];
   if (inputBindings.length > 0) bindings.push(`{...{ [BINDING_INPUTS_PROP]: { ${inputBindings.join(", ")} } }}`);
-  const attributes = [...literals, ...(rootTag === undefined ? [] : [state.preact && !svg ? "{...nativeAttributes}" : "{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
+  const attributes = [...literals, ...(rootTag === undefined ? [] : [state.preact && !svg ? "{...(nativeAttributes as Record<string, unknown>)}" : "{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
       `{...{ component: [renderedIdentity, ${quote(rootTag.tag)}].filter(Boolean).join(" ") }}`,
@@ -954,7 +947,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   }
   const template = definition.template;
   if (template.name === "template" && template.flow?.kind !== "match") fail("HT030", "React conversion requires one element root.");
-  const lowering = new ReactLowering("warnUnless");
+  const lowering = new TypeScriptLowering("warnUnless");
   const code = new Map<string, string>();
   const types = new Map<string, Static>();
   for (const prop of target.props) {
@@ -1121,6 +1114,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ]),
     ...(nestedDepthLimit === undefined ? [] : [`import { NestedDepthContext } from ${quote(options.depthSpecifier ?? "./depth")};`]),
     RENDER_IMPORT,
+    ...(options.modulePreparation === undefined ? [] : [`import { usePreparedModule } from ${quote(options.bindingsSpecifier ?? "./bindings")};`]),
     ...(styles.css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${name}.css`)};`]),
     ...[...imports].filter(tag => tag !== definition.contract.tag).sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.tsx`)};`),
     ...[...new Map(contexts.filter((context) => context.from !== definition.contract.tag || !providedContexts.has(context.name))
@@ -1166,6 +1160,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     '  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];',
     '  delete nativeAttrs["component"];',
     '  delete nativeAttrs["data-component"];',
+    ...(options.modulePreparation === undefined ? [] : [
+      `  const htmlNextPrepared = usePreparedModule(() => import(${quote((definition.module ?? definition.controller)!)}), ${JSON.stringify({ tag: definition.contract.tag, source: options.modulePreparation.source })});`,
+      "  Object.assign(nativeAttrs, htmlNextPrepared.attributes(nativeAttrs));",
+    ]),
     ...(options.target === "preact" ? [
       "  const { constructor: _nativeConstructor, ...nativeAttributes } = nativeAttrs;",
       '  if (Object.hasOwn(nativeAttrs, "constructor")) Object.assign(nativeAttributes, { CONSTRUCTOR: _nativeConstructor });',
@@ -1186,7 +1184,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
             : `selectedPropNode(source ? ${stateGetters.get(select.from)!}() : ${code.get(select.from)!}, ${JSON.stringify(select.options)})`;
         return `    case ${quote(prop.name)}: return checkPropInput(value, ${type}, false, ${!prop.contract.required});`;
       }),
-      `    default: return { ok: false }; } });`,
+      `    default: return { ok: false }; } }${options.modulePreparation === undefined ? "" : `, inputs => htmlNextPrepared.restore(inputs, { ${propInputOrder(target.props).map(prop => `${propKey(prop.name)}: props[${quote(prop.name)}]`).join(", ")} }, _inputBindings)`});`,
       "  const inputAccepted: Record<string, boolean> = {};",
       "  const checkedProps = {",
       ...propInputOrder(target.props).map((prop) => {
@@ -1502,7 +1500,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }, (name) => ({ read: scriptNames.get(name)!, write: (value) => `${scriptSetters.get(name)!}(${value})` }))});`]),
     ]),
     ...(usesController ? [
-      `  useComponentHost(() => import(${quote((definition.module ?? definition.controller)!)}), {`,
+      `  useComponentHost(${options.modulePreparation === undefined ? `() => import(${quote((definition.module ?? definition.controller)!)})` : "htmlNextPrepared.load"}, {`,
+      ...(options.modulePreparation === undefined ? [] : ["    attach: htmlNextPrepared.attach,"]),
       ...(definition.module === undefined ? [] : ["    module: true,"]),
       `    root: rootRef, definition: ${quote(definition.source.file)}, controller: ${quote(options.controllerSpecifier ?? (definition.module ?? definition.controller)!)},`,
       `    props: () => ${target.props.length === 0 ? "({})" : "acceptedProps.current"},`,
@@ -1603,6 +1602,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     component,
     css: styles.css,
     helpers: [
+      ...(options.modulePreparation === undefined ? [] : ["bindings" as const]),
       ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),

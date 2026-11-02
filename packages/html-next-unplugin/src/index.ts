@@ -54,6 +54,8 @@ export interface HtmlNextNativePluginOptions {
   readonly root?: string;
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
+  /** Generate native factories that can adopt an existing server-rendered root. */
+  readonly hydrate?: boolean;
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
   /** Optional language extensions to build, such as `"transitions"`. Each is off until listed. */
   readonly extensions?: readonly string[];
@@ -154,6 +156,7 @@ function collectInvocationEdges(
 ): {
   readonly edges: ReadonlyMap<string, ReadonlyMap<string, string>>;
   readonly dynamicUses: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly recursive: boolean;
 } {
   const edges = new Map<string, ReadonlyMap<string, string>>();
   const dynamicUses = new Map<string, Set<string>>();
@@ -185,11 +188,12 @@ function collectInvocationEdges(
     edges.set(node.id, invoked);
   }
 
+  let recursive = false;
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const visit = (url: string): void => {
     if (visited.has(url)) return;
-    if (visiting.has(url)) diagnostic("HN002", "Compiled component invocations form a cycle.", nodes.get(url)?.url ?? url, getDiagnosticLocation(nodes.get(url)!.definition));
+    if (visiting.has(url)) { recursive = true; return; }
     visiting.add(url);
     try {
       for (const target of edges.get(url)?.values() ?? []) {
@@ -204,7 +208,7 @@ function collectInvocationEdges(
     catch (error) { recoverDiagnostic(error, report); }
   }
 
-  return { edges, dynamicUses };
+  return { edges, dynamicUses, recursive };
 }
 
 function supportSource(imports: ReadonlySet<string>): string {
@@ -365,6 +369,8 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         ? node.definition
         : { ...node.definition, [node.module === undefined ? "controller" : "module"]: fileURLToPath(edge.url) };
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
+        hydrate: options.hydrate === true,
+        guardNestedDepth: invocations.recursive,
         noContextReaders: options.publicState !== true && dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
         definitions: definitionsByTag,
         ...options.extensions === undefined ? {} : { extensions: options.extensions },
@@ -541,6 +547,9 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
       /** `html-next-sync` writes the typed controller hosts before a standalone typecheck. */
       api: { async sync(): Promise<void> { await writeHostDeclarations((await graph()).graph); } },
       configResolved(config) {
+        // A shared Vite builder uses one source snapshot for its client and server environments.
+        // Resolving a new build config starts a fresh snapshot even when the plugin is reused.
+        compiled = undefined;
         root = options.root ?? config.root;
         const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
         resolveStylesheet = async (specifier, parentURL) => {
@@ -550,9 +559,10 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
         };
       },
     },
+    watchChange() { compiled = undefined; },
     async buildStart() {
-      compiled = compileGraph({ ...options, root }, false, resolveStylesheet);
-      const current = await compiled;
+      if (meta.framework !== "vite") compiled = undefined;
+      const current = await graph();
       await writeHostDeclarations(current.graph);
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },

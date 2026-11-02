@@ -98,7 +98,7 @@ export {
   PROJECTED_ATTRIBUTE,
   stateAttribute,
 } from "./component-styles.js";
-export { compileComponentStylesForConversion, compileComponentGraphStylesForConversion, compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
+export { normalizeConversionStyleIdentities, compileComponentStylesForConversion, compileComponentGraphStylesForConversion, compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
 export { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 export {
   NATIVE_FLAG,
@@ -123,4 +123,6 @@ export type * from "./type-system.js";
 export type * from "./template.js";
 export type * from "./types.js";
 
-export { generateAngularConversion, angularArtifacts, type AngularOptions, type AngularConversion } from "./targets/angular.js";
+export { generateAngularConversion, angularArtifacts, angularHostTag, type AngularOptions, type AngularConversion } from "./targets/angular.js";
+
+export { reactBindingsArtifact, svelteBindingsArtifact } from "./targets/framework-bindings.js";

@@ -64,6 +64,7 @@ export interface StateAccess {
 }
 
 export interface ComponentHostOptions {
+  readonly attach?: (host: any) => void;
   readonly inputs?: InputBookkeeping;
   readonly contexts?: readonly { readonly name: string; readonly subscribe?: (notify: () => void) => () => void }[];
   readonly root: React.RefObject<Element | null>;
@@ -544,6 +545,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       checkComputed();
     };
     runtime.current = { host, synchronize, disconnect, checkValues, contextChanged: name => { checkValues(); changedPath([name]); }, relayLateResponders };
+    options.attach?.(host);
   }
 
   React.useLayoutEffect(() => { runtime.current!.checkValues(); runtime.current!.synchronize(); runtime.current!.relayLateResponders(); });

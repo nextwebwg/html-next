@@ -244,6 +244,8 @@ class FrameworkCompiler {
         const path = JSON.stringify(importPath(entry, resolve(output, component.artifact)));
         return `export { default as ${name} } from ${path};${this.options.target === "angular" ? `\nexport * from ${path};` : ""}`;
       });
+      const bindings = manifest.output.artifacts.find(item => item.kind === "helper" && /\/(?:bindings|bindings\.svelte)\.ts$/.test(item.path));
+      if (bindings && this.options.target !== "vue" && this.options.target !== "angular") exports.push(`export { renderPrepared } from ${JSON.stringify(importPath(entry, resolve(output, bindings.path)))};`);
       await mkdir(dirname(entry), { recursive: true });
       await writeFile(entry, exports.join("\n") + "\n", "utf8");
       this.conversions.set(`${cache}:${source}`, Promise.resolve(entry));
@@ -300,7 +302,7 @@ class FrameworkCompiler {
     if (this.options.target === "svelte") {
       digest.update(await readFile(require.resolve("svelte2tsx/package.json")));
       // A pinned tooling patch changes declarations without changing the package version.
-      digest.update(await readFile(new URL(import.meta.resolve("svelte2tsx"))));
+      digest.update(await readFile(require.resolve("svelte2tsx")));
     }
     const fingerprint = digest.digest("hex");
     const metadata = resolve(cache, "declarations.fingerprint");
@@ -508,7 +510,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       await updates;
       const alias = current.aliases.get(id);
       if (alias !== undefined) return alias;
-      if (resolveOptions.isEntry || !id.endsWith(".html") || id.includes("?")) return null;
+      if (resolveOptions.isEntry || importer === undefined || !id.endsWith(".html") || id.includes("?")) return null;
       const resolved = await this.resolve(id, importer, { ...resolveOptions, skipSelf: true });
       if (resolved === null || !isAbsolute(resolved.id)) return null;
       const entry = await compiler.localResource(resolved.id);

@@ -26,15 +26,16 @@ for (const mode of ["application", "library"] as const) it(`converts a typed ${m
     await symlink(fileURLToPath(new URL(`../node_modules/${name}`, import.meta.url)), join(root, "node_modules", name), "dir");
   }
   await writeFile(join(root, "package.json"), '{"type":"module"}');
-  await writeFile(join(root, "badge.html"), `<template component="x-badge"><defs><context name="count" from="x-card" as="inherited"></context></defs><aside>{$inherited}</aside></template>`);
+  await writeFile(join(root, "badge.html"), `<template component="x-badge"><defs><context name="count" from="x-card" as="inherited"></context></defs><aside from:aria-expanded="$inherited > 0">{$inherited}</aside></template>`);
   await writeFile(join(root, "card.js"), 'export function connect() { throw new Error("Browser connections must not run during SSR"); }');
   await writeFile(join(root, "card.html"), `<link rel="component" href="./badge.html"><template component="x-card" module="./card.js"><defs>
     <prop name="label" type="string" required>Label.</prop>
+    <prop name="linked" type="boolean" default="false">Render a link.</prop>
     <state name="count" type="integer" value="0"></state>
     <state name="body" type="string" value="&lt;b&gt;Safe&lt;/b&gt;"></state>
     <computed name="double" type="integer" from="$count * 2"></computed>
     <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-    </defs><article><button on:click="increment">{$label}: {$double}</button><slot></slot><x-badge></x-badge><div $html="$body"></div></article>
+    </defs><template $match><article $when="$linked"><button draggable="true" from:aria-pressed="$count > 0" on:click="increment">{$label}: {$double}</button><slot></slot><x-badge></x-badge><div $html="$body"></div></article><aside $else>Alternate root</aside></template>
     <style>:host { color: red; }</style></template>`);
   const output = join(root, "output");
   const manifest = await convertComponents({ target: "preact", mode, entries: ["card.html"], root, outDirectory: output });
@@ -49,7 +50,7 @@ for (const mode of ["application", "library"] as const) it(`converts a typed ${m
   const consumer = join(output, "consumer.tsx");
   await writeFile(consumer, `/** @jsxImportSource preact */
     import { XCard } from "./${manifest.output.entry}";
-    const good = <XCard label="Save" ref={element => { element?.focus(); }}><b>Body</b></XCard>;
+    const good = <XCard label="Save" linked role="region" ref={element => { element?.focus(); }}><b>Body</b></XCard>;
     // @ts-expect-error label is required
     const missing = <XCard />;
     // @ts-expect-error label must be a string
@@ -62,9 +63,24 @@ for (const mode of ["application", "library"] as const) it(`converts a typed ${m
   const bundle = join(output, "server.mjs");
   await build({ entryPoints: [join(output, manifest.output.entry)], outfile: bundle, bundle: true, platform: "node", format: "esm",
     packages: "external", jsx: "automatic", loader: { ".css": "empty" } });
-  const components = await import(pathToFileURL(bundle).href) as { XCard: ComponentType<{ label: string }> };
-  assert.match(renderToString(createElement(components.XCard, { label: "Save" }, createElement("b", null, "Body"))), /Save:.*0.*<b[^>]*>Body<\/b>/s);
-  assert.match(renderToString(createElement(components.XCard, { label: "Save" })), /<aside[^>]*>0<\/aside>.*<div><b>Safe<\/b><\/div>/s);
+  // React and Preact libraries can share an SSR process without sharing framework contexts.
+  const react = await import("react");
+  const registry = globalThis as unknown as Record<symbol, unknown>;
+  const depth = Symbol.for("nextwebwg.html-next.react.depth.v1"), context = Symbol.for("nextwebwg.html-next.react.context.v1");
+  const previousDepth = registry[depth], previousContext = registry[context];
+  registry[depth] = react.createContext(0);
+  registry[context] = new Map([["x-card\u0000count", react.createContext(undefined)]]);
+  try {
+    const components = await import(pathToFileURL(bundle).href) as { XCard: ComponentType<{ label: string; linked?: boolean }> };
+    const html = renderToString(createElement(components.XCard, { label: "Save", linked: true }, createElement("b", null, "Body")));
+    assert.match(html, /Save:.*0.*<b[^>]*>Body<\/b>/s);
+    assert.match(html, /aria-pressed="false"/);
+    assert.match(html, /aria-expanded="false"/);
+    assert.match(renderToString(createElement(components.XCard, { label: "Save", linked: true })), /<aside[^>]*>0<\/aside>.*<div><b>Safe<\/b><\/div>/s);
+  } finally {
+    if (previousDepth === undefined) delete registry[depth]; else registry[depth] = previousDepth;
+    if (previousContext === undefined) delete registry[context]; else registry[context] = previousContext;
+  }
 });
 
 it("typechecks the shared conformance corpus using Preact's public types", async () => {

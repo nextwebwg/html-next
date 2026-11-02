@@ -11,6 +11,9 @@
       ],
       "@nextwebwg/html-next-converter": [
         "../html-next-converter/src/index.ts"
+      ],
+      "@nextwebwg/html-next/server": [
+        "../html-next/src/server.ts"
       ]
     }
   },

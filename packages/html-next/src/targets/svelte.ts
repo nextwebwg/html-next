@@ -33,6 +33,8 @@ function unknownValueScope(name: string): Scope {
 
 
 export interface SvelteConversionOptions {
+  readonly modulePreparation?: { readonly source: string };
+  readonly bindingsSpecifier?: string;
   /**
    * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
@@ -66,7 +68,7 @@ export interface SvelteConversionOptions {
 export interface SvelteConversionOutput {
   readonly component: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render" | "requests" | "head")[];
+  readonly helpers: readonly ("bindings" | "props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render" | "requests" | "head")[];
 }
 
 /** A value Svelte reads as written in a quoted attribute: no entity, brace, quote or edge space. */
@@ -1167,7 +1169,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "htmlNextPrepared htmlNextPreparationId retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of ["PropInputs", "InputBindings", "propInputs", "statusInputs", "inputVersion", "inputStatus", "inputReads", "checkPropInput", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "inputComputed", "inputRead", "inputDefault", "evaluateInput", "initializedState", "copyStateSeed"]) reserved.add(name);
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
@@ -1447,6 +1449,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   let script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     `import type { HTMLAttributes${nativeAttributes === "HTMLAttributes" ? "" : ` as ${nativeAttributes}`} } from "svelte/elements";`,
+    ...(options.modulePreparation === undefined ? [] : [`import { usePreparedModule } from ${quote(options.bindingsSpecifier ?? "./bindings.svelte")};`]),
     ...svelteImport([...(nestedDepthLimit !== undefined || context.imports.size > 0) ? ["getContext", "setContext"] : [], ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
     RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
@@ -1486,7 +1489,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(context.usesControls ? ["prepareHydrationControls();"] : []),
     `type Props = Omit<${nativeAttributes}<${rootType}>, ${omittedNative.map(quote).join(" | ")}> & { ${propTypes} ${eventCallbacks.map((event) => `${quote(event.name)}?: ${event.type};`).join(" ")} ${publicChildren ? "" : "children?: Snippet;"} ${publicSlots ? "" : `slots?: ${slotsType};`} [key: string]: unknown; };`,
     `let { ${[destructured, ...internalProps, `...${rawRest}`].filter(Boolean).join(", ")} }: Props = $props();`,
-    `const rest = ${rawRest} as Record<string, unknown>;`,
+    ...(options.modulePreparation === undefined ? [] : [`const htmlNextPreparationId = $props.id();`, `const htmlNextPrepared = usePreparedModule(() => import(${quote((definition.module ?? definition.controller)!)}), ${JSON.stringify({ tag: definition.contract.tag, source: options.modulePreparation.source })}, htmlNextPreparationId);`]),
+    `const rest = ${options.modulePreparation === undefined ? `${rawRest} as Record<string, unknown>` : `$derived(htmlNextPrepared.attributes(${rawRest} as Record<string, unknown>))`};`,
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
     ...(initialBindingSources.length === 0 ? [] : [
       `function ${context.nativeBindingReadName}(name: string): (() => unknown) | undefined {`,
@@ -1586,6 +1590,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
         "}",
       ]),
       ...selectedInputSources,
+      ...(options.modulePreparation === undefined ? [] : [`htmlNextPrepared.restore(propInputs, { ${propInputOrder(target.props).map(prop => `${objectKey(prop.name)}: ${inputSource(prop.name)}`).join(", ")} }, statusInputs);`]),
       "let checkedProps = $derived.by(() => { void inputVersion; return ({",
       ...checkedPropSources,
       "}); });",
@@ -1667,7 +1672,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ]),
     ...(usesController ? [
       ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, Parameters<typeof acceptsControllerWrite>[1]> = ${JSON.stringify(controllerStateTypes)};`] : []),
-      `useComponentHost(() => import(${quote((definition.module ?? definition.controller)!)}), {`,
+      `useComponentHost(${options.modulePreparation === undefined ? `() => import(${quote((definition.module ?? definition.controller)!)})` : "htmlNextPrepared.load"}, {`,
+      ...(options.modulePreparation === undefined ? [] : ["  attach: htmlNextPrepared.attach,"]),
       "  root: () => rootElement ?? null,",
       `  ownsRoot: () => rest[${quote(ROOT_OWNER_PROP)}] !== true,`,
       ...(definition.module === undefined ? [] : ["  module: true,"]),
@@ -1724,6 +1730,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n${style}`;
   return { component, usesHtml: context.htmlSites > 0,
     helpers: [
+      ...(options.modulePreparation === undefined ? [] : ["bindings" as const]),
       ...(hasProps || context.usesSlotPropChecks || context.usesInputStatus || computed.length > 0 || seeded.length > 0 || contexts.length > 0 || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
         (usesController && requestProps.length > 0) ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),

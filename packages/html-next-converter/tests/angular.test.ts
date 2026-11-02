@@ -66,10 +66,8 @@ it("compiles native-root Angular components and checks consumer input bindings",
 
 
 for (const [description, source, message] of [
-  ["polymorphic roots", '<template component="ui-test"><defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop></defs><template $match><a $when="$as = &quot;a&quot;"></a><button $else></button></template></template>', /structural root/],
   ["multiple control bindings", '<template component="ui-test"><defs><state name="value" type="string" value="token"></state><state name="checked" type="boolean" value="false"></state></defs><input type="checkbox" bind:value="value" bind:checked="checked"></template>', /multiple two-way/],
   ["projected select defaults", '<template component="ui-test"><defs><state name="choice" type="string" value="b"></state></defs><select bind:value="choice"><slot><option value="a" selected>A</option></slot></select></template>', /projected options/],
-  ["recursive views", '<template component="ui-test"><div><ui-test></ui-test></div></template>', /recursive component/],
   ["fragment HTML", '<template component="ui-test"><div><template $html="true"></template></div></template>', /template \$html/],
 ] as const) it(`reports unsupported Angular ${description} during a no-output check`, async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-angular-check-")); roots.push(root);
@@ -86,3 +84,34 @@ it("emits the context dependency for public state without an in-graph reader", a
   assert.ok(manifest.output.artifacts.some(artifact => artifact.path === "angular/context.ts"));
   assert.match(await readFile(join(outDirectory, "angular/context.ts"), "utf8"), /contextToken/);
 });
+
+
+it("compiles recursive object inputs and native root choices through an Angular library consumer", async () => {
+  const { angularStructural } = await import("./fixtures/angular-structural.js");
+  const root = await mkdtemp(join(tmpdir(), "html-next-angular-structural-")); roots.push(root);
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "dir");
+  await writeFile(join(root, "package.json"), '{"type":"module"}');
+  await writeFile(join(root, "components.html"), angularStructural);
+  const manifest = await convertComponents({ target: "angular", mode: "library", root, entries: ["components.html"], outDirectory: join(root, "out") });
+  assert.equal(manifest.components.length, 5);
+  const branch = await readFile(join(root, "out/angular/UiBranch.ts"), "utf8");
+  assert.match(branch, /data-ui-branch-prop-href/);
+  assert.doesNotMatch(branch, /"\[attr\.href\]":/);
+
+  const app = `import { Component } from "@angular/core"; import { UiBranch, UiTreeParent } from "./out/angular/index";
+    @Component({ selector: "app-root", standalone: true, imports: [UiBranch, UiTreeParent], template: \`<ng-template #badge><i>New</i></ng-template><ng-template ui-branch id="action" [slots]="{ badge: badge }" [href]="null" (saved)="receive($event)"><b>Save</b></ng-template><div ui-tree-parent [current]="node"></div>\` }) export class App {
+      node = { kind: "branch", label: "Root", children: [{ kind: "leaf", label: "Child" }] };
+      receive(event: CustomEvent<number>): void { void event.detail; }
+    }`;
+  await writeFile(join(root, "app.ts"), app);
+  const config = join(root, "tsconfig.json");
+  await writeFile(config, JSON.stringify({ compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", strict: true,
+    skipLibCheck: true, experimentalDecorators: true, declaration: true, rewriteRelativeImportExtensions: true,
+    rootDir: root, outDir: join(root, "build"), types: [] }, angularCompilerOptions: { strictTemplates: true }, files: ["app.ts"] }));
+  const require = createRequire(import.meta.url);
+  const ngc = join(dirname(require.resolve("@angular/compiler-cli/package.json")), "bundles/src/bin/ngc.js");
+  const compile = () => promisify(execFile)(process.execPath, [ngc, "-p", config], { cwd: root });
+  try { await compile(); } catch (error) { assert.fail((error as { stderr?: string }).stderr ?? String(error)); }
+  await writeFile(join(root, "app.ts"), app.replace("[href]=\"null\"", "[href]=\"42\""));
+  await assert.rejects(compile, error => /not assignable to type 'string/.test((error as { stderr?: string }).stderr ?? ""));
+}, 60_000);

@@ -17,6 +17,7 @@ export interface StateAccess {
 }
 
 export interface ComponentHostOptions {
+  readonly attach?: (host: any) => void;
   readonly inputs?: { port(reactions: {
     readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
     track(name: string, kind: "value" | "status" | "supplied"): void;
@@ -238,6 +239,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   }
   if (options.request?.has !== undefined) host.hasResponder = options.request.has(host, own);
   Object.freeze(host);
+  options.attach?.(host);
   // Each request's responder listens on the root from its first connection, before the controller runs.
   const responders = Object.entries(options.responders ?? {});
   for (const [name, read] of responders) listen(name, (event) => read()?.(event), () => untrack(read) !== undefined);

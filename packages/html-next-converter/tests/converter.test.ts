@@ -1788,16 +1788,24 @@ void [scoped, staticNode];`);
 });
 
 
-it("prepares exported binding modules through ordinary Vue conversion", async () => {
+for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) it(`prepares exported binding modules through ordinary ${target} conversion`, async () => {
   const root = await fixture();
   await writeFile(join(root, "x-card.html"), `<template component="x-card" module="./module.js"><defs><prop name="rows" type="list(string)">Produced rows.</prop></defs><section><template $each="row of $rows"><p>{$row}</p></template></section></template>`);
   await writeFile(join(root, "module.js"), `export { prepare, adopt } from './provider.js'; export function connect() {}`);
   await writeFile(join(root, "provider.js"), `throw new Error('conversion must not execute modules'); export function prepare() {} export function adopt() {}`);
   const outDirectory = join(root, "converted");
-  const manifest = await convertComponents({ mode: "application", target: "vue", root, entries: ["x-card.html"], outDirectory });
+  const manifest = await convertComponents({ mode: "application", target, root, entries: ["x-card.html"], outDirectory });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /usePreparedModule/);
-  assert.match(source, /moduleBindings\.attach\(host\)/);
-  assert.match(await readFile(join(outDirectory, "vue/bindings.ts"), "utf8"), /onServerPrefetch/);
-  compileVue(source, "UiCard.vue");
+  assert.match(source, target === "angular" ? /preparedModule/ : /usePreparedModule/);
+  assert.ok(manifest.package.dependencies["@nextwebwg/html-next"]);
+  if (target === "vue") {
+    assert.match(source, /moduleBindings\.attach\(host\)/);
+    assert.match(await readFile(join(outDirectory, "vue/bindings.ts"), "utf8"), /onServerPrefetch/);
+    compileVue(source, "UiCard.vue");
+  } else if (target !== "angular") {
+    assert.match(await readFile(join(outDirectory, manifest.output.entry), "utf8"), /export.*renderPrepared/);
+    assert.ok(manifest.output.artifacts.some(item => item.path === `${target}/bindings${target === "svelte" ? ".svelte" : ""}.ts`));
+    if (target === "react") assert.ok(manifest.package.peerDependencies["react-dom"]);
+    if (target === "preact") assert.ok(manifest.package.peerDependencies["preact-render-to-string"]);
+  }
 });

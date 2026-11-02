@@ -3,8 +3,11 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { afterEach, describe, it } from "vitest";
-import { build } from "vite";
+import { afterEach, describe, it, vi } from "vitest";
+import { build, createBuilder } from "vite";
+import { JSDOM } from "jsdom";
+import { parseComponent } from "@nextwebwg/html-next";
+import { renderComponents } from "@nextwebwg/html-next/server";
 
 import {
   componentModule,
@@ -110,6 +113,26 @@ describe("HTML Next unplugin", () => {
     await rm(host);
     await (plugin as unknown as { api: { sync(): Promise<void> } }).api.sync();
     assert.equal(await readFile(host, "utf8"), generated);
+  });
+
+  it("builds native factories that adopt server markup and keep its node identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-hydration-")); temporary.push(root);
+    const source = `<template component="ui-counter"><defs><state name="count" type="number" value="0"></state><handler name="add"><set name="count" expr:value="$count + 1"></set></handler></defs><button on:click="add">{$count}</button></template>`;
+    await writeFile(join(root, "counter.html"), source);
+    await writeFile(join(root, "main.js"), `import { createUiCounter } from ${JSON.stringify(componentsModule)}; export const mount = root => createUiCounter({}, undefined, root);`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["counter.html"], hydrate: true })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["iife"], name: "HydratedFixture", cssFileName: "components", fileName: () => "app.js" } } });
+    const rendered = await renderComponents('<ui-counter></ui-counter>', { definitions: [parseComponent(source)], state: { '[component~="ui-counter"]': { count: 2 } } });
+    const { window } = new JSDOM(rendered.html, { runScripts: "dangerously" });
+    window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
+    const before = window.document.querySelector("button")!;
+    const fixture = (window as unknown as { HydratedFixture: { mount(root: Element): Element } }).HydratedFixture;
+    assert.equal(fixture.mount(before), before);
+    before.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(window.document.querySelector("button"), before);
+    assert.equal(before.textContent, "3");
+    window.close();
   });
 
   it("consumes a packed component folder with native factories and no configured entries", async () => {
@@ -872,22 +895,29 @@ describe("HTML Next unplugin", () => {
     }), /app\.html: HC013:.*min constraint.*does not conform/);
   });
 
-  it("rejects cycles in compiled component invocations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "html-next-vite-invocation-cycle-"));
-    temporary.push(root);
-    await writeFile(join(root, "alpha.html"), `<link rel="component" href="./beta.html">
-      <template component="x-alpha" status="early" summary="Alpha."><x-beta></x-beta></template>`);
-    await writeFile(join(root, "beta.html"), `<link rel="component" href="./alpha.html">
-      <template component="x-beta" status="early" summary="Beta."><x-alpha></x-alpha></template>`);
-    await writeFile(join(root, "main.js"), `export { createXAlpha } from ${JSON.stringify(componentsModule)};`);
-
-    await assert.rejects(() => build({
-      root,
-      logLevel: "silent",
-      resolve: { alias: generatedRuntimeAlias },
-      plugins: [htmlNext.vite({ entries: ["alpha.html"], root })],
-      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
-    }), /HN002: Compiled component invocations form a cycle/);
+  it("compiles finite recursion and bounds non-terminating invocation cycles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-invocation-cycle-")); temporary.push(root);
+    await writeFile(join(root, "alpha.html"), `<link rel="component" href="./beta.html"><template component="x-alpha"><x-beta></x-beta></template>`);
+    await writeFile(join(root, "beta.html"), `<link rel="component" href="./alpha.html"><template component="x-beta"><x-alpha></x-alpha></template>`);
+    await writeFile(join(root, "node.html"), `<template component="x-node"><defs><prop name="node" type="object({ label: string, ... })" required>Node.</prop></defs><div><b>{$node.label}</b><x-node $each="child of $node.children" from:node="$child"></x-node></div></template>`);
+    await writeFile(join(root, "main.js"), `export { createXAlpha, createXNode } from ${JSON.stringify(componentsModule)}; export { componentRegistry, flushComponent } from "@nextwebwg/html-next/generated-runtime";`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["alpha.html", "node.html"], root })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["iife"], name: "RecursiveFixture", fileName: () => "app.js", cssFileName: "components" } } });
+    const { window } = new JSDOM('<!doctype html><body></body>', { runScripts: "dangerously" });
+    window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
+    const api = (window as unknown as { RecursiveFixture: {
+      createXAlpha(): Element; createXNode(props: { node: object }): Element;
+      componentRegistry: { update(root: Element, props: object): void }; flushComponent(root: Element): void;
+    } }).RecursiveFixture;
+    assert.throws(() => api.createXAlpha(), /HR008/);
+    const tree = (depth: number): object => ({ label: String(depth), children: depth > 1 ? [tree(depth - 1)] : [] });
+    const data = (depth: number): object => window.JSON.parse(JSON.stringify(tree(depth))) as object;
+    const element = api.createXNode({ node: data(4) }); window.document.body.append(element);
+    await vi.waitFor(() => assert.deepEqual([...element.querySelectorAll("b")].map(node => node.textContent), ["4", "3", "2", "1"]));
+    api.componentRegistry.update(element, { node: data(6) }); api.flushComponent(element);
+    await vi.waitFor(() => assert.deepEqual([...element.querySelectorAll("b")].map(node => node.textContent), ["6", "5", "4", "3", "2", "1"]));
+    assert.equal(api.createXNode({ node: data(1) }).textContent, "1", "a failed creation releases its nesting frame");
+    window.close();
   });
 
   it("diagnoses undeclared dynamic component boundaries before emission", async () => {
@@ -997,5 +1027,28 @@ describe("HTML Next unplugin", () => {
     const rebuilt = await readFile(join(root, "dist/app.js"), "utf8");
     assert.match(rebuilt, /Second/);
     assert.doesNotMatch(rebuilt, /First/);
+  });
+
+  it("shares the native source snapshot across a Vite builder's client and server environments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-shared-library-")); temporary.push(root);
+    const component = join(root, "counter.html");
+    await writeFile(component, '<template component="x-counter"><button>Shared source</button></template>');
+    const entry = join(root, "main.js");
+    await writeFile(entry, `export { createXCounter } from ${JSON.stringify(componentsModule)};`);
+    const output = (folder: string) => ({ minify: false as const, outDir: join(root, folder), lib: { entry, formats: ["es" as const], fileName: () => "index.js", cssFileName: "components" } });
+    const builder = await createBuilder({ configFile: false, root, logLevel: "silent",
+      plugins: [htmlNext.vite({ entries: ["counter.html"], root, manifestFile: false })],
+      resolve: { alias: generatedRuntimeAlias }, build: output("client"),
+      builder: { sharedConfigBuild: true, sharedPlugins: true },
+      environments: { client: { build: output("client") }, ssr: { consumer: "server", build: { ...output("server"), ssr: true } } },
+    });
+    await builder.build(builder.environments.client!);
+    // Both outputs belong to one preparation. A new build config reads changed sources instead.
+    await writeFile(component, '<template component="x-counter"><button>Changed source</button></template>');
+    const serverBuild = await builder.build(builder.environments.ssr!);
+    assert.match(await readFile(join(root, "client/index.js"), "utf8"), /Shared source/);
+    const server = (Array.isArray(serverBuild) ? serverBuild : [serverBuild]).flatMap(result => "output" in result ? result.output.flatMap(chunk => chunk.type === "chunk" ? [chunk.code] : []) : []).join("\n");
+    assert.match(server, /Shared source/);
+    assert.doesNotMatch(server, /Changed source/);
   });
 });

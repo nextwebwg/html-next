@@ -1,14 +1,31 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { JSDOM } from "jsdom";
+import postcss from "postcss";
 
 import { loadNodeComponents } from "../src/node-loader.js";
-import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild, compileSharedComponentStylesForBuild } from "../src/component-styles-build.js";
+import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild, compileSharedComponentStylesForBuild, normalizeConversionStyleIdentities } from "../src/component-styles-build.js";
 import { collectSharedStylesheets, wrapStylesheetConditions } from "../src/stylesheet-resources.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
 import { normalizeStylesheetNamespacesForBuild, parseStylesheetForBuild } from "../src/stylesheet-resources-build.js";
 
 describe("shared component CSS resources", () => {
+  it("keeps imported module CSS usable by native and converted roots without changing CSS text", () => {
+    const document = new JSDOM(`<div component="x-panel"><b class="value"></b></div><div data-component="x-panel"><b class="value"></b></div><div x-panel data-hn><b class="value"></b></div><div class="x-panel" data-hn><b class="value"></b></div>`).window.document;
+    for (const identity of ["attribute", "class", "component"] as const) for (const original of ['[data-component~="x-panel"]', "[component ~= 'x-panel']", '[data-component~=x-panel]']) {
+      const css = normalizeConversionStyleIdentities(`${original} .value { content: "[data-component]"; --literal: '[component~=x-panel]'; }`, identity, { includeNative: true });
+      const rule = postcss.parse(css).first as postcss.Rule;
+      const matches = Array.from(document.querySelectorAll(rule.selector));
+      const roots = Array.from(document.querySelectorAll('[component], [data-component]'));
+      for (const root of roots) assert.ok(matches.includes(root.querySelector("b")!));
+      if (identity === "attribute") assert.ok(matches.includes(document.querySelector("[x-panel] b")!));
+      if (identity === "class") assert.ok(matches.includes(document.querySelector(".x-panel b")!));
+      assert.ok(css.includes('content: "[data-component]"'));
+      assert.ok(css.includes("--literal: '[component~=x-panel]'"));
+    }
+  });
+
   it("reads CSS escapes and case-insensitive import functions, and ignores invalid empty functions", () => {
     const parsed = parseStylesheetForBuild('@import URL(shared\\ defaults.css) LAYER(base) SUPPORTS(display: grid); @import "missing.css" layer(); @import "other.css" supports();');
     assert.deepEqual(parsed.imports, [{ specifier: "shared defaults.css", conditions: { layer: "base", supports: "display: grid" } }]);

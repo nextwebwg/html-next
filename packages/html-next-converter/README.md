@@ -110,10 +110,9 @@ inside a TypeScript handler, cast `Event` to the exported `UiButtonEvents["saved
 Angular conversion covers ordinary and dependent inputs, mutable and computed state, context,
 native events and declared requests, refs, browser modules/controllers, data reads, head/scripts,
 plain and scoped slots, native form bindings, and sanitized `$html` on native elements.
-Root-replacing structural flow, recursive components, component two-way bindings, multiple two-way bindings on one control, selects with
+Components with root-replacing structural flow use attribute directives on `ng-template`; recursive components can render finite content. Component two-way bindings, multiple two-way bindings on one control, selects with
 structural or projected options, inline `<template $html>`, and raw HTML regions containing authored child
-views produce conversion diagnostics. Browser modules connect after hydration; this target does
-not prepare module outputs during SSR.
+views produce conversion diagnostics. Binding modules prepare their outputs during Angular server rendering and adopt that data before browser connection. Angular's pending-task and hydration APIs own that lifecycle.
 
 React output accepts the same quoted globs and mirrors the same source
 directories under `generated/react/`, emitting `.tsx` and adjacent plain `.css` files. The CSS is
@@ -206,7 +205,7 @@ export function connect(host, { signal }) {
 
 `connect` runs on each DOM connection. Disconnection aborts its signal and releases its
 listeners, effects and returned cleanup. A reconnect keeps the instance's state and starts a
-new activation. SSR renders supplied props without importing this browser module.
+new activation. Modules exporting `prepare` and `adopt` can supply typed inputs during SSR, then adopt their prepared data before browser connection. Vue and Angular wait for preparation through their server lifecycle. React, Preact, and Svelte output exports `renderPrepared` from the generated entry: await `renderPrepared(<App />)` for React/Preact, or `renderPrepared(App, { props })` for Svelte. Hydrate through the framework's normal API. The conversion inventory lists the preparation helpers' dependencies and framework peers.
 Compatibility `controller` default exports still initialize once per instance; their
 `host.on("connect", setup)` handles repeated connections. Register other
 native events with `host.on(type, listener)`, which detaches listeners while disconnected and

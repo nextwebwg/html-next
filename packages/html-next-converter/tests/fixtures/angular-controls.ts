@@ -16,8 +16,12 @@ export const angularControls = `<template component="ui-button"><defs>
     <input aria-label="Name" value="Default" bind:value="name">
     <input type="checkbox" aria-label="Enabled" checked bind:checked="enabled">
     <select aria-label="Choice" bind:value="choice"><option value="a" selected>A</option><option value="b">B</option></select>
+    <textarea aria-label="Native flags" from:disabled="$enabled" from:readonly="$enabled" from:required="$enabled" from:aria-expanded="$enabled"></textarea>
+    <ui-boolean-root from:disabled="$enabled"></ui-boolean-root>
     <output>{$name}</output>
   </form></template>
+  <template component="ui-boolean-root"><defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs>
+    <textarea aria-label="Root flags" from:disabled="$disabled" from:readonly="$disabled" from:required="$disabled" from:aria-expanded="$disabled"></textarea></template>
   <template component="ui-rows"><defs>
     <prop name="title" type="string" default="People">Title.</prop>
     <state name="seed" type="string" from="$title"></state>

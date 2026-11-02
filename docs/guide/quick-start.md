@@ -8,7 +8,7 @@ eyebrow: HTML Next · Build
 
 # Build an HTML Next component
 
-Write a workshop check-in counter once in HTML, then use it natively or in Vue, React, or Svelte.
+Write a workshop check-in counter once in HTML, then use it natively or in Vue, React, Preact, Svelte, or Angular.
 
 ## Write the component
 
@@ -88,43 +88,47 @@ import React from "react";
 import type { ReactNode } from "react";
 import { useNativeEvents } from "./events";
 import { decimalAdd, text, useLiveState } from "./render";
-
 export type XCounterProps = Omit<React.ComponentPropsWithoutRef<"div">, "style"> & {
-  style?:
-    | React.CSSProperties
-    | (React.CSSProperties & { [name: `--${string}`]: string | number | undefined });
-  children?: ReactNode;
-  slots?: Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>;
-  ref?: React.Ref<HTMLDivElement>;
-  [name: string]: unknown;
+    style?: React.CSSProperties | (React.CSSProperties & {
+        [name: `--${string}`]: string | number | undefined;
+    });
+    children?: ReactNode;
+    slots?: Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>;
+    ref?: React.Ref<HTMLDivElement>;
+    [name: string]: unknown;
 };
-
 export default function XCounter(props: XCounterProps) {
-  const { children: _children, slots: _slots, ...nativeAttrs } = props;
-  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];
-  delete nativeAttrs["component"];
-  delete nativeAttrs["data-component"];
-  const [count, setCount, getCount] = useLiveState<number>(0);
-  const rootRef = React.useRef<HTMLDivElement | null>(null);
-  React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);
-  function increment(): void {
-    setCount((count) => decimalAdd(count, 1));
-  }
-  function reset(): void {
-    setCount(0);
-  }
-  const incrementEvents = useNativeEvents([{ type: "click", modifiers: [], handler: increment }]);
-  const resetEvents = useNativeEvents([{ type: "click", modifiers: [], handler: reset }]);
-  return (
-    <div
-      {...nativeAttrs}
-      ref={rootRef}
-      {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}
-    >
-      <button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}
-      <button type="button" ref={resetEvents}>Reset</button>
-    </div>
-  );
+    const { children: _children, slots: _slots, ...nativeAttrs } = props;
+    const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];
+    delete nativeAttrs["component"];
+    delete nativeAttrs["data-component"];
+    const [count, setCount, getCount] = useLiveState<number>(0);
+    const rootRef = React.useRef<HTMLDivElement | null>(null);
+    React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);
+    function increment(): void {
+        setCount((count) => decimalAdd(count, 1));
+    }
+    function reset(): void {
+        setCount(0);
+    }
+    const incrementEvents = useNativeEvents([{ type: "click", modifiers: [], handler: increment }]);
+    const resetEvents = useNativeEvents([{ type: "click", modifiers: [], handler: reset }]);
+    return (<div {...nativeAttrs} ref={rootRef} {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}><button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}<button type="button" ref={resetEvents}>Reset</button></div>);
+}
+```
+
+:::
+
+::: framework-preact
+
+The Preact adapter generates TSX using Preact's runtime and public types. [Set up Preact](/html-next/usage/preact), then import the definition:
+
+```tsx title="src/App.tsx"
+/** @jsxImportSource preact */
+import { XCounter } from "./counter.html";
+
+export default function App() {
+  return <XCounter />;
 }
 ```
 
@@ -161,6 +165,25 @@ The Svelte adapter generates this component when your app builds. [Set up Svelte
 	><button type="button" onclick={increment}>Count: {count}</button>
 	<button type="button" onclick={reset}>Reset</button
 ></div>
+```
+
+:::
+
+::: framework-angular
+
+The Angular adapter generates a standalone component with a native attribute selector. The counter's root is a `div`, so keep that element in your template. [Set up Angular](/html-next/usage/angular), including its AOT compiler and generated type configuration:
+
+```ts title="src/app.ts"
+import { Component } from "@angular/core";
+import { XCounter } from "./counter.html";
+
+@Component({
+  selector: "app-root",
+  standalone: true,
+  imports: [XCounter],
+  template: `<div x-counter></div>`,
+})
+export class App {}
 ```
 
 :::

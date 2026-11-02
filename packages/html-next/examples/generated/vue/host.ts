@@ -208,7 +208,7 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
   const nested = new WeakMap<object, Map<string, object>>()
   const eventType = typeof Event === 'undefined'
     ? undefined
-    : Object.getOwnPropertyDescriptor(Event.prototype, 'type')!.get!
+    : Object.getOwnPropertyDescriptor(Event.prototype, 'type')?.get
   const eventBrands = new WeakMap<object, boolean>()
   const nativeEvent = (value: object): boolean => {
     if (!('type' in value) || eventType === undefined) return false

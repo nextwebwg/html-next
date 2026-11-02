@@ -168,6 +168,8 @@ Generated output imports `preact/compat` and uses Preact JSX. Consumers install 
 SSR consumers also install `preact-render-to-string`. Prepare declarations with
 `html-next-sync`, then run `tsc` with `jsx: "react-jsx"` and `jsxImportSource: "preact"`.
 
+For server-rendered components with asynchronous binding modules, React and Preact applications import `renderPrepared` from their source component package and await `renderPrepared(<App />)`. Svelte applications use `await renderPrepared(App, { props })`. The returned HTML includes prepared data that generated components adopt during normal framework hydration. Vue and Angular use their ordinary server rendering lifecycle.
+
 ### Angular
 
 Add the Angular target to your existing Angular AOT Vite pipeline:
@@ -417,7 +419,19 @@ The external element remains a native `document.createElement()` boundary and is
 users in the manifest. Capability chunks and the universal HTML Next runtime are not yet dynamic
 boundary strategies.
 
-The current compiled-invocation tranche accepts empty, statically positioned invocations in
-components that do not need the general runtime renderer. Attributes, projected children, events,
-refs, structural flow, invocation cycles, and general-runtime parents fail before emission with a
-source-located `HN` diagnostic rather than producing a partially valid graph.
+Linked invocations compile their props, projected content, events, refs, and structural flow into
+native factories. Recursive components can render finite content; non-terminating invocation chains
+fail with the runtime's nesting diagnostic.
+
+Enable `hydrate: true` to generate factories that can adopt server-rendered roots. Pass the existing
+root as the factory's third argument:
+
+```ts
+// vite.config.ts
+htmlNext({ entries: ["src/components/counter.html"], hydrate: true });
+
+// client.ts
+import { createXCounter } from "virtual:html-next/components";
+
+createXCounter({}, undefined, document.querySelector('[component~="x-counter"]')!);
+```

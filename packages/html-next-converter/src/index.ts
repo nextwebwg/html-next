@@ -5,6 +5,7 @@ import { preactArtifact } from "./preact.js";
 
 import {
   addControllerGraph,
+  normalizeConversionStyleIdentities,
   getDiagnosticLocation,
   expandComponentEntries,
   generateVueComponent,
@@ -13,6 +14,8 @@ import {
   GENERATOR_VERSION,
   preparedModuleRevision,
   vueBindingsArtifact,
+  reactBindingsArtifact,
+  svelteBindingsArtifact,
   generateReactConversion,
   generateSvelteConversion,
   HtmlDiagnosticError,
@@ -493,11 +496,11 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   const controllerRoots = new Map([...new Set([...graph.nodes.values()].map(node => node.trustRoot))].sort()
     .map((root, index) => [root, `${options.target}/modules/${index}`]));
   const emittedControllerFiles = new Map<string, string>();
+  const controllerPlans = new Map<string, { controller: string | undefined; controllerFiles: Map<string, GeneratedArtifact>; modulePreparation: { readonly source: string } | undefined }>();
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     try {
       const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
       const tag = node.definition.contract.tag;
-      const componentPath = pathsByTag.get(tag)!;
       // Preserve each package's module graph once, including imports shared by separate components.
       const controllerFiles = new Map<string, GeneratedArtifact>();
       let controller: string | undefined;
@@ -509,12 +512,27 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error), getDiagnosticLocation(node.definition));
         }
       }
-      const modulePreparation = options.target !== "vue" || node.module === undefined || controller === undefined ? undefined
+      // Module styles can style native editor node views and converted chrome together.
+      for (const [path, artifact] of controllerFiles) if (path.endsWith(".css")) controllerFiles.set(path, { ...artifact,
+        content: normalizeConversionStyleIdentities(artifact.content, options.target === "angular" ? "attribute" : options.target === "svelte" ? "component" : "class", { includeNative: true }),
+      });
+      const modulePreparation = node.module === undefined || controller === undefined ? undefined
         : await preparedModuleRevision(controller, node.definition, GENERATOR_VERSION, async path => {
           const artifact = controllerFiles.get(path);
           if (artifact === undefined) throw new Error(`Missing prepared module dependency: ${path}.`);
           return artifact.content;
         });
+      controllerPlans.set(tag, { controller, controllerFiles, modulePreparation });
+    } catch (error) { recover(error); }
+  }
+  for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
+    try {
+      const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
+      const tag = node.definition.contract.tag;
+      const componentPath = pathsByTag.get(tag)!;
+      const plan = controllerPlans.get(tag);
+      if (plan === undefined) continue;
+      const { controller, controllerFiles, modulePreparation } = plan;
       const definitionURL = browserDefinitionURL(node.definition, source, options.publicRootURL, options.target, tag);
       const scripts = browserScripts(node.definition.scripts, definitionURL);
       const definition = Object.freeze({
@@ -545,7 +563,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         };
         const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
         content = options.target === "angular" ? (angularConversion = generateAngularConversion(definition, GENERATOR_VERSION, {
-          componentGraph, importSpecifier,
+          componentGraph, importSpecifier, guardNestedDepth,
+          preparationForTag: tag => controllerPlans.get(tag)?.modulePreparation,
           controllerSpecifier: importedTag => {
             const importedNode = graph.nodes.get(graph.tags.get(importedTag)!)!;
             const edge = importedNode.module ?? importedNode.controller;
@@ -571,6 +590,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           },
           ...((node.definition.module ?? node.definition.controller) === undefined ? {} : { controllerSpecifier: node.definition.module ?? node.definition.controller }),
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
+          ...(modulePreparation === undefined ? {} : { modulePreparation }),
+          bindingsSpecifier: relativeImport(componentPath, "svelte/bindings.svelte.ts").replace(/\.ts$/, ""),
           publishedStates: published,
           slotsByTag,
           componentGraph,
@@ -594,6 +615,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           requestsSpecifier: relativeImport(componentPath, "svelte/requests.ts").replace(/\.ts$/, ""),
           headSpecifier: relativeImport(componentPath, "svelte/head.svelte.ts").replace(/\.ts$/, ""),
         })).component : (reactConversion = generateReactConversion(definition, {
+          ...(modulePreparation === undefined ? {} : { modulePreparation }),
+          bindingsSpecifier: reactHelperSpecifier("bindings"),
           target: options.target,
           publishedStates: published,
           slotsByTag,
@@ -673,6 +696,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...unsupported, ...diagnostics]);
 
   if (options.target === "angular") for (const artifact of angularArtifacts(GENERATOR_VERSION, neededHelpers)) claim(artifact, "helper");
+  if (reactTarget && neededHelpers.has("bindings")) claim(reactBindingsArtifact(GENERATOR_VERSION), "helper");
+  if (options.target === "svelte" && neededHelpers.has("bindings")) claim(svelteBindingsArtifact(GENERATOR_VERSION), "helper");
   if (options.target === "vue" && neededHelpers.has("bindings")) claim(vueBindingsArtifact(), "helper");
   if (options.target === "vue" && neededHelpers.has("host")) {
     claim(vueHostArtifact(), "helper");
@@ -766,7 +791,10 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       artifact: component.artifact,
     };
   });
-  const entry = frameworkEntry(options.mode, options.target, conversionEntries);
+  let entry = frameworkEntry(options.mode, options.target, conversionEntries);
+  if (neededHelpers.has("bindings") && (reactTarget || options.target === "svelte")) entry = { ...entry,
+    content: entry.content + `\nexport { renderPrepared } from ${JSON.stringify(relativeImport(entry.path, `${options.target}/${options.target === "svelte" ? "bindings.svelte" : "bindings"}.ts`).replace(/\.ts$/, ""))};\n`,
+  };
   claim(entry, "entry");
   const inventory = "html-next.conversion.json" as const;
   const outputArtifacts: ConversionOutput[] = planned.map(({ artifact, kind, source }) => ({
@@ -782,9 +810,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     targetVersion,
     graph: options.mode,
     package: Object.freeze({
-      dependencies: Object.freeze({ ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
+      dependencies: Object.freeze({ ...(neededHelpers.has("bindings") ? { "@nextwebwg/html-next": `>=${GENERATOR_VERSION}` } : {}), ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
       // Vue 3.5.43 restores generic inference through runtime PropType declarations.
-      peerDependencies: Object.freeze(options.target === "angular" ? { "@angular/core": ">=21.2.24", ...(neededHelpers.has("slots") ? { "@angular/common": ">=21.2.24" } : {}) } : { [options.target]: options.target === "vue" ? "^3.5.43" : options.target === "preact" ? `^${targetVersion}` : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
+      peerDependencies: Object.freeze(options.target === "angular" ? { "@angular/core": ">=21.2.24", ...(neededHelpers.has("slots") ? { "@angular/common": ">=21.2.24" } : {}) } : { [options.target]: options.target === "vue" ? "^3.5.43" : options.target === "preact" ? `^${targetVersion}` : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}`, ...(neededHelpers.has("bindings") && options.target === "react" ? { "react-dom": `^${targetVersion}.0` } : {}), ...(neededHelpers.has("bindings") && options.target === "preact" ? { "preact-render-to-string": "^6.8.2" } : {}) }),
     }),
     entries: Object.freeze(conversionEntries),
     sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),

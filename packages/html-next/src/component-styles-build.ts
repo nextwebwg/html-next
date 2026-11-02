@@ -124,10 +124,15 @@ export function compileComponentGraphStylesForBuild(definitions: readonly Compon
 }
 
 /** Converted roots have one target identity; consume canonical/legacy CSS together here. */
-function normalizeConversionStyleIdentities(css: string, identity: "component" | "class" | "attribute"): string {
-  const boundary = identity === "component" ? "[component]" : `[${VUE_ROOT_ATTRIBUTE}]`;
-  const ownerSelector = (tag: string, namespace = ""): string => identity === "class" ? tagClassSelector(tag, namespace)
-    : `${namespace === "" ? "" : namespace + "*"}[${identity === "attribute" ? tag : `component~="${tag}"`}]`;
+export function normalizeConversionStyleIdentities(css: string, identity: "component" | "class" | "attribute", options: { readonly includeNative?: boolean } = {}): string {
+  const compatible = (...selectors: string[]): string => { const unique = [...new Set(selectors)]; return unique.length === 1 ? unique[0]! : `:is(${unique.join(", ")})`; };
+  const targetBoundary = identity === "component" ? "[component]" : `[${VUE_ROOT_ATTRIBUTE}]`;
+  const boundary = options.includeNative ? compatible("[component]", "[data-component]", targetBoundary) : targetBoundary;
+  const ownerSelector = (tag: string, namespace = ""): string => {
+    const prefix = namespace === "" ? "" : namespace + "*";
+    const target = identity === "class" ? tagClassSelector(tag, namespace) : `${prefix}[${identity === "attribute" ? tag : `component~="${tag}"`}]`;
+    return options.includeNative ? compatible(`${prefix}[component~="${tag}"]`, `${prefix}[data-component~="${tag}"]`, target) : target;
+  };
   function normalizeSelector(selector: string): string {
     let result = "";
     for (let index = 0; index < selector.length;) {
@@ -159,8 +164,8 @@ function normalizeConversionStyleIdentities(css: string, identity: "component" |
           else if (character === "]") break;
         }
         const attribute = selector.slice(start, index);
-        const named = /^\[(?:data-)?component~="([a-z][a-z0-9-]*)"\]$/.exec(attribute);
-        if (named !== null) { result += ownerSelector(named[1]!); continue; }
+        const named = /^\[(?:data-)?component\s*~=\s*(?:"([a-z][a-z0-9-]*)"|'([a-z][a-z0-9-]*)'|([a-z][a-z0-9-]*))\s*\]$/.exec(attribute);
+        if (named !== null) { result += ownerSelector((named[1] ?? named[2] ?? named[3])!); continue; }
         if (attribute === "[component]" || attribute === "[data-component]") { result += boundary; continue; }
       } else index++;
       result += selector.slice(start, index);

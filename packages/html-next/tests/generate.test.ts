@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
+import { transform } from "esbuild";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { JSDOM } from "jsdom";
 
 import { generateComponent, generateReactComponent, generateSvelteConversion, generateVueComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -49,7 +53,7 @@ describe("generateComponent", () => {
     assert.match(vue, /\[0\]/);
     assert.match(vue, /\[42\]/);
   });
-  it("writes whitespace between inline content in each framework's kept form", () => {
+  it("writes whitespace between inline content in each framework's kept form", async () => {
     const definition = parseComponent(`<template component="x-spaces"><div>
       <p><strong>Package:</strong> <code>x</code> and <em>a</em>
         <em>b</em><template $if="true"> <b>c</b></template></p>
@@ -69,12 +73,19 @@ describe("generateComponent", () => {
     assert.match(vue, /<strong>Package:<\/strong>\{\{ ' ' \}\}<code>x<\/code> and <em>a<\/em>\{\{ ' ' \}\}<em>b<\/em>\n<template v-if="true">\{\{ ' ' \}\}<b>c<\/b><\/template>/);
     assert.match(vue, /<li>a<\/li>\n<li>b<\/li>/);
     assert.match(vue, /<pre><b>1<\/b>\n<b>2<\/b><\/pre>/);
-    // JSX drops whitespace that holds a newline, so a kept space is a string expression.
-    const react = lines(generateReactComponent(definition));
-    assert.match(react, /<em>a<\/em> <em>b<\/em>/);
-    assert.match(react, /<>\n\{" "\}\n<b>c<\/b>/);
-    assert.match(react, /<li>a<\/li>\n<li>b<\/li>\n<\/ul>\n<select>\n<option>a<\/option>\n<option>b<\/option>\n<\/select>\n<pre>/);
-    assert.match(react, /<pre><b>\{"1"\}<\/b>\{"\\n  "\}<b>\{"2"\}<\/b><\/pre>/);
+    // Check rendered whitespace so formatting changes cannot alter inline or preformatted content.
+    const react = generateReactComponent(definition);
+    const { code } = await transform(react, { loader: "tsx", format: "cjs" });
+    const module = { exports: {} as { default: React.ComponentType } };
+    new Function("require", "module", "exports", code)((name: string) => {
+      assert.equal(name, "react");
+      return React;
+    }, module, module.exports);
+    const document = new JSDOM(renderToStaticMarkup(React.createElement(module.exports.default))).window.document;
+    assert.equal(document.querySelector("p")!.textContent, "Package: x and a b c");
+    assert.equal(document.querySelector("ul")!.textContent, "ab");
+    assert.equal(document.querySelector("select")!.textContent, "ab");
+    assert.equal(document.querySelector("pre")!.textContent, "1\n  2");
     // Svelte keeps whitespace between nodes as one space, but drops it at a block's edge.
     const svelte = generateSvelteConversion(definition).component;
     assert.match(svelte, /<em>a<\/em> <em>b<\/em>\{#if true\}\{" "\}<b>c<\/b>\{\/if\}/);
