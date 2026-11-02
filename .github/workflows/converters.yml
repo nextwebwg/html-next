@@ -1,0 +1,91 @@
+name: Converter catalog qualification
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare SDK and all Looma catalogs once
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 6
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:beddddcf96f19abec078cd2f3da676f40abd460e0e734ad5eed73627ce161d33
+      options: --ipc=host --init
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - id: looma
+        run: node --input-type=module -e 'import fs from "node:fs"; const pin = JSON.parse(fs.readFileSync("tests/looma.json")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `revision=${pin.revision}\n`);'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: threadlabs-studio/looma
+          ref: ${{ steps.looma.outputs.revision }}
+          path: .context/looma-pressure
+          persist-credentials: false
+      - name: Build SDK and Looma, then compile six complete catalogs
+        run: pnpm verify:converters --prepare-only
+      - name: Archive immutable compiler output
+        run: |
+          tar -cf converter-build.tar packages/*/dist .context/looma-pressure/packages/looma/.test-build .context/looma-pressure/packages/looma/dist .context/looma-pressure/packages/looma/components .context/looma-pressure/packages/looma/styles .context/looma-pressure/packages/looma/vanilla .context/looma-pressure/packages/looma/editor .context/looma-pressure/packages/looma/markdown .context/looma-pressure/packages/looma/*.css
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: converter-build
+          path: converter-build.tar
+          compression-level: 0
+          if-no-files-found: error
+
+  catalog:
+    name: Looma ${{ matrix.renderer }} / ${{ matrix.shard }}
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 6
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:beddddcf96f19abec078cd2f3da676f40abd460e0e734ad5eed73627ce161d33
+      options: --ipc=host --init
+    strategy:
+      fail-fast: false
+      matrix:
+        renderer: [html-next, vue, react, preact, svelte, angular]
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - id: looma
+        run: node --input-type=module -e 'import fs from "node:fs"; const pin = JSON.parse(fs.readFileSync("tests/looma.json")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `revision=${pin.revision}\n`);'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: threadlabs-studio/looma
+          ref: ${{ steps.looma.outputs.revision }}
+          path: .context/looma-pressure
+          persist-credentials: false
+      - name: Install harness dependencies
+        working-directory: .context/looma-pressure
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: converter-build
+      - run: tar -xf converter-build.tar
+      - name: Run the shared assertions with the SDK under test
+        run: pnpm verify:converters --prepared --catalog-only --target=${{ matrix.renderer }} --shard=${{ matrix.shard }}/4
+      - name: Preserve failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: converter-${{ matrix.renderer }}-${{ matrix.shard }}
+          path: .context/looma-pressure/packages/looma/test-results/
+          if-no-files-found: ignore

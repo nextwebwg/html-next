@@ -46,7 +46,11 @@ const includesPackage = (...directories: string[]): boolean => !selectedPackage 
 // Removing the installed consumers on Windows can outlast the default hook budget.
 afterAll(() => rmSync(workspace, { recursive: true, force: true }), 60_000);
 
+const tarballs = new Map<string, string>();
+
 function pack(packageDirectory: string): string {
+  const existing = tarballs.get(packageDirectory);
+  if (existing !== undefined) return existing;
   const packageRoot = join(root, "packages", packageDirectory);
   const packed = execFileSync(
     "corepack",
@@ -58,7 +62,9 @@ function pack(packageDirectory: string): string {
     .at(-1);
 
   expect(packed).toBeDefined();
-  return isAbsolute(packed!) ? packed! : join(workspace, packed!);
+  const file = isAbsolute(packed!) ? packed! : join(workspace, packed!);
+  tarballs.set(packageDirectory, file);
+  return file;
 }
 
 // Runs an installed bin the way a consumer does: through npm's node_modules/.bin link (a command shim on Windows).

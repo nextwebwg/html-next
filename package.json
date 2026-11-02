@@ -36,6 +36,7 @@
     "verify:affected": "node scripts/ci-local.ts",
     "verify:inner": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:generated && pnpm measure:runtime",
     "verify:pr": "pnpm verify:inner && pnpm build && pnpm test:package",
+    "verify:converters": "node scripts/check-converters.ts",
     "verify:compatibility": "pnpm test:browser && pnpm test:targets && pnpm test:consumer",
     "verify:extended": "pnpm verify:pr && pnpm verify:compatibility",
     "verify:release": "pnpm --filter @nextwebwg/html-next check:release && pnpm test:consumer",

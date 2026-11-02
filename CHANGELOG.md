@@ -4,10 +4,21 @@
 
 ### Added
 
+- Require the complete Looma catalog and shared browser behavior tests for native HTML Next and all five converter targets alongside the focused Vite and converter feature checks. Catalog preparation runs once and is reused by browser shards.
+
+- Native Vite builds compile finite recursive component graphs and guard non-terminating invocations with the existing nesting diagnostic. Shared Vite builders reuse one native source snapshot across client and server output.
+- Native Vite builds accept `hydrate: true` to generate factories that adopt server-rendered roots in place. Hydration-enabled factory declarations include the existing root argument.
+- Document Preact and Angular in the Usage and quick-start framework selectors, including Angular native hosts, switchable roots and compiler setup.
 - Convert HTML component graphs to Angular 21.2 standalone components with `target: "angular"` or `html-next-convert angular`. Native attribute selectors preserve roots such as `<button ui-button>`; delegated roots compose into one component and retain identity attributes for CSS. The Vite adapter compiles generated components ahead of time, links Angular dependencies, and prepares compiler-visible input and slot types.
 
 ### Fixed
 
+- Preserve Angular structural-root hydration, live default/named projection and parent ownership through native root changes. Controller-dispatched events render at the next microtask checkpoint before a following native event consumes their bound DOM.
+- Normalize CSS imported by component modules for converted roots while keeping native roots supported in the same application.
+- Format React and Preact output with the TypeScript printer to avoid excessive layout search on deeply nested component graphs.
+- Angular native boolean bindings omit false attributes so controls remain editable and enabled. ARIA bindings preserve serialized false values.
+- Angular prop inspection uses component data attributes instead of duplicating native bindings on the host. Disabled links keep their authored `href` removal through SSR, hydration and later updates.
+- Keep Preact native attribute forwarding and serialized ARIA bindings type-correct for polymorphic component roots.
 - Normalize canonical `component` and legacy `data-component` CSS identities in the shared framework conversion pipeline. Vue, React, Preact, Svelte, and Angular render those identities using their target root markers.
 - Shared generated prop checks tolerate server Event implementations without a prototype type getter. Document-head rendering uses core DOM methods and URL resolution available in Angular SSR, and retains declared-script preloads through later reconciliation.
 
