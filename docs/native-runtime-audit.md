@@ -188,3 +188,27 @@ Native DOM callback refs describe attachment changes, while React's imperative-h
 can clear and republish the same handle after each render. Converted native roots publish from a
 layout effect only when the root or consumer ref changes. A separate layout cleanup releases the
 handle on disposal or Suspense hiding, including callback-provided cleanup functions.
+
+Native input value attributes update the default and, while pristine, the live value. A textarea's
+value attribute remains separate from its text content, and a select's value attribute does not
+select an option. React's form-value props map to control state or text defaults, so generated
+native-value helpers use an element ref and a layout effect to write or remove the attribute when
+its bound value changes. The attribute is applied before the helper publishes the native ref.
+Preact accepts the native attribute through its uppercase attribute spelling. The browser retains
+ownership of dirty-value behavior in both targets.
+
+Plain React SSR represents textarea/select value attributes with private metadata. Converted CSS
+preserves attribute-selector specificity and supplies metadata branches for attribute reads.
+PostCSS nesting runs only when those reads need branches; complete declaration blocks retain
+shorthand overrides and source order. Keyframes use native CSS attribute fallbacks because they
+have no selector subject. Inline reads use the metadata name until the mount layout effect restores
+the actual attribute and authored styles, before publishing refs. Hydration removes the metadata.
+Browser coverage compares native defaults, CSS and inline/animated attribute reads before JavaScript
+and after hydration, then checks native attribute mutation and removal. This compiler processing
+does not add the PostCSS parser to generated browser output.
+
+A production React fixture with 100 dirty inputs and 100 synchronous prop updates measured seven
+alternating runs against the prior default-value mapping. Median update time was 30.7 ms versus
+28.8 ms in Chromium and 34 ms versus 30 ms in WebKit; the complete minified consumer added 925
+gzip bytes. Both variants were validated outside the timed section for current values, defaults
+and attributes. These local measurements describe that workload, not a general framework ranking.

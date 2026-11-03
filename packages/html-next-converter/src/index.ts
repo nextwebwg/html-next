@@ -514,7 +514,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       }
       // Module styles can style native editor node views and converted chrome together.
       for (const [path, artifact] of controllerFiles) if (path.endsWith(".css")) controllerFiles.set(path, { ...artifact,
-        content: normalizeConversionStyleIdentities(artifact.content, options.target === "angular" ? "attribute" : options.target === "svelte" ? "component" : "class", { includeNative: true }),
+        content: normalizeConversionStyleIdentities(artifact.content, options.target === "angular" ? "attribute" : options.target === "svelte" ? "component" : "class", { includeNative: true, nativeValueMetadata: options.target === "react" }),
       });
       const modulePreparation = node.module === undefined || controller === undefined ? undefined
         : await preparedModuleRevision(controller, node.definition, GENERATOR_VERSION, async path => {
@@ -777,7 +777,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     claim({ path: `${options.target}/styles.d.ts`, content: 'declare module "*.css";\n' }, "helper");
   }
   if (sharedStyles.length > 0 && reactTarget) {
-    const css = compileComponentGraphStylesForConversion([...graph.nodes.values()].map(node => node.definition));
+    const css = compileComponentGraphStylesForConversion([...graph.nodes.values()].map(node => node.definition), "component", undefined, { nativeValueMetadata: options.target === "react" });
     claim({ path: sharedStylePath, content: wrapStylesheetConditions(css, []) + "\n" }, "style");
   }
 

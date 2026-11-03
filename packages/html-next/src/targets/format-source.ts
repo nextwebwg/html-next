@@ -6,8 +6,8 @@ import { createFormatValue } from "../format.js";
  * Retain its actual parameter names so bundler renaming cannot change the generated behavior.
  * esbuild/tsx's keep-names helper affects only debugging names; a local identity supplies it.
  */
-export function formattingHelperSource(binding = "formatValue"): string {
-  const source = createFormatValue.toString();
+export function closureFreeFunctionSource(factory: { toString(): string }, binding: string): string {
+  const source = factory.toString();
   const parsed = ts.createSourceFile("format.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const names = new Set(source.match(/\b__name\d*\b/g) ?? []);
   const transformed = ts.transform(parsed, [(context) => {
@@ -21,7 +21,7 @@ export function formattingHelperSource(binding = "formatValue"): string {
         const declarations = [...names].flatMap((name) => ts.createSourceFile("name.ts", `const ${name} = (fn: any, ..._names: any[]): any => fn;`, ts.ScriptTarget.Latest, true).statements);
         const body = ts.visitEachChild(node.body!, visit, context);
         return context.factory.updateFunctionDeclaration(node, node.modifiers, node.asteriskToken,
-          context.factory.createIdentifier("createFormatValue"), node.typeParameters,
+          context.factory.createIdentifier(binding), node.typeParameters,
           node.parameters.map((parameter) => ts.visitNode(parameter, visit) as ts.ParameterDeclaration),
           context.factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
           context.factory.updateBlock(body, [...declarations, ...body.statements]));
@@ -30,6 +30,10 @@ export function formattingHelperSource(binding = "formatValue"): string {
     };
     return (file) => ts.visitNode(file, visit) as ts.SourceFile;
   }]);
-  try { return `${ts.createPrinter().printFile(transformed.transformed[0]!)}\nconst ${binding} = createFormatValue();\n`; }
+  try { return ts.createPrinter().printFile(transformed.transformed[0]!); }
   finally { transformed.dispose(); }
+}
+
+export function formattingHelperSource(binding = "formatValue"): string {
+  return `${closureFreeFunctionSource(createFormatValue, "createFormatValue")}\nconst ${binding} = createFormatValue();\n`;
 }

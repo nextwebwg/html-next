@@ -121,6 +121,7 @@
     "jsdom": "30.1.2",
     "parse5": "catalog:",
     "postcss": "catalog:",
+    "postcss-nesting": "^14.0.3",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2"
   },
   "devDependencies": {

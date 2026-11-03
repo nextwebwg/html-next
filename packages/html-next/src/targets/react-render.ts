@@ -5,6 +5,8 @@
  * only the ones a component imports. Preact output reuses these with its compatibility API.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { NATIVE_VALUE_ATTRIBUTE, nativeValueCss } from "../native-value.js";
+import { closureFreeFunctionSource } from "./format-source.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 import { formatReact } from "./vue-format.js";
 import { expressionHelpersSource } from "./vue-lowering.js";
@@ -123,6 +125,40 @@ export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, ht
   <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 export const HtmlNextTextarea = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
   <textarea {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
+
+${preact ? "" : `/** Native value attributes retain the browser's dirty-value flag and textarea attribute semantics. */
+${closureFreeFunctionSource(nativeValueCss, "nativeValueCss")}
+function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(value: unknown, ref: React.Ref<T> | undefined, style?: React.CSSProperties): { ref: React.RefObject<T | null>; style?: React.CSSProperties } {
+  const root = React.useRef<T | null>(null);
+  let represented = style;
+  const restored: [string, string][] = [];
+  for (const [name, authored] of Object.entries(style ?? {})) {
+    if (typeof authored !== "string") continue;
+    const rewritten = nativeValueCss(authored, ${JSON.stringify(NATIVE_VALUE_ATTRIBUTE)});
+    if (rewritten === authored) continue;
+    if (represented === style) represented = { ...style };
+    (represented as Record<string, unknown>)[name] = rewritten;
+    restored.push([name.startsWith("--") ? name : name.replace(/[A-Z]/g, letter => "-" + letter.toLowerCase()).replace(/^ms-/, "-ms-"), authored]);
+  }
+  React.useLayoutEffect(() => {
+    if (value == null) root.current?.removeAttribute("value");
+    else root.current?.setAttribute("value", String(value));
+    root.current?.removeAttribute(${JSON.stringify(NATIVE_VALUE_ATTRIBUTE)});
+  }, [value]);
+  React.useLayoutEffect(() => {
+    for (const [name, authored] of restored) root.current?.style.setProperty(name, authored);
+  });
+  useRootHandle(root, ref);
+  return { ref: root, style: represented };
+}
+export const HtmlNextValueInput = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, ...props }: React.ComponentProps<"input"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
+  <input {...props} ref={useValueAttribute<HTMLInputElement>(htmlNextValue, ref).ref} defaultValue={typeof document === "undefined" && htmlNextValue != null ? String(htmlNextValue) : undefined} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
+export const HtmlNextValueTextarea = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, style, ...props }: React.ComponentProps<"textarea"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
+  <textarea {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} {...useValueAttribute<HTMLTextAreaElement>(htmlNextValue, ref, style)} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
+
+export const HtmlNextValueSelect = /* @__PURE__ */ React.memo(({ htmlNextValue, ref, style, ...props }: React.ComponentProps<"select"> & { readonly htmlNextValue?: unknown }) =>
+  <select {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} {...useValueAttribute<HTMLSelectElement>(htmlNextValue, ref, style)} />, sameControlProps);
+`}
 
 ${preact ? `/** Preact's core select leaves option properties to the native binding helper after the first render. */
 export function HtmlNextSelect({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"select"> & ControlDefaults): ReactNode {

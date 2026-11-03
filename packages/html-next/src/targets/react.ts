@@ -85,7 +85,7 @@ function pascal(name: string): string {
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
-const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextValueInput", "HtmlNextValueTextarea", "HtmlNextValueSelect", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle"] as const;
 
 export interface ReactConversionOptions {
@@ -525,9 +525,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     attribute.kind === "attribute" && attribute.twoWay === true ||
     attribute.kind === "property" && ["input", "textarea", "select"].includes(node.name) && ["value", "checked"].includes(attribute.name)
   ).map((attribute) => attribute.name));
+  const nativeValueAttribute = !component && !inSvg && ["input", "textarea", "select"].includes(node.name) && !controlledNames.has("value") && node.attributes.some(attribute =>
+    attribute.name === "value" && (attribute.kind === "literal" || attribute.kind === "attribute" && attribute.twoWay !== true && attribute.target === undefined));
   // React DOM rewrites an input's name and type, and a textarea's default, whenever it commits one.
   const memoControl = !component && !outputValue && !inSvg && (node.name === "input" || node.name === "textarea" || state.preact && node.name === "select" && controlledNames.has("value"));
-  const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : memoControl
+  const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : nativeValueAttribute && !state.preact
+    ? node.name === "input" ? "HtmlNextValueInput" : node.name === "select" ? "HtmlNextValueSelect" : "HtmlNextValueTextarea" : memoControl
     ? node.name === "input" ? "HtmlNextInput" : node.name === "select" ? "HtmlNextSelect" : "HtmlNextTextarea" : node.name;
   const svg = !component && (inSvg || node.name === "svg");
   if (component) imports.add(node.name);
@@ -560,7 +563,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   // HTML attribute names are case-insensitive; uppercase bypasses Preact's case-sensitive
   // DOM-property lookup for attributes whose property has different behavior (output.value, constructor).
   const nativeAttribute = (name: string): boolean => state.preact && !component && !svg &&
-    (name === "constructor" || name === "value" && !["input", "textarea", "select"].includes(node.name));
+    (name === "constructor" || name === "value");
   const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string => {
     const value = lowering.attribute(node, valueScope, name);
     return state.preact && isEnumeratedBoolean(name) ? `(${value})?.toString()` : value;
@@ -584,6 +587,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       if (attribute.name === "class") classes.push(quote(attribute.value));
       else if (attribute.name === "style") literalStyles.push(...literalStyle(attribute.value, importantStyles));
       else if (controlledNames.has(attribute.name)) continue;
+      else if (nativeValueAttribute && attribute.name === "value") literals.push(state.preact ? attributeBinding(attribute.name, quote(attribute.value)) : `htmlNextValue=${quote(attribute.value)}`);
       else if (componentProp !== undefined) {
         const [name, contract] = componentProp;
         const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
@@ -662,7 +666,8 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         : attributeValue(attribute.expressionPlan.ast, scope, attribute.name);
       const nativeValue = componentPropContract === undefined && (typeOf(attribute.expressionPlan.ast, scope).nullable || typeOf(attribute.expressionPlan.ast, scope).null === true) ? `(${value}) ?? undefined` : value;
       const sourceGuard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if ((node.name === "input" || node.name === "textarea") && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
+      if (nativeValueAttribute && attribute.name === "value") bindings.push(state.preact ? attributeBinding(attribute.name, nativeValue) : `htmlNextValue={${nativeValue}}`);
+      else if ((node.name === "input" || node.name === "textarea") && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
       else if (node.name === "input" && attribute.name === "checked") bindings.push(`defaultChecked={Boolean(${lowering.value(attribute.expressionPlan.ast, scope)})}`);
       else if (componentPropContract !== undefined) {
         const alias = boundPropAliases.get(componentPropName!)!;
@@ -1032,7 +1037,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   });
   const reflections = [`data-html-next-renderer=${quote(options.target === "preact" ? "preact" : "react")}`,
     ...(target.props.length === 0 ? [] : ["{...reflectedAttrs}"])];
-  const styles = compileComponentStylesForConversion(definition.css, definition, options.componentGraph);
+  const styles = compileComponentStylesForConversion(definition.css, definition, options.componentGraph, { nativeValueMetadata: options.target !== "preact" });
   const hostStateNames = componentStateNames(definition, options.componentGraph);
   const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
