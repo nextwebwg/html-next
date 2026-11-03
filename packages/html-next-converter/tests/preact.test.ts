@@ -18,6 +18,23 @@ const roots: string[] = [];
 const require = createRequire(import.meta.url);
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
+for (const mode of ["application", "library"] as const) it(`serializes a Preact ${mode} select with its bound initial option`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-preact-select-")); roots.push(root);
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "dir");
+  await writeFile(join(root, "package.json"), '{"type":"module"}');
+  await writeFile(join(root, "select.html"), '<template component="x-choice"><defs><state name="choice" type="string" value="y"></state></defs><select bind:value="choice"><option value="x">X</option><option value="y">Y</option></select></template>');
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ target: "preact", mode, entries: ["select.html"], root, outDirectory });
+  const bundle = join(outDirectory, "server.mjs");
+  await build({ entryPoints: [join(outDirectory, manifest.output.entry)], outfile: bundle, bundle: true, platform: "node", format: "esm", packages: "external", jsx: "automatic", loader: { ".css": "empty" } });
+  const { XChoice } = await import(pathToFileURL(bundle).href) as { XChoice: ComponentType };
+  const html = renderToString(createElement(XChoice, {}));
+  const select = parseFragment(html).childNodes.find(node => "tagName" in node && node.tagName === "select");
+  assert.ok(select && "childNodes" in select);
+  const options = select.childNodes.filter(node => "tagName" in node && node.tagName === "option");
+  assert.deepEqual(options.map(node => "attrs" in node && node.attrs.some(attribute => attribute.name === "selected")), [false, true]);
+});
+
 for (const mode of ["application", "library"] as const) it(`converts a typed ${mode} graph for Preact without React installed`, async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-preact-"));
   roots.push(root);

@@ -80,7 +80,7 @@ function withoutStylingMarkers(value: unknown): unknown {
     key,
     key === "attributes" && Array.isArray(entry)
       ? entry.filter((attribute) => Array.isArray(attribute) &&
-        typeof attribute[0] === "string" && attribute[0] !== "data-slotted" && !attribute[0].startsWith("data-v-"))
+        typeof attribute[0] === "string" && attribute[0] !== "data-slotted" && attribute[0] !== "data-html-next-renderer" && !attribute[0].startsWith("data-v-"))
       : withoutStylingMarkers(entry),
   ]));
 }
@@ -179,6 +179,8 @@ export const render = () => renderToString(${expression});
               // Server HTML has no JavaScript validity facade before hydration.
               const requiresHydration = testCase.expect.probe.includes(".validity.");
               await react.waitForFunction(() => document.querySelector("main")?.childElementCount !== 0);
+              assert.equal(await react.locator("[data-html-next-renderer]").first().getAttribute("data-html-next-renderer"), target);
+              assert.equal(await hydrated.locator("[data-html-next-renderer]").first().getAttribute("data-html-next-renderer"), target);
               const [liveResult, reactResult, serverResult] = await Promise.all([live.evaluate((script) => Function(script)(), program),
                 react.evaluate((script) => Function(script)(), program),
                 requiresHydration ? Promise.resolve(undefined) : hydrated.evaluate((script) => Function(script)(), program)]);

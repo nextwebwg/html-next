@@ -1716,7 +1716,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       // A handler that reads $event gets a connection event, as a controller's host.on callback does.
       return `() => ${handlerNames.get(handlers[handler]!.name)!}(${handlerSources[handler]!.includes("(event: Event)") ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
-  ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
+  ].join("\n").replace(/<\/script/gi, match => "<\\/" + match.slice(2)) + "\n</script>";
   const headSpecifier = quote(options.headSpecifier ?? "./head.svelte");
   if (headed) script = script.replace("/* html-next head imports */", [
     `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\b`).test(script)).join(", ")} } from ${headSpecifier};`,

@@ -129,7 +129,7 @@ describe("affected CI", () => {
     const files = new Set(plan.browser.flatMap((job) => job.files));
     expect(files.has("packages/html-next/tests/runtime.test.ts")).toBe(true);
     expect([...files].some((file) => file.endsWith("public-conformance-parity.test.ts"))).toBe(false);
-    expect(plan.corpus).toHaveLength(12);
+    expect(plan.corpus).toHaveLength(18);
     expect(plan.corpus.every((job) => job.files.every((file) => file.endsWith("public-conformance-parity.test.ts")))).toBe(true);
     expect(plan.corpus.every((job) => job.seconds <= 180)).toBe(true);
     expect(createPlan(["packages/htmlkit/src/routes.ts"]).corpus).toEqual([]);
