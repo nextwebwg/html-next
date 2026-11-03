@@ -17,6 +17,7 @@ export interface StateAccess {
 }
 
 export interface ComponentHostOptions {
+  readonly attach?: (host: any) => void;
   readonly inputs?: { port(reactions: {
     readonly declarations?: Readonly<Record<string, { readonly read: () => unknown; readonly status: () => InputStatus }>>;
     track(name: string, kind: "value" | "status" | "supplied"): void;
@@ -95,8 +96,10 @@ function moduleDiagnostic(code: "HJ001" | "HJ002", options: ComponentHostOptions
 }
 
 function documentOrder(elements: readonly Element[]): Element[] {
-  return [...elements].filter((element) => element.isConnected)
-    .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1);
+  return [...elements].sort((left, right) => {
+    const position = left.compareDocumentPosition(right);
+    return position & Node.DOCUMENT_POSITION_DISCONNECTED ? 0 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+  });
 }
 
 ${MODULE_CONNECTION_SOURCE}
@@ -163,7 +166,6 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         const recorded = options.refs.get(name);
         if (!Array.isArray(recorded)) return recorded;
         const live = documentOrder(recorded);
-        if (live.length !== recorded.length) options.refs.set(name, live);
         return live;
       },
       has: (_target, name) => typeof name === "string" && options.refs.has(name),
@@ -238,6 +240,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   }
   if (options.request?.has !== undefined) host.hasResponder = options.request.has(host, own);
   Object.freeze(host);
+  options.attach?.(host);
   // Each request's responder listens on the root from its first connection, before the controller runs.
   const responders = Object.entries(options.responders ?? {});
   for (const [name, read] of responders) listen(name, (event) => read()?.(event), () => untrack(read) !== undefined);

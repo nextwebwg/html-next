@@ -360,7 +360,7 @@ describe("official target compilers", () => {
           "write((next) => (loose = next), loose + 1, isInteger, 'writes.html', 'step', 'loose');"],
         // A read that may be null reverts to the declared value; an operator's result is never null.
         ["write(total, label.value ?? 0.5, isNumber, 'writes.html', 'wrong', 'total')",
-          'write(setTotal, getLabel() ?? 0.5, isNumber, "writes.html", "wrong", "total");',
+          'write(setTotal, (getLabel() ?? 0.5), isNumber, "writes.html", "wrong", "total");',
           "write((next) => (total = next), label ?? 0.5, isNumber, 'writes.html', 'wrong', 'total');"],
       ],
     };

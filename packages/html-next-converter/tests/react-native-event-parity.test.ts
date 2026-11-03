@@ -50,7 +50,9 @@ describe.skipIf(!enabled)("React native custom-event parity", () => {
     await writeFile(reactEntry, `import React from "react";
 import { createRoot } from "react-dom/client";
 import { XParent } from "./react/application";
-createRoot(document.querySelector("main")!).render(<XParent />);`);
+const root = createRoot(document.querySelector("main")!);
+root.render(<XParent />);
+(window as any).unmountConverted = () => root.unmount();`);
     reactBundle = join(outDirectory, "react.js");
     await build({
       entryPoints: [reactEntry], outfile: reactBundle, bundle: true, format: "iife", platform: "browser",
@@ -66,6 +68,36 @@ createRoot(document.querySelector("main")!).render(<XParent />);`);
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} keeps converted roots out of native document observation`, async () => {
+      const browser = await launchParityBrowser(browserType);
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`${child}${parent}<main></main>`);
+        await page.addScriptTag({ path: liveBundle });
+        await page.evaluate(() => {
+          (window as any).nativeConnections = [];
+          (window as unknown as { HtmlRuntime: { observeDocument(root: Document, options: { onConnect(element: Element): void }): void } }).HtmlRuntime
+            .observeDocument(document, { onConnect: element => { (window as any).nativeConnections.push(element); } });
+        });
+        await page.addScriptTag({ path: reactBundle });
+        await page.getByRole("button", { name: "Fire", exact: true }).waitFor();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert.equal(await page.evaluate(() => (window as any).nativeConnections.length), 0);
+        await page.evaluate(() => { document.body.append(document.createElement("x-parent")); });
+        await page.waitForFunction(() => (window as any).nativeConnections.length === 2);
+        assert.equal(await page.getByRole("button", { name: "Fire", exact: true }).count(), 2);
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        assert.equal(await page.evaluate(() => {
+          const root = document.querySelector("main > section")!;
+          document.body.append(root);
+          (window as any).unmountConverted();
+          return root.isConnected;
+        }), false, "renderer disposal releases a root moved through native DOM APIs");
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} forwards a child root and filters its native CustomEvent`, async () => {
       const browser = await launchParityBrowser(browserType);
       const live = await browser.newPage();

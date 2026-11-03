@@ -1,6 +1,6 @@
 # `@nextwebwg/html-next-unplugin`
 
-Vite can convert imported Declarative Components sources into Vue, React, Preact, or Svelte components. Libraries
+Vite can convert imported Declarative Components sources into Vue, React, Preact, Svelte, or Angular components. Libraries
 publish their HTML definitions; consumers use their normal component imports.
 
 Named imports from component folders and pure re-export barrels resolve directly to the requested
@@ -168,6 +168,55 @@ Generated output imports `preact/compat` and uses Preact JSX. Consumers install 
 SSR consumers also install `preact-render-to-string`. Prepare declarations with
 `html-next-sync`, then run `tsc` with `jsx: "react-jsx"` and `jsxImportSource: "preact"`.
 
+For server-rendered components with asynchronous binding modules, React and Preact applications import `renderPrepared` from their source component package and await `renderPrepared(<App />)`. Svelte applications use `await renderPrepared(App, { props })`. The returned HTML includes prepared data that generated components adopt during normal framework hydration. Vue and Angular use their ordinary server rendering lifecycle.
+
+### Angular
+
+Add the Angular target to your existing Angular AOT Vite pipeline:
+
+```ts
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+// Include alongside the plugins that compile your application's Angular templates.
+const components = htmlNext({ target: "angular", entries: ["src/components/**/*.html"] });
+```
+
+Install matching Angular packages, including `@angular/compiler-cli`, and its compatible TypeScript
+version. The adapter invokes that compiler for generated components and links partial-Ivy
+Angular dependencies. Your application's Angular compiler continues to compile its authored code.
+The supported baseline is Angular 21.2.24.
+
+Run `html-next-sync` before standalone Angular typechecking. Extend the generated
+`src/html-next.angular.json` from your application tsconfig and include `src/html-next.d.ts`.
+The generated config maps HTML and source-package imports to Angular class metadata, so
+`strictTemplates` checks input bindings. `declarationsFile` relocates both generated files. If your application declares its own `paths`,
+merge the generated path entries into that object; TypeScript replaces an inherited `paths` object.
+
+```json
+{
+  "extends": "./src/html-next.angular.json",
+  "compilerOptions": { "allowArbitraryExtensions": true },
+  "angularCompilerOptions": { "strictTemplates": true },
+  "include": ["src/**/*.ts"]
+}
+```
+
+Import a generated class into your standalone component's `imports`, then use the native host:
+
+```ts
+import { UiButton } from "@example/controls";
+// imports: [UiButton]
+// template: '<button ui-button [label]="label">Send</button>'
+```
+
+A scoped `row` slot on `ui-table` exports `UiTableRowSlot`. Add it to `imports` with `UiTable`,
+then provide `<ng-template ui-table-row let-item="item">...</ng-template>` inside
+`<table ui-table>`. Template context types come from the declared slot props. Ordinary named
+slots use `slot="name"`; default slots use ordinary children. Angular's standard
+`provideClientHydration()` owns hydration. Native hosts, projected nodes, control defaults, and
+sanitized markup retain their server identities. Data reads and module connections begin in the
+browser. See the [converter limits](../html-next-converter/README.md) before converting a graph.
+
 For Svelte 5, use its standard Vite compiler after the converter:
 
 ```ts
@@ -232,7 +281,7 @@ working; assembly is optional for source libraries.
 
 ### Generated types
 
-The adapter uses `vue-tsc`, TypeScript, or `svelte2tsx` to emit declarations from the converted components.
+The adapter uses `vue-tsc`, TypeScript, `svelte2tsx`, or Angular's `ngc` to emit declarations from the converted components.
 These retain required props, allowed values, dependent prop types, and framework slot APIs.
 Runtime source and declarations live under `node_modules/.html-next/<target>/`.
 `src/html-next.d.ts` exposes the package's exports to the consumer's editor and typechecker.
@@ -370,7 +419,34 @@ The external element remains a native `document.createElement()` boundary and is
 users in the manifest. Capability chunks and the universal HTML Next runtime are not yet dynamic
 boundary strategies.
 
-The current compiled-invocation tranche accepts empty, statically positioned invocations in
-components that do not need the general runtime renderer. Attributes, projected children, events,
-refs, structural flow, invocation cycles, and general-runtime parents fail before emission with a
-source-located `HN` diagnostic rather than producing a partially valid graph.
+Linked invocations compile their props, projected content, events, refs, and structural flow into
+native factories. Recursive components can render finite content; non-terminating invocation chains
+fail with the runtime's nesting diagnostic.
+
+Enable `hydrate: true` to generate factories that can adopt server-rendered roots. Pass the existing
+root as the factory's third argument:
+
+```ts
+// vite.config.ts
+htmlNext({ entries: ["src/components/counter.html"], hydrate: true });
+
+// client.ts
+import { createXCounter } from "virtual:html-next/components";
+
+createXCounter({}, undefined, document.querySelector('[component~="x-counter"]')!);
+```
+
+For components with producer modules exporting `prepare` and `adopt`, build a server entry with
+the same native Vite configuration:
+
+```ts
+// prepare.ts, compiled as a server entry
+export { prepare } from "virtual:html-next/prepare";
+```
+
+Pass that built entry's absolute module URL to `renderComponents` as `prepare.module`, alongside
+the component definitions. The server prepares producer values and transfers their read identities;
+factories adopt those records before connecting browser modules. Server preparation and client
+factories use the same graph revisions. Current caller props take precedence over restored server
+props, and controls retain edits made before hydration. Ordinary components import no binding
+preparation helper.

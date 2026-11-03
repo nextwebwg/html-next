@@ -104,7 +104,7 @@ export {
 
 /** Requests: what a component asks its consumer (src/requests.ts). Loaders hold a root until its controller runs. */
 export {
-  holdController, RequestEvent,
+  holdController, pendingControllers, RequestEvent,
   type RequestEventInit, type RequestOptions, type Responder, type ResponderInit,
 } from "./requests.js";
 
@@ -3846,6 +3846,8 @@ function lowerScopes(
   };
   const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: Iterable<Element>): void => {
     for (const element of elements) {
+      const renderer = element.getAttribute("data-html-next-renderer");
+      if (renderer === "react" || renderer === "preact") continue;
       const live = byTag.get(element.localName);
       if (live !== undefined) prepare(live, element, false);
       if (!element.matches(COMPONENT_ROOT_SELECTOR)) continue;

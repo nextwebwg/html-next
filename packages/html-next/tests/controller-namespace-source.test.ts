@@ -59,3 +59,12 @@ describe("generated controller namespaces", () => {
     assert.equal(acceptsControllerWrite("click", type, []), false);
   });
 });
+
+
+it("loads generated prop checks with a server DOM Event that has no native prototype getter", async () => {
+  const compiled = await transform(typedPropsModule("server-dom"), { loader: "ts", format: "cjs" });
+  const module = { exports: {} as { checkPropInput(value: unknown, type: unknown): { ok: boolean } } };
+  class ServerEvent { constructor(readonly type: string) {} }
+  new Function("Event", "module", "exports", compiled.code)(ServerEvent, module, module.exports);
+  assert.equal(module.exports.checkPropInput("ready", { kind: "terminal", name: "string" }).ok, true);
+});

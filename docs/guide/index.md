@@ -16,7 +16,7 @@ Build reactive components in HTML. Keep markup, state, and styles together, then
 | You want to… | Start here |
 | --- | --- |
 | Learn to author HTML Next components | [Build your first component](/html-next/quick-start), then [use it natively](/html-next/usage). |
-| Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and has Vue and React setup in its switcher. |
+| Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and includes Vue, React, Preact, Svelte and Angular setup in its switcher. |
 | Publish a component library | [Publish your HTML files](/html-next/ship) with instructions for the consuming app’s Vite plugin. |
 | Generate framework source files | The separate [Converter](/html-next/convert) covers conversion commands and their output. |
 

@@ -29,6 +29,7 @@ jobs:
       has_packages: ${{ steps.plan.outputs.has_packages }}
       playwright: ${{ steps.plan.outputs.playwright }}
       generated: ${{ steps.plan.outputs.generated }}
+      converters: ${{ steps.plan.outputs.converters }}
       browser_reused: ${{ steps.reuse.outputs.reused }}
       browser_image: ${{ steps.reuse.outputs.image }}
       browser_node: ${{ steps.reuse.outputs.node }}
@@ -190,10 +191,16 @@ jobs:
         # Node builds the application whose server entry Deno and Bun then run.
         run: node runtime-smoke.mjs && deno run -A runtime-smoke.mjs && bun runtime-smoke.mjs
 
+  converters:
+    name: Converter catalog gate
+    needs: changes
+    if: needs.changes.outputs.converters == 'true'
+    uses: ./.github/workflows/converters.yml
+
   required:
     name: Required
     if: always()
-    needs: [changes, repository, verify, browser, packages, runtimes]
+    needs: [changes, repository, verify, browser, packages, runtimes, converters]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -211,6 +218,8 @@ jobs:
             const expected = results.changes.outputs[flag] === 'true' && !reused ? 'success' : 'skipped';
             if (results[name].result !== expected) process.exit(1);
           }
+          const converters = results.changes.outputs.converters === 'true' ? 'success' : 'skipped';
+          if (results.converters.result !== converters) process.exit(1);
           const runtimes = JSON.parse(results.changes.outputs.packages).includes('htmlkit') ? 'success' : 'skipped';
           if (results.runtimes.result !== runtimes) process.exit(1);
           JS

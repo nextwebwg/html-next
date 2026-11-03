@@ -40,6 +40,8 @@
 
 ## Verification
 
+- Use the real Looma catalog as a required converter pressure test. Every supported target must convert the complete catalog, compile with its framework toolchain, and pass Looma's shared browser tests for rendering and behavior. Keep those assertions independent of the renderer; fix compiler or adapter defects rather than weakening assertions or skipping failing components. Small converter fixtures supplement this gate.
+
 - During development, run the smallest focused test plus `pnpm verify:inner`.
 - Before handoff, run `pnpm verify:pr` and report commands, results, skips, and remaining judgment.
 - Keep each CI check within 15 minutes. Shard a long suite across parallel jobs instead of extending a job, and flag any check that approaches the limit.

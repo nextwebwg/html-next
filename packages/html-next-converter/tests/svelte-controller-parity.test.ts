@@ -14,7 +14,11 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 import { assertTargetedDispatch } from "./fixtures/targeted-dispatch.js";
-import { controllerParitySource as source, controllerParityModule as controller } from "./fixtures/controller-parity.js";
+import { controllerParitySource, controllerParityModule } from "./fixtures/controller-parity.js";
+const source = controllerParitySource.replace("<defs>", '<defs><state name="written" type="list(number)" value="[]"></state>');
+const controller = controllerParityModule.replace("window.controllerHost = host;", `window.controllerHost = host;
+  const stopWriteOnly = host.effect(() => { host.state.written = [host.state.count]; });`)
+  .replace("const cleanup = () => {", "const cleanup = () => { stopWriteOnly();");
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

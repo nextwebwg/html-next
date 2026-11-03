@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.0.0-alpha.82
+
+### Added
+
+- Read current controller startup promises with `pendingControllers(root)` when preparing a DOM subtree for imperative interaction.
+- Require the complete Looma catalog and shared browser behavior tests for native HTML Next and all five converter targets alongside the focused Vite and converter feature checks. Catalog preparation runs once and is reused by browser shards.
+
+- Native Vite builds compile finite recursive component graphs and guard non-terminating invocations with the existing nesting diagnostic. Shared Vite builders reuse one native source snapshot across client and server output.
+- Native Vite builds accept `hydrate: true` to generate factories that adopt server-rendered roots in place. Hydration-enabled factory declarations include the existing root argument.
+- Native hydration builds expose producer preparation through `virtual:html-next/prepare`. Server output and factories share the same source revisions and adopt prepared binding reads before browser connection.
+- Document Preact and Angular in the Usage and quick-start framework selectors, including Angular native hosts, switchable roots and compiler setup.
+- Convert HTML component graphs to Angular 21.2 standalone components with `target: "angular"` or `html-next-convert angular`. Native attribute selectors preserve roots such as `<button ui-button>`; delegated roots compose into one component and retain identity attributes for CSS. The Vite adapter compiles generated components ahead of time, links Angular dependencies, and prepares compiler-visible input and slot types.
+
+### Fixed
+
+- Collapsed native roots retain every pending controller until all of their startup bodies finish.
+- React and Preact controller effects run after rendered refs commit, retain detached refs for renderer disposal, and preserve connected controller lifetimes and data notifications when Suspense hides a root. Converted roots remain owned by their renderer when native HTML Next observation is active.
+- Converted native prop validation preserves application-owned errors. React and Preact retain form reset defaults, user-edited textarea values and initial structured prop metadata; moved native roots return to their declared parent for renderer disposal.
+- React and Preact publish consumer refs only when the native root or receiving ref changes, preventing reactive ref feedback loops during ordinary updates.
+- Preact preserves explicit option value attributes even when their values equal the option text.
+- React and Preact preserve native input, textarea and select value attributes, including pristine input updates, dirty values, controller-owned textarea reset defaults, plain server rendering, hydration and CSS attribute reads.
+- React SVG output uses framework attribute names during client and server rendering.
+- Svelte controller writes do not create reactive read dependencies, and iterated refs retain detached nodes until their renderer attachment is disposed.
+- Svelte preserves initial structured prop metadata and applies mixed own/slotted CSS rules to each selector's intended nodes, including fallback images.
+- Native package controllers activate after importing ancestors, so nested modal surfaces open in DOM order. Controller cleanup promises do not block child activation.
+- React and Preact recheck connection when a controller module finishes loading and omit missing optional colors in repeated style bindings.
+- Converted prop inputs retain accepted object and list identities when revalidation is unchanged, preventing controller render loops while still checking in-place edits.
+- Native prop validity clears its own errors on controls barred from validation, whose platform validation messages are empty.
+- Native hydration preserves incomplete date entries, current typed inputs and prepared calendar rows without replacing their server nodes. Repeated identical attribute writes no longer reset opaque native editing state.
+- Keep application-owned native validation messages when prop validity refreshes, and normalize imported module CSS for canonical native roots.
+- Repeated scoped slots in components with seeded state receive the initial empty dirty map independently of the state initializer.
+- Native hydration preserves explicit current caller props, including null and undefined releases, while restoring server state and retaining DOM nodes.
+- React and Preact controller refs retain their declared single or iterated shape, including absent single refs and empty iterations.
+- Preserve Angular structural-root hydration, live default/named projection and parent ownership through native root changes. Controller-dispatched events render at the next microtask checkpoint before a following native event consumes their bound DOM.
+- Normalize CSS imported by component modules for converted roots while keeping native roots supported in the same application.
+- Format React and Preact output with the TypeScript printer to avoid excessive layout search on deeply nested component graphs.
+- Angular native boolean bindings omit false attributes so controls remain editable and enabled. ARIA bindings preserve serialized false values.
+- Angular prop inspection uses component data attributes instead of duplicating native bindings on the host. Disabled links keep their authored `href` removal through SSR, hydration and later updates.
+- Keep Preact native attribute forwarding and serialized ARIA bindings type-correct for polymorphic component roots.
+- Normalize canonical `component` and legacy `data-component` CSS identities in the shared framework conversion pipeline. Vue, React, Preact, Svelte, and Angular render those identities using their target root markers.
+- Shared generated prop checks tolerate server Event implementations without a prototype type getter. Document-head rendering uses core DOM methods and URL resolution available in Angular SSR, and retains declared-script preloads through later reconciliation.
+
 ## 1.0.0-alpha.81
 
 ### Breaking

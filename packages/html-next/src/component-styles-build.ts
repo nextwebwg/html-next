@@ -1,10 +1,12 @@
-import { componentOwnerSelector } from "./component-identity.js";
+import { COMPONENT_ROOT_SELECTOR, componentOwnerSelector } from "./component-identity.js";
+import { NATIVE_VALUE_ATTRIBUTE, nativeValueCss } from "./native-value.js";
 import { normalizeStylesheetNamespacesForBuild } from "./stylesheet-resources-build.js";
 import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 /**
  * Component style compilation for build tools, which have no DOM. It performs the same rename,
  * two-copy prune, and selector rewrite as the browser (`component-styles.ts`), over postcss.
  */
+import postcssNesting from "postcss-nesting";
 import postcss, { type AtRule, type ChildNode, type Container, type Rule } from "postcss";
 
 import {
@@ -121,6 +123,141 @@ export function compileComponentGraphStylesForBuild(definitions: readonly Compon
   }
   const body = css.filter(part => part !== "").join("\n");
   return hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body);
+}
+
+interface ConversionStyleOptions { readonly includeNative?: boolean; readonly nativeValueMetadata?: boolean }
+
+const CSS_IDENTIFIER = /^(?:[-_a-zA-Z0-9\u0080-\uffff]|\\(?:[0-9a-fA-F]{1,6}[ \t\r\n\f]?|[^\r\n\f]))+/;
+function cssIdentifier(value: string): string {
+  return value.replace(/\\([0-9a-fA-F]{1,6})[ \t\r\n\f]?|\\([^\r\n\f])/g,
+    (_match, hex: string | undefined, character: string | undefined) => {
+      if (hex === undefined) return character!;
+      const point = Number.parseInt(hex, 16);
+      return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : "\ufffd";
+    }).toLowerCase();
+}
+
+/** The native attribute branch retains its specificity; metadata is only the server fallback. */
+function nativeValueAlias(attribute: string): string | undefined {
+  const prefix = /^\[(?:\s|\/\*[\s\S]*?\*\/)*(?:(?:\*|)\|)?/.exec(attribute)?.[0];
+  if (prefix === undefined) return;
+  const name = CSS_IDENTIFIER.exec(attribute.slice(prefix.length))?.[0];
+  if (name === undefined || cssIdentifier(name) !== "value" || !/^(?:\s|\/\*[\s\S]*?\*\/)*(?:[~|^$*]?=|\])/.test(attribute.slice(prefix.length + name.length))) return;
+  return ":where(:not([value]))" + prefix + NATIVE_VALUE_ATTRIBUTE + attribute.slice(prefix.length + name.length);
+}
+
+const nativeValueFunctions = (value: string): string => nativeValueCss(value, NATIVE_VALUE_ATTRIBUTE);
+
+const NATIVE_VALUE_GUARD = ":where([" + NATIVE_VALUE_ATTRIBUTE + "]:not([value]))";
+function nativeValueRules(root: postcss.Root): void {
+  const rules: Rule[] = [];
+  root.walkRules(rule => { rules.push(rule); });
+  for (const rule of rules) {
+    // A keyframe has no selector subject. Its attribute fallback reads the same animated element.
+    if (rule.parent?.type === "atrule" && /(?:^|-)keyframes$/i.test(rule.parent.name)) {
+      rule.walkDecls(declaration => { declaration.value = nativeValueCss(declaration.value, NATIVE_VALUE_ATTRIBUTE, true); });
+      continue;
+    }
+    const declarations = (rule.nodes ?? []).filter(node => node.type === "decl");
+    const values = declarations.map(node => nativeValueFunctions(node.value));
+    if (!values.some((value, index) => value !== declarations[index]!.value)) continue;
+    const selector = complexSelectors(rule.selector).map(complex => {
+      const { pseudo } = subjectCompound(complex);
+      return complex.slice(0, pseudo) + NATIVE_VALUE_GUARD + complex.slice(pseudo);
+    }).join(", ");
+    const next = rule.next();
+    if (next?.type === "rule" && next.selector === selector) {
+      const previous = (next.nodes ?? []).filter(node => node.type === "decl");
+      if (previous.length === declarations.length && previous.every((node, index) => node.prop === declarations[index]!.prop && node.value === values[index] && node.important === declarations[index]!.important)) continue;
+    }
+    // Copy every declaration to preserve shorthand overrides and source order within the block.
+    const fallback = rule.clone({ selector, nodes: [] });
+    declarations.forEach((node, index) => fallback.append(node.clone({ value: values[index]! })));
+    rule.after(fallback);
+  }
+}
+
+/** Converted roots have one target identity; consume canonical/legacy CSS together here. */
+export function normalizeConversionStyleIdentities(css: string, identity: "component" | "class" | "attribute", options: ConversionStyleOptions = {}): string {
+  const compatible = (...selectors: string[]): string => { const unique = [...new Set(selectors)]; return unique.length === 1 ? unique[0]! : `:is(${unique.join(", ")})`; };
+  const targetBoundary = identity === "component" ? "[component]" : `[${VUE_ROOT_ATTRIBUTE}]`;
+  const boundary = options.includeNative ? compatible("[component]", "[data-component]", targetBoundary) : targetBoundary;
+  const ownerSelector = (tag: string, namespace = ""): string => {
+    const prefix = namespace === "" ? "" : namespace + "*";
+    const target = identity === "class" ? tagClassSelector(tag, namespace) : `${prefix}[${identity === "attribute" ? tag : `component~="${tag}"`}]`;
+    return options.includeNative ? compatible(`${prefix}[component~="${tag}"]`, `${prefix}[data-component~="${tag}"]`, target) : target;
+  };
+  function normalizeSelector(selector: string): string {
+    let result = "";
+    for (let index = 0; index < selector.length;) {
+      const start = index;
+      if (options.nativeValueMetadata && selector.startsWith(NATIVE_VALUE_GUARD, index)) {
+        result += NATIVE_VALUE_GUARD; index += NATIVE_VALUE_GUARD.length; continue;
+      }
+      if (selector.startsWith(COMPONENT_ROOT_SELECTOR, index)) {
+        result += boundary; index += COMPONENT_ROOT_SELECTOR.length; continue;
+      }
+      // Collapse the shared canonical/legacy selector as one unit, including namespace prefixes.
+      const owner = /^:is\(([^[]*)\[component~="([a-z][a-z0-9-]*)"\]/.exec(selector.slice(index));
+      if (owner !== null) {
+        const namespace = owner[1] === "" ? "" : owner[1]!.slice(0, -1);
+        const compatible = componentOwnerSelector(owner[2]!, namespace);
+        if (selector.startsWith(compatible, index)) {
+          result += ownerSelector(owner[2]!, namespace); index += compatible.length; continue;
+        }
+      }
+      if (selector[index] === "\\") { result += selector.slice(index, index + 2); index += 2; continue; }
+      if (selector[index] === '"' || selector[index] === "'") {
+        const delimiter = selector[index++];
+        while (index < selector.length) { if (selector[index++] === "\\") index++; else if (selector[index - 1] === delimiter) break; }
+      } else if (selector[index] === "[") {
+        index++;
+        let delimiter = "";
+        while (index < selector.length) {
+          const character = selector[index++];
+          if (character === "\\") { index++; continue; }
+          if (delimiter !== "") { if (character === delimiter) delimiter = ""; }
+          else if (character === '"' || character === "'") delimiter = character;
+          else if (character === "]") break;
+        }
+        const attribute = selector.slice(start, index);
+        const valueAlias = options.nativeValueMetadata ? nativeValueAlias(attribute) : undefined;
+        if (valueAlias !== undefined) {
+          // A subsequent normalization must consume our entire fallback, including its [value] guard.
+          const delimiter = /^\s*,\s*/.exec(selector.slice(index))?.[0];
+          const tail = delimiter === undefined ? "" : delimiter + valueAlias + ")";
+          if (/:is\(\s*$/.test(selector.slice(0, start)) && tail !== "" && selector.startsWith(tail, index)) {
+            result += attribute + tail; index += tail.length; continue;
+          }
+          result += ":is(" + attribute + ", " + valueAlias + ")"; continue;
+        }
+        const named = /^\[(?:data-)?component\s*~=\s*(?:"([a-z][a-z0-9-]*)"|'([a-z][a-z0-9-]*)'|([a-z][a-z0-9-]*))\s*\]$/.exec(attribute);
+        if (named !== null) { result += ownerSelector((named[1] ?? named[2] ?? named[3])!); continue; }
+        if (attribute === "[component]" || attribute === "[data-component]") { result += boundary; continue; }
+      } else index++;
+      result += selector.slice(start, index);
+    }
+    return result;
+  }
+  let root = postcss.parse(css);
+  let nativeValues = false;
+  if (options.nativeValueMetadata) root.walkDecls(declaration => { if (nativeValueFunctions(declaration.value) !== declaration.value) nativeValues = true; });
+  if (nativeValues) root = postcss([postcssNesting({ edition: "2024-02" })]).process(root, { from: undefined }).sync().root;
+  root.walkRules(rule => { rule.selector = normalizeSelector(rule.selector); });
+  root.walkAtRules("scope", rule => { rule.params = normalizeSelector(rule.params); });
+  if (nativeValues) nativeValueRules(root);
+  return root.toString();
+}
+
+/** Native-style framework output shares the same identity normalization as class-scoped output. */
+export function compileComponentStylesForConversion(css: string, definition: ComponentDefinition, graph?: ComponentStyleGraph, options: ConversionStyleOptions = {}): CompiledComponentStyles {
+  const compiled = compileComponentStylesForBuild(css, definition, undefined, undefined, true, graph);
+  return { ...compiled, css: normalizeConversionStyleIdentities(compiled.css, "component", options) };
+}
+
+export function compileComponentGraphStylesForConversion(definitions: readonly ComponentDefinition[], identity: "component" | "attribute" = "component",
+  graph: ComponentStyleGraph = definitionGraph(definitions), options: ConversionStyleOptions = {}): string {
+  return normalizeConversionStyleIdentities(compileComponentGraphStylesForBuild(definitions, graph), identity, options);
 }
 
 function compileStyles(css: string, definition: ComponentDefinition, source?: string,
@@ -291,9 +428,20 @@ export function compileComponentStylesForSvelte(
       descends ||= !scoped.root;
       return scoped.selector;
     }).join(", ");
-  }, (root) => root.walkAtRules(/keyframes$/i, (rule) => {
-    if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
-  }),
+  }, (root) => {
+    // Nested rules inherit ownership from their parent selector, so split mixed lists first.
+    root.walkRules((rule) => {
+      const selectors = postcss.list.comma(rule.selector);
+      const own = selectors.filter(selector => !selector.includes(SLOTTED));
+      const projected = selectors.filter(selector => selector.includes(SLOTTED));
+      if (own.length === 0 || projected.length === 0) return;
+      rule.cloneAfter({ selector: projected.join(", ") });
+      rule.selector = own.join(", ");
+    });
+    root.walkAtRules(/keyframes$/i, (rule) => {
+      if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
+    });
+  },
   // A nested or projected component's root bounds the scope, as `[data-hn]` does in Vue; with neither, nothing does.
   () => descends && ((definition.slots?.length ?? 0) > 0 || componentTags(definition.template).size > 0) && `[${VUE_ROOT_ATTRIBUTE}]`, graph);
   return hashed ? { ...compiled, hashed } : compiled;
@@ -345,11 +493,11 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
     }
   }
   if (scope.nodes === undefined || scope.nodes.length === 0) {
-    return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
+    return withImportedStateNames({ css: normalizeConversionStyleIdentities(root.toString().trim(), "class"), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
   }
   root.append(scope);
   if (projecting?.nodes !== undefined && projecting.nodes.length > 0) root.append(projecting);
-  return withImportedStateNames({ css: root.toString().trim(), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
+  return withImportedStateNames({ css: normalizeConversionStyleIdentities(root.toString().trim(), "class"), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
 }
 
 /** One complex selector as `:global()`, with any test of its subject's ownership before its pseudo-element. */

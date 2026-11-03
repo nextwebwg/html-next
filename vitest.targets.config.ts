@@ -52,6 +52,7 @@ config.test!.include = [
   "packages/html-next/tests/vue-parity.test.ts",
   "packages/html-next-converter/tests/vue-*-parity.test.ts",
   "packages/html-next-converter/tests/react-*-parity.test.ts",
+  "packages/html-next-converter/tests/preact-*-parity.test.ts",
   "packages/html-next-converter/tests/svelte-*-parity.test.ts",
   "packages/html-next-converter/tests/event-containment-parity.test.ts",
   "packages/html-next-converter/tests/request-parity.test.ts",
@@ -72,6 +73,7 @@ config.test!.include = [
   "packages/html-next-converter/tests/library-distribution.test.ts",
   "packages/html-next-unplugin/tests/framework.test.ts",
   "packages/html-next-unplugin/tests/preact-framework.test.ts",
+  "packages/html-next-unplugin/tests/angular-framework.test.ts",
 ];
 
 export default config;

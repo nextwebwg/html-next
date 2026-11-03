@@ -39,16 +39,17 @@ export class PropBoundary<P> extends React.Component<PropBoundaryProps<P>, PropB
 
 const INPUTS = `
 export function usePropInputs(values: Record<string, unknown>, defaults: Readonly<Record<string, unknown>>,
-  check: PropInputOptions["check"]): PropInputs {
+  check: PropInputOptions["check"], initialize?: (inputs: PropInputs) => void): PropInputs {
   const ref = React.useRef<{ inputs: PropInputs; revision: number; listeners: Set<() => void> } | undefined>(undefined);
   if (ref.current === undefined) {
     ref.current = { revision: 0, listeners: new Set(), inputs: new PropInputs({ names: Object.keys(values), values, defaults, check,
       invalidate: () => { ref.current!.revision += 1; for (const notify of ref.current!.listeners) notify(); } }) };
+    initialize?.(ref.current.inputs);
   }
   const current = ref.current;
   React.useSyncExternalStore(React.useCallback(notify => { current.listeners.add(notify); return () => { current.listeners.delete(notify); }; }, [current]),
     () => current.revision, () => current.revision);
-  const candidate = current.inputs.fork({ names: Object.keys(values), values, defaults, check,
+  const candidate = typeof document === "undefined" ? current.inputs : current.inputs.fork({ names: Object.keys(values), values, defaults, check,
     invalidate: () => { current.revision += 1; for (const notify of current.listeners) notify(); } });
   React.useLayoutEffect(() => { current.inputs.commit(candidate); });
   return candidate;

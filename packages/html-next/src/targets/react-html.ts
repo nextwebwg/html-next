@@ -9,12 +9,19 @@ import { defaultTreeAdapter, html as parse5Html, parseFragment, type DefaultTree
 
 ${SAFE_HTML_SANITIZER_SOURCE}
 
+function attributeName(name: string, namespace: string): string {
+  if (name === "class") return "className";
+  if (name === "for") return "htmlFor";
+  return namespace === "http://www.w3.org/2000/svg" && !/^(?:aria|data)-/.test(name)
+    ? name.replace(/[-:]([a-z])/g, (_, letter: string) => letter.toUpperCase()) : name;
+}
+
 function browserChildren(parent: ParentNode, projected = false): ReactNode[] {
   return Array.from(parent.childNodes).flatMap((node, index): ReactNode[] => {
     if (node.nodeType === 3) return [node.textContent ?? ""];
     if (node.nodeType !== 1) return [];
     const element = node as Element;
-    const attributes = Object.fromEntries(Array.from(element.attributes, ({ name, value }) => [name, value]));
+    const attributes = Object.fromEntries(Array.from(element.attributes, ({ name, value }) => [attributeName(name, element.namespaceURI ?? ""), value]));
     return [createElement(element.localName, { ...attributes, ...(projected ? { "data-slotted": "" } : {}), key: index }, ...browserChildren(element))];
   });
 }
@@ -23,7 +30,7 @@ function serverChildren(nodes: readonly DefaultTreeAdapterTypes.ChildNode[], pro
   return nodes.flatMap((node, index): ReactNode[] => {
     if (node.nodeName === "#text" && "value" in node) return [node.value];
     if (!("tagName" in node)) return [];
-    const attributes = Object.fromEntries(node.attrs.map(({ name, value }) => [name, value]));
+    const attributes = Object.fromEntries(node.attrs.map(({ name, value }) => [attributeName(name, node.namespaceURI), value]));
     return [createElement(node.tagName, { ...attributes, ...(projected ? { "data-slotted": "" } : {}), key: index }, ...serverChildren(node.childNodes))];
   });
 }

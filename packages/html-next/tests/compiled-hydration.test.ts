@@ -46,6 +46,20 @@ afterEach(() => {
 });
 
 describe("compiled hydration of Node output", () => {
+  for (const [props, label] of [[{}, "Server"], [{ label: "Client" }, "Client"], [{ label: null }, "Visits"], [{ label: undefined }, "Visits"]] as const) {
+    it(`retains server state while hydrating current caller props ${JSON.stringify(props)} as ${label}`, async () => {
+      const rendered = await renderComponents('<ssr-counter id="subject" label="Server"></ssr-counter>', {
+        definitions, state: { "#subject": { count: 7 } },
+      });
+      const { document, runtime } = await page(rendered.html);
+      const root = document.querySelector("#compiled #subject")!;
+      assert.equal(runtime.factories["ssr-counter"]!(props, undefined, root), root);
+      await flush();
+      assert.equal(root.getAttribute("data-label"), label);
+      assert.equal(root.querySelector("button span")!.textContent, "7");
+    });
+  }
+
   for (const attribute of ["component", "data-component"]) {
     it(`adopts ${attribute} roots without mirroring identity`, async () => {
       const rendered = await renderComponents('<ssr-delegate id="subject">Kept</ssr-delegate>', { definitions });

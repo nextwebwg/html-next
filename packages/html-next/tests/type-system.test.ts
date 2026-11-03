@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import { deepFreeze } from "../src/freeze.js";
 
 import {
@@ -150,6 +150,17 @@ describe("native event values", () => {
     assert.equal(Object.isFrozen(detail), false);
     event.preventDefault();
     assert.equal(event.defaultPrevented, true);
+  });
+
+  it("can load beside an SSR Event implementation without a native type getter", async () => {
+    vi.stubGlobal("Event", class { readonly type = "ssr"; });
+    try {
+      vi.resetModules();
+      const { deepFreeze: freeze } = await import("../src/freeze.js");
+      const value = freeze({ label: { value: "Prepared" } });
+      assert.equal(Object.isFrozen(value), true);
+      assert.equal(Object.isFrozen(value.label), true);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it("rejects native event serialization while retaining serializable absent event values", () => {

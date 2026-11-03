@@ -80,13 +80,13 @@ describe("checkHtmlNext", () => {
     assert.deepEqual(diagnostics.map(({ code, line }) => [code, line]), [["HN001", 2], ["HN001", 3]]);
   });
 
-  it("reports separate cycles without marking their acyclic parent as cyclic", async () => {
+  it("accepts recursive invocation graphs whose depth is checked at runtime", async () => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), '<link rel="component" href="./one.html"><link rel="component" href="./two.html"><template component="x-app"><main><x-one></x-one><x-two></x-two></main></template>');
     await writeFile(join(root, "one.html"), '<template component="x-one"><main><x-one></x-one></main></template>');
     await writeFile(join(root, "two.html"), '<template component="x-two"><main><x-two></x-two></main></template>');
     const diagnostics = await checkHtmlNext({ root, entries: ["app.html"] });
-    assert.deepEqual(diagnostics.map(({ code, source }) => [code, source?.split("/").at(-1)]), [["HN002", "one.html"], ["HN002", "two.html"]]);
+    assert.deepEqual(diagnostics, []);
   });
 
   it("checks dependencies even when their importing component has a parse error", async () => {

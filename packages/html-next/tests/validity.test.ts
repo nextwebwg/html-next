@@ -234,6 +234,52 @@ describe.skipIf(!enabled)("browser validity", () => {
       }
     });
 
+    it(`${name}: preserves native custom errors across derived prop validity refreshes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<form><input id="field"></form>');
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const V = (window as unknown as { V: typeof import("../src/validity.js") }).V;
+          const input = document.querySelector("input")!;
+          let valid = true;
+          V.manageDerivedValidity(input, () => valid ? { valid: true, errors: [] } : { valid: false, errors: [{ reason: "customError", message: "Prop error" }] });
+          input.setCustomValidity("Application error");
+          V.refreshElementValidity(input);
+          const first = [input.checkValidity(), input.validationMessage];
+          valid = false; V.refreshElementValidity(input);
+          const invalid = [input.checkValidity(), input.validationMessage];
+          input.setCustomValidity(""); V.refreshElementValidity(input);
+          const cleared = [input.checkValidity(), input.validationMessage];
+          valid = true; V.refreshElementValidity(input);
+          return { first, invalid, cleared, final: [input.checkValidity(), input.validationMessage] };
+        });
+        assert.deepEqual(result, { first: [false, "Application error"], invalid: [false, "Application error"], cleared: [false, "Prop error"], final: [true, ""] });
+      } finally { await browser.close(); }
+    });
+
+    it(`${name}: clears owned errors on controls barred from validation`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<output></output><input disabled><input readonly>');
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const V = (window as unknown as { V: typeof import("../src/validity.js") }).V;
+          return [...document.querySelectorAll("output, input")].map(element => {
+            const control = element as HTMLInputElement;
+            let valid = false;
+            V.manageDerivedValidity(control, () => valid ? { valid: true, errors: [] } : { valid: false, errors: [{ reason: "customError", message: "Prop error" }] });
+            const invalid = [control.willValidate, control.validity.customError, control.validationMessage];
+            valid = true; V.refreshElementValidity(control);
+            return { invalid, cleared: control.validity.valid };
+          });
+        });
+        assert.deepEqual(result, Array.from({ length: 3 }, () => ({ invalid: [false, true, ""], cleared: true })));
+      } finally { await browser.close(); }
+    });
+
     it(`${name}: preserves native email validation and form submission`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
