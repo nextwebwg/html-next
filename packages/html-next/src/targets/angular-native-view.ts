@@ -160,7 +160,7 @@ export class HtmlNextSlot {
     const nodes = this.supplied?.rootNodes as Node[] | undefined;
     const content = nodes?.some(node => node.nodeType === 1 || node.nodeType === 3 && !!node.textContent?.trim());
     for (const node of nodes ?? []) if (node.nodeType === 1) {
-      (node as Element).setAttribute("data-slotted", "");
+      if (!(node as Element).hasAttribute("data-slotted")) (node as Element).setAttribute("data-slotted", "");
       if (this.name()) (node as Element).setAttribute("slot", this.name());
     }
     if (!content && !this.empty && this.fallback()) {
