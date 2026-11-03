@@ -14,8 +14,10 @@
 
 ### Fixed
 
-- React and Preact controller effects run after rendered refs commit, retain detached refs until renderer disposal, and disconnect before ref cleanup. Converted roots remain owned by their renderer when native HTML Next observation is active.
+- React and Preact controller effects run after rendered refs commit, retain detached refs for renderer disposal, and preserve connected controller lifetimes and data notifications when Suspense hides a root. Converted roots remain owned by their renderer when native HTML Next observation is active.
 - Converted native prop validation preserves application-owned errors. React and Preact retain form reset defaults, user-edited textarea values and initial structured prop metadata; moved native roots return to their declared parent for renderer disposal.
+- React and Preact publish consumer refs only when the native root or receiving ref changes, preventing reactive ref feedback loops during ordinary updates.
+- Preact preserves explicit option value attributes even when their values equal the option text.
 - React SVG output uses framework attribute names during client and server rendering.
 - Svelte controller writes do not create reactive read dependencies, and iterated refs retain detached nodes until their renderer attachment is disposed.
 - Svelte preserves initial structured prop metadata and applies mixed own/slotted CSS rules to each selector's intended nodes, including fallback images.

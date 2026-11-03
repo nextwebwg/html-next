@@ -152,6 +152,13 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   const [, requestCommit] = React.useReducer((revision: number, _action: undefined) => revision + 1, 0);
   const committing = React.useRef(false);
   React.useLayoutEffect(() => { latest.current = options; });
+  const retainedRefs = React.useRef<ReadonlyMap<string, ReadonlySet<Element>> | undefined>(undefined);
+  React.useLayoutEffect(() => {
+    retainedRefs.current = undefined;
+    return () => {
+      retainedRefs.current = new Map([...latest.current.refs].map(([name, elements]) => [name, new Set(elements)]));
+    };
+  }, []);
   const runtime = React.useRef<{
     readonly host: ControllerHost;
     readonly synchronize: () => void;
@@ -178,7 +185,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       queuedCommit = true;
       queueMicrotask(() => {
         queuedCommit = false;
-        if (connected) flushSync(() => requestCommit(undefined));
+        if (connected) {
+          flushSync(() => requestCommit(undefined));
+          // Suspense can retain the DOM without a commit; data providers must still notify readers.
+          if (pendingEffects.size > 0) runtime.current!.flushEffects();
+        }
       });
     };
     // A listener's known responder (k), and for a request's function prop or event form whether one is set (r).
@@ -326,12 +337,12 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
         get: (_target, name) => {
           if (typeof name !== "string") return undefined;
-          const elements = latest.current.refs.get(name);
+          const elements = (latest.current.root.current === null ? retainedRefs.current ?? latest.current.refs : latest.current.refs).get(name);
           if (elements === undefined) return undefined;
           const ordered = documentOrder(elements);
           return latest.current.iteratedRefs?.includes(name) ? ordered : ordered[0];
         },
-        has: (_target, name) => typeof name === "string" && latest.current.refs.has(name),
+        has: (_target, name) => typeof name === "string" && (latest.current.root.current === null ? retainedRefs.current ?? latest.current.refs : latest.current.refs).has(name),
       }),
       slots: new Proxy({} as Record<string, readonly Element[]>, {
         get: (_target, name) => {
@@ -593,7 +604,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     runtime.current!.checkValues();
     return () => { active = false; for (const stop of stops) stop(); };
   }, [...Object.values(options.state).map(state => state.subscribe), ...(options.contexts ?? []).map(context => context.subscribe)]);
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     const root = latest.current.root.current;
     if (root === null) return;
     const stopObserving = observeConnection(root, runtime.current!.synchronize);

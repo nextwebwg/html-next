@@ -406,7 +406,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     assert.match(component, /reportValidity/);
     assert.match(component, /\.focus\(\)/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
-    assert.match(field, /useImperativeHandle\(props\.ref/);
+    assert.match(field, /useRootHandle\(rootRef, props\.ref\)/);
     await typecheckReact(root, manifest.output.artifacts
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
       .map((artifact) => join(outDirectory, artifact.path)));

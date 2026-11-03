@@ -86,7 +86,7 @@ function pascal(name: string): string {
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
 const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
-  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef"] as const;
+  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle"] as const;
 
 export interface ReactConversionOptions {
   readonly modulePreparation?: { readonly source: string };
@@ -560,7 +560,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   // HTML attribute names are case-insensitive; uppercase bypasses Preact's case-sensitive
   // DOM-property lookup for attributes whose property has different behavior (output.value, constructor).
   const nativeAttribute = (name: string): boolean => state.preact && !component && !svg &&
-    (name === "constructor" || name === "value" && !["input", "textarea", "select", "option"].includes(node.name));
+    (name === "constructor" || name === "value" && !["input", "textarea", "select"].includes(node.name));
   const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string => {
     const value = lowering.attribute(node, valueScope, name);
     return state.preact && isEnumeratedBoolean(name) ? `(${value})?.toString()` : value;
@@ -1292,7 +1292,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(capturesRoot ? [
       `  const rootRef = React.useRef<${publicRootType} | null>(null);`,
       ...(preservesRootFocus ? ["  const rootFocusPending = React.useRef(false);"] : []),
-      "  React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);",
+      "  useRootHandle(rootRef, props.ref);",
       ...(attachments.some(attachment => attachment.forwardsOnly) ? ["  const ownedRootRef = useOwnedRootRef(rootRef);"] : []),
     ] : []),
     ...(target.props.length === 0 ? [] : [

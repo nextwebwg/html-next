@@ -55,7 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         renderer: [html-next, vue, react, preact, svelte, angular]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -84,7 +84,7 @@ jobs:
         env:
           LOOMA_PARALLEL_SCENARIOS: "1"
           LOOMA_SCENARIO_CONCURRENCY: "4"
-        run: pnpm verify:converters --prepared --catalog-only --target=${{ matrix.renderer }} --shard=${{ matrix.shard }}/4 -- --maxWorkers=1
+        run: pnpm verify:converters --prepared --catalog-only --target=${{ matrix.renderer }} --shard=${{ matrix.shard }}/6 -- --maxWorkers=1
       - name: Preserve failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

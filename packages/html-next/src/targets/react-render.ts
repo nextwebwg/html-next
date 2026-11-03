@@ -36,6 +36,29 @@ export function useOwnedRootRef<T extends Element>(root: { current: T | null }):
   }, [root]);
 }
 
+/** Publish native handles only when the consumer or native root changes. */
+export function useRootHandle<T extends Element>(root: { current: T | null }, ref: React.Ref<T> | undefined): void {
+  const previous = React.useRef<{ element: T | null; ref: React.Ref<T> | undefined } | undefined>(undefined);
+  const dispose = React.useRef<(() => void) | undefined>(undefined);
+  React.useLayoutEffect(() => () => {
+    dispose.current?.(); dispose.current = undefined; previous.current = undefined;
+  }, []);
+  React.useLayoutEffect(() => {
+    const element = root.current;
+    if (previous.current?.element === element && previous.current?.ref === ref) return;
+    dispose.current?.(); dispose.current = undefined;
+    previous.current = { element, ref };
+    if (!ref || !element) return;
+    if (typeof ref === "function") {
+      const cleanup = ref(element);
+      dispose.current = typeof cleanup === "function" ? cleanup : () => { ref(null); };
+    } else {
+      ref.current = element;
+      dispose.current = () => { ref.current = null; };
+    }
+  });
+}
+
 /** Structured prop metadata keeps its initial value; rendered bindings read current inputs. */
 export function useReflectedProp(): (name: string, value: unknown) => string | undefined {
   const structured = React.useRef<Map<string, string> | undefined>(undefined);

@@ -178,3 +178,13 @@ surface visible. Controller writes therefore share one microtask commit through 
 `flushSync` or Preact's compatibility equivalent. The framework still owns reconciliation and ref
 publication; controller reactions run after that commit. This batches synchronous controller writes
 before the following native task and adds no DOM observer or independent rendering pass.
+
+React invokes layout-effect cleanup when Suspense hides connected DOM. That cleanup therefore
+snapshots named refs but does not end controller observation. Passive effect disposal and native
+connection observation retain lifecycle ownership. If Suspense prevents a queued commit, pending
+controller reactions still notify data consumers so a provider can resolve the suspended render.
+
+Native DOM callback refs describe attachment changes, while React's imperative-handle layout effect
+can clear and republish the same handle after each render. Converted native roots publish from a
+layout effect only when the root or consumer ref changes. A separate layout cleanup releases the
+handle on disposal or Suspense hiding, including callback-provided cleanup functions.
