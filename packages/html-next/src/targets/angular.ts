@@ -547,7 +547,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         statuses.set(declaration.as ?? declaration.name, `(this.${id} as Signal<any> & { status?: () => InputStatus }).status?.() ?? (this.${id}() === undefined ? UNRESOLVED_INPUT : READY_INPUT)`); continue;
       }
       const type = declarationTypeNode(declaration.type, declaration.shape) ?? (declaration.kind === "computed" && declaration.expression !== undefined ? typeOf(declaration.expression.ast, names).type : undefined);
-      types.set(declaration.name, type === undefined ? UNKNOWN : present(type));
+      types.set(declaration.name, type === undefined ? UNKNOWN : { ...present(type), nullable: declaration.kind === "computed" });
       if (declaration.kind === "state") {
         const setter = field(); writes.set(declaration.name, setter);
         const literal = declaration.expression === undefined ? undefined : literalInitial(declaration.expression.ast);

@@ -482,6 +482,20 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "computed member reads stay absent as list results arrive and clear",
+    source: scene({
+      defs: `<state name="items" type="list(object({ label: string }))" value="[]"></state><computed name="current" from="$items[0]"></computed>` +
+        `<handler name="fill"><set name="items" expr:value="[{ label: 'Ready' }]"></set></handler><handler name="clear"><set name="items" expr:value="[]"></set></handler>`,
+      root: `<div><output $value="$current.label"></output><button on:click="fill">Fill</button><button on:click="clear">Clear</button></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#b output').textContent;`,
+      result: "",
+      after: [{ action: `document.querySelectorAll('#b button')[0].click();`, result: "Ready" }, { action: `document.querySelectorAll('#b button')[1].click();`, result: "" }],
+    },
+  },
+  {
     name: "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
     source: scene({
       defs: `<state name="textNumber" type="string" value="1"></state>`,
