@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.87
+
+- List all five framework targets in the JS Tools introduction and explain its Looma and cross-browser conversion checks.
+
 ## 1.0.0-alpha.86
 
 - Qualify the complete Looma catalog with native page-keyboard navigation in its shared tooltip activation checks, retaining all tooltip assertions and explicitly checking the returning focus.

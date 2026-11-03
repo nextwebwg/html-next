@@ -9,7 +9,9 @@ pager: false
 
 # Universal components. Built with HTML.
 
-Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively, in Vue, in React, or in Svelte.
+Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively or in Vue, React, Preact, Svelte, or Angular.
+
+Conversion is tested against [Looma’s complete catalog](https://threadlabs.studio/looma/) and shared interaction tests in Chromium. [Parity checks](https://github.com/nextwebwg/html-next/actions/workflows/converter-corpus.yml) also compare behavior and rendering in Chromium, Firefox, and WebKit.
 
 ## Get started
 
