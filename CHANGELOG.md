@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.86
+
+- Qualify the complete Looma catalog with native page-keyboard navigation in its shared tooltip activation checks, retaining all tooltip assertions and explicitly checking the returning focus.
+
 ## 1.0.0-alpha.85
 
 - Preserve Angular whitespace, dimensional computed values, invalid structural regions, public validity, ordinary two-way bindings, and sanitized fragment HTML through SSR and hydration.
