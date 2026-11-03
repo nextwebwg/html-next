@@ -31,7 +31,7 @@ export function nativeValueCss(value: string, attribute: string, fallback = fals
         }
         if (value.startsWith("*|", at)) at += 2; else if (value[at] === "|") at++;
         const property = identifier.exec(value.slice(at))?.[0];
-        if (property !== undefined && decode(property) === "value" && /^(?:\s|[,)]|$)/.test(value.slice(at + property.length))) {
+        if (property !== undefined && decode(property) === "value" && /^(?:\s|\/\*|[,)]|$)/.test(value.slice(at + property.length))) {
           if (!fallback) {
             result += value.slice(start, at) + attribute;
             index = at + property.length; continue;

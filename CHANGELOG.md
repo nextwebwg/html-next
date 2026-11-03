@@ -18,7 +18,7 @@
 - Converted native prop validation preserves application-owned errors. React and Preact retain form reset defaults, user-edited textarea values and initial structured prop metadata; moved native roots return to their declared parent for renderer disposal.
 - React and Preact publish consumer refs only when the native root or receiving ref changes, preventing reactive ref feedback loops during ordinary updates.
 - Preact preserves explicit option value attributes even when their values equal the option text.
-- React and Preact preserve native input, textarea and select value attributes, including pristine input updates, dirty values, plain server rendering, hydration and CSS attribute reads.
+- React and Preact preserve native input, textarea and select value attributes, including pristine input updates, dirty values, controller-owned textarea reset defaults, plain server rendering, hydration and CSS attribute reads.
 - React SVG output uses framework attribute names during client and server rendering.
 - Svelte controller writes do not create reactive read dependencies, and iterated refs retain detached nodes until their renderer attachment is disposed.
 - Svelte preserves initial structured prop metadata and applies mixed own/slotted CSS rules to each selector's intended nodes, including fallback images.

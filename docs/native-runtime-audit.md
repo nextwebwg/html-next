@@ -197,6 +197,16 @@ its bound value changes. The attribute is applied before the helper publishes th
 Preact accepts the native attribute through its uppercase attribute spelling. The browser retains
 ownership of dirty-value behavior in both targets.
 
+React also rewrites an uncontrolled textarea's default during commits. A native controller can
+own that default independently of its value attribute. The textarea helper carries the observed
+default into the render and uses React's before-mutation snapshot and post-commit lifecycle to
+preserve changes made between render and commit. Restoring the native default uses its setter,
+which keeps dirty values and lets pristine values follow the default after a form reset.
+React's synthetic event restoration also reads its cached default after input/change events.
+The helper refreshes that cache through React's normal event batch when a native controller has
+changed the default; consumer handlers still run before the refresh. Real typing and form reset
+regressions cover this path separately from ordinary prop updates.
+
 Plain React SSR represents textarea/select value attributes with private metadata. Converted CSS
 preserves attribute-selector specificity and supplies metadata branches for attribute reads.
 PostCSS nesting runs only when those reads need branches; complete declaration blocks retain
@@ -207,8 +217,13 @@ Browser coverage compares native defaults, CSS and inline/animated attribute rea
 and after hydration, then checks native attribute mutation and removal. This compiler processing
 does not add the PostCSS parser to generated browser output.
 
-A production React fixture with 100 dirty inputs and 100 synchronous prop updates measured seven
-alternating runs against the prior default-value mapping. Median update time was 30.7 ms versus
-28.8 ms in Chromium and 34 ms versus 30 ms in WebKit; the complete minified consumer added 925
-gzip bytes. Both variants were validated outside the timed section for current values, defaults
-and attributes. These local measurements describe that workload, not a general framework ranking.
+Production React fixtures each measured 100 dirty controls through 100 synchronous updates, with
+seven alternating runs against the prior default-value mapping. Input updates change the value
+attribute; textarea updates change an unrelated data attribute while retaining the native default.
+Both variants were validated outside the timed section for live values, defaults and attributes.
+These local measurements describe those workloads, not a general framework ranking.
+
+| Workload | Consumer gzip increase | Chromium median, new / prior | WebKit median, new / prior |
+| --- | ---: | ---: | ---: |
+| Input value updates | 930 bytes | 31.9 / 29.6 ms | 36.0 / 34.0 ms |
+| Textarea attribute updates | 1,146 bytes | 43.3 / 35.1 ms | 46.0 / 39.0 ms |

@@ -294,14 +294,14 @@ it("keeps a component type selector's namespace in Vue's class form", () => {
 });
 
 it("preserves native value CSS through SSR metadata without repeated expansion", () => {
-  const css = `textarea[value="a,b"]:not([value=""]), [VALUE^="a" i], [v\\61 lue] { content: attr(value, "empty"); --quoted: "attr(value)"; }
+  const css = `textarea[value="a,b"]:not([value=""]), [VALUE^="a" i], [v\\61 lue], [/**/value/**/="a,b"] { content: attr(value/**/, "empty"); --quoted: "attr(value)"; }
     [data-description="[value]"] { content: attr(data-description); }`;
   const options = { nativeValueMetadata: true };
   const normalized = normalizeConversionStyleIdentities(css, "component", options);
   assert.match(normalized, /data-html-next-native-value="a,b"/);
   assert.match(normalized, /data-html-next-native-value\^="a" i/);
-  assert.match(normalized, /content: attr\(data-html-next-native-value, "empty"\)/);
-  assert.ok(normalized.includes('content: attr(value, "empty")'));
+  assert.match(normalized, /content: attr\(data-html-next-native-value\/\*\*\/, "empty"\)/);
+  assert.ok(normalized.includes('content: attr(value/**/, "empty")'));
   assert.ok(normalized.includes('--quoted: "attr(value)"'));
   assert.ok(normalized.includes('[data-description="[value]"]'));
   assert.equal(normalizeConversionStyleIdentities(normalized, "component", options), normalized);

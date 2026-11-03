@@ -139,10 +139,10 @@ function cssIdentifier(value: string): string {
 
 /** The native attribute branch retains its specificity; metadata is only the server fallback. */
 function nativeValueAlias(attribute: string): string | undefined {
-  const prefix = /^\[\s*(?:(?:\*|)\|)?/.exec(attribute)?.[0];
+  const prefix = /^\[(?:\s|\/\*[\s\S]*?\*\/)*(?:(?:\*|)\|)?/.exec(attribute)?.[0];
   if (prefix === undefined) return;
   const name = CSS_IDENTIFIER.exec(attribute.slice(prefix.length))?.[0];
-  if (name === undefined || cssIdentifier(name) !== "value" || !/^\s*(?:[~|^$*]?=|\])/.test(attribute.slice(prefix.length + name.length))) return;
+  if (name === undefined || cssIdentifier(name) !== "value" || !/^(?:\s|\/\*[\s\S]*?\*\/)*(?:[~|^$*]?=|\])/.test(attribute.slice(prefix.length + name.length))) return;
   return ":where(:not([value]))" + prefix + NATIVE_VALUE_ATTRIBUTE + attribute.slice(prefix.length + name.length);
 }
 

@@ -153,8 +153,33 @@ function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HT
 }
 export const HtmlNextValueInput = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, ...props }: React.ComponentProps<"input"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
   <input {...props} ref={useValueAttribute<HTMLInputElement>(htmlNextValue, ref).ref} defaultValue={typeof document === "undefined" && htmlNextValue != null ? String(htmlNextValue) : undefined} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
-export const HtmlNextValueTextarea = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, style, ...props }: React.ComponentProps<"textarea"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
-  <textarea {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} {...useValueAttribute<HTMLTextAreaElement>(htmlNextValue, ref, style)} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
+interface NativeTextareaProps extends React.ComponentPropsWithoutRef<"textarea"> { readonly htmlNextRoot: React.RefObject<HTMLTextAreaElement | null> }
+/** React rewrites an uncontrolled textarea's default on every commit. Snapshot controller-owned defaults before that mutation. */
+const NativeTextarea = /* @__PURE__ */ (() => class extends React.Component<NativeTextareaProps, {}, string | null> {
+  private committedChildren = this.props.children;
+  componentDidMount(): void { this.committedChildren = this.props.children; }
+  getSnapshotBeforeUpdate(previous: NativeTextareaProps): string | null {
+    return previous.defaultValue === this.props.defaultValue && previous.children === this.props.children
+      ? this.props.htmlNextRoot.current?.defaultValue ?? null : null;
+  }
+  componentDidUpdate(_previous: NativeTextareaProps, _state: {}, nativeDefault: string | null): void {
+    const element = this.props.htmlNextRoot.current;
+    if (element && nativeDefault !== null && element.defaultValue !== nativeDefault) element.defaultValue = nativeDefault;
+    this.committedChildren = this.props.children;
+  }
+  render(): ReactNode {
+    const { htmlNextRoot, children, ...props } = this.props;
+    const nativeDefault = props.defaultValue ?? (children !== this.committedChildren ? children : htmlNextRoot.current?.defaultValue ?? children);
+    const defaultText = String(nativeDefault ?? "");
+    return <textarea {...props} defaultValue={defaultText} ref={htmlNextRoot}
+      onInput={event => { props.onInput?.(event); if (event.currentTarget.defaultValue !== defaultText) this.forceUpdate(); }}
+      onChange={event => { props.onChange?.(event); if (event.currentTarget.defaultValue !== defaultText) this.forceUpdate(); }} />;
+  }
+})();
+export const HtmlNextValueTextarea = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, style, ...props }: React.ComponentProps<"textarea"> & ControlDefaults & { readonly htmlNextValue?: unknown }) => {
+  const native = useValueAttribute<HTMLTextAreaElement>(htmlNextValue, ref, style);
+  return <NativeTextarea {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} htmlNextRoot={native.ref} style={native.style} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />;
+}, sameControlProps);
 
 export const HtmlNextValueSelect = /* @__PURE__ */ React.memo(({ htmlNextValue, ref, style, ...props }: React.ComponentProps<"select"> & { readonly htmlNextValue?: unknown }) =>
   <select {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} {...useValueAttribute<HTMLSelectElement>(htmlNextValue, ref, style)} />, sameControlProps);

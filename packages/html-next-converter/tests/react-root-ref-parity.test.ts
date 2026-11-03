@@ -22,10 +22,10 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
     await writeFile(join(directory, "field.html"), `<template component="x-field"><defs>
       <prop name="multiline" type="boolean" default="false">Render a textarea.</prop><prop name="select" type="boolean" default="false">Render a select.</prop><prop name="message" type="string" default="">Field value.</prop>
       </defs><template $match><select $when="$select" from:data-value="$message" from:value="$message"><option value="a">A</option><option value="b">B</option></select><textarea $when="$multiline" from:data-value="$message" from:value="$message"></textarea><input $else from:data-value="$message" from:value="$message"></template><style>
-      :host { background: rgb(1 2 3); content: attr(value); @media (min-width: 1px) { content: "overridden"; content: attr(value); } }
-      :host[value="initial"] { background: rgb(10 20 30); }
-      :host::after { animation: value-label 1s step-end -1s paused both; }
-      @keyframes value-label { from { content: "waiting"; } to { content: attr(value); } }
+      :host { --declared-value: attr(value/**/); background: rgb(1 2 3); content: attr(/* attribute */value/**/); @media (min-width: 1px) { content: "overridden"; content: attr(/* attribute */value/**/); } }
+      :host[/**/value/**/="initial"] { background: rgb(10 20 30); }
+      :host { animation: value-label 1s step-end -1s paused both; }
+      @keyframes value-label { from { content: "waiting"; } to { content: attr(/* attribute */value/**/); } }
       </style></template>`);
     const definition = parseComponent(await readFile(join(directory, "field.html"), "utf8"));
     nativeCss = compileComponentStylesForBuild(definition.css, definition).css;
@@ -77,9 +77,10 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
           const nativeStyle = await page.addStyleTag({ content: nativeCss });
           const snapshot = (selector: string) => page.locator(selector).evaluate((element: HTMLInputElement) => ({
             value: element.value, defaults: element.defaultValue,
-            animated: getComputedStyle(element, "::after").content, background: getComputedStyle(element).backgroundColor, content: getComputedStyle(element).content, inline: getComputedStyle(element).getPropertyValue("--inline-value").trim(),
+            animated: getComputedStyle(element).animationName, declared: getComputedStyle(element).getPropertyValue("--declared-value").trim(), background: getComputedStyle(element).backgroundColor, content: getComputedStyle(element).content, inline: getComputedStyle(element).getPropertyValue("--inline-value").trim(),
           }));
           const reference = await snapshot("#reference > *");
+          assert.notEqual(reference.animated, "none", "the native reference exercises animated attribute reads");
           await nativeStyle.evaluate(style => style.parentNode?.removeChild(style));
           await page.addStyleTag({ content: styles.get(target)! });
           assert.deepEqual(await snapshot("main > *"), reference, `${tag} preserves native defaults and authored CSS before JavaScript`);
@@ -127,6 +128,19 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
         await page.evaluate(() => Reflect.get(window, "switchRoot")());
         await page.waitForFunction(() => document.querySelector("#field")?.localName === "textarea");
         assert.deepEqual(await values("#field"), ["", "", "next"], "textarea's value attribute is separate from its text default");
+        await page.locator("#field").evaluate((element: HTMLTextAreaElement) => {
+          const form = document.createElement("form"); form.id = "reset-form"; document.body.append(form);
+          element.setAttribute("form", form.id); element.defaultValue = "native default";
+        });
+        await page.locator("#field").fill("edited");
+        assert.deepEqual(await values("#field"), ["edited", "native default", "next"], "native input events retain controller defaults");
+        await page.evaluate(() => Reflect.get(window, "change")("later"));
+        await page.waitForFunction(() => document.querySelector("#field")?.getAttribute("data-value") === "later");
+        assert.deepEqual(await values("#field"), ["edited", "native default", "later"]);
+        await page.locator("#reset-form").evaluate((form: HTMLFormElement) => form.reset());
+        await page.evaluate(() => Reflect.get(window, "change")("next"));
+        await page.waitForFunction(() => document.querySelector("#field")?.getAttribute("data-value") === "next");
+        assert.deepEqual(await values("#field"), ["native default", "native default", "next"], "a commit preserves the native reset default and pristine value");
         await page.evaluate(() => Reflect.get(window, "switchSelect")());
         await page.waitForFunction(() => document.querySelector("#field")?.localName === "select");
         assert.deepEqual(await values("#field"), ["a", undefined, "next"], "select's value attribute does not select an option");
