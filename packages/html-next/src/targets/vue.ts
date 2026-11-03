@@ -1455,6 +1455,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     rootMarkup,
     "</template>",
   ];
+  // The SFC parser recognizes a script end tag even inside a JavaScript string.
+  const scriptEnd = lines.indexOf("</script>");
+  for (let index = 2; index < scriptEnd; index++) lines[index] = lines[index]!.replace(/<\/script/gi, match => "<\\/" + match.slice(2));
   if (styles.css !== "") lines.push("", "<style scoped>", styles.css, "</style>");
   const source = `${lines.join("\n").replace(/\n{3,}/g, "\n\n").replace(/(?<=<script setup lang="ts">\n)\n/, "").replace(/\n\n(?=<\/script>)/, "\n")}\n`;
   return formatVue(source, `${componentName(contract.tag)}.vue`);

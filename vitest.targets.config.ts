@@ -51,6 +51,7 @@ config.test!.include = [
   "packages/html-next/tests/target-transitions.test.ts",
   "packages/html-next/tests/vue-parity.test.ts",
   "packages/html-next-converter/tests/vue-*-parity.test.ts",
+  "packages/html-next-converter/tests/angular-*-parity.test.ts",
   "packages/html-next-converter/tests/react-*-parity.test.ts",
   "packages/html-next-converter/tests/preact-*-parity.test.ts",
   "packages/html-next-converter/tests/svelte-*-parity.test.ts",

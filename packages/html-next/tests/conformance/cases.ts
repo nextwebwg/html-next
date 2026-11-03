@@ -426,6 +426,62 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "fragment $html preserves inline siblings, sanitized SVG namespaces, and scoped styles through updates",
+    source: scene({
+      defs:
+        `<state name="body" type="string" value="&lt;b title='safe'&gt;One&lt;/b&gt;&lt;svg width='10' height='10' viewBox='0 0 10 10'&gt;&lt;circle cx='5' cy='5' r='4'&gt;&lt;/circle&gt;&lt;/svg&gt;&lt;img src=x onerror=alert(1)&gt;"></state>` +
+        `<handler name="change"><set name="body" value="&lt;i title='next'&gt;Two&lt;/i&gt;&lt;script&gt;window.fragmentUnsafe = true&lt;/script&gt;"></set></handler>`,
+      root: `<article><p>Before <template $html="$body"></template> after</p><button type="button" on:click="change">Change</button></article>`,
+      style: `b { color: rgb(12 34 56); } i { color: rgb(65 43 21); }`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const p = q('#b p'), label = p.querySelector('b, i'), circle = p.querySelector('circle');` +
+        `return { text: p.textContent, tags: Array.from(p.children, child => child.localName), title: label.getAttribute('title'), ` +
+        `color: getComputedStyle(label).color, namespace: circle?.namespaceURI ?? null, unsafe: qa('#b img, #b script, #b [onerror]').length, executed: window.fragmentUnsafe ?? false };`,
+      result: { text: "Before One after", tags: ["b", "svg"], title: "safe", color: "rgb(12, 34, 56)", namespace: "http://www.w3.org/2000/svg", unsafe: 0, executed: false },
+      after: [{
+        action: `document.querySelector('#b button').click();`,
+        result: { text: "Before Two after", tags: ["i"], title: "next", color: "rgb(65, 43, 21)", namespace: null, unsafe: 0, executed: false },
+      }],
+    },
+  },
+  {
+    name: "script closing text retains its authored case in state and handler values",
+    source: scene({
+      defs: `<state name="text" type="string" value="&lt;/ScRiPt&gt;"></state><handler name="change"><set name="text" value="&lt;/SCRIPT&gt;"></set></handler>`,
+      root: `<div><output $value="$text"></output><button type="button" on:click="change">Change</button></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#b output').textContent;`,
+      result: "</ScRiPt>",
+      after: [{ action: `document.querySelector('#b button').click();`, result: "</SCRIPT>" }],
+    },
+  },
+  {
+    name: "ordinary two-way attributes preserve boolean, list, object, and native input semantics",
+    source: scene({
+      defs: `<state name="value" type="unknown" from="true"></state>` +
+        `<handler name="hide"><set name="value" expr:value="false"></set></handler>` +
+        `<handler name="list"><set name="value" expr:value="['a', 2, true]"></set></handler>` +
+        `<handler name="object"><set name="value" expr:value="{ a: 1 }"></set></handler>`,
+      root: `<div><span bind:value="value"></span><button on:click="hide">Hide</button><button on:click="list">List</button><button on:click="object">Object</button></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#b span').getAttribute('value');`,
+      result: "",
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: null },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: "a 2 true" },
+        { action: `document.querySelectorAll('#b button')[2].click();`, result: null },
+        { action: `const node = document.querySelector('#b span'); node.value = 'edited'; node.dispatchEvent(new Event('input', { bubbles: true }));`, result: "edited" },
+      ],
+    },
+  },
+  {
     name: "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
     source: scene({
       defs: `<state name="textNumber" type="string" value="1"></state>`,

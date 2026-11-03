@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-alpha.84
+
+- Preserve Angular whitespace, dimensional computed values, invalid structural regions, public validity, ordinary two-way bindings, and sanitized fragment HTML through SSR and hydration.
+- Preserve a Preact select's bound initial option in server-rendered HTML.
+- Escape script-closing strings in Vue components and retain their original case in Vue and Svelte state and handlers.
+- Exercise Angular's public converter against the shared HTML Next corpus in both delivery modes and all three browser engines; add shared fragment SVG, scoped-style, and interaction coverage.
+- Qualify converters against the released Looma catalog and its final shared browser fixtures, including pagination controller readiness.
+
 ## 1.0.0-alpha.83
 
 - Publish the shared package set again after the alpha.82 converter tarball was unavailable from the registry.

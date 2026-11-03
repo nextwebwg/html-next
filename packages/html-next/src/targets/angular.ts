@@ -13,7 +13,7 @@ import { headEntriesSource, headScriptsSource, headHelperArtifact } from "./head
 import { targetComponent, type TargetRequest } from "./backend.js";
 import { frameworkRequestSource } from "./requests-target.js";
 import { requestsArtifact } from "./request-host-source.js";
-import { angularHtmlArtifact } from "./angular-html.js";
+import { angularHtmlArtifact, angularHtmlFragmentTemplate } from "./angular-html.js";
 import { angularDataArtifact } from "./angular-data.js";
 import { angularHostArtifact } from "./angular-host.js";
 import { angularBindingsArtifact } from "./angular-bindings.js";
@@ -21,6 +21,7 @@ import { angularControlsRendererArtifact } from "./angular-controls-renderer.js"
 import { angularNativeViewArtifact, angularNativeViewSource } from "./angular-native-view.js";
 import { DOM_INTERFACES } from "../generated/dom-properties.js";
 import { resolveDomProperty } from "../platform.js";
+import { angularValidityArtifact } from "./angular-validity.js";
 import { angularControlArtifact } from "./angular-control.js";
 import { declaredStateLiteral, literalInitial, revertSource, withRevert, publishedStates } from "./state-roots.js";
 import { expressionHelpersSource, AUTHORED_CHECK_SOURCE, inputScope, present, typeOf, UNKNOWN, type Scope } from "./vue-lowering.js";
@@ -36,6 +37,10 @@ function sourceValue(value: unknown, space?: number): string {
   return JSON.stringify(value, null, space)?.replaceAll('"__proto__":', '["__proto__"]:') ?? "undefined";
 }
 const propertyKey = (name: string): string => name === "__proto__" ? `[${quote(name)}]` : quote(name);
+
+function angularPropContract(definition: ComponentDefinition) {
+  return { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { type: prop.select === undefined ? normalizeType(prop.type) : { kind: "union", members: prop.select.options.map(item => item.type) }, ...(prop.select === undefined ? {} : { select: prop.select }), required: prop.required, ...Object.fromEntries(["values", "pattern", "min", "max", "minLength", "maxLength"].flatMap(key => prop[key as keyof typeof prop] === undefined ? [] : [[key, prop[key as keyof typeof prop]]])) }])) };
+}
 
 export interface AngularOptions {
   readonly preparationForTag?: (tag: string) => { readonly source: string } | undefined;
@@ -85,6 +90,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   const methods: string[] = [];
   const host: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, { [VUE_ROOT_ATTRIBUTE]: "" });
   const rootEvents: string[] = [];
+  const validityModels: string[] = [];
   const rootControls: string[] = [];
   const rootProperties: string[] = [];
   let rootHtml: string | undefined;
@@ -213,14 +219,18 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         const code = attribute.kind === "property" || componentInput !== undefined ? value(attribute.expressionPlan, names)
           : lowering.attribute(attribute.expressionPlan!.ast, names, attribute.name);
         if (attribute.kind === "attribute" && attribute.twoWay) {
-          if (child !== undefined || !["input", "textarea", "select"].includes(node.name)) return unsupported("two-way bindings currently require a native input, textarea or select.");
+          if (child !== undefined) return unsupported("two-way component inputs require an explicit component model contract.");
           helper("control"); helper("state");
+          const generic = !(["input", "textarea", "select"].includes(node.name) && (attribute.name === "value" || node.name === "input" && attribute.name === "checked"));
+          const read = value(attribute.expressionPlan, names);
+          const attributeScope = { ...names, code: new Map([...names.code, ["hnBound", "hnBound"]]), types: new Map([...names.types, ["hnBound", UNKNOWN]]) };
+          const boundValue = generic ? `((hnBound: unknown) => ${lowering.attribute({ kind: "id", name: "hnBound" }, attributeScope, attribute.name)})(${read})` : read;
           const defaults: { value?: string; checked?: boolean; options?: boolean[] } = {};
           for (const literal of node.attributes) if (literal.kind === "literal") {
             if (literal.name === "value") defaults.value = literal.value;
             if (literal.name === "checked") defaults.checked = true;
           }
-          if (node.name === "select") {
+          if (node.name === "select" && !generic) {
             const flags: boolean[] = [];
             const visit = (child: TemplateNode): void => {
               if (child.kind === "slot") return unsupported("two-way selects with projected options require dynamic reset defaults.");
@@ -232,7 +242,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           }
           const path = attribute.writablePath!;
           const update = pathWrite(path, "next", names);
-          const binding = `{ name: ${quote(attribute.name)}, value: ${value(attribute.expressionPlan, names)}, defaults: ${sourceValue(defaults)}, update: (next: unknown) => { ${update} return ${value(attribute.expressionPlan, names)}; } }`;
+          const binding = `{ name: ${quote(attribute.name)}, ${generic ? "generic: true, " : ""}value: ${boundValue}, defaults: ${sourceValue(defaults)}, update: (next: unknown) => { ${update} return ${read}; } }`;
           if (root) rootControls.push(binding);
           else controls.push(binding);
           continue;
@@ -280,7 +290,9 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         const alias = `local${serial++}`;
         const local = flow.alias === undefined ? names : localScope(names, [[alias, alias, undefined]]);
         const matchNames = flow.alias === undefined ? local : { ...local, code: new Map([...local.code, [flow.alias, alias]]) };
-        const prefix = flow.alias === undefined ? "" : `@let ${alias} = ${expression(value(flow.expressionPlan, names), names)};`;
+        const region = `hnRegion${serial++}`;
+        if (flow.alias !== undefined) { helper("region"); helper("value"); }
+        const prefix = flow.alias === undefined ? "" : `@let ${region} = ${expression(value(flow.expressionPlan, names), names, false, true)} | hnNextRegion;@if (${region}.ready) {@let ${alias} = ${region}.value;`;
         let branches = "";
         for (const arm of node.children) {
           if (arm.kind !== "element" || arm.flow?.kind !== "when" && arm.flow?.kind !== "else") return unsupported("match arms must be conditional elements.");
@@ -288,7 +300,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           if (arm.flow.kind === "else") branches += ` @else {${markup}}`;
           else branches += `${branches === "" ? "@if" : " @else if"} (${expression(lowering.condition(arm.flow.testPlan!.ast, matchNames), matchNames)}) {${markup}}`;
         }
-        const content = prefix + branches;
+        const content = prefix + branches + (flow.alias === undefined ? "" : "}");
         result += node.name === "template" ? content : render({ ...elementMatchRoot(node), children: [{ kind: "text", value: "" }], flow: undefined } as unknown as ElementNode, names, projection).replace("></", `>${content}</`);
       } else result += render(node, names, projection, rootView);
     }
@@ -340,19 +352,23 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       if (flow.kind === "if") return `@if (${expression(lowering.condition(flow.testPlan!.ast, names), names)}) {${render(plain, names, projection, rootView)}}`;
       if (flow.kind === "with") {
         if (flow.binding !== undefined) helper("state");
+        helper("value"); helper("region");
         const id = `local${serial++}`;
+        const region = `hnRegion${serial++}`;
         const scoped = localScope(names, [[id, id, flow.aliasType]]);
         const code = new Map(scoped.code); code.set(flow.alias, id);
         const types = new Map(scoped.types); types.set(flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan!.ast, names) : present(flow.aliasType));
-        return `@let ${id} = ${expression(flow.binding === undefined ? value(flow.expressionPlan, names) : `requireInputStatus(${names.statuses.get(flow.binding.name) ?? "UNRESOLVED_INPUT"}, ${flow.binding.handlesError})`, names)};${render(plain, { ...scoped, code, types }, projection, rootView)}`;
+        return `@let ${region} = ${expression(flow.binding === undefined ? value(flow.expressionPlan, names) : `requireInputStatus(${names.statuses.get(flow.binding.name) ?? "UNRESOLVED_INPUT"}, ${flow.binding.handlesError})`, names, false, true)} | hnNextRegion;@if (${region}.ready) {@let ${id} = ${region}.value;${render(plain, { ...scoped, code, types }, projection, rootView)}}`;
       }
       if (flow.kind === "each") {
         const id = `row${serial++}`;
+        const retained = `hnList${serial++}`;
+        const retainedNames = localScope(names, [[retained, retained, undefined]]);
         const itemType = typeOf(flow.listPlan!.ast, names).type;
         const itemNames = { ...names, code: new Map([...names.code, [flow.item, "item"]]), types: new Map([...names.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN]]) };
         const list = lowering.list(flow.listPlan!.ast, names, "item", { itemScope: itemNames,
           ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-          sort: flow.sortKeys?.map(key => `${key.descending ? "-" : ""}${key.path.join(".")}`) ?? [], ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }) });
+          sort: flow.sortKeys?.map(key => `${key.descending ? "-" : ""}${key.path.join(".")}`) ?? [], ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }) }, `((${retained} ?? []) as any[])`);
         const scoped = localScope(names, [[id, id, undefined]]);
         const code = new Map(scoped.code); code.set(flow.item, `${id}.item`); code.set("loop", `${id}.loop`);
         if (flow.index !== undefined) code.set(flow.index, `${id}.index`);
@@ -361,14 +377,17 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         const unique = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(item: any, index: number, loop: any) => ${value(flow.keyPlan, keyScope)}`);
         const rows = lowering.eachRows(unique);
         const keyedRows = flow.keyPlan === undefined ? rows : `${rows}.map((${id}: any) => ({ ...${id}, hnKey: ${value(flow.keyPlan, loopNames)} }))`;
-        return `@for (${id} of ${expression(keyedRows, names)}; track ${id}.${flow.keyPlan === undefined ? "index" : "hnKey"}) {${render(plain, loopNames, projection)}}`;
+        return `@let ${retained} = ${expression(value(flow.listPlan, names), names)};@for (${id} of ${expression(keyedRows, retainedNames)}; track ${id}.${flow.keyPlan === undefined ? "index" : "hnKey"}) {${render(plain, loopNames, projection)}}`;
       }
       if (flow.kind !== "match") return unsupported(`orphan ${flow.kind} directive.`);
     }
     if (node.name === "template") {
       const content = node.attributes.find(attribute => attribute.kind === "directive");
       if (content?.kind === "directive") {
-        if (content.name === "html") return unsupported("template $html needs the shared sanitizer adapter.");
+        if (content.name === "html") {
+          helper("html"); helper("html-fragment"); helper("slots");
+          return `<ng-template [hnNextHtmlFragment]="${expression(htmlBinding(node, content.expressionPlan, names), names)}" let-hnNodes><ng-container [ngTemplateOutlet]="hnHtmlNodes" [ngTemplateOutletContext]="{ $implicit: hnNodes }"></ng-container></ng-template>`;
+        }
         return `{{ ${expression(lowering.text(content.expressionPlan!.ast, names), names)} }}`;
       }
       return renderChildren(node.children, names, projection, rootView);
@@ -527,7 +546,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         types.set(declaration.as ?? declaration.name, UNKNOWN);
         statuses.set(declaration.as ?? declaration.name, `(this.${id} as Signal<any> & { status?: () => InputStatus }).status?.() ?? (this.${id}() === undefined ? UNRESOLVED_INPUT : READY_INPUT)`); continue;
       }
-      const type = declarationTypeNode(declaration.type, declaration.shape);
+      const type = declarationTypeNode(declaration.type, declaration.shape) ?? (declaration.kind === "computed" && declaration.expression !== undefined ? typeOf(declaration.expression.ast, names).type : undefined);
       types.set(declaration.name, type === undefined ? UNKNOWN : present(type));
       if (declaration.kind === "state") {
         const setter = field(); writes.set(declaration.name, setter);
@@ -580,6 +599,10 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       const scripts = headScriptsSource({ ...current, source: { ...current.source, file: options.definitionURL?.(current.contract.tag) ?? current.source.file } },
         (name, event) => `this.${handlers.get(name)}(${event})`, name => ({ read: `this.${scriptNames.get(name)}()`, write: next => `this.${scriptNames.get(name)}.set(${next})` }));
       headModels.push(`{ tag: ${quote(current.contract.tag)}, entries: () => ${entries}, scripts: ${scripts} }`);
+    }
+    if (Object.keys(current.contract.props).length > 0) {
+      helper("validity");
+      validityModels.push(`{ contract: ${sourceValue(angularPropContract(current))}, values: { ${[...inputs].map(([name, value]) => `${propertyKey(name)}: ${value}`).join(", ")} } }`);
     }
     if (source !== undefined || current.lifecycle !== undefined || requests.length > 0) models.push({ definition: current, names, raw, inputs, requests, responders, types: propTypes,
       ...(source === undefined ? {} : { source }), readNames: [...code.keys()].filter(name => !(current.declarations ?? []).some(item => item.kind === "data" && item.name === name)) });
@@ -646,6 +669,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     return renderChildren(root.children, names, projection);
   };
   let template = compose(definition);
+  if (helpers.has("html-fragment")) template += angularHtmlFragmentTemplate();
   if (requiredReadiness.length > 0) {
     fields.push("private hnWasReady = false;");
     methods.push(`hnInputsReady(): boolean { if (${requiredReadiness.join(" && ")}) this.hnWasReady = true; return this.hnWasReady; }`);
@@ -674,7 +698,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       helper("bindings");
       fields.push(`readonly ${prepared} = preparedModule(${loadController}, ${sourceValue({ tag: current.contract.tag, source: preparation!.source })});`);
     }
-    const contract = { props: Object.fromEntries(Object.entries(current.contract.props).map(([name, prop]) => [name, { type: prop.select === undefined ? normalizeType(prop.type) : { kind: "union", members: prop.select.options.map(item => item.type) }, ...(prop.select === undefined ? {} : { select: prop.select }), required: prop.required, ...Object.fromEntries(["values", "pattern", "min", "max", "minLength", "maxLength"].flatMap(key => prop[key as keyof typeof prop] === undefined ? [] : [[key, prop[key as keyof typeof prop]]])) }])) };
+    const contract = angularPropContract(current);
     const declared = Object.fromEntries((current.declarations ?? []).flatMap(item => item.kind === "event" ? [[item.name, [declarationTypeNode(item.type, item.shape), { bubbles: item.bubbles, composed: item.composed, cancelable: item.cancelable }]]] : []));
     const multiplicity = iteratedRefNames(current);
     const modelRefs = [...refs].filter(([key]) => key.startsWith(current.contract.tag + ":")).map(([key, field]) => {
@@ -723,10 +747,12 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   const usesHead = helpers.has("head");
   const usesRequests = helpers.has("requests");
   const usesHtml = helpers.has("html");
+  const usesHtmlFragment = helpers.has("html-fragment");
   if (rootHtml !== undefined) host[`[attr.${VUE_ROOT_ATTRIBUTE}]`] = "hnRootBindings()";
   const usesData = helpers.has("data");
   const usesHost = helpers.has("host");
   const usesValue = helpers.has("value");
+  const usesValidity = helpers.has("validity");
   const usesControl = helpers.has("control");
   const usesNativeControls = [...chain].some(item => {
     const visit = (node: TemplateNode): boolean => node.kind === "element" && (node.name === "input" || node.children.some(visit));
@@ -742,11 +768,11 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   const rootBindings = rootControls.length === 0 && rootHtml === undefined && rootProperties.length === 0 ? "" : `hnRootBindings(): string { ${rootProperties.join(" ")} ${rootControls.length === 0 ? "" : `this.hnControl.bindings = [${rootControls.join(", ")}];`} ${rootHtml === undefined ? "" : `this.hnHtml.binding = ${rootHtml};`} return ""; }`;
   if (rootBindings !== "") host[`[attr.${VUE_ROOT_ATTRIBUTE}]`] = "hnRootBindings()";
   const helperPath = (name: string) => quote(options.helperSpecifier?.(name) ?? `./${name}`);
-  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml } from ${helperPath("html")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}\n${helpers.has("expressions") ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
+  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}\n${helpers.has("expressions") ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
 export class ${slot.name} {
   readonly template = inject<TemplateRef<${slot.type}>>(TemplateRef);
   static ngTemplateContextGuard(_directive: ${slot.name}, _context: unknown): _context is ${slot.type} { return true; }
-}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(usesHtml ? ["HtmlNextHtml"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext ? `providers: [${providers.join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
+}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext ? `providers: [${providers.join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
   if (nativeView) {
     helper("view");
     helper("events");
@@ -759,10 +785,10 @@ export class ${slot.name} {
       arguments: generics.length === 0 ? "" : `<${generics.map(() => "any").join(", ")}>`,
       template, host, fields, methods: [...methods, rootBindings], styles,
       slotQueries: [...slotDirectives].map(([name, slot]) => `readonly ${slot.query} = () => { const template = this.hnSlotTemplates()[${quote(name)}]; return template ? { template } : undefined; };`),
-      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(usesHtml ? ["HtmlNextHtml"] : [])],
+      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])],
       providers,
-      injections: [...(rootEvents.length > 0 ? [{ name: "hnEvents", type: "HtmlNextEvents" }] : []), ...(usesProjection ? [{ name: "hnProjection", type: "HtmlNextProjection" }] : []), ...(usesHost ? [{ name: "hnHost", type: "HtmlNextHost" }] : []), ...(usesHead ? [{ name: "hnHead", type: "HtmlNextHead" }] : [])],
-      initialize: `${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""}`,
+      injections: [...(usesValidity ? [{ name: "hnValidity", type: "HtmlNextValidity" }] : []), ...(rootEvents.length > 0 ? [{ name: "hnEvents", type: "HtmlNextEvents" }] : []), ...(usesProjection ? [{ name: "hnProjection", type: "HtmlNextProjection" }] : []), ...(usesHost ? [{ name: "hnHost", type: "HtmlNextHost" }] : []), ...(usesHead ? [{ name: "hnHead", type: "HtmlNextHead" }] : [])],
+      initialize: `${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""}`,
       props: Object.keys(definition.contract.props), events: [...events].map(([name, type]) => ({ name, type })),
       viewSpecifier: options.helperSpecifier?.("view") ?? "./view",
     }), helpers };
@@ -790,6 +816,7 @@ export function checkNestedDepth(depth: number, limit: number): number {
     angularHostArtifact(version),
     angularDataArtifact(version),
     angularHtmlArtifact(version),
+    angularValidityArtifact(version),
     headHelperArtifact("angular", version),
     requestsArtifact("angular", version),
     { path: "angular/value.ts", content: `import { Pipe } from "@angular/core";
@@ -798,6 +825,14 @@ export class HtmlNextValue {
   private accepted: any;
   transform(value: any): any {
     if (value !== Symbol.for("html-next.invalid-result") && (typeof value !== "number" || Number.isFinite(value))) this.accepted = value;
+    return this.accepted;
+  }
+}
+@Pipe({ name: "hnNextRegion", standalone: true, pure: false })
+export class HtmlNextRegion {
+  private accepted: { ready: boolean; value?: unknown } = { ready: false };
+  transform(value: unknown): { ready: boolean; value?: unknown } {
+    if (value !== Symbol.for("html-next.invalid-result") && (typeof value !== "number" || Number.isFinite(value))) this.accepted = { ready: true, value };
     return this.accepted;
   }
 }

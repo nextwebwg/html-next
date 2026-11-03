@@ -246,7 +246,7 @@ export default class ${source.name}${source.declaration} {
 }
 @Component({ selector: ${quote(source.name.toLowerCase() + "-native-view")}, standalone: true,
   imports: [${[rootName, "HtmlNextSlot", ...source.dependencies.map(name => `forwardRef(() => ${name})`)].join(", ")}],
-  changeDetection: ChangeDetectionStrategy.OnPush, encapsulation: ViewEncapsulation.None,
+  preserveWhitespaces: true, changeDetection: ChangeDetectionStrategy.OnPush, encapsulation: ViewEncapsulation.None,
   template: ${quote(`<ng-template #hnView>${template}</ng-template>`)}, styles: [${quote(source.styles)}] })
 class ${holderName} {
   hnController!: ${type};

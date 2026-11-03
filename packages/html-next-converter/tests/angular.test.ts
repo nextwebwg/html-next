@@ -9,9 +9,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "vitest";
 import { checkConversion, convertComponents } from "../src/index.js";
+import { cases } from "../../html-next/tests/conformance/cases.js";
+import { parseFragment } from "parse5";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+
+for (const name of ["bind: renders its initial state; declared on: bindings are consumed", "invalid $html expressions retain the last sanitized content"]) {
+  for (const mode of ["application", "library"] as const) it(`converts the shared ${mode} case: ${name}`, async () => {
+    const test = cases.find(test => test.name === name)!;
+    const carrier = parseFragment(test.source, { sourceCodeLocationInfo: true }).childNodes.find(node => "tagName" in node && node.tagName === "template")!;
+    const location = carrier.sourceCodeLocation!;
+    const root = await mkdtemp(join(tmpdir(), "html-next-angular-corpus-")); roots.push(root);
+    await writeFile(join(root, "component.html"), test.source.slice(location.startOffset, location.endOffset));
+    await convertComponents({ target: "angular", mode, root, entries: ["component.html"], outDirectory: join(root, "out") });
+  });
+}
 
 import { angularControls, angularController, angularRequestController, angularTypedController, angularSetup } from "./fixtures/angular-controls.js";
 
@@ -68,7 +81,6 @@ it("compiles native-root Angular components and checks consumer input bindings",
 for (const [description, source, message] of [
   ["multiple control bindings", '<template component="ui-test"><defs><state name="value" type="string" value="token"></state><state name="checked" type="boolean" value="false"></state></defs><input type="checkbox" bind:value="value" bind:checked="checked"></template>', /multiple two-way/],
   ["projected select defaults", '<template component="ui-test"><defs><state name="choice" type="string" value="b"></state></defs><select bind:value="choice"><slot><option value="a" selected>A</option></slot></select></template>', /projected options/],
-  ["fragment HTML", '<template component="ui-test"><div><template $html="true"></template></div></template>', /template \$html/],
 ] as const) it(`reports unsupported Angular ${description} during a no-output check`, async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-angular-check-")); roots.push(root);
   await writeFile(join(root, "test.html"), source);

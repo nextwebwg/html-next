@@ -185,11 +185,25 @@ export const HtmlNextValueSelect = /* @__PURE__ */ React.memo(({ htmlNextValue, 
   <select {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} {...useValueAttribute<HTMLSelectElement>(htmlNextValue, ref, style)} />, sameControlProps);
 `}
 
-${preact ? `/** Preact's core select leaves option properties to the native binding helper after the first render. */
+${preact ? `/** The serializer cannot infer selection from the uppercase VALUE used for native attributes. */
+function initialSelectOptions(children: ReactNode, value: unknown): ReactNode {
+  const selected = new Set((Array.isArray(value) ? value : [value]).map(String));
+  const serverOptions = (child: ReactNode): ReactNode => {
+    if (Array.isArray(child)) return child.map(serverOptions);
+    if (!React.isValidElement(child)) return child;
+    const element = child as React.ReactElement<Record<string, any>>;
+    const attributes = element.props;
+    return React.cloneElement(element, element.type === "option"
+      ? { selected: selected.has(String(attributes.VALUE ?? attributes.value ?? attributes.children ?? "")) }
+      : { children: serverOptions(attributes.children) });
+  };
+  return serverOptions(children);
+}
+/** Preact's core select leaves option properties to the native binding helper after the first render. */
 export function HtmlNextSelect({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"select"> & ControlDefaults): ReactNode {
   const initial = React.useRef(true);
   React.useLayoutEffect(() => { initial.current = false; }, []);
-  return nativeElement("select", { ...props, value: initial.current ? htmlNextInitial as React.SelectHTMLAttributes<HTMLSelectElement>["value"] : undefined });
+  return nativeElement("select", { ...props, ...(typeof document === "undefined" ? { children: initialSelectOptions(props.children, htmlNextInitial) } : {}), value: initial.current ? htmlNextInitial as React.SelectHTMLAttributes<HTMLSelectElement>["value"] : undefined });
 }
 ` : ""}
 

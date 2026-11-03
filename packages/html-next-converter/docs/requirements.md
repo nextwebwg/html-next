@@ -4,7 +4,8 @@ What the HTML Next framework converter must produce. The converter is tooling bu
 Declarative Components specification, not part of it.
 
 Framework conversion translates a Declarative Components application or library graph into Vue,
-React, Svelte, or Solid components while that target owns rendering, reactivity, lifecycle, and hydration.
+React, Preact, Svelte, or Angular components while that target owns rendering, reactivity, lifecycle,
+and hydration.
 
 ## Inputs and graph boundary
 
@@ -34,8 +35,8 @@ objects part of the component's portable public contract.
 
 ## Runtime ownership
 
-Vue, React, Svelte, or Solid owns its normal render scheduling, reactive dependency tracking, list
-reconciliation, component lifecycle, SSR attachment, and hydration. The converter expresses the
+Vue, React, Preact, Svelte, or Angular owns its normal render scheduling, reactive dependency tracking,
+list reconciliation, component lifecycle, SSR attachment, and hydration. The converter expresses the
 normalized component plan through those facilities.
 
 Converted output has **no runtime dependency on HTML Next**: it imports the target framework,
@@ -98,9 +99,8 @@ convention remains appropriate at the *component API* boundary, not as the inter
 directive. The application/library hydration test asserts that distinction in generated output
 and exercises both sides of the write rule across three engines. React's controlled `value`/
 `checked` and one-time `defaultValue`/`defaultChecked` each cover only part of the same contract;
-its adapter must prove a target-appropriate bridge before it can pass this gate. Svelte and Solid
-need the same semantic audit when their adapters are implemented; matching binding syntax alone
-is not evidence of parity.
+its adapter must prove a target-appropriate bridge before it can pass this gate. Every target needs
+the same semantic audit; matching binding syntax alone is not evidence of parity.
 
 ## Measurement contract
 
@@ -114,8 +114,8 @@ multi-entry consumer bundles.
 
 ## Conformance scenarios
 
-1. Convert one shared fixture graph to Vue, React, Svelte, and Solid and compare native roots, projection,
-   props, events, methods, state results, declared types, native form behavior, styles, and diagnostics.
+1. Convert one shared fixture graph to Vue, React, Preact, Svelte, and Angular and compare native roots,
+   projection, props, events, methods, state results, declared types, native form behavior, styles, and diagnostics.
 2. Server-render and hydrate each target while preserving specified form edits, focus, and
    selection.
 3. Exercise target-native reactive updates, keyed reorders, controller cleanup, and request
@@ -133,9 +133,9 @@ authored components with the live HTML Next runtime and Vue, and compares browse
 screenshots in Chromium, Firefox, and WebKit before and after interactions. It also converts each
 successful live-runtime conformance example and compares the runnable examples in all three engines.
 The same target command now runs every public-converter Vue parity fixture. A separate fixture
-converts all 35 successful shared conformance examples through both the application and library
+converts every successful shared conformance example through both the application and library
 entry artifacts, then compares the live runtime's expected behavior and exact pixels in Chromium,
-Firefox, and WebKit (210 browser cases). Each case also runs through Vue's SSR compiler: the
+Firefox, and WebKit. Each case also runs through Vue's SSR compiler: the
 server markup is compared before hydration, then hydrated and compared again for behavior and
 pixels. This verifies that the public graph/packaging path does not silently lose behavior
 covered by direct component generation.
@@ -149,8 +149,7 @@ The Node source parser also follows HTML parser recovery for malformed-but-recov
 such as duplicate attributes. It no longer rejects a resource solely because parse5 reports a
 recoverable parse error; a missing stable carrier source range remains a build diagnostic.
 
-All 35 successful live-runtime conformance examples now
-convert, including `$html` through a feature-specific safe-markup helper. Every example
+Every successful live-runtime conformance example converts, including `$html` through a feature-specific safe-markup helper. Every example
 matches the live runtime's browser behavior and pixels, after excluding target-owned styling
 markers from the DOM comparison. Additional interactive fixtures compare rendered pixels and
 behavior at two checkpoints in all three engines. They cover basic requests, cancellation, and per-reference typed data reads.

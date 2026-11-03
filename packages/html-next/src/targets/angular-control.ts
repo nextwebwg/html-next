@@ -6,7 +6,8 @@ export function angularControlArtifact(version: string): GeneratedArtifact {
   return { path: "angular/control.ts", content: `${nativeControlModule(version)}
 import { Directive, ElementRef, Input, PLATFORM_ID, inject } from "@angular/core";
 interface ControlBinding {
-  readonly name: "value" | "checked";
+  readonly name: string;
+  readonly generic?: boolean;
   readonly value: unknown;
   readonly defaults: BoundDefaults;
   readonly update?: (value: unknown) => unknown;
@@ -19,10 +20,16 @@ export class HtmlNextControl {
   private attached = false;
   private readonly stops: (() => void)[] = [];
   private options: readonly HTMLOptionElement[] = [];
+  private syncAttribute(binding: ControlBinding): void {
+    const value = binding.value == null ? null : String(binding.value);
+    if (value === null) { if (this.element.hasAttribute(binding.name)) this.element.removeAttribute(binding.name); }
+    else if (this.element.getAttribute(binding.name) !== value) this.element.setAttribute(binding.name, value);
+  }
   ngAfterViewChecked(): void {
     const element = this.element;
     if (!this.browser) {
       for (const binding of this.bindings) {
+        if (binding.generic) { this.syncAttribute(binding); continue; }
         if (binding.name === "checked") { if (binding.value) element.setAttribute("checked", ""); else element.removeAttribute("checked"); }
         else if (element.localName === "textarea") element.textContent = binding.value == null ? "" : String(binding.value);
         else if (element.localName === "select") {
@@ -38,11 +45,19 @@ export class HtmlNextControl {
     const changedOptions = options.length !== this.options.length || options.some((option, index) => option !== this.options[index]);
     this.options = options;
     for (const [index, binding] of this.bindings.entries()) {
+      if (binding.generic) {
+        this.syncAttribute(binding);
+        if (!this.attached && binding.update !== undefined) {
+          const stop = attachGenericBinding(element, value => this.bindings[index]?.update?.(value));
+          if (stop !== undefined) this.stops.push(stop);
+        }
+        continue;
+      }
       if (!this.attached) {
-        const stop = attachBoundControl(element, binding.name, binding.value, binding.defaults,
+        const stop = attachBoundControl(element, binding.name as BoundName, binding.value, binding.defaults,
           binding.update === undefined ? undefined : value => this.bindings[index]?.update?.(value));
         if (stop !== undefined) this.stops.push(stop);
-      } else syncBoundControl(element, binding.name, binding.value, binding.defaults, false, true, changedOptions);
+      } else syncBoundControl(element, binding.name as BoundName, binding.value, binding.defaults, false, true, changedOptions);
     }
     if (this.bindings.length > 0) this.attached = true;
   }

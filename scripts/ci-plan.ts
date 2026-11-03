@@ -90,7 +90,7 @@ export function createPlan(paths: readonly string[]) {
       if (seconds > 150) {
         // Public converter corpora cover every engine and both application/library delivery.
         // Partition by full test name; the first partition also owns any unlabelled test.
-        const labels = path === "svelte-public-conformance-parity.test.ts"
+        const labels = ["svelte-public-conformance-parity.test.ts", "angular-public-conformance-parity.test.ts"].includes(path)
           ? ["Chromium application", "Chromium library", "Firefox application", "Firefox library", "WebKit application", "WebKit library"]
           : ["Chromium", "Firefox", "WebKit"];
         labels.forEach((label, index) => destination.push({

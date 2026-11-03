@@ -14,6 +14,7 @@ import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
 import { generateComponent, HtmlDiagnosticError, parseComponentResource, reactControlArtifact } from "@nextwebwg/html-next";
 
 import { linkFormSource, rowSource } from "./fixtures/named-slots.js";
@@ -215,10 +216,28 @@ describe("framework converter", () => {
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
   });
 
-  it("converts every successful shared conformance definition to React in both graph modes", async () => {
+  for (const target of ["vue", "svelte"] as const) for (const mode of ["application", "library"] as const) it(`preserves script-closing string values through the ${target} ${mode} compiler`, async () => {
+    const test = conformanceCases.find(test => test.name === "script closing text retains its authored case in state and handler values")!;
+    const carrier = parseFragment(test.source, { sourceCodeLocationInfo: true }).childNodes.find(node => "tagName" in node && node.tagName === "template")!;
+    const location = carrier.sourceCodeLocation!;
+    const root = await mkdtemp(join(tmpdir(), "html-next-script-text-")); temporary.push(root);
+    await writeFile(join(root, "component.html"), test.source.slice(location.startOffset, location.endOffset));
+    const outDirectory = join(root, "out");
+    const manifest = await convertComponents({ mode, target, root, outDirectory, entries: ["component.html"] });
+    const file = join(outDirectory, manifest.components[0]!.artifact);
+    const source = await readFile(file, "utf8");
+    const compiled = target === "vue" ? compileScript(parseVue(source, { filename: file }).descriptor, { id: "script-text" }).content
+      : compileSvelte(source, { filename: file, generate: "server" }).js.code;
+    const values = new Set<string>();
+    const visit = (node: ts.Node): void => { if (ts.isStringLiteral(node) && /^<\/script>$/i.test(node.text)) values.add(node.text); ts.forEachChild(node, visit); };
+    visit(ts.createSourceFile("component.ts", compiled, ts.ScriptTarget.Latest, true));
+    assert.deepEqual(values, new Set(["</ScRiPt>", "</SCRIPT>"]));
+  });
+
+  for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) it(`converts every successful shared conformance definition to ${target} in both graph modes`, async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 43, "review new successful conformance cases for React coverage");
-    const root = await mkdtemp(join(tmpdir(), "html-next-react-conformance-"));
+    assert.equal(successful.length, 46, "review new successful conformance cases for converter coverage");
+    const root = await mkdtemp(join(tmpdir(), `html-next-${target}-conformance-`));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
       const nodes = parseFragment(testCase.source, { sourceCodeLocationInfo: true }).childNodes;
@@ -229,7 +248,7 @@ describe("framework converter", () => {
       await writeFile(join(root, entry), testCase.source.slice(definition.sourceCodeLocation.startOffset, definition.sourceCodeLocation.endOffset));
       for (const mode of ["application", "library"] as const) {
         const outDirectory = join(root, `out-${index}-${mode}`);
-        const manifest = await convertComponents({ mode, target: "react", root, outDirectory, entries: [entry] });
+        const manifest = await convertComponents({ mode, target, root, outDirectory, entries: [entry] });
         assert.equal(manifest.components.length, 1, `${mode}: ${testCase.name}`);
         const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
         assert.doesNotMatch(component, /@nextwebwg\/html-next/, `${mode}: ${testCase.name}`);
@@ -1160,7 +1179,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
       assert.ok(closing >= 0, `${testCase.name} needs a component definition`);
       const entry = `components/invalid-${index}.html`;
       await writeFile(join(root, entry), testCase.source.slice(0, closing + "</template>".length));
-      for (const target of ["vue", "react"] as const) {
+      for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) {
         for (const mode of ["application", "library"] as const) {
           const outDirectory = join(root, `out-${target}-${mode}-${index}`);
           await assert.rejects(
