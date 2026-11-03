@@ -6,6 +6,7 @@ import { REQUEST_HOST_SOURCE } from "./request-host-source.js";
 import { INPUT_STATUS_SOURCE, INPUT_STATUS_COMPARISON_SOURCE } from "./shared-generated.js";
 
 const SOURCE = `import React from "react";
+import { flushSync } from "react-dom";
 ${INPUT_STATUS_SOURCE}
 ${INPUT_STATUS_COMPARISON_SOURCE}
 
@@ -139,13 +140,17 @@ function moduleDiagnostic(code: "HJ001" | "HJ002", options: ComponentHostOptions
 }
 
 function documentOrder(elements: ReadonlySet<Element>): Element[] {
-  return [...elements].filter((element) => element.isConnected)
-    .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1);
+  return [...elements].sort((left, right) => {
+    const position = left.compareDocumentPosition(right);
+    return position & Node.DOCUMENT_POSITION_DISCONNECTED ? 0 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+  });
 }
 
 /** React owns the DOM; the controller owns only its connection lifetime and local reactions. */
 export function useComponentHost(loader: () => Promise<unknown>, options: ComponentHostOptions): void {
   const latest = React.useRef(options);
+  const [, requestCommit] = React.useReducer((revision: number, _action: undefined) => revision + 1, 0);
+  const committing = React.useRef(false);
   React.useLayoutEffect(() => { latest.current = options; });
   const runtime = React.useRef<{
     readonly host: ControllerHost;
@@ -154,6 +159,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     readonly checkValues: () => void;
     readonly contextChanged: (name: string) => void;
     readonly relayLateResponders: () => void;
+    readonly flushEffects: () => void;
   } | null>(null);
 
   if (runtime.current === null) {
@@ -165,6 +171,16 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     let lastRoot: Element | null = null;
     let generation = 0;
     const effects = new Map<() => void, { pause(): void; execute(): void }>();
+    const pendingEffects = new Set<() => void>();
+    let queuedCommit = false;
+    const scheduleCommit = (): void => {
+      if (committing.current || queuedCommit) return;
+      queuedCommit = true;
+      queueMicrotask(() => {
+        queuedCommit = false;
+        if (connected) flushSync(() => requestCommit(undefined));
+      });
+    };
     // A listener's known responder (k), and for a request's function prop or event form whether one is set (r).
     const listeners = new Set<{
       type: string; callback: (event: Event) => void | (() => void); listener: EventListener;
@@ -240,6 +256,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     };
     // A write changes the value at its path and every path below it, never the containers above it.
     const changedPath = (path: readonly string[]): void => {
+      scheduleCommit();
       if (path.length === 1) notify(dependency("state:" + path[0]));
       for (const entry of [...statePaths.values()]) {
         if (entry.path.length >= path.length && path.every((key, index) => entry.path[index] === key)) notify(entry.dependency);
@@ -377,9 +394,12 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           invalidate() {
             if (queued || reaction.stopped) return;
             queued = true;
-            queueMicrotask(() => { queued = false; execute(); });
+            const first = pendingEffects.size === 0;
+            pendingEffects.add(flush);
+            if (first) scheduleCommit();
           },
         };
+        const flush = (): void => { queued = false; execute(); };
         const execute = (): void => {
           if (reaction.stopped || !connected) return;
           cleanupEffect?.();
@@ -390,6 +410,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           try { cleanupEffect = run(); } finally { activeReaction = prior; }
         };
         const pause = (): void => {
+          pendingEffects.delete(flush);
+          queued = false;
           cleanupEffect?.();
           cleanupEffect = undefined;
           clear(reaction);
@@ -546,11 +568,21 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       for (const name of replaced) if (!writes.some((path) => path[0] === name)) changedPath([name]);
       checkComputed();
     };
-    runtime.current = { host, synchronize, disconnect, checkValues, contextChanged: name => { checkValues(); changedPath([name]); }, relayLateResponders };
+    const flushEffects = (): void => {
+      const pending = [...pendingEffects];
+      pendingEffects.clear();
+      for (const run of pending) run();
+      if (pendingEffects.size > 0) requestCommit(undefined);
+    };
+    runtime.current = { host, synchronize, disconnect, checkValues, contextChanged: name => { checkValues(); changedPath([name]); }, relayLateResponders, flushEffects };
     options.attach?.(host);
   }
 
-  React.useLayoutEffect(() => { runtime.current!.checkValues(); runtime.current!.synchronize(); runtime.current!.relayLateResponders(); });
+  React.useLayoutEffect(() => {
+    committing.current = true;
+    try { runtime.current!.checkValues(); runtime.current!.synchronize(); runtime.current!.relayLateResponders(); runtime.current!.flushEffects(); }
+    finally { committing.current = false; }
+  });
   React.useEffect(() => {
     let active = true;
     const changed = (name?: string): void => { queueMicrotask(() => { if (active) { if (name === undefined) runtime.current!.checkValues(); else runtime.current!.contextChanged(name); } }); };
@@ -561,7 +593,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     runtime.current!.checkValues();
     return () => { active = false; for (const stop of stops) stop(); };
   }, [...Object.values(options.state).map(state => state.subscribe), ...(options.contexts ?? []).map(context => context.subscribe)]);
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const root = latest.current.root.current;
     if (root === null) return;
     const stopObserving = observeConnection(root, runtime.current!.synchronize);

@@ -19,6 +19,35 @@ ${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 
 ${expressionHelpersSource()}
 
+/** React removes a node from its declared parent even when a controller has temporarily moved it. */
+export function rememberParent(element: Element | null): () => void {
+  const parent = element?.parentNode;
+  const next = element?.nextSibling;
+  return () => {
+    if (parent && element && element.parentNode !== parent) parent.insertBefore(element, next?.parentNode === parent ? next : null);
+  };
+}
+
+export function useOwnedRootRef<T extends Element>(root: { current: T | null }): (element: T | null) => () => void {
+  return React.useCallback(element => {
+    root.current = element;
+    const restore = rememberParent(element);
+    return () => { restore(); root.current = null; };
+  }, [root]);
+}
+
+/** Structured prop metadata keeps its initial value; rendered bindings read current inputs. */
+export function useReflectedProp(): (name: string, value: unknown) => string | undefined {
+  const structured = React.useRef<Map<string, string> | undefined>(undefined);
+  return (name, value) => {
+    if (value == null) return undefined;
+    if (typeof value !== "object") return String(value);
+    const values = structured.current ??= new Map<string, string>();
+    if (!values.has(name)) values.set(name, JSON.stringify(value));
+    return values.get(name);
+  };
+}
+
 /**
  * React state a handler reads and writes in step order, as HTML Next handlers do: a write is the
  * next read's value at once, before React renders it. The setter takes a value or an updater.
@@ -61,10 +90,10 @@ function sameControlProps(previousProps: object, nextProps: object): boolean {
 interface ControlDefaults { readonly htmlNextDefault?: "defaultValue" | "defaultChecked"; readonly htmlNextAuthored?: unknown; readonly htmlNextInitial?: unknown }
 /** A bound control renders its initial default, then switches to its authored one as it mounts, rendering only itself. */
 function useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial }: ControlDefaults): Record<string, unknown> {
-  ${preact ? 'return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: htmlNextInitial };' : `const mounted = React.useRef(false);
+  ${preact ? 'const initial = React.useRef(htmlNextInitial);\n  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: htmlNextDefault === "defaultChecked" ? initial.current : htmlNextInitial };' : `const mounted = React.useRef(false);
   const [, settle] = React.useReducer((revision: number) => revision + 1, 0);
   React.useLayoutEffect(() => { if (htmlNextDefault !== undefined) { mounted.current = true; settle(); } }, []);
-  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
+  return htmlNextDefault === undefined || htmlNextDefault === "defaultChecked" && mounted.current ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
 }
 /** Inputs and textareas render through these, so React DOM, which rewrites an input's name and type and a textarea's default whenever it commits one, commits nothing to them on an unrelated render. */
 export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>

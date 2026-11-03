@@ -27,11 +27,22 @@ const INTERNAL_PROPS = [ROOT_OWNER_PROP, DECORATIONS_PROP, BINDING_INPUTS_PROP, 
 /** Helpers a component calls by these names; the expression helpers come from its lowering. */
 export const SVELTE_RENDER_COMPONENTS = ["formatValue", "isString", "isNumber", "isInteger", "isBoolean", "rootAttributes",
   "retainedValue", "retainedStructuralValue", "writePath", "checkedSlot", "setProperty",
-  "decorate", "hostStateTokens", "publishState", "injectContext"] as const;
+  "decorate", "hostStateTokens", "publishState", "injectContext", "reflectedProp"] as const;
 
-const SOURCE = `import { getContext, setContext } from "svelte";
+const SOURCE = `import { getContext, setContext, untrack } from "svelte";
 ${INPUT_STATUS_SOURCE}
 import { createAttachmentKey } from "svelte/attachments";
+
+/** Structured metadata retains its initial serialization while rendered bindings stay live. */
+export function reflectedProp(): (name: string, value: unknown) => string | undefined {
+  const initial = new Map<string, string>();
+  return (name, value) => {
+    if (value == null) return undefined;
+    if (typeof value !== "object") return String(value);
+    if (!initial.has(name)) initial.set(name, untrack(() => JSON.stringify(value)));
+    return initial.get(name);
+  };
+}
 
 ${expressionHelpersSource()}
 

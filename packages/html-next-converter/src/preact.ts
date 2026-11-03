@@ -6,6 +6,7 @@ export function preactArtifact(artifact: GeneratedArtifact): GeneratedArtifact {
   const path = artifact.path.replace(/^react\//, "preact/");
   if (!/\.tsx?$/.test(path)) return { ...artifact, path };
   let content = artifact.content.replaceAll('"react-dom/server"', '"preact-render-to-string"')
+    .replaceAll('"react-dom"', '"preact/compat"')
     .replaceAll('Symbol.for("nextwebwg.html-next.react.', 'Symbol.for("nextwebwg.html-next.preact.')
     .replace(" for React 19. Do not edit.", " for Preact 11. Do not edit.");
   const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true);

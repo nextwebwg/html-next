@@ -357,9 +357,20 @@ export function compileComponentStylesForSvelte(
       descends ||= !scoped.root;
       return scoped.selector;
     }).join(", ");
-  }, (root) => root.walkAtRules(/keyframes$/i, (rule) => {
-    if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
-  }),
+  }, (root) => {
+    // Nested rules inherit ownership from their parent selector, so split mixed lists first.
+    root.walkRules((rule) => {
+      const selectors = postcss.list.comma(rule.selector);
+      const own = selectors.filter(selector => !selector.includes(SLOTTED));
+      const projected = selectors.filter(selector => selector.includes(SLOTTED));
+      if (own.length === 0 || projected.length === 0) return;
+      rule.cloneAfter({ selector: projected.join(", ") });
+      rule.selector = own.join(", ");
+    });
+    root.walkAtRules(/keyframes$/i, (rule) => {
+      if (/^[\w-]+$/.test(rule.params)) rule.params = `-global-${rule.params}`;
+    });
+  },
   // A nested or projected component's root bounds the scope, as `[data-hn]` does in Vue; with neither, nothing does.
   () => descends && ((definition.slots?.length ?? 0) > 0 || componentTags(definition.template).size > 0) && `[${VUE_ROOT_ATTRIBUTE}]`, graph);
   return hashed ? { ...compiled, hashed } : compiled;

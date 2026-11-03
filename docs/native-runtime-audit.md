@@ -162,3 +162,19 @@ activation. Asynchronous cleanup results are retained separately, allowing desce
 while that cleanup promise remains pending. React and Preact additionally read `isConnected` when
 an asynchronous controller import resolves, closing the interval before the native mutation observer
 reports a detached root.
+
+Native document observation discovers canonical component attributes in both native and converted
+markup. React and Preact therefore identify their roots with `data-html-next-renderer` in server and
+client output. Discovery reads that existing DOM metadata before lowering, so it does not attach a
+second native controller to framework-owned nodes. No additional observer or lifecycle is installed.
+
+Named refs retain their renderer registration while a controller temporarily detaches a surface.
+Native `parentNode` and `nextSibling` identify its declared location. Ref cleanup restores a moved
+node to that location before React removes it, preserving native relocation and renderer disposal.
+Controller reactions run after the renderer commits, when conditional refs describe the new DOM.
+
+Native popover toggle events can run before a deferred framework render makes a state-controlled
+surface visible. Controller writes therefore share one microtask commit through React DOM's
+`flushSync` or Preact's compatibility equivalent. The framework still owns reconciliation and ref
+publication; controller reactions run after that commit. This batches synchronous controller writes
+before the following native task and adds no DOM observer or independent rendering pass.

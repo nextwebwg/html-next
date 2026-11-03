@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from "node:module";
 import { transform } from "esbuild";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { JSDOM } from "jsdom";
 
 import { parseComponent } from "../src/source-parser.js";
@@ -28,8 +29,18 @@ async function controllerHarness(controller: (host: Host) => void, references: {
   let cursor = 0;
   const layouts: Array<() => void | (() => void)> = [];
   const cleanups: Array<() => void> = [];
+  let scheduled = false;
   const react = {
     useRef(value: unknown) { return hooks[cursor++] ??= { current: value }; },
+    useReducer(reduce: (value: unknown) => unknown, initial: unknown) {
+      const hook = hooks[cursor++] ??= { current: initial };
+      return [hook.current, () => {
+        hook.current = reduce(hook.current);
+        if (scheduled) return;
+        scheduled = true;
+        queueMicrotask(() => { scheduled = false; render(); });
+      }];
+    },
     useLayoutEffect(run: () => void | (() => void)) { layouts.push(run); },
     useEffect(run: () => void | (() => void)) { layouts.push(run); },
   };
@@ -38,8 +49,8 @@ async function controllerHarness(controller: (host: Host) => void, references: {
     constructor(check: () => void) { checkConnection = check; }
     observe() {} disconnect() {}
   });
-  const source = stripTypeScriptTypes(reactHostArtifact("test").content.replace('import React from "react";', "").replaceAll("export ", ""));
-  const useComponentHost = new Function("React", source + "\nreturn useComponentHost;")(react) as
+  const source = stripTypeScriptTypes(reactHostArtifact("test").content.replace('import React from "react";', "").replace('import { flushSync } from "react-dom";', "").replaceAll("export ", ""));
+  const useComponentHost = new Function("React", "flushSync", source + "\nreturn useComponentHost;")(react, (run: () => void) => run()) as
     (loader: () => Promise<unknown>, options: unknown) => void;
   const root = Object.assign(new EventTarget(), {
     isConnected: true, ownerDocument: {}, querySelectorAll: () => [],
@@ -90,7 +101,7 @@ describe("React controller contract", () => {
     } finally { release(); harness.stop(); vi.unstubAllGlobals(); }
   });
 
-  it("keeps single refs optional and iterated refs as lists through DOM removal", async () => {
+  it("retains detached named refs until the renderer releases them", async () => {
     const dom = new JSDOM("<button>Single</button><i>Row</i>");
     const single = dom.window.document.querySelector("button")!;
     const row = dom.window.document.querySelector("i")!;
@@ -105,6 +116,10 @@ describe("React controller contract", () => {
       assert.equal(host.refs.single, single);
       assert.deepEqual(host.refs.row, [row]);
       single.remove(); row.remove();
+      assert.equal(host.refs.single, single, "a controller may temporarily detach its surface");
+      assert.deepEqual(host.refs.row, [row]);
+      references.refs.get("single")!.delete(single);
+      references.refs.get("row")!.delete(row);
       assert.equal(host.refs.single, undefined);
       assert.deepEqual(host.refs.row, []);
       assert.equal("single" in host.refs, true);
@@ -253,7 +268,7 @@ describe("React controller contract", () => {
       vi.stubGlobal(name, dom.window[name]);
     }
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const modules = new Map<string, unknown>([["react", React]]);
+    const modules = new Map<string, unknown>([["react", React], ["react-dom", { flushSync }]]);
     const evaluate = async (source: string, loader: "ts" | "tsx" = "ts") => {
       const compiled = await transform(source, { loader, format: "cjs", target: "es2022" });
       const module = { exports: {} as Record<string, unknown> };

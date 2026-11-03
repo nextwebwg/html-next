@@ -81,7 +81,10 @@ jobs:
           name: converter-build
       - run: tar -xf converter-build.tar
       - name: Run the shared assertions with the SDK under test
-        run: pnpm verify:converters --prepared --catalog-only --target=${{ matrix.renderer }} --shard=${{ matrix.shard }}/4
+        env:
+          LOOMA_PARALLEL_SCENARIOS: "1"
+          LOOMA_SCENARIO_CONCURRENCY: "4"
+        run: pnpm verify:converters --prepared --catalog-only --target=${{ matrix.renderer }} --shard=${{ matrix.shard }}/4 -- --maxWorkers=1
       - name: Preserve failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

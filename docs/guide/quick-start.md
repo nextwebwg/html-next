@@ -87,7 +87,7 @@ The React adapter generates this component when your app builds. [Set up React](
 import React from "react";
 import type { ReactNode } from "react";
 import { useNativeEvents } from "./events";
-import { decimalAdd, text, useLiveState } from "./render";
+import { decimalAdd, text, useLiveState, useOwnedRootRef } from "./render";
 export type XCounterProps = Omit<React.ComponentPropsWithoutRef<"div">, "style"> & {
     style?: React.CSSProperties | (React.CSSProperties & {
         [name: `--${string}`]: string | number | undefined;
@@ -105,6 +105,7 @@ export default function XCounter(props: XCounterProps) {
     const [count, setCount, getCount] = useLiveState<number>(0);
     const rootRef = React.useRef<HTMLDivElement | null>(null);
     React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);
+    const ownedRootRef = useOwnedRootRef(rootRef);
     function increment(): void {
         setCount((count) => decimalAdd(count, 1));
     }
@@ -113,7 +114,7 @@ export default function XCounter(props: XCounterProps) {
     }
     const incrementEvents = useNativeEvents([{ type: "click", modifiers: [], handler: increment }]);
     const resetEvents = useNativeEvents([{ type: "click", modifiers: [], handler: reset }]);
-    return (<div {...nativeAttrs} ref={rootRef} {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}><button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}<button type="button" ref={resetEvents}>Reset</button></div>);
+    return (<div {...nativeAttrs} ref={ownedRootRef} data-html-next-renderer="react" {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}><button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}<button type="button" ref={resetEvents}>Reset</button></div>);
 }
 ```
 

@@ -11,6 +11,15 @@ import type { ComponentDefinition } from "../src/template.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
 
+it("keeps Svelte ownership separate in mixed own and slotted selector lists", () => {
+  const definition = parseComponent('<template component="x-image"><figure><div class="frame"><img><slot></slot></div></figure></template>');
+  const css = compileComponentStylesForSvelte(".frame img, .frame :slotted(img) { max-width: 100%; & b { color: red; } }", definition).css;
+  assert.match(css, /:global\(\.frame img\):where\(\*\)/);
+  assert.match(css, /:global\(\.frame :is\(img\)\):not\(:scope, \* \*\)/);
+  assert.match(css, /:global\(& b\):where\(\*\)/);
+  assert.match(css, /:global\(& b\):not\(:scope, \* \*\)/);
+});
+
 it("preserves an implicit universal selector before a descendant pseudo-element", () => {
   assert.equal(guardComponentPseudoElements(".item ::before"), '.item :where(:not(:is([component]:not(template), [data-component]:not([component])), [data-slotted]))::before');
   assert.equal(guardComponentPseudoElements(".item > ::after"), '.item > :where(:not(:is([component]:not(template), [data-component]:not([component])), [data-slotted]))::after');

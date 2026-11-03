@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 
 import { generateComponent, generateReactComponent, generateSvelteConversion, generateVueComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { reactRenderArtifact } from "../src/targets/react-render.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 const snapshotUrl = new URL("./snapshots/x-button.json", import.meta.url);
@@ -85,9 +86,16 @@ describe("generateComponent", () => {
     assert.match(vue, /<pre><b>1<\/b>\n<b>2<\/b><\/pre>/);
     // Check rendered whitespace so formatting changes cannot alter inline or preformatted content.
     const react = generateReactComponent(definition);
+    const helperCode = await transform(reactRenderArtifact("test").content, { loader: "tsx", format: "cjs" });
+    const helpers = { exports: {} };
+    new Function("require", "module", "exports", helperCode.code)((name: string) => {
+      assert.equal(name, "react");
+      return React;
+    }, helpers, helpers.exports);
     const { code } = await transform(react, { loader: "tsx", format: "cjs" });
     const module = { exports: {} as { default: React.ComponentType } };
     new Function("require", "module", "exports", code)((name: string) => {
+      if (name === "./render") return helpers.exports;
       assert.equal(name, "react");
       return React;
     }, module, module.exports);

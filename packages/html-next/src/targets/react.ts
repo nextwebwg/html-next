@@ -39,12 +39,12 @@ const REACT_RESERVED = new Set([
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
   "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
-  "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
+  "propInputValues", "reflectedAttrs", "hostState", "rootRef", "ownedRootRef", "propValidityContract", "propValidityElement",
   "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
   "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
   "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
-  "ref", "cleanup", "binding", "attrs", "detail", "name", "keys", "path",
+  "ref", "cleanup", "restoreParent", "binding", "attrs", "detail", "name", "keys", "path",
   "checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", "propValidityState",
   "selectedPropNode", "acceptsControllerWrite",
   "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
@@ -85,8 +85,8 @@ function pascal(name: string): string {
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
-const REACT_RENDER_COMPONENTS = ["useLiveState", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
-  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
+const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef"] as const;
 
 export interface ReactConversionOptions {
   readonly modulePreparation?: { readonly source: string };
@@ -138,8 +138,9 @@ interface EventAttachment {
   readonly name: string;
   /** Only native listeners: the element's ref is `useNativeEvents`'s callback. */
   readonly listensOnly: boolean;
-  /** The root's ref alone: it is `rootRef` itself. */
+  /** The root's ref alone, with its native location retained for disposal. */
   readonly forwardsOnly: boolean;
+  readonly remembersParent: boolean;
   readonly scoped: boolean;
   readonly bindings: readonly EventBinding[];
   readonly forward: boolean;
@@ -218,7 +219,8 @@ function reactAttribute(name: string, svg = false): string {
     }
     name = adjusted;
   }
-  return Object.hasOwn(REACT_ATTRIBUTES, name) ? REACT_ATTRIBUTES[name]! : name;
+  return Object.hasOwn(REACT_ATTRIBUTES, name) ? REACT_ATTRIBUTES[name]! : svg && !/^(?:aria|data)-/.test(name)
+    ? name.replace(/[-:]([a-z])/g, (_, letter: string) => letter.toUpperCase()) : name;
 }
 
 function reactStyleProperty(name: string): string {
@@ -660,7 +662,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         : attributeValue(attribute.expressionPlan.ast, scope, attribute.name);
       const nativeValue = componentPropContract === undefined && (typeOf(attribute.expressionPlan.ast, scope).nullable || typeOf(attribute.expressionPlan.ast, scope).null === true) ? `(${value}) ?? undefined` : value;
       const sourceGuard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if (node.name === "input" && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
+      if ((node.name === "input" || node.name === "textarea") && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
       else if (node.name === "input" && attribute.name === "checked") bindings.push(`defaultChecked={Boolean(${lowering.value(attribute.expressionPlan.ast, scope)})}`);
       else if (componentPropContract !== undefined) {
         const alias = boundPropAliases.get(componentPropName!)!;
@@ -843,8 +845,8 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined;
     const forwardsOnly = rootTag !== undefined && !component && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0
       && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined && rootArms(state.definition.template) === undefined;
-    const name = forwardsOnly ? "rootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
-    const attachment: EventAttachment = { name, listensOnly, forwardsOnly, scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
+    const name = forwardsOnly ? "ownedRootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
+    const attachment: EventAttachment = { name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
       ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
     attachments.push(attachment);
     if (scoped) {
@@ -936,6 +938,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const invalidateSetterName = invalidateStateName !== "" && options.target === "preact" ? allocate("rerenderTick") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
   const stateWritesName = invalidateStateName === "" ? "" : allocate("stateWrites");
+  const reflectPropName = target.props.length === 0 ? "" : allocate("reflectProp");
   const handlerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextHandlerComputed${index}`)] as const));
   const controllerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextControllerComputed${index}`)] as const));
   const computedPreviousNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextComputedPrevious${index}`)] as const));
@@ -1027,7 +1030,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     return states.some(state => state.name === name) || contexts.some(context => (context.as ?? context.name) === name)
       ? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)` : undefined;
   });
-  const reflections = target.props.length === 0 ? [] : ["{...reflectedAttrs}"];
+  const reflections = [`data-html-next-renderer=${quote(options.target === "preact" ? "preact" : "react")}`,
+    ...(target.props.length === 0 ? [] : ["{...reflectedAttrs}"])];
   const styles = compileComponentStylesForConversion(definition.css, definition, options.componentGraph);
   const hostStateNames = componentStateNames(definition, options.componentGraph);
   const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
@@ -1273,11 +1277,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  const propInputValues = { ...checkedProps,",
       ...target.props.map((prop) => `    ...(props[${quote(prop.name)}] == null ? {} : { ${propKey(prop.name)}: props[${quote(prop.name)}] }),`),
       "  };",
+      `  const ${reflectPropName} = useReflectedProp();`,
       "  const reflectedAttrs = {",
       ...target.props.map((prop) => {
         const value = `(hasMounted.current && !inputAccepted[${quote(prop.name)}] ? props[${quote(prop.name)}] : checkedProps[${quote(prop.name)}])`;
-        const serialized = `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`;
-        return `    ...(Object.hasOwn(props, ${quote(prop.name)}) ? { ${quote(propAttribute(definition.contract.tag, prop.name))}: ${value} == null ? undefined : (${serialized}) } : {}),`;
+        return `    ...(Object.hasOwn(props, ${quote(prop.name)}) ? { ${quote(propAttribute(definition.contract.tag, prop.name))}: ${reflectPropName}(${quote(prop.name)}, ${value}) } : {}),`;
       }),
       "  };",
     ]),
@@ -1289,6 +1293,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `  const rootRef = React.useRef<${publicRootType} | null>(null);`,
       ...(preservesRootFocus ? ["  const rootFocusPending = React.useRef(false);"] : []),
       "  React.useImperativeHandle(props.ref ?? null, () => rootRef.current!, undefined);",
+      ...(attachments.some(attachment => attachment.forwardsOnly) ? ["  const ownedRootRef = useOwnedRootRef(rootRef);"] : []),
     ] : []),
     ...(target.props.length === 0 ? [] : [
       `  const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { ...prop, type: validityType(prop) }])) })} as const;`,
@@ -1472,6 +1477,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         });
         const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.ref === undefined ? attach : [
           "{",
+          ...(attachment.remembersParent ? ["const restoreParent = rememberParent(element);"] : []),
           ...(attachment.forward ? [`rootRef.current = element as ${publicRootType} | null;`] : []),
           ...(attachment.forward && preservesRootFocus ? [
             "if (element !== null && rootFocusPending.current) { (element as HTMLElement).focus({ preventScroll: true }); rootFocusPending.current = false; }",
@@ -1486,7 +1492,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           ...(bindings.length === 0 ? [] : [`const nativeCleanup = ${attach};`]),
           ...(control === undefined ? [] : [`const controlCleanup = attachBoundControl(element, ${quote(control.name)}, ${attachment.scoped ? "scoped?.control" : `controlValue${attachment.name}.current`}, ${control.defaults}, ${update}, ${control.nativeProperty}, ${attachment.scoped ? "scoped?.controlAccepted ?? true" : control.accepts ?? "true"});`]),
           ...genericUpdates,
-          `return () => { ${attachment.forward && preservesRootFocus ? "rootFocusPending.current = element?.ownerDocument.activeElement === element; " : ""}${attachment.forward ? "rootRef.current = null; " : ""}${attachment.ref === undefined ? "" : `refElements.current.get(${quote(attachment.ref)})?.delete(element!); `}${control === undefined ? "" : `${attachment.scoped ? "" : `controlRef${attachment.name}.current = null; `}controlCleanup?.(); `}${attachment.genericWrites.map((_write, index) => `genericCleanup${index}?.();`).join(" ")} ${attachment.properties.length === 0 || attachment.scoped ? "" : `propertyRef${attachment.name}.current = null; `}${bindings.length === 0 ? "" : "nativeCleanup?.();"} };`,
+          `return () => { ${attachment.remembersParent ? "restoreParent(); " : ""}${attachment.forward && preservesRootFocus ? "rootFocusPending.current = element?.ownerDocument.activeElement === element; " : ""}${attachment.forward ? "rootRef.current = null; " : ""}${attachment.ref === undefined ? "" : `refElements.current.get(${quote(attachment.ref)})?.delete(element!); `}${control === undefined ? "" : `${attachment.scoped ? "" : `controlRef${attachment.name}.current = null; `}controlCleanup?.(); `}${attachment.genericWrites.map((_write, index) => `genericCleanup${index}?.();`).join(" ")} ${attachment.properties.length === 0 || attachment.scoped ? "" : `propertyRef${attachment.name}.current = null; `}${bindings.length === 0 ? "" : "nativeCleanup?.();"} };`,
           "}",
         ].join(" ");
         return `  const ${attachment.name} = React.useCallback((element: Element | null, paths?: readonly (((() => readonly (string | number)[]) | undefined))[]${attachment.scoped ? ", scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }" : ""}) => ${callback}, []);`;

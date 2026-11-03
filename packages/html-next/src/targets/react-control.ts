@@ -207,7 +207,7 @@ export function syncBoundControl(element: Element | null, name: BoundName, value
     writeControl(element, name, value, nativeProperty);
     boundValues.set(element, snapshot(value));
   }
-  restoreDefault(element, name, defaults);
+  if (name !== "checked") restoreDefault(element, name, defaults);
 }
 
 ${NATIVE_PATH_WRITE_SOURCE}

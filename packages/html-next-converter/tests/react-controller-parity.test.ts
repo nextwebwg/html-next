@@ -18,7 +18,13 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 import { assertTargetedDispatch } from "./fixtures/targeted-dispatch.js";
-import { controllerParitySource as source, controllerParityModule as controller } from "./fixtures/controller-parity.js";
+import { controllerParitySource, controllerParityModule } from "./fixtures/controller-parity.js";
+const source = controllerParitySource.replace("<defs>", '<defs><state name="visible" type="boolean" value="false"></state>')
+  .replace("</section>", '<button $if="$visible" $ref="late" aria-label="late">Ready</button></section>');
+const controller = controllerParityModule.replace("window.controllerHost = host;", `window.controllerHost = host;
+  window.revealRef = () => { host.state.visible = true; };
+  const stopLate = host.effect(() => { if (host.state.visible) window.refTiming = host.refs.late?.textContent ?? "missing"; });`)
+  .replace("const cleanup = () => {", "const cleanup = () => { window.cleanupRef = host.refs.button?.localName; stopLate();");
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -102,6 +108,24 @@ const props: { amount?: number; tone?: string } = {};
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
       for (const hydrate of [false, true]) {
+        it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} runs controller effects after committing conditional refs`, async () => {
+          const browser = await launchParityBrowser(browserType);
+          try {
+            const page = await browser.newPage();
+            await page.setContent(`<main>${hydrate ? outputs.get(mode)!.markup : ""}</main>`);
+            await page.evaluate(() => { (window as any).trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 }; });
+            await page.addScriptTag({ path: outputs.get(mode)!.bundle });
+            await page.waitForFunction(() => typeof (window as any).revealRef === "function");
+            assert.equal(await page.evaluate(async () => {
+              (window as any).revealRef();
+              await Promise.resolve();
+              return document.querySelector("button[aria-label='late']")?.textContent;
+            }), "Ready", "controller writes commit before the next native task");
+            await page.getByRole("button", { name: "late", exact: true }).waitFor();
+            assert.equal(await page.evaluate(() => (window as any).refTiming), "Ready");
+          } finally { await browser.close(); }
+        });
+
         it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} matches controller effects, events, and cleanup`, async () => {
           const browser = await launchParityBrowser(browserType);
           const pages: Page[] = [];
@@ -288,6 +312,7 @@ const props: { amount?: number; tone?: string } = {};
             const cleanupRoots = await Promise.all([live, react].map((page) => page.evaluate(() =>
               (window as unknown as { cleanupRoot: string }).cleanupRoot)));
             assert.deepEqual(cleanupRoots, ["section", "section"]);
+            assert.equal(await react.evaluate(() => (window as any).cleanupRef), "button");
             assert.deepEqual(errors, []);
             assert.deepEqual(warnings.filter((message) => /hydration|mismatch/i.test(message)), []);
           } finally {

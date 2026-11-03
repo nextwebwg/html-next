@@ -14,6 +14,11 @@
 
 ### Fixed
 
+- React and Preact controller effects run after rendered refs commit, retain detached refs until renderer disposal, and disconnect before ref cleanup. Converted roots remain owned by their renderer when native HTML Next observation is active.
+- Converted native prop validation preserves application-owned errors. React and Preact retain form reset defaults, user-edited textarea values and initial structured prop metadata; moved native roots return to their declared parent for renderer disposal.
+- React SVG output uses framework attribute names during client and server rendering.
+- Svelte controller writes do not create reactive read dependencies, and iterated refs retain detached nodes until their renderer attachment is disposed.
+- Svelte preserves initial structured prop metadata and applies mixed own/slotted CSS rules to each selector's intended nodes, including fallback images.
 - Native package controllers activate after importing ancestors, so nested modal surfaces open in DOM order. Controller cleanup promises do not block child activation.
 - React and Preact recheck connection when a controller module finishes loading and omit missing optional colors in repeated style bindings.
 - Converted prop inputs retain accepted object and list identities when revalidation is unchanged, preventing controller render loops while still checking in-place edits.

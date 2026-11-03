@@ -115,6 +115,15 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await compare();
             };
             await compare();
+            assert.equal(await svelte.evaluate(() => {
+              const host = (window as any).refsHost;
+              const element = host.refs.row[0] as Element;
+              const parent = element.parentNode!, next = element.nextSibling;
+              element.remove();
+              const retained = host.refs.row.includes(element);
+              parent.insertBefore(element, next);
+              return retained;
+            }), true, "native detachment retains a ref until renderer disposal");
             await validate();
             for (const rows of [[3, 2], [2, 3], [2], []]) {
               await Promise.all(pages.map((page) => page.locator('[data-action="focus"]').focus()));
