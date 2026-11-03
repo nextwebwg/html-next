@@ -66,6 +66,7 @@ interface NativeConstraintElement extends Element {
   readonly validationMessage: string;
   checkValidity(): boolean;
   setCustomValidity(message: string): void;
+  readonly willValidate: boolean;
 }
 
 function nativeControl(el: Element): el is NativeConstraintElement {
@@ -73,6 +74,11 @@ function nativeControl(el: Element): el is NativeConstraintElement {
     "validity" in el && "validationMessage" in el &&
     typeof (el as { checkValidity?: unknown }).checkValidity === "function" &&
     typeof (el as { setCustomValidity?: unknown }).setCustomValidity === "function";
+}
+
+function ownsNativeBridge(el: NativeConstraintElement): boolean {
+  const message = nativeBridgeMessages.get(el);
+  return message !== undefined && (el.validationMessage === message || !el.willValidate && el.validationMessage === "");
 }
 
 function current(el: Element): Validity {
@@ -129,14 +135,13 @@ function reflect(el: Element, state: ManagedState | undefined): void {
   const message = firstMessage(validity);
   if (nativeControl(el)) {
     const needsBridge = state === undefined || state.derive !== undefined || state.external.length > 0 || Object.keys(state.constraint).length > 0;
-    const applicationError = el.validity.customError && el.validationMessage !== nativeBridgeMessages.get(el);
+    const applicationError = el.validity.customError && !ownsNativeBridge(el);
     if (needsBridge && !applicationError) {
       el.setCustomValidity(message);
       if (message === "") nativeBridgeMessages.delete(el);
       else nativeBridgeMessages.set(el, message);
     } else if (!needsBridge) {
-      const priorBridge = nativeBridgeMessages.get(el);
-      if (priorBridge !== undefined && el.validationMessage === priorBridge) el.setCustomValidity("");
+      if (ownsNativeBridge(el)) el.setCustomValidity("");
       nativeBridgeMessages.delete(el);
     }
     // Native form-associated elements already own :valid/:invalid/:user-invalid. Mirroring
@@ -225,8 +230,7 @@ function dispatchInvalid(el: Element, validity: Validity): void {
 function derive(el: Element, state: ManagedState): Validity {
   if (state.derive !== undefined) return state.derive();
   if (nativeControl(el) && Object.keys(state.constraint).length === 0) {
-    const priorBridge = nativeBridgeMessages.get(el);
-    if (priorBridge !== undefined && el.validationMessage === priorBridge) el.setCustomValidity("");
+    if (ownsNativeBridge(el)) el.setCustomValidity("");
     nativeBridgeMessages.delete(el);
     return validityFromNative(el.validity, el.validationMessage);
   }

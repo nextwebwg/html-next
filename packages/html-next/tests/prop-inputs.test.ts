@@ -18,6 +18,48 @@ function create(defaults: Record<string, unknown> = {}) {
 }
 
 describe("framework prop input bookkeeping", () => {
+  for (const bound of [false, true]) it(`keeps an unchanged structured ${bound ? "parent" : "caller"} input stable across render commits`, () => {
+    const { inputs, values, port } = create();
+    const caller = { name: "Coffee" as unknown };
+    const type = parseTypeExpression("object({ name: string })");
+    const options = { names: ["product"], values, defaults: {},
+      check: (_name: string, value: unknown) => parseTypedValue(value, type), invalidate() {} };
+    const bindings = bound ? { product: () => ({ value: caller, status: READY_INPUT }) } : undefined;
+    inputs.value("product", caller, bindings);
+    const accepted = port.read("product");
+    const render = () => {
+      const candidate = inputs.fork(options);
+      candidate.value("product", caller, bindings);
+      inputs.commit(candidate);
+      return port.read("product");
+    };
+    assert.equal(render(), accepted, "rechecking a caller input must not manufacture a value change");
+    caller.name = "Tea";
+    const changed = render();
+    assert.notEqual(changed, accepted);
+    assert.deepEqual(changed, { name: "Tea" });
+    assert.deepEqual(accepted, { name: "Coffee" }, "accepted snapshots stay separate from mutable caller data");
+    caller.name = 7;
+    assert.equal(render(), changed, "an invalid in-place edit retains the last accepted snapshot");
+    assert.equal(port.supplied("product"), true);
+  });
+
+  it("keeps a validated list stable while preserving caller replacements", () => {
+    const values = { items: null as unknown };
+    const type = parseTypeExpression("list(object({ label: string }))");
+    const options = { names: ["items"], values, defaults: {},
+      check: (_name: string, value: unknown) => parseTypedValue(value, type), invalidate() {} };
+    const inputs = new PropInputs(options);
+    const caller = [{ label: "Apple" }];
+    const accepted = inputs.value("items", caller);
+    assert.equal(inputs.value("items", caller), accepted);
+    caller.push({ label: "Pear" });
+    const changed = inputs.value("items", caller);
+    assert.notEqual(changed, accepted);
+    assert.deepEqual(changed, [{ label: "Apple" }, { label: "Pear" }]);
+    assert.notEqual(inputs.value("items", [...caller]), changed, "a new caller list is still a replacement");
+  });
+
   it("notifies source value and status without reporting unchanged caller ownership", () => {
     const notifications: string[] = [];
     const inputs = new PropInputs({ names: ["product"], values: { product: null }, defaults: {},

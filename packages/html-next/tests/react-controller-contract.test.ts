@@ -23,7 +23,7 @@ interface Host {
   effect(run: () => void | (() => void)): () => void;
 }
 
-async function controllerHarness(controller: (host: Host) => void, references: { refs: Map<string, Set<Element>>; iteratedRefs: readonly string[] } = { refs: new Map(), iteratedRefs: [] }) {
+async function controllerHarness(controller: (host: Host) => void, references: { refs: Map<string, Set<Element>>; iteratedRefs: readonly string[] } = { refs: new Map(), iteratedRefs: [] }, loadGate?: Promise<void>) {
   const hooks: Array<{ current: unknown }> = [];
   let cursor = 0;
   const layouts: Array<() => void | (() => void)> = [];
@@ -64,7 +64,7 @@ async function controllerHarness(controller: (host: Host) => void, references: {
   };
   const render = () => {
     cursor = 0;
-    useComponentHost(async () => ({ default: controller }), options);
+    useComponentHost(async () => { if (loadGate) await loadGate; return { default: controller }; }, options);
     for (const layout of layouts.splice(0)) { const cleanup = layout(); if (cleanup) cleanups.push(cleanup); }
   };
   render();
@@ -73,6 +73,23 @@ async function controllerHarness(controller: (host: Host) => void, references: {
 }
 
 describe("React controller contract", () => {
+  it("checks the native root again when an asynchronous controller finishes loading", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let connections = 0;
+    const harness = await controllerHarness(() => { connections++; }, undefined, gate);
+    try {
+      Reflect.set(harness.root, "isConnected", false);
+      release();
+      for (let index = 0; index < 12; index++) await Promise.resolve();
+      assert.equal(connections, 0, "a detached root cannot activate before its observer callback");
+      Reflect.set(harness.root, "isConnected", true);
+      harness.checkConnection();
+      for (let index = 0; index < 12; index++) await Promise.resolve();
+      assert.equal(connections, 1, "a later real connection can activate it");
+    } finally { release(); harness.stop(); vi.unstubAllGlobals(); }
+  });
+
   it("keeps single refs optional and iterated refs as lists through DOM removal", async () => {
     const dom = new JSDOM("<button>Single</button><i>Row</i>");
     const single = dom.window.document.querySelector("button")!;

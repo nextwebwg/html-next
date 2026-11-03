@@ -502,6 +502,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       // Requests from inside this root wait until the controller has run, or failed to load.
       const release = releaseController = holdController(next);
       void load().then(async (module) => {
+        synchronize();
         if (!connected || current !== generation || initialized && !latest.current.module) return;
         initialized = true;
         if (latest.current.module) {

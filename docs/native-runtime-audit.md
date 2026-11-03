@@ -149,3 +149,16 @@ controller-owned errors survive later prop refreshes. No additional event or obs
 Hydrating a child supplies conforming typed bound props before adopting producer records. This lets
 existing binding read identities compare current arrays and objects directly and retain matching server
 rows. Later input updates continue through the existing binding channel and scheduler.
+
+
+Native controls barred from validation expose an empty `validationMessage` even while `customError`
+is set. The validity bridge also checks `willValidate` when identifying its recorded message, so an
+output, disabled input or readonly input can clear a resolved prop error. Browser tests exercise those
+three controls alongside application-owned errors and selected-prop changes.
+
+Native package modules load independently through `import()`. The package entry uses DOM ancestry
+and their existing promises to start a descendant after its importing ancestor's synchronous
+activation. Asynchronous cleanup results are retained separately, allowing descendants to activate
+while that cleanup promise remains pending. React and Preact additionally read `isConnected` when
+an asynchronous controller import resolves, closing the interval before the native mutation observer
+reports a detached root.

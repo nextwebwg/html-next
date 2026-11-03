@@ -3,7 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
+import { build } from "esbuild";
+import { JSDOM } from "jsdom";
 
 import { assembleComponentPackage } from "../src/package.js";
 import { GENERATOR_VERSION } from "../src/generate.js";
@@ -36,6 +38,39 @@ async function assemble() {
 }
 
 describe("component package assembler", () => {
+  for (const kind of ["module", "controller"]) it(`activates nested ${kind}s after their importing ancestor`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-package-order-")); temporary.push(root);
+    for (const name of ["parent", "child"]) {
+      await writeFile(join(root, `${name}.html`), `<template component="x-${name}" ${kind}="./${name}.js"><section><slot></slot></section></template>`);
+      await writeFile(join(root, `${name}.js`), `${name === "parent" ? 'await new Promise(resolve => window.releaseParent = resolve);' : 'window.childImported = true;'}
+        export ${kind === "module" ? "function connect" : "default function"}(host) { window.connections.push(host.root.id); ${kind === "controller" ? name === "parent" ? "return new Promise(resolve => window.parentCleanup = resolve);" : "window.parentCleanup?.(() => {});" : ""} }`);
+    }
+    const outDirectory = join(root, "output");
+    await assembleComponentPackage({ name: "@example/ordered", version: "1.0.0", outDirectory,
+      components: ["parent", "child"].map(name => ({ source: join(root, `${name}.html`) })) });
+    const bundle = join(root, "bundle/index.mjs");
+    await build({ entryPoints: [join(outDirectory, "dist/index.js")], outdir: join(root, "bundle"), outExtension: { ".js": ".mjs" }, bundle: true, format: "esm", splitting: true,
+      platform: "browser", target: ["es2022"], alias: { "@nextwebwg/html-next/runtime": fileURLToPath(new URL("../src/runtime.ts", import.meta.url)) } });
+    const dom = new JSDOM('<x-parent id="parent"><x-child id="child"></x-child></x-parent>', { url: "https://example.test" });
+    for (const name of Object.getOwnPropertyNames(dom.window)) {
+      if (name in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(name)) continue;
+      try { vi.stubGlobal(name, Reflect.get(dom.window, name)); } catch { /* read-only global */ }
+    }
+    const window = dom.window as unknown as { connections: string[]; childImported: boolean; releaseParent: () => void };
+    window.connections = [];
+    let entry: { stop?: () => void } | undefined;
+    try {
+      entry = await import(bundle);
+      for (let index = 0; index < 100 && (!window.childImported || !window.releaseParent); index++) await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(window.childImported, true, "descendant modules load while their ancestor is pending");
+      assert.deepEqual(window.connections, [], "descendant activation waits for its importing ancestor");
+      window.releaseParent();
+      for (let index = 0; index < 100 && window.connections.length < 2; index++) await new Promise(resolve => setTimeout(resolve, 5));
+      assert.deepEqual(window.connections, ["parent", "child"]);
+      entry?.stop?.();
+    } finally { entry?.stop?.(); window.releaseParent?.(); await new Promise(resolve => setTimeout(resolve, 0)); dom.window.close(); vi.unstubAllGlobals(); }
+  });
+
   it("discovers prepared module exports without evaluating them and revisions their relative dependencies", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-prepared-package-"));
     temporary.push(root);

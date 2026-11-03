@@ -30,6 +30,28 @@ export interface InputReactions {
   untracked<T>(run: () => T): T;
 }
 
+// Validation copies structured values. Rechecking the same input must not turn that copy into
+// a renderer-visible change, but still has to observe edits and selected-type changes.
+function sameAcceptedValue(left: unknown, right: unknown, seen?: WeakMap<object, object>): boolean {
+  if (Object.is(left, right)) return true;
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  if (Array.isArray(left)) {
+    if (left.length !== (right as unknown[]).length) return false;
+  } else {
+    for (const value of [left, right]) {
+      const prototype: unknown = Object.getPrototypeOf(value);
+      if (prototype !== null && prototype !== Object.prototype) return false;
+    }
+  }
+  if (seen?.get(left) === right) return true;
+  seen ??= new WeakMap<object, object>();
+  seen.set(left, right);
+  const keys = Reflect.ownKeys(left);
+  return keys.length === Reflect.ownKeys(right).length && keys.every(key => Object.hasOwn(right, key)
+    && sameAcceptedValue(Reflect.get(left, key), Reflect.get(right, key), seen));
+}
+
 export class PropInputs {
   #options: PropInputOptions;
   readonly #records: Record<string, PropInputRecord> = Object.create(null) as Record<string, PropInputRecord>;
@@ -77,6 +99,7 @@ export class PropInputs {
   value<T>(name: string, input: unknown, bindings?: InputBindings, flags?: Record<string, boolean>): T {
     const record = this.#record(name);
     const released = record.caller !== undefined && input === undefined;
+    const previousCaller = record.caller;
     record.caller = input;
     const upstream = bindings !== undefined && Object.hasOwn(bindings, name) ? bindings[name]!() : undefined;
     if (upstream !== undefined) {
@@ -91,7 +114,9 @@ export class PropInputs {
         record.accepted = result.ok;
         if (result.ok) {
           record.revision += 1;
-          this.#options.values[name] = result.value;
+          if (!Object.is(record.input, upstream.value) || !sameAcceptedValue(this.#options.values[name], result.value)) {
+            this.#options.values[name] = result.value;
+          }
           record.input = upstream.value; record.provided = true; record.source = false; record.refused = false;
           this.#status(record, upstream.status);
         }
@@ -108,7 +133,9 @@ export class PropInputs {
       record.refused = !result.ok && input !== undefined;
       if (result.ok) {
         record.revision += 1;
-        this.#options.values[name] = result.value;
+        if (!Object.is(previousCaller, input) || !sameAcceptedValue(this.#options.values[name], result.value)) {
+          this.#options.values[name] = result.value;
+        }
         record.provided = input !== undefined; record.source = false; record.status = undefined;
       }
     }

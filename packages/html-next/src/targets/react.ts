@@ -608,7 +608,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else if (attribute.kind === "attribute" && attribute.target === "style") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: String(${lowering.text(attribute.expressionPlan.ast, scope)})`);
+      if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
+        const text = lowering.text(attribute.expressionPlan.ast, scope);
+        reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: String(${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${text}) ?? ""` : text})`);
+      }
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;

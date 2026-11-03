@@ -178,14 +178,16 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_849);
 // status observation; +17 B on computed-counter for existing-property notification of status.
 // Hydration input ownership is feature-only. Its export changes minifier allocation by 1 B
 // uncompressed per ordinary fixture; gzip moves by -6 to +2 B, with no added runtime calls.
+// +1–8 B on affected fixtures: native validity recognizes its own message even on controls
+// barred from validation, whose native validationMessage is empty.
 // Native custom validity keeps application-owned errors across prop refreshes; identical attribute
 // writes are omitted to preserve opaque native editing state (+19–34 B on affected prop/head
 // fixtures, +3 B on controller-keyed). These are exact measured costs, with no added allowance.
 const propGenerated = await generatedFixture("prop-button", 14_238);
-const awaitGenerated = await generatedFixture("await-card", 14_661);
+const awaitGenerated = await generatedFixture("await-card", 14_666);
 // +55 B gzip: the seed-copy cold path recognizes ordinary foreign-realm records,
 // retaining local/foreign class and platform identities. Local record/list copies keep their fast path.
-const seededGenerated = await generatedFixture("state-seed", 16_160);
+const seededGenerated = await generatedFixture("state-seed", 16_168);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
 const computedGenerated = await generatedFixture("computed-counter", 8_547);
@@ -207,15 +209,15 @@ const requestGenerated = await generatedFixture("controller-request", 9_784);
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
-const headNoneGenerated = await generatedFixture("head-none", 12_495);
+const headNoneGenerated = await generatedFixture("head-none", 12_499);
 // +78–79 B gzip over the component-identity baseline: core DOM mutations and base-URL fallback
 // support Angular SSR; script preloads survive reconciliation.
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
 // Recursive-factory helper exports change minified identifier allocation by 2 B gzip.
 // These acyclic fixtures contain none of the nesting helpers.
 const headStaticGenerated = await generatedFixture("head-static", 14_739);
-const headJsonGenerated = await generatedFixture("head-json", 14_878);
-const headGenerated = await generatedFixture("head-script", 16_854);
+const headJsonGenerated = await generatedFixture("head-json", 14_885);
+const headGenerated = await generatedFixture("head-script", 16_855);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

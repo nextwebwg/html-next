@@ -14,6 +14,10 @@
 
 ### Fixed
 
+- Native package controllers activate after importing ancestors, so nested modal surfaces open in DOM order. Controller cleanup promises do not block child activation.
+- React and Preact recheck connection when a controller module finishes loading and omit missing optional colors in repeated style bindings.
+- Converted prop inputs retain accepted object and list identities when revalidation is unchanged, preventing controller render loops while still checking in-place edits.
+- Native prop validity clears its own errors on controls barred from validation, whose platform validation messages are empty.
 - Native hydration preserves incomplete date entries, current typed inputs and prepared calendar rows without replacing their server nodes. Repeated identical attribute writes no longer reset opaque native editing state.
 - Keep application-owned native validation messages when prop validity refreshes, and normalize imported module CSS for canonical native roots.
 - Repeated scoped slots in components with seeded state receive the initial empty dirty map independently of the state initializer.
