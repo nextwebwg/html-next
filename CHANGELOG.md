@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-alpha.83
+
+- Publish the shared package set again after the alpha.82 converter tarball was unavailable from the registry.
+- Verify that every published package tarball can be downloaded before the release workflow succeeds.
+
 ## 1.0.0-alpha.82
 
 - Qualify dynamically mounted editor controls after their controllers activate, using the same shared readiness check as initial fixtures.
