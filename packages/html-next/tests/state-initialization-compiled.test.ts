@@ -39,6 +39,29 @@ async function create(props: object = {}, html = "", compiled = code) {
 }
 
 describe("compiled one-time state initialization", () => {
+  it("passes an empty dirty map to scoped slots in initially seeded rows", async () => {
+    const seededRows = parseComponent(`<template component="x-seed"><defs>
+      <prop name="product" type="list(string)">Rows.</prop>
+      <state name="draft" type="list(string)" from="$product"></state>
+      <slot name="row"><prop name="item" type="string" required>Item.</prop></slot>
+      </defs><section><slot $each="row of $draft" $key="$row" name="row" from:item="$row"></slot></section></template>`);
+    const compiled = await compiledFixtures("esm", `
+      import { scopedTemplate } from "@nextwebwg/html-next/generated-runtime";
+      const factory = factories["x-seed"];
+      factories["x-seed"] = (props, ...rest) => {
+        const carrier = document.createElement("template");
+        scopedTemplate(carrier, { l: new Set(), p() {}, m(dirty, props) {
+          const n = document.createDocumentFragment(), output = document.createElement("output");
+          output.textContent = props.item + ":" + dirty.size; n.append(output);
+          return { n, s: props };
+        } });
+        return factory({ ...props, slots: { row: [carrier] } }, ...rest);
+      };
+    `, [seededRows]);
+    const { root } = await create({ product: ["Ada"] }, "", compiled);
+    assert.equal(root.querySelector("output")?.textContent, "Ada:0");
+  });
+
   it("seeds the first frame and retains ordinary writable state", async () => {
     const { root, host, port } = await create({ product: { name: "Coffee" } });
     assert.equal(root.querySelector("b")?.textContent, "Coffee");

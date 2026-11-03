@@ -40,6 +40,16 @@ function audioSource(): string {
 }
 
 describe("generateComponent", () => {
+  it("keeps prepared-module adoption out of ordinary native factories", () => {
+    const definition = parseComponent('<template component="x-prepared" module="./module.js"><div></div></template>');
+    const preparation = { modulePreparation: { source: "build-a" } };
+    const ordinary = generateComponent(definition, preparation).find(artifact => artifact.path === "vanilla/XPrepared.js")!.content;
+    assert.doesNotMatch(ordinary, /adoptNativeModule|from "@nextwebwg\/html-next\/bindings"/);
+    const hydrating = generateComponent(definition, { ...preparation, hydrate: true }).find(artifact => artifact.path === "vanilla/XPrepared.js")!.content;
+    assert.match(hydrating, /adoptNativeModule\(I\.H, controller/);
+    assert.match(hydrating, /const I =/);
+  });
+
   it("lowers dollar-prefixed indexed references in both generated targets", () => {
     const definition = parseComponent(`<template component="x-first-item"><defs>
       <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>

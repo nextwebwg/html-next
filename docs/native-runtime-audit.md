@@ -121,3 +121,31 @@ cloned output. Cross-browser scoped-style coverage checks both spellings, confli
 empty canonical values and fallback after removing the canonical attribute.
 
 Framework style conversion normalizes canonical and legacy identity selectors in one shared build stage. React and Preact emit canonical `component` selectors; Vue and Svelte use their component classes; Angular uses native host attributes. The shared stage handles imported sheets, scope boundaries, namespace prefixes and authored identity selectors while preserving quoted values.
+
+## Native producer preparation
+
+Native server workers already provide component hosts, cancellation and a rendering flush. Generated
+hydration restores typed prop/state records and holds native controls and connection until adoption
+finishes. BindingScope already serializes and adopts read identities. The remaining gap was carrying
+those binding records through native Vite output with matching source revisions. The native build
+exports server preparation from the same graph as its factories. A feature-only helper adopts those
+records after prop management is installed and before the existing hydration hold is released.
+No observer or additional scheduling layer is needed. Explicit current caller keys retain ownership
+over restored inputs, including null and undefined releases, while server component state is restored.
+
+
+## Native form adoption and validity
+
+Native date controls retain editing segments that `value` cannot serialize. Writing the same `value`
+or constraint attribute can discard that partial entry. Compiled hydration therefore holds value,
+checked and selection writes during the existing adoption phase, and ordinary attribute updates omit
+identical values. Restoring form defaults also avoids rewriting unchanged live control properties.
+Browser regressions compare native `badInput`, values and retained nodes before and after adoption.
+
+Native `ValidityState.customError` and `validationMessage` identify an application's own validation
+message. The prop-validity bridge retains the last message it wrote and updates only its own message;
+controller-owned errors survive later prop refreshes. No additional event or observation layer is used.
+
+Hydrating a child supplies conforming typed bound props before adopting producer records. This lets
+existing binding read identities compare current arrays and objects directly and retain matching server
+rows. Later input updates continue through the existing binding channel and scheduler.

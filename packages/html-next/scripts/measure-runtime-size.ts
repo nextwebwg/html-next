@@ -176,11 +176,16 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_849);
 // Counters allocate only when queried; neither capability duplicates accepted values.
 // +132–148 B on SDK fixtures for read-only state/computed/context declaration reads and
 // status observation; +17 B on computed-counter for existing-property notification of status.
-const propGenerated = await generatedFixture("prop-button", 14_202);
-const awaitGenerated = await generatedFixture("await-card", 14_637);
+// Hydration input ownership is feature-only. Its export changes minifier allocation by 1 B
+// uncompressed per ordinary fixture; gzip moves by -6 to +2 B, with no added runtime calls.
+// Native custom validity keeps application-owned errors across prop refreshes; identical attribute
+// writes are omitted to preserve opaque native editing state (+19–34 B on affected prop/head
+// fixtures, +3 B on controller-keyed). These are exact measured costs, with no added allowance.
+const propGenerated = await generatedFixture("prop-button", 14_238);
+const awaitGenerated = await generatedFixture("await-card", 14_661);
 // +55 B gzip: the seed-copy cold path recognizes ordinary foreign-realm records,
 // retaining local/foreign class and platform identities. Local record/list copies keep their fast path.
-const seededGenerated = await generatedFixture("state-seed", 16_141);
+const seededGenerated = await generatedFixture("state-seed", 16_160);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
 const computedGenerated = await generatedFixture("computed-counter", 8_547);
@@ -196,21 +201,21 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 8_082
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 9_783);
+const requestGenerated = await generatedFixture("controller-request", 9_784);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
-const headNoneGenerated = await generatedFixture("head-none", 12_470);
+const headNoneGenerated = await generatedFixture("head-none", 12_495);
 // +78–79 B gzip over the component-identity baseline: core DOM mutations and base-URL fallback
 // support Angular SSR; script preloads survive reconciliation.
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
 // Recursive-factory helper exports change minified identifier allocation by 2 B gzip.
 // These acyclic fixtures contain none of the nesting helpers.
-const headStaticGenerated = await generatedFixture("head-static", 14_714);
-const headJsonGenerated = await generatedFixture("head-json", 14_858);
-const headGenerated = await generatedFixture("head-script", 16_820);
+const headStaticGenerated = await generatedFixture("head-static", 14_739);
+const headJsonGenerated = await generatedFixture("head-json", 14_878);
+const headGenerated = await generatedFixture("head-script", 16_854);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -219,7 +224,7 @@ const headGenerated = await generatedFixture("head-script", 16_820);
 // recording the rows it kept in place, so lists whose rows read their position visit only moved rows,
 // 85 B for the platform-object check that keeps DOM nodes in state unwrapped, and 17 B for the
 // whitespace between its elements, which templates keep as authored.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_891);
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_894);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, awaitGenerated, seededGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];

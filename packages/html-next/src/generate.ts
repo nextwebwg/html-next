@@ -98,7 +98,7 @@ export function generateComponent(
     [definition.contract.tag, definition] as const,
   ]);
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.guardNestedDepth === true);
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.guardNestedDepth === true, options?.modulePreparation);
   const vue = convertedToVue(definition, {
     slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
     propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),

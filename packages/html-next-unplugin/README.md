@@ -435,3 +435,18 @@ import { createXCounter } from "virtual:html-next/components";
 
 createXCounter({}, undefined, document.querySelector('[component~="x-counter"]')!);
 ```
+
+For components with producer modules exporting `prepare` and `adopt`, build a server entry with
+the same native Vite configuration:
+
+```ts
+// prepare.ts, compiled as a server entry
+export { prepare } from "virtual:html-next/prepare";
+```
+
+Pass that built entry's absolute module URL to `renderComponents` as `prepare.module`, alongside
+the component definitions. The server prepares producer values and transfers their read identities;
+factories adopt those records before connecting browser modules. Server preparation and client
+factories use the same graph revisions. Current caller props take precedence over restored server
+props, and controls retain edits made before hydration. Ordinary components import no binding
+preparation helper.

@@ -6,6 +6,7 @@ export { evaluateInput, inputRead, inputDefault, requireInputStatus, READY_INPUT
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
+import { recordInputs, restoreInstance } from "./generated-hydration.js";
 import { checkProps, registerEntry, registryRecord } from "./component-registry.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
@@ -47,7 +48,7 @@ export { notifyPropertySet } from "./reactivity.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
-export { ADOPT, adoptLifecycle, adoptProjection, adoptRows, adoptTree, holdControls, recordInputs, regionEnd, renderedInstanceRecord, restoreInstance } from "./generated-hydration.js";
+export { ADOPT, adoptLifecycle, adoptProjection, adoptRows, adoptTree, holdControls, canWriteControl, recordInputs, regionEnd, renderedInstanceRecord, restoreInstance } from "./generated-hydration.js";
 export { holdTransitions, transitionChanged, transitionName, transitionRows, transitionRowsChanged, transitionStyles, writeTransitionStyle } from "./generated-transitions.js";
 export { eventPasses } from "./event-filter.js";
 export {
@@ -56,7 +57,7 @@ export {
   checkUnknown,
 } from "./type-checks.js";
 export { boundFailures } from "./value-constraints.js";
-export { RequestEvent } from "./requests.js";
+export { RequestEvent, knownResponder } from "./requests.js";
 export { ComponentRegistry, componentRegistry, type ComponentDefinition, type ComponentInit } from "./component-registry.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
@@ -238,6 +239,11 @@ export function invoke(
  */
 export function propText(type: CompactType | null, value: unknown, attribute: string): string | null {
   return value === NONCONFORMING || !fits(value, type) ? null : toAttribute(value as Value, attribute);
+}
+
+/** A bound value accepted before a hydrating child reads its current inputs. */
+export function propValue(type: CompactType | null, value: unknown): unknown {
+  return value === NONCONFORMING || value != null && !fits(value, type) ? NONCONFORMING : value;
 }
 
 export { regionChanged } from "./rendered-form.js";
@@ -798,6 +804,28 @@ export function acceptProps(
   return record;
 }
 
+/** Restore recorded inputs while preserving the ownership of explicit current caller keys. */
+export function acceptHydratedProps(
+  element: Element | undefined, D: GeneratedPropRecord["D"], n: readonly string[], v: unknown[],
+  input: Readonly<Record<string, unknown>>, bound: readonly string[], html?: Readonly<Record<string, string>>, restored?: RenderedInstanceRecord,
+): GeneratedPropRecord {
+  if (!restored) return acceptProps(element, D, n, v, input, bound, html);
+  const current = { ...html, ...input };
+  const omit = <T>(values: Readonly<Record<string, T>>): Record<string, T> =>
+    Object.fromEntries(Object.entries(values).filter(([name]) => !Object.hasOwn(current, name)));
+  const values = recordInputs(restored, "value");
+  const attributes = { ...recordInputs(restored, "html"), ...html } as Record<string, string>;
+  for (const name of Object.keys(html ?? {})) delete values[name];
+  for (const name of Object.keys(input)) delete attributes[name];
+  Object.assign(values, input);
+  const record = acceptProps(element, D, n, v, values, bound, attributes, { ...restored, inputs: omit(restored.inputs),
+    ...(restored.availability === undefined ? {} : { availability: omit(restored.availability) }),
+    ...(restored.revisions === undefined ? {} : { revisions: omit(restored.revisions) }),
+  });
+  restoreInstance(restored, { n, k: 0 }, v, D, current);
+  return record;
+}
+
 /**
  * The live runtime's prop boundary for an attached compiled instance: on first connect the root
  * takes its validity and bound props their reflection; a reconnect reflects every explicit or bound
@@ -1066,6 +1094,7 @@ export function writeText(element: Element, text: string): void {
 
 /** Writes a converted attribute value; null removes it. */
 export function writeAttribute(element: Element, name: string, value: string | null): void {
+  if (element.getAttribute(name) === value) return;
   if (value === null) element.removeAttribute(name);
   else element.setAttribute(name, value);
 }

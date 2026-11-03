@@ -87,5 +87,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: converter-${{ matrix.renderer }}-${{ matrix.shard }}
-          path: .context/looma-pressure/packages/looma/test-results/
+          path: |
+            .context/looma-pressure/packages/looma/test-results/
+            .context/looma-pressure/packages/looma/.vitest/attachments/
+          include-hidden-files: true
           if-no-files-found: ignore

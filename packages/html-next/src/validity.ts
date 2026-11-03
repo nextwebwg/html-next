@@ -129,11 +129,12 @@ function reflect(el: Element, state: ManagedState | undefined): void {
   const message = firstMessage(validity);
   if (nativeControl(el)) {
     const needsBridge = state === undefined || state.derive !== undefined || state.external.length > 0 || Object.keys(state.constraint).length > 0;
-    if (needsBridge) {
+    const applicationError = el.validity.customError && el.validationMessage !== nativeBridgeMessages.get(el);
+    if (needsBridge && !applicationError) {
       el.setCustomValidity(message);
       if (message === "") nativeBridgeMessages.delete(el);
       else nativeBridgeMessages.set(el, message);
-    } else {
+    } else if (!needsBridge) {
       const priorBridge = nativeBridgeMessages.get(el);
       if (priorBridge !== undefined && el.validationMessage === priorBridge) el.setCustomValidity("");
       nativeBridgeMessages.delete(el);

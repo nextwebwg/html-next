@@ -1704,11 +1704,11 @@ function selectOf(block: Block, site: number): number | undefined {
 }
 
 /** A select's `applySelection`: its value bindings, applied as they evaluate now. */
-function selection(block: Block, select: number, siteOf: (site: number) => string): string {
+function selection(block: Block, select: number, siteOf: (site: number) => string, hydrate = false): string {
   const writes = block.bindings.filter((binding) => binding.select === true && binding.site === select).map((binding) => {
     const value = binding.apply!;
     const write = binding.kind === "property" ? `${siteOf(select)}.value = x;` : `writeControl(${siteOf(select)}, "value", x);`;
-    return `{ const x = ${value.source}; ${value.fails ? `if (x !== NONCONFORMING) ` : ""}${write} }`;
+    return `{ const x = ${value.source}; ${value.fails ? `if (x !== NONCONFORMING) ` : ""}${hydrate ? `if (canWriteControl(${siteOf(select)}, "value")) ` : ""}${write} }`;
   });
   return `() => { ${writes.join(" ")} }`;
 }
@@ -1763,6 +1763,7 @@ export function emitBlocks(
   /** A bundler module whose default export is a relative declared script's URL (`GenerationOptions.scriptURL`). */
   scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
   guardNestedDepth = false,
+  modulePreparation?: { readonly source: string },
 ): string {
   const { contract } = definition;
   // A script relative to the definition resolves at build time, through the bundler, to the URL it serves.
@@ -1864,20 +1865,22 @@ export function emitBlocks(
       ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.matches(':is([component]:not(template), [data-component]:not([component]))');`] : [],
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
       `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
-      // A bound prop is first its attribute's text, which the component reads as HTML input, then its value.
+      ...hydrate && invocation.props.length > 0 ? ["    const V = {};"] : [],
+      // Adoption reads typed current inputs before comparing prepared producer identities.
       ...invocation.props.flatMap((prop, at) => [
         prop.snapshot ? `    const ${prop.record} = [], t${at} = evaluateInput(() => ${convertible(prop.expression)}, READY_INPUT, NONCONFORMING), s${at} = rec(${prop.record}, t${at}.status), y${at} = t${at}.value;`
           : prop.availability === undefined ? `    const ${prop.record} = [], y${at} = ${convertible(prop.expression)};`
           : `    const ${prop.record} = [], s${at} = rec(${prop.record}, ${prop.availability}), y${at} = s${at}.ready ? ${convertible(prop.expression)} : undefined;`,
         `    r.q${index}_${at} = ${prop.record};`,
-        `    { const t = propText(${prop.type}, y${at}, ${JSON.stringify(prop.attribute)}); if (t !== null) H[${JSON.stringify(prop.name)}] = t; }`,
+        hydrate ? `    { const t = propValue(${prop.type}, y${at}); if (${prop.snapshot || prop.availability !== undefined ? `s${at}.ready && ` : ""}t !== NONCONFORMING) V[${JSON.stringify(prop.name)}] = t; }`
+          : `    { const t = propText(${prop.type}, y${at}, ${JSON.stringify(prop.attribute)}); if (t !== null) H[${JSON.stringify(prop.name)}] = t; }`,
       ]),
       ...invocation.content === undefined ? [] : [
         `    const k = document.createElement("div"), y = ${convertible(invocation.content.expression)};`,
         `    if (y !== NONCONFORMING) ${invocation.content.kind === "html" ? "writeHtml(k, toText(y))" : "k.textContent = toText(y)"};`,
       ],
       `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? adoptInvoke : invoke)` : "invoke"}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
-        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
+        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
       `    ${site} = r.h${index}.e;`,
       // The shared root carries both markers, and this component's lifecycle rides its owner's.
       ...invocation.root ? [
@@ -1971,7 +1974,8 @@ export function emitBlocks(
             `      ${last} = ${binding.exact};`);
           const name = JSON.stringify(binding.name);
           const write = binding.kind === "property" ? `${site}[${name}] = ${value};` : `writeControl(${site}, ${name}, ${value});`;
-          lines.push(expression.fails ? `      if (${value} !== NONCONFORMING) ${write}` : `      ${write}`, "    }");
+          const guardedWrite = hydrate && ["value", "checked", "selected", "selectedIndex", "files"].includes(binding.name!) ? `if (canWriteControl(${site}, ${name})) ${write}` : write;
+          lines.push(expression.fails ? `      if (${value} !== NONCONFORMING) ${guardedWrite}` : `      ${guardedWrite}`, "    }");
           continue;
         }
         let value = shared.get(binding.expression.key);
@@ -2240,7 +2244,7 @@ export function emitBlocks(
     block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: ${hydrate
       ? `(d, s, h) => m${scope.block.id}(d, s, ${record}, h)` : `(d, s) => m${scope.block.id}(d, s, ${record})`}, p: p${scope.block.id}, l: new Set() });`));
     // A select's `applySelection` runs once its options exist and after its option regions change.
-    for (const select of block.selects) lines.push(`${indent}${record}.c${select} = ${selection(block, select, (site) => block.sites[site]!.length === 0 ? `${record}.n` : `${record}.a${site}`)};`);
+    for (const select of block.selects) lines.push(`${indent}${record}.c${select} = ${selection(block, select, (site) => block.sites[site]!.length === 0 ? `${record}.n` : `${record}.a${site}`, hydrate)};`);
     const stops = block.events.map((event) => listener(event, siteOf(event.site)));
     const invoked = new Set(block.invocations.map((invocation) => invocation.site));
     for (const binding of block.bindings) if (binding.kind === "control" && !invoked.has(binding.site)) stops.push(`bindControl(I, ${siteOf(binding.site)}, ${binding.path})`);
@@ -2324,7 +2328,7 @@ export function emitBlocks(
         ] : ['    const s = document.createComment("html-next:item-start"), t = document.createComment("html-next:item-end");', "    n.prepend(s);", "    n.append(t);"],
         `    const r = { k: undefined, i: o, n${block.ranged === true ? ": s, t" : ""}, x: 0, y: 0${block.positional === true ? ", j, l" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
-        `    p${block.id}(r, -1, E);`,
+        `    p${block.id}(r, -1, emptyDirty);`,
         ...block.selects.map((select) => `    r.c${select}();`),
         "    return r;",
         "  };",
@@ -2419,7 +2423,7 @@ export function emitBlocks(
     "  };",
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { ${rootEntries.join(", ")} };`,
-    ...root.selects.map((select) => `  R.c${select} = ${selection(root, select, (site) => root.sites[site]!.length === 0 ? "element" : `R.a${site}`)};`),
+    ...root.selects.map((select) => `  R.c${select} = ${selection(root, select, (site) => root.sites[site]!.length === 0 ? "element" : `R.a${site}`, hydrate)};`),
     ...root.regions.flatMap((region, index) => region.kind !== "each" ? [] : [
       ...listOwned(region) ? [`  R.L${index}.u = R;`] : [],
       ...region.counted === true ? [`  R.L${index}.q = true;`] : [],
@@ -2501,6 +2505,7 @@ export function emitBlocks(
       return `[${declared}, ${script.root}, ${name === undefined ? "undefined" : JSON.stringify(name)}, ${run}]`;
     }).join(", ")}]);`] : [],
     ...(propNames.length > 0 ? ["  manageProps(I);"] : []),
+    ...(modulePreparation === undefined ? [] : [`  adoptNativeModule(${[asks ? "requestHost" : "", scripted ? "scriptHost" : ""].filter(Boolean).reduce((host, wrap) => `${wrap}(${host}, I)`, "I.H")}, controller, ${JSON.stringify({ tag: contract.tag, source: modulePreparation.source })});`]),
     ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
     ...plan.arms !== undefined ? [] : root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
@@ -2545,8 +2550,8 @@ export function emitBlocks(
     });
   }
   /** The prop inputs: the factory's, or an adopted root's restored ones. */
-  const inputs = hydrate ? "Z ? recordInputs(Z, \"value\") : componentProps" : "componentProps";
-  const htmlInputs = hydrate ? "Z ? recordInputs(Z, \"html\") : html" : "html";
+  const accept = hydrate ? "acceptHydratedProps" : "acceptProps";
+  const inputs = "componentProps";
   /** Where a block's invoked components' roots stand among its prototype's nodes. */
   function invokedAt(block: Block): number[] {
     return block.invocations.map((invocation) => preorder(block.spec, block.sites[invocation.site]!));
@@ -2563,7 +2568,7 @@ export function emitBlocks(
       // The root is the invoked component's, created when the root block first renders.
       hydrate ? "  const element = h ?? document.createTextNode(\"\");" : "  const element = document.createTextNode(\"\");",
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(undefined, D, S.n, v, ${inputs}, [], ${htmlInputs}${hydrate ? ", Z" : ""});`]),
+      ...(propNames.length === 0 ? [] : [`  const B = ${accept}(undefined, D, S.n, v, ${inputs}, [], html${hydrate ? ", Z" : ""});`]),
     ] : plan.arms === undefined ? [
       ...hydrate ? [
         `  const z = h && adoptTree(${rootChildren ? "T0" : '["", []]'}, h, [${invokedAt(root).join(", ")}], ${JSON.stringify(definition.template.name)});`,
@@ -2576,14 +2581,14 @@ export function emitBlocks(
         ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
       ],
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, ${inputs}, ${JSON.stringify(boundProps(definition.template))}, ${htmlInputs}${hydrate ? ", Z" : ""});`]),
+      ...(propNames.length === 0 ? [] : [`  const B = ${accept}(element, D, S.n, v, ${inputs}, ${JSON.stringify(boundProps(definition.template))}, html${hydrate ? ", Z" : ""});`]),
     ] : [
       // The props choose the arm, as live's factory chooses it, before the root exists.
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : [`  let B = acceptProps(undefined, D, S.n, v, ${inputs}, [], ${htmlInputs}${hydrate ? ", Z" : ""});`]),
+      ...(propNames.length === 0 ? [] : [`  let B = ${accept}(undefined, D, S.n, v, ${inputs}, [], html${hydrate ? ", Z" : ""});`]),
     ],
     ...plan.initializers,
-    ...hydrate ? [`  if (Z) restoreInstance(Z, S, v${propNames.length > 0 ? ", D" : ""});`] : [],
+    ...hydrate ? [`  if (Z) restoreInstance(Z, S, v${propNames.length > 0 ? ", D, { ...html, ...componentProps }" : ""});`] : [],
     // A context's value is its own: the host reads it as it reads a computed.
     ...(channel || observesBindings ? [
       "  const CS = [];",
@@ -2627,7 +2632,7 @@ export function emitBlocks(
       ]),
       "  }",
       ...hydrate ? ["  }"] : [],
-      ...(propNames.length === 0 ? [] : [`  B = acceptProps(element, D, S.n, v, ${inputs}, Q[a], ${htmlInputs}${hydrate ? ", Z" : ""});`]),
+      ...(propNames.length === 0 ? [] : [`  B = ${accept}(element, D, S.n, v, ${inputs}, Q[a], html${hydrate ? ", Z" : ""});`]),
     ],
     ...body,
   ];
@@ -2671,13 +2676,13 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "generatedInputs", "awaitInput", "evaluateInput", "inputRead", "inputDefault", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "notifyPropertySet", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "acceptHydratedProps", "manageProps", "generatedInputs", "awaitInput", "evaluateInput", "inputRead", "inputDefault", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "notifyPropertySet", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke", "propValue",
     "bindProp", "bindInput", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
     "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "manageHead", "manageScripts", "headValue", "headAttributes", "headJson", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
-    "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "placeFallback", "recordInputs",
+    "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}`));
@@ -2698,6 +2703,7 @@ export function emitBlocks(
   return [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
     `import { ${helpers.map(name => guardNestedDepth && (name === "invoke" || name === "adoptInvoke") ? `${name === "invoke" ? "invokeNested" : "adoptNestedInvoke"} as ${name}` : name).join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
+    ...(modulePreparation === undefined ? [] : ['import { adoptNativeModule } from "@nextwebwg/html-next/bindings";']),
     // Each invoked component's factory, from its own module; a component that invokes itself has its own.
     ...[...new Set(blocks.flatMap((block) => block.invocations.map((invocation) => invocation.factory)))].filter((factory) => factory !== `create${contract.name}`).map((factory) => {
       const invoked = [...invocations?.values() ?? []].find((candidate) => `create${candidate.definition.contract.name}` === factory)!;
@@ -2712,7 +2718,7 @@ export function emitBlocks(
     ...slotPropChecks.map((check, at) => `const K${at} = ${check};`),
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
     // A fresh row's first patch has nothing written yet.
-    ...(blocks.some((block) => block.row) ? ["const E = new Map();"] : []),
+    ...(blocks.some((block) => block.row) ? ["const emptyDirty = new Map();"] : []),
     stateSpec,
     ...(plan.arms === undefined ? [] : [
       `const A = ${JSON.stringify(plan.arms.nodes.map((node) => armRoot(node, definition)))};`,

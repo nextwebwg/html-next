@@ -353,16 +353,16 @@ export function restoreSerializedFormDefaults(root: Element): void {
         if (defaults.valuePresent === false) element.removeAttribute("value");
       }
       if (typeof defaults.checked === "boolean") element.defaultChecked = defaults.checked;
-      element.value = value;
-      element.checked = checked;
+      if (element.value !== value) element.value = value;
+      if (element.checked !== checked) element.checked = checked;
     } else if (element instanceof HTMLTextAreaElement && typeof defaults.value === "string") {
       const value = element.value;
       element.defaultValue = defaults.value;
-      element.value = value;
+      if (element.value !== value) element.value = value;
     } else if (element instanceof HTMLOptionElement && typeof defaults.selected === "boolean") {
       const selected = element.selected;
       element.defaultSelected = defaults.selected;
-      element.selected = selected;
+      if (element.selected !== selected) element.selected = selected;
     }
   }
 }

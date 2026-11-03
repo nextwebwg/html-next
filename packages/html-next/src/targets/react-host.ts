@@ -79,6 +79,7 @@ export interface ComponentHostOptions {
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly availability?: Readonly<Record<string, () => InputStatus>>;
   readonly refs: ReadonlyMap<string, ReadonlySet<Element>>;
+  readonly iteratedRefs?: readonly string[];
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly data: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
@@ -311,7 +312,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           const elements = latest.current.refs.get(name);
           if (elements === undefined) return undefined;
           const ordered = documentOrder(elements);
-          return ordered.length === 1 ? ordered[0] : ordered;
+          return latest.current.iteratedRefs?.includes(name) ? ordered : ordered[0];
         },
         has: (_target, name) => typeof name === "string" && latest.current.refs.has(name),
       }),

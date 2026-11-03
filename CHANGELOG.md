@@ -8,11 +8,17 @@
 
 - Native Vite builds compile finite recursive component graphs and guard non-terminating invocations with the existing nesting diagnostic. Shared Vite builders reuse one native source snapshot across client and server output.
 - Native Vite builds accept `hydrate: true` to generate factories that adopt server-rendered roots in place. Hydration-enabled factory declarations include the existing root argument.
+- Native hydration builds expose producer preparation through `virtual:html-next/prepare`. Server output and factories share the same source revisions and adopt prepared binding reads before browser connection.
 - Document Preact and Angular in the Usage and quick-start framework selectors, including Angular native hosts, switchable roots and compiler setup.
 - Convert HTML component graphs to Angular 21.2 standalone components with `target: "angular"` or `html-next-convert angular`. Native attribute selectors preserve roots such as `<button ui-button>`; delegated roots compose into one component and retain identity attributes for CSS. The Vite adapter compiles generated components ahead of time, links Angular dependencies, and prepares compiler-visible input and slot types.
 
 ### Fixed
 
+- Native hydration preserves incomplete date entries, current typed inputs and prepared calendar rows without replacing their server nodes. Repeated identical attribute writes no longer reset opaque native editing state.
+- Keep application-owned native validation messages when prop validity refreshes, and normalize imported module CSS for canonical native roots.
+- Repeated scoped slots in components with seeded state receive the initial empty dirty map independently of the state initializer.
+- Native hydration preserves explicit current caller props, including null and undefined releases, while restoring server state and retaining DOM nodes.
+- React and Preact controller refs retain their declared single or iterated shape, including absent single refs and empty iterations.
 - Preserve Angular structural-root hydration, live default/named projection and parent ownership through native root changes. Controller-dispatched events render at the next microtask checkpoint before a following native event consumes their bound DOM.
 - Normalize CSS imported by component modules for converted roots while keeping native roots supported in the same application.
 - Format React and Preact output with the TypeScript printer to avoid excessive layout search on deeply nested component graphs.

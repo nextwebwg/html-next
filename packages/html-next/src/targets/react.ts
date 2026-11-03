@@ -8,7 +8,7 @@ import { parseDuration } from "../duration.js";
 import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
@@ -1048,6 +1048,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const capturesRoot = attachments.some((attachment) => attachment.forward);
   const usesRefActions = handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate"));
   const usesRefs = usesTargetDispatch || usesRefActions || attachments.some((attachment) => attachment.ref !== undefined);
+  const references = [...new Set(attachments.flatMap(attachment => attachment.ref === undefined ? [] : [attachment.ref]))];
+  const iteratedRefs = [...iteratedRefNames(definition)];
   const rootType = rootArms(template) === undefined ? getDomInterface(template.name) ?? "HTMLElement"
     : [...new Set(rootArms(template)!.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
   const preservesRootFocus = rootArms(template) !== undefined;
@@ -1302,7 +1304,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  React.useLayoutEffect(() => () => { propValidityCleanup.current?.(); propValidityCleanup.current = null; propValidityElement.current = null; }, []);",
     ]),
     ...(usesRefs ? [
-      "  const refElements = React.useRef(new Map<string, Set<Element>>());",
+      `  const refElements = React.useRef(new Map<string, Set<Element>>([${references.map(name => `[${quote(name)}, new Set<Element>()]`).join(", ")}]));`,
     ] : []),
     ...(usesRefActions ? [
       "  function refTarget(name: string): Element | undefined {",
@@ -1528,6 +1530,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(checksControllerWrites ? [`    acceptsState: (name, keys, value) => acceptsControllerWrite(value, controllerStateTypes[name as keyof typeof controllerStateTypes], keys),`] : []),
       ...controllerInitials(definition, "    "),
       `    refs: ${usesRefs ? "refElements.current" : "new Map<string, ReadonlySet<Element>>()"},`,
+      ...(iteratedRefs.length === 0 ? [] : [`    iteratedRefs: ${JSON.stringify(iteratedRefs)},`]),
       ...(target.requests.length === 0 ? [] : [
         "    request: requestAsk,",
         `    responders: ${respondersSource(target.requests, (prop) => `props[${quote(prop)}]`, (request) => `props[${quote(request.callbackName)}]`)},`,

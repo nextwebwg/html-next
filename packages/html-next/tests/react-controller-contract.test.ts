@@ -16,13 +16,14 @@ import { reactRenderArtifact } from "../src/targets/react-render.js";
 interface Host {
   state: Record<string, unknown>;
   data: Readonly<Record<string, { value: unknown }>>;
+  refs: Readonly<Record<string, Element | readonly Element[] | undefined>>;
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
   dispatch(type: string, detail?: unknown): boolean;
   computed<T>(run: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
 }
 
-async function controllerHarness(controller: (host: Host) => void) {
+async function controllerHarness(controller: (host: Host) => void, references: { refs: Map<string, Set<Element>>; iteratedRefs: readonly string[] } = { refs: new Map(), iteratedRefs: [] }) {
   const hooks: Array<{ current: unknown }> = [];
   let cursor = 0;
   const layouts: Array<() => void | (() => void)> = [];
@@ -50,7 +51,7 @@ async function controllerHarness(controller: (host: Host) => void) {
   let event: unknown;
   const options = {
     root: { current: root }, definition: "https://example.test/x-probe.html", controller: "./probe.js",
-    props: () => ({}), refs: new Map(),
+    props: () => ({}), ...references,
     state: {
       count: { get: () => count, set: (value: unknown) => { count = value; } },
       source: { get: () => event, set: (value: unknown) => { event = value; } },
@@ -72,6 +73,28 @@ async function controllerHarness(controller: (host: Host) => void) {
 }
 
 describe("React controller contract", () => {
+  it("keeps single refs optional and iterated refs as lists through DOM removal", async () => {
+    const dom = new JSDOM("<button>Single</button><i>Row</i>");
+    const single = dom.window.document.querySelector("button")!;
+    const row = dom.window.document.querySelector("i")!;
+    const references = { refs: new Map<string, Set<Element>>([["single", new Set()], ["row", new Set()]]), iteratedRefs: ["row"] };
+    let host!: Host;
+    const harness = await controllerHarness(value => { host = value; }, references);
+    try {
+      assert.equal(host.refs.single, undefined);
+      assert.deepEqual(host.refs.row, []);
+      references.refs.get("single")!.add(single);
+      references.refs.get("row")!.add(row);
+      assert.equal(host.refs.single, single);
+      assert.deepEqual(host.refs.row, [row]);
+      single.remove(); row.remove();
+      assert.equal(host.refs.single, undefined);
+      assert.deepEqual(host.refs.row, []);
+      assert.equal("single" in host.refs, true);
+      assert.equal("row" in host.refs, true);
+    } finally { harness.stop(); dom.window.close(); vi.unstubAllGlobals(); }
+  });
+
   it("warns and ignores invalid writes, separates resources, and retains native events", async () => {
     let host!: Host;
     const harness = await controllerHarness((value) => { host = value; });
