@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.84
+
+- Preserve authoring-component style ownership when Angular projects native children through a structural component. Existing slot markers survive server rendering and hydration.
+
 ## 1.0.0-alpha.83
 
 - Publish the shared package set again after the alpha.82 converter tarball was unavailable from the registry.
