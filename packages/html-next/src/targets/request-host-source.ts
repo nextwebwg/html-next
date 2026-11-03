@@ -21,10 +21,17 @@ const documentRecord = (root: Element): DocumentRecord =>
 /** Requests from inside root wait until its controller has run; the returned release ends the wait. */
 function holdController(root: Element): () => void {
   const { g: gates } = documentRecord(root).requests ??= { g: new WeakMap() };
+  const previous = gates.get(root);
   let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const own = new Promise<void>((resolve) => { release = resolve; });
+  const gate = previous === undefined ? own : Promise.all([previous, own]).then(() => {});
   gates.set(root, gate);
-  return () => { if (gates.get(root) === gate) gates.delete(root); release(); };
+  return () => {
+    release();
+    if (gates.get(root) !== gate) return;
+    if (previous === undefined) gates.delete(root);
+    else void gate.then(() => { if (gates.get(root) === gate) gates.delete(root); });
+  };
 }
 
 /** A responder registered on root relays to the requests inside it that went unanswered, once a page asks. */

@@ -104,7 +104,7 @@ export {
 
 /** Requests: what a component asks its consumer (src/requests.ts). Loaders hold a root until its controller runs. */
 export {
-  holdController, RequestEvent,
+  holdController, pendingControllers, RequestEvent,
   type RequestEventInit, type RequestOptions, type Responder, type ResponderInit,
 } from "./requests.js";
 

@@ -227,3 +227,11 @@ These local measurements describe those workloads, not a general framework ranki
 | --- | ---: | ---: | ---: |
 | Input value updates | 930 bytes | 31.9 / 29.6 ms | 36.0 / 34.0 ms |
 | Textarea attribute updates | 1,146 bytes | 43.3 / 35.1 ms | 46.0 / 39.0 ms |
+
+Controller startup already has per-document promise gates for request delivery. Script downloads
+can finish before module evaluation activates a controller, so DOM presence alone cannot establish
+interaction readiness. `pendingControllers(root)` reads those existing promises through a native
+DOM subtree query. Imperative callers can await them before driving the rendered controls.
+Controllers sharing one collapsed element compose their startup promises with `Promise.all`;
+the gate remains until every startup body has finished. The query runs when an imperative caller
+asks for readiness, using the existing connection lifecycle.

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Read current controller startup promises with `pendingControllers(root)` when preparing a DOM subtree for imperative interaction.
 - Require the complete Looma catalog and shared browser behavior tests for native HTML Next and all five converter targets alongside the focused Vite and converter feature checks. Catalog preparation runs once and is reused by browser shards.
 
 - Native Vite builds compile finite recursive component graphs and guard non-terminating invocations with the existing nesting diagnostic. Shared Vite builders reuse one native source snapshot across client and server output.
@@ -14,6 +15,7 @@
 
 ### Fixed
 
+- Collapsed native roots retain every pending controller until all of their startup bodies finish.
 - React and Preact controller effects run after rendered refs commit, retain detached refs for renderer disposal, and preserve connected controller lifetimes and data notifications when Suspense hides a root. Converted roots remain owned by their renderer when native HTML Next observation is active.
 - Converted native prop validation preserves application-owned errors. React and Preact retain form reset defaults, user-edited textarea values and initial structured prop metadata; moved native roots return to their declared parent for renderer disposal.
 - React and Preact publish consumer refs only when the native root or receiving ref changes, preventing reactive ref feedback loops during ordinary updates.
