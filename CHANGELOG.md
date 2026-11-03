@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.82
 
+- Qualify dynamically mounted editor controls after their controllers activate, using the same shared readiness check as initial fixtures.
+
 ### Added
 
 - Read current controller startup promises with `pendingControllers(root)` when preparing a DOM subtree for imperative interaction.
