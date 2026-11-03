@@ -38,7 +38,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.82";
+export const GENERATOR_VERSION = "1.0.0-alpha.83";
 
 export interface GeneratedArtifact {
   readonly path: string;
