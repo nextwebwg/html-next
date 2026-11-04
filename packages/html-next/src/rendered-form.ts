@@ -247,7 +247,8 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
   const owner = tag ?? lineage[0];
   const carrier = Array.from(root.children).find((child): child is HTMLTemplateElement =>
     child instanceof HTMLTemplateElement && !inRanges.has(child) && child.getAttribute("carrier") === owner);
-  if (ranges.length === 0 && carrier === undefined) return undefined;
+  // A root whose only content is placed by its parent's `<slot of>` still has that content.
+  if (ranges.length === 0 && carrier === undefined && !(consume && borrowedRanges.has(root))) return undefined;
   const carried: Node[] = [];
   for (const child of carrier?.content.childNodes ?? []) carriedRoots.add(child);
   if (carrier !== undefined && consume) {

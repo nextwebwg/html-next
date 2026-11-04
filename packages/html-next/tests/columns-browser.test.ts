@@ -250,6 +250,37 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
       }
     });
 
+    it(`${engine} hydrates a column whose only content its table places`, async () => {
+      const definitions = [
+        `<template component="x-note"><th>Note</th><defs><slot name="detail"></slot></defs></template>`,
+        `<template component="x-notes"><defs><slot accepts="x-note" as="notes"></slot></defs><table><thead><tr><template $slot></template></tr></thead>
+          <tbody><tr><td $each="note of $notes" $key="$note"><slot of="$note" name="detail">none</slot></td></tr></tbody></table></template>`,
+        `<template component="page-notes"><main><x-notes><x-note><b slot="detail">kept</b></x-note></x-notes></main></template>`,
+      ].map((source) => parseComponent(source));
+      const rendered = await renderComponents('<page-notes id="subject"></page-notes>', { definitions });
+      assert.doesNotMatch(rendered.html, /carrier="x-note"/);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.setContent(`<div id="server">${rendered.html}</div>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const kept = document.querySelector("b");
+          window.HtmlRuntime.registerComponentDefinitions(JSON.parse(${JSON.stringify(JSON.stringify(definitions))}));
+          window.HtmlRuntime.observeDocument(document);
+          await ${tick};
+          const detail = window.HtmlRuntime.getComponentHost(document.querySelector("th")).slots.detail;
+          return { detail: detail.length === 1 && detail[0] === kept, same: document.querySelector("b") === kept };
+        })()`);
+        assert.deepEqual(result, { detail: true, same: true });
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${engine} warns for children a slot does not accept and for unknown or prop-less placements`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
