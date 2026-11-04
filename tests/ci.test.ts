@@ -109,6 +109,7 @@ describe("affected CI", () => {
       expect(JSON.parse(values.node!).include.map((job: { package: string }) => job.package)).toEqual(["htmlkit"]);
       expect(JSON.parse(values.packages!)).toEqual(["html-next", "html-next-unplugin", "htmlkit"]);
       expect(values.generated).toBe("true"); expect(values.has_packages).toBe("true");
+      expect(values.converters).toBe("false");
       // A developer's new file is not in HEAD yet, but must select its owning suite.
       write("packages/html-next/tests/new-regression.test.ts", "// New local regression");
       const localOutput = join(directory, "local-outputs");
@@ -117,6 +118,7 @@ describe("affected CI", () => {
       });
       const local = Object.fromEntries(readFileSync(localOutput, "utf8").trim().split("\n")
         .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+      expect(local.converters).toBe("true");
       expect(JSON.parse(local.node!).include.flatMap((job: { files: string[] }) => job.files))
         .toContain("packages/html-next/tests/new-regression.test.ts");
     } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -127,7 +129,7 @@ describe("affected CI", () => {
     const files = new Set(plan.browser.flatMap((job) => job.files));
     expect(files.has("packages/html-next/tests/runtime.test.ts")).toBe(true);
     expect([...files].some((file) => file.endsWith("public-conformance-parity.test.ts"))).toBe(false);
-    expect(plan.corpus).toHaveLength(12);
+    expect(plan.corpus).toHaveLength(18);
     expect(plan.corpus.every((job) => job.files.every((file) => file.endsWith("public-conformance-parity.test.ts")))).toBe(true);
     expect(plan.corpus.every((job) => job.seconds <= 180)).toBe(true);
     expect(createPlan(["packages/htmlkit/src/routes.ts"]).corpus).toEqual([]);

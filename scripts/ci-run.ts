@@ -13,6 +13,10 @@ function pnpm(...args: string[]) {
 if (job.suite === "node") {
   pnpm("--filter", `./packages/${job.package}`, "typecheck");
 }
+if (job.suite === "targets" && job.package === "html-next-unplugin") {
+  // Angular's real compiler resolves the SDK's published declaration exports.
+  pnpm("--filter", "@nextwebwg/html-next", "build");
+}
 const config = job.suite === "targets" ? "vitest.targets.config.ts"
   : job.suite === "browser" ? "vitest.browser.config.ts" : "vitest.config.ts";
 pnpm("exec", "vitest", "run", "--config", config, ...job.files,

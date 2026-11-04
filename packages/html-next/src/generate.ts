@@ -38,7 +38,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.82";
+export const GENERATOR_VERSION = "1.0.0-alpha.87";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -66,6 +66,8 @@ export interface GenerationOptions {
    * DOM in place (see `docs/compiled-direct-path.md`, Hydration).
    */
   readonly hydrate?: boolean;
+  /** Bound native creation depth when the invocation graph contains recursive edges. */
+  readonly guardNestedDepth?: boolean;
   /**
    * The Vanilla module also records what its template writes on its root, so that evaluating a
    * changed module carries over only the attributes each replaced root received from outside its
@@ -102,7 +104,7 @@ export function generateComponent(
     [definition.contract.tag, definition] as const,
   ]);
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.hot === true);
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.guardNestedDepth === true, options?.modulePreparation, options?.hot === true);
   const vue = convertedToVue(definition, {
     slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
     propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
@@ -297,3 +299,5 @@ function inlineStylesheetSources(definition: ComponentDefinition): ComponentDefi
   return { ...definition, stylesheets: [], css: hoistStylesheetNamespaces(definition.stylesheets!.map(sheet =>
     wrapStylesheetConditions(sheet.css, sheet.conditions)).join("\n") + "\n" + definition.css) };
 }
+
+export { reactBindingsArtifact, svelteBindingsArtifact } from "./targets/framework-bindings.js";

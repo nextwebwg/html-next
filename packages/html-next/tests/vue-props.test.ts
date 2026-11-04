@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
 import { build } from "esbuild";
+import { JSDOM } from "jsdom";
 
 import { vuePropsArtifact } from "../src/generate.js";
 import { parseTypedValue, parseTypeExpression } from "../src/type-system.js";
@@ -42,6 +43,29 @@ function bareElement(localName: string) {
 }
 
 describe("generated Vue prop validity", () => {
+  it("preserves application-owned native errors while refreshing its own prop errors", async () => {
+    const { mountPropValidity, updatePropValidity } = await generatedModule();
+    const dom = new JSDOM("<input>");
+    const input = dom.window.document.querySelector("input")!;
+    const binding = { contract: { props: { count: { type: parseTypeExpression("integer"), required: true } } }, values: { count: 1 as unknown } };
+    const cleanup = mountPropValidity(input, binding);
+    try {
+      input.setCustomValidity("Application error");
+      updatePropValidity(input, binding);
+      assert.equal(input.validationMessage, "Application error");
+      binding.values.count = "invalid";
+      updatePropValidity(input, binding);
+      assert.equal(input.validationMessage, "Application error", "prop errors do not replace the application's error");
+      input.setCustomValidity("");
+      updatePropValidity(input, binding);
+      assert.equal(input.validity.customError, true);
+      assert.notEqual(input.validationMessage, "Application error");
+      binding.values.count = 2;
+      updatePropValidity(input, binding);
+      assert.equal(input.validationMessage, "");
+    } finally { cleanup(); dom.window.close(); }
+  });
+
   it("gives a native-named element without validity its own API, without calling itself", async () => {
     const { vPropValidity } = await generatedModule();
     const field = bareElement("fieldset") as ReturnType<typeof bareElement> & { validity: { valid: boolean }, setCustomValidity(message: string): void };

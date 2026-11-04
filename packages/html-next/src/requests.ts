@@ -134,18 +134,29 @@ const recordOf = (target: EventTarget): DocumentRecord => documentRecord((target
   : (target as Node).ownerDocument ?? (target as Window).document ?? target as Document);
 const requestState = (record: DocumentRecord): RequestState => record.requests ??= { g: new WeakMap() };
 
+/** Controller startup already in progress inside this DOM subtree, including its root. */
+export function pendingControllers(root: Document | DocumentFragment | Element): readonly Promise<void>[] {
+  const gates = recordOf(root).requests?.g;
+  if (gates === undefined) return [];
+  return [root, ...root.querySelectorAll("*")].flatMap(element => gates.get(element) ?? []);
+}
+
 /**
  * Marks a root whose controller is about to run, so requests from inside it wait for its
  * synchronous body (step 4). The returned release runs once the body returns or fails to load.
  */
 export function holdController(root: Element): () => void {
   const { g: gates } = requestState(recordOf(root));
+  const previous = gates.get(root);
   let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const own = new Promise<void>((resolve) => { release = resolve; });
+  const gate = previous === undefined ? own : Promise.all([previous, own]).then(() => {});
   gates.set(root, gate);
   return () => {
-    if (gates.get(root) === gate) gates.delete(root);
     release();
+    if (gates.get(root) !== gate) return;
+    if (previous === undefined) gates.delete(root);
+    else void gate.then(() => { if (gates.get(root) === gate) gates.delete(root); });
   };
 }
 

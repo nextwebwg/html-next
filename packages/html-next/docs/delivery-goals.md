@@ -56,32 +56,32 @@ metadata.
 
 ## Framework conversion
 
-**Tracked goal.** Convert application and library graphs into React, Vue, and Svelte components that
-use target-native rendering, reactivity, lifecycle, lists, and hydration.
+**Tracked goal.** Convert application and library graphs into Vue, React, Preact, Svelte, and Angular
+components that use the target's rendering, reactivity, lifecycle, lists, and hydration.
 
 - Contract: [converter requirements](../../html-next-converter/docs/requirements.md)
 - Input boundary: application or library entries plus a target framework and supported version
-- Primary metrics: generated output, HTML Next bridge cost, target framework/runtime cost, and total
+- Primary metrics: generated output, HTML Next bridge cost, framework/runtime cost, and total
   production output
-- Required evidence: cross-target appearance and runtime conformance, successful hydration, controller-host
-  parity, request cleanup, and representative consumer bundles
-- Current evidence: conversion has explicit application and library modes, version and collision
-  diagnostics, stable entry files and output inventories, and target-native state, computed values,
-  updates, and declared event dispatch across React, Vue, and Svelte. Three-engine fixtures cover
-  data reads and cancellation, controllers and refs, handler operations, context, flow and keyed
-  updates, two-way native controls, named/scoped slots, safe HTML, SSR, hydration, and diagnostics.
-  Converted libraries have dependency inventories and independent installed-consumer checks;
-  Vite can convert source imports and generate consumer declarations for all three frameworks.
-  Entries export components for consumers to mount or hydrate with the framework's public APIs.
-  Svelte's remaining audit includes focus and event behavior during keyed movement and the final
-  runtime, hydration, compatibility, and performance gates. Controller projection checks exercise
-  rendered interactions and lifecycle cleanup. Framework-owned node objects and SSR markup may
-  differ; passing feature fixtures alone does not prove every feature combination.
-- Completion: all supported capabilities map to target-native primitives or measured semantic
-  bridges, and application and library outputs satisfy the framework conversion spec
+- Required evidence: cross-target appearance and behavior, SSR and hydration, controller lifecycle,
+  request cleanup, public types, and independently installed consumer bundles
+- Completion: every supported capability maps to target primitives or a measured semantic bridge;
+  every target converts the complete pinned Looma catalog, compiles with its framework toolchain,
+  and passes the same complete renderer-independent browser and SSR tests. Required HTML Next
+  checks must also pass on the final changes.
 
-The next framework milestone closes or explicitly resolves the remaining Svelte semantic gaps,
-then completes the full compatibility, performance, and delivery gates.
+`pnpm test:targets` runs the focused feature fixtures and the public converter conformance corpus.
+The public corpus uses the shared HTML Next cases and expected results in both delivery modes,
+compares behavior and exact pixels in Chromium, Firefox, and WebKit, and repeats the checks through
+SSR, hydration, and interactions. Framework ownership and styling metadata may differ; portable
+content and behavior must agree.
+
+`pnpm verify:converters` builds the SDK, prepares the pinned Looma catalog for native HTML Next and
+all five frameworks, and runs its shared tests plus HTML Next's target fixtures. CI shards the
+catalog and feature tests to keep each check within the repository's time limit. The separate
+Converter corpus workflow runs the broad shared-case sweep. Qualification records must identify
+both source revisions and every required run; a successful focused fixture alone does not complete
+this goal.
 
 ## Measurement rule
 

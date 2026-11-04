@@ -9,14 +9,16 @@ pager: false
 
 # Universal components. Built with HTML.
 
-Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively, in Vue, in React, or in Svelte.
+Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively or in Vue, React, Preact, Svelte, or Angular.
+
+Conversion is tested against [Looma’s complete catalog](https://threadlabs.studio/looma/) and shared interaction tests in Chromium. [Parity checks](https://github.com/nextwebwg/html-next/actions/workflows/converter-corpus.yml) also compare behavior and rendering in Chromium, Firefox, and WebKit.
 
 ## Get started
 
 | You want to… | Start here |
 | --- | --- |
 | Learn to author HTML Next components | [Build your first component](/html-next/quick-start), then [use it natively](/html-next/usage). |
-| Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and has Vue and React setup in its switcher. |
+| Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and includes Vue, React, Preact, Svelte and Angular setup in its switcher. |
 | Publish a component library | [Publish your HTML files](/html-next/ship) with instructions for the consuming app’s Vite plugin. |
 | Generate framework source files | The separate [Converter](/html-next/convert) covers conversion commands and their output. |
 

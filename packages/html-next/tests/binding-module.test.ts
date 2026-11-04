@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, it, vi } from "vitest";
-import { bindModule, type BindingConnection, type BindingModule, type BindingPreparation } from "../src/bindings.js";
+import { adoptNativeModule, bindModule, prepareNativeModules, type BindingConnection, type BindingModule, type BindingPreparation } from "../src/bindings.js";
 import { componentInputs } from "../src/inputs.js";
 import { activateModule } from "../src/module-connection.js";
 import { adoptRenderedProps, componentRegistry, getComponentHost, lowerDocument, registerComponentDefinitions, serializeRenderedForm } from "../src/runtime.js";
@@ -10,11 +10,11 @@ import { parseComponent } from "../src/source-parser.js";
 const windows: JSDOM[] = [];
 const releases: (() => void)[] = [];
 const source = '<template component="x-module"><defs><prop name="id" type="integer" default="1">Id.</prop><prop name="value" type="integer">Value.</prop><prop name="second" type="integer">Second.</prop></defs><section><b $await="$value">{$value}</b><p $error="problem">{$problem.message}</p><i $else>Loading.</i></section></template>';
-function fixture() {
-  const dom = new JSDOM("<!doctype html><html><head></head><body><x-module></x-module></body></html>");
+function fixture(definitions = [source], markup = "<x-module></x-module>") {
+  const dom = new JSDOM(`<!doctype html><html><head></head><body>${markup}</body></html>`);
   windows.push(dom);
   for (const name of ["Node", "Element", "HTMLElement", "Text", "Comment", "HTMLTemplateElement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "HTMLOptionElement", "HTMLFormElement", "MutationObserver", "Event", "CustomEvent"]) vi.stubGlobal(name, Reflect.get(dom.window, name));
-  registerComponentDefinitions([parseComponent(source)], dom.window.document);
+  registerComponentDefinitions(definitions.map(definition => parseComponent(definition)), dom.window.document);
   lowerDocument(dom.window.document, { connect: false });
   const root = dom.window.document.querySelector("section")!;
   const host = getComponentHost(root)!;
@@ -42,6 +42,55 @@ afterEach(() => {
 });
 
 describe("binding module adapter", () => {
+  it("stabilizes a child's prepared inputs after an asynchronous parent changes them", async () => {
+    const { root } = fixture([
+      '<template component="x-parent"><defs><prop name="value" type="integer" default="2">Count.</prop></defs><section><x-child from:id="$value"></x-child></section></template>',
+      '<template component="x-child"><defs><prop name="id" type="integer" default="2">Count.</prop><prop name="value" type="integer">Result.</prop></defs><p>{$value}</p></template>',
+    ], "<x-parent></x-parent>");
+    const reads: number[] = [];
+    const child = bindModule({ props: { value: { input: props => Number(props.id), async load(id) { reads.push(id); if (id === 4) await new Promise(resolve => setTimeout(resolve, 5)); return id * 10; } } } });
+    const parent = bindModule({ props: { value: { input: () => 4, async load(value) { await Promise.resolve(); return value; } } } });
+    const dispose = await prepareNativeModules({ document: root.ownerDocument,
+      host: (element, tag) => getComponentHost(element, tag), signal: new AbortController().signal, flush: tick,
+    }, [{ tag: "x-child", source: "build-a", module: child }, { tag: "x-parent", source: "build-a", module: parent }]);
+    releases.push(dispose);
+    const output = root.querySelector("p")!;
+    assert.equal(componentInputs(getComponentHost(output)!).read("value"), 40);
+    assert.deepEqual(reads, [2, 4]);
+    assert.equal(output.textContent, "40");
+  });
+
+  it("transfers native producer reads, preserves other collapsed records, and honors current caller inputs", async () => {
+    const server = fixture();
+    let reads = 0;
+    const module = bindModule({ props: { value: { input: props => props.id, load: id => { reads++; return id * 10; } } } }, { browser: { source: "build-a" } });
+    server.root.setAttribute("data-html-next-bindings", JSON.stringify({ other: "kept" }));
+    const dispose = await prepareNativeModules({ document: server.root.ownerDocument,
+      host: (element, tag) => getComponentHost(element, tag), signal: new AbortController().signal, flush: tick,
+    }, [{ tag: "x-module", source: "build-a", module }]);
+    assert.equal(server.port.read("value"), 10);
+    assert.equal(reads, 1);
+    const transfer = server.root.getAttribute("data-html-next-bindings")!;
+    dispose();
+
+    const browser = fixture();
+    browser.root.setAttribute("data-html-next-bindings", transfer);
+    adoptNativeModule(browser.host, module, { tag: "x-module", source: "build-a" });
+    releases.push(activateModule(module, browser.host)); await tick();
+    assert.equal(browser.port.read("value"), 10);
+    assert.equal(reads, 1, "the first browser connection reuses its prepared read");
+    assert.deepEqual(JSON.parse(browser.root.getAttribute("data-html-next-bindings")!), { other: "kept" });
+
+    const changed = fixture();
+    changed.root.setAttribute("data-html-next-bindings", transfer);
+    componentRegistry.update(changed.root, { id: 2 });
+    assert.throws(() => adoptNativeModule(changed.host, module, { tag: "x-module", source: "build-b" }), /revision does not match/);
+    adoptNativeModule(changed.host, module, { tag: "x-module", source: "build-a" });
+    releases.push(activateModule(module, changed.host)); await tick();
+    assert.equal(changed.port.read("value"), 20);
+    assert.equal(reads, 2);
+  });
+
   it("adopts prepared values into a retained instance without another read or connection", async () => {
     const { host, root, port } = fixture(); let reads = 0; let creates = 0; let connections = 0;
     const adapter = bindModule({ create() {

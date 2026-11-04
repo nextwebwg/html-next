@@ -1,10 +1,14 @@
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { readFile } from "node:fs/promises";
 
 import {
   generateComponent,
+  preparedModuleRevision,
+  GENERATOR_VERSION,
   collectSharedStylesheets,
   compileComponentGraphStylesForBuild,
+  normalizeConversionStyleIdentities,
   getDiagnosticLocation,
   withDiagnosticLocation,
   expandComponentEntries,
@@ -17,6 +21,7 @@ import {
   type HtmlDiagnostic,
   type DiagnosticLocation,
   type ComponentDefinition,
+  type GeneratedArtifact,
   type ComponentGraphNode,
   type ElementNode,
   type TemplateNode,
@@ -38,8 +43,11 @@ export { formatCheckDiagnostic, type CheckDiagnosticFormatOptions } from "./diag
 
 export const componentsModule = "virtual:html-next/components";
 export const supportModule = "virtual:html-next/support";
+/** Server preparation for native factories generated from the same component graph. */
+export const preparationModule = "virtual:html-next/prepare";
 const resolvedComponentsModule = "\0html-next:components";
 const resolvedSupportModule = "\0html-next:support";
+const resolvedPreparationModule = "\0html-next:prepare";
 const resolvedPackagePrefix = "\0html-next:package:";
 const publicComponentPrefix = `${componentsModule}/`;
 const resolvedPublicComponentPrefix = "\0html-next:public-component:";
@@ -54,6 +62,8 @@ export interface HtmlNextNativePluginOptions {
   readonly root?: string;
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
+  /** Generate native factories that can adopt an existing server-rendered root. */
+  readonly hydrate?: boolean;
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
   /** Optional language extensions to build, such as `"transitions"`. Each is off until listed. */
   readonly extensions?: readonly string[];
@@ -111,6 +121,7 @@ interface CompiledGraph {
   readonly publicComponents: ReadonlyMap<string, string>;
   readonly styles: ReadonlyMap<string, string>;
   readonly support: string;
+  readonly preparation: string;
   readonly sourceFiles: readonly string[];
   readonly manifest: HtmlNextBuildManifest;
   readonly graph: ComponentGraph;
@@ -154,6 +165,7 @@ function collectInvocationEdges(
 ): {
   readonly edges: ReadonlyMap<string, ReadonlyMap<string, string>>;
   readonly dynamicUses: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly recursive: boolean;
 } {
   const edges = new Map<string, ReadonlyMap<string, string>>();
   const dynamicUses = new Map<string, Set<string>>();
@@ -185,11 +197,12 @@ function collectInvocationEdges(
     edges.set(node.id, invoked);
   }
 
+  let recursive = false;
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const visit = (url: string): void => {
     if (visited.has(url)) return;
-    if (visiting.has(url)) diagnostic("HN002", "Compiled component invocations form a cycle.", nodes.get(url)?.url ?? url, getDiagnosticLocation(nodes.get(url)!.definition));
+    if (visiting.has(url)) { recursive = true; return; }
     visiting.add(url);
     try {
       for (const target of edges.get(url)?.values() ?? []) {
@@ -204,7 +217,7 @@ function collectInvocationEdges(
     catch (error) { recoverDiagnostic(error, report); }
   }
 
-  return { edges, dynamicUses };
+  return { edges, dynamicUses, recursive };
 }
 
 function supportSource(imports: ReadonlySet<string>): string {
@@ -358,13 +371,19 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   const sortedNodes = [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url));
   // Every component's styles may test another's state, so each sees the whole graph.
   const definitionsByTag = new Map(sortedNodes.map((node) => [node.definition.contract.tag, node.definition] as const));
-  const generated = sortedNodes.flatMap((node) => {
+  const generated: { node: ComponentGraphNode; definition: ComponentDefinition; artifacts: readonly GeneratedArtifact[]; artifact: GeneratedArtifact; modulePreparation: { source: string } | undefined }[] = [];
+  for (const node of sortedNodes) {
     try {
       const edge = node.module ?? node.controller;
       const definition: ComponentDefinition = edge === undefined
         ? node.definition
         : { ...node.definition, [node.module === undefined ? "controller" : "module"]: fileURLToPath(edge.url) };
+      const modulePreparation = options.hydrate && edge !== undefined
+        ? await preparedModuleRevision(fileURLToPath(edge.url), definition, GENERATOR_VERSION, file => readFile(file, "utf8")) : undefined;
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
+        hydrate: options.hydrate === true,
+        ...(modulePreparation === undefined ? {} : { modulePreparation }),
+        guardNestedDepth: invocations.recursive,
         noContextReaders: options.publicState !== true && dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
         definitions: definitionsByTag,
         ...options.extensions === undefined ? {} : { extensions: options.extensions },
@@ -376,12 +395,19 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       }));
       const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
       if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
-      return [{ node, definition, artifacts, artifact }];
+      generated.push({ node, definition, artifacts, artifact, modulePreparation });
     } catch (error) {
       recoverDiagnostic(error, report);
-      return [];
     }
-  });
+  }
+
+  const prepared = generated.filter(item => item.modulePreparation !== undefined);
+  const preparation = [
+    'import { prepareNativeModules } from "@nextwebwg/html-next/bindings";',
+    ...prepared.map(({ definition }, index) => `import * as module${index} from ${JSON.stringify(definition.module ?? definition.controller)};`),
+    `const modules = [${prepared.map(({ definition, modulePreparation }, index) => `{ tag: ${JSON.stringify(definition.contract.tag)}, source: ${JSON.stringify(modulePreparation!.source)}, module: module${index} }`).join(", ")}];`,
+    "export const prepare = context => prepareNativeModules(context, modules);",
+  ].join("\n");
 
   for (const { node, definition, artifacts, artifact } of generated) {
     try {
@@ -460,6 +486,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     publicComponents,
     styles,
     support: supportSource(supportImports),
+    preparation,
     sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...graph.stylesheetInputs.map(url => fileURLToPath(url)), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",
@@ -495,7 +522,7 @@ export interface HtmlNextCheckDiagnostic extends HtmlDiagnostic {
 export async function checkHtmlNext(options: HtmlNextCheckOptions = {}): Promise<readonly HtmlNextCheckDiagnostic[]> {
   try {
     const warnings: HtmlDiagnostic[] = [];
-    if (options.target === "vue" || options.target === "react" || options.target === "preact" || options.target === "svelte") {
+    if (options.target === "vue" || options.target === "react" || options.target === "preact" || options.target === "svelte" || options.target === "angular") {
       await checkConversion({ ...options, onWarning: (warning) => { warnings.push(warning); } });
     } else await compileGraph(options, true);
     return checkDiagnostics(warnings);
@@ -541,6 +568,9 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
       /** `html-next-sync` writes the typed controller hosts before a standalone typecheck. */
       api: { async sync(): Promise<void> { await writeHostDeclarations((await graph()).graph); } },
       configResolved(config) {
+        // A shared Vite builder uses one source snapshot for its client and server environments.
+        // Resolving a new build config starts a fresh snapshot even when the plugin is reused.
+        compiled = undefined;
         root = options.root ?? config.root;
         const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
         resolveStylesheet = async (specifier, parentURL) => {
@@ -550,9 +580,16 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
         };
       },
     },
+    watchChange() { compiled = undefined; },
+    transformInclude(id) { return !id.startsWith("\0") && /\.css(?:$|\?)/.test(id); },
+    transform(code) {
+      // Module-imported CSS shares the canonical/legacy root contract with scoped styles.
+      return /\[(?:data-)?component(?:\s|[~\]])/.test(code)
+        ? { code: normalizeConversionStyleIdentities(code, "component", { includeNative: true }), map: null } : null;
+    },
     async buildStart() {
-      compiled = compileGraph({ ...options, root }, false, resolveStylesheet);
-      const current = await compiled;
+      if (meta.framework !== "vite") compiled = undefined;
+      const current = await graph();
       await writeHostDeclarations(current.graph);
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },
@@ -562,6 +599,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
       }
       if (id === componentsModule) return resolvedComponentsModule;
       if (id === supportModule) return resolvedSupportModule;
+      if (id === preparationModule) return resolvedPreparationModule;
       if (id.startsWith(publicComponentPrefix)) {
         return publicComponentId(decodeURIComponent(id.slice(publicComponentPrefix.length)));
       }
@@ -574,6 +612,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
       if (
         id !== resolvedComponentsModule &&
         id !== resolvedSupportModule &&
+        id !== resolvedPreparationModule &&
         !id.startsWith(resolvedPublicComponentPrefix) &&
         !id.startsWith(resolvedComponentPrefix) &&
         !id.startsWith(resolvedStylePrefix) &&
@@ -582,6 +621,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
       return graph().then((current) => {
         if (id === resolvedComponentsModule) return current.entry;
         if (id === resolvedSupportModule) return current.support;
+        if (id === resolvedPreparationModule) return current.preparation;
         if (id.startsWith(resolvedPackagePrefix)) return current.packages.get(id.slice(resolvedPackagePrefix.length)) ?? null;
         if (id.startsWith(resolvedPublicComponentPrefix)) {
           if (current.manifest.delivery !== "library") {

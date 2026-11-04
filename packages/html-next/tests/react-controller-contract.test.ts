@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from "node:module";
 import { transform } from "esbuild";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { JSDOM } from "jsdom";
 
 import { parseComponent } from "../src/source-parser.js";
@@ -16,19 +17,30 @@ import { reactRenderArtifact } from "../src/targets/react-render.js";
 interface Host {
   state: Record<string, unknown>;
   data: Readonly<Record<string, { value: unknown }>>;
+  refs: Readonly<Record<string, Element | readonly Element[] | undefined>>;
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
   dispatch(type: string, detail?: unknown): boolean;
   computed<T>(run: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
 }
 
-async function controllerHarness(controller: (host: Host) => void) {
+async function controllerHarness(controller: (host: Host) => void, references: { refs: Map<string, Set<Element>>; iteratedRefs: readonly string[] } = { refs: new Map(), iteratedRefs: [] }, loadGate?: Promise<void>) {
   const hooks: Array<{ current: unknown }> = [];
   let cursor = 0;
   const layouts: Array<() => void | (() => void)> = [];
   const cleanups: Array<() => void> = [];
+  let scheduled = false;
   const react = {
     useRef(value: unknown) { return hooks[cursor++] ??= { current: value }; },
+    useReducer(reduce: (value: unknown) => unknown, initial: unknown) {
+      const hook = hooks[cursor++] ??= { current: initial };
+      return [hook.current, () => {
+        hook.current = reduce(hook.current);
+        if (scheduled) return;
+        scheduled = true;
+        queueMicrotask(() => { scheduled = false; render(); });
+      }];
+    },
     useLayoutEffect(run: () => void | (() => void)) { layouts.push(run); },
     useEffect(run: () => void | (() => void)) { layouts.push(run); },
   };
@@ -37,8 +49,8 @@ async function controllerHarness(controller: (host: Host) => void) {
     constructor(check: () => void) { checkConnection = check; }
     observe() {} disconnect() {}
   });
-  const source = stripTypeScriptTypes(reactHostArtifact("test").content.replace('import React from "react";', "").replaceAll("export ", ""));
-  const useComponentHost = new Function("React", source + "\nreturn useComponentHost;")(react) as
+  const source = stripTypeScriptTypes(reactHostArtifact("test").content.replace('import React from "react";', "").replace('import { flushSync } from "react-dom";', "").replaceAll("export ", ""));
+  const useComponentHost = new Function("React", "flushSync", source + "\nreturn useComponentHost;")(react, (run: () => void) => run()) as
     (loader: () => Promise<unknown>, options: unknown) => void;
   const root = Object.assign(new EventTarget(), {
     isConnected: true, ownerDocument: {}, querySelectorAll: () => [],
@@ -50,7 +62,7 @@ async function controllerHarness(controller: (host: Host) => void) {
   let event: unknown;
   const options = {
     root: { current: root }, definition: "https://example.test/x-probe.html", controller: "./probe.js",
-    props: () => ({}), refs: new Map(),
+    props: () => ({}), ...references,
     state: {
       count: { get: () => count, set: (value: unknown) => { count = value; } },
       source: { get: () => event, set: (value: unknown) => { event = value; } },
@@ -63,7 +75,7 @@ async function controllerHarness(controller: (host: Host) => void) {
   };
   const render = () => {
     cursor = 0;
-    useComponentHost(async () => ({ default: controller }), options);
+    useComponentHost(async () => { if (loadGate) await loadGate; return { default: controller }; }, options);
     for (const layout of layouts.splice(0)) { const cleanup = layout(); if (cleanup) cleanups.push(cleanup); }
   };
   render();
@@ -72,6 +84,49 @@ async function controllerHarness(controller: (host: Host) => void) {
 }
 
 describe("React controller contract", () => {
+  it("checks the native root again when an asynchronous controller finishes loading", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let connections = 0;
+    const harness = await controllerHarness(() => { connections++; }, undefined, gate);
+    try {
+      Reflect.set(harness.root, "isConnected", false);
+      release();
+      for (let index = 0; index < 12; index++) await Promise.resolve();
+      assert.equal(connections, 0, "a detached root cannot activate before its observer callback");
+      Reflect.set(harness.root, "isConnected", true);
+      harness.checkConnection();
+      for (let index = 0; index < 12; index++) await Promise.resolve();
+      assert.equal(connections, 1, "a later real connection can activate it");
+    } finally { release(); harness.stop(); vi.unstubAllGlobals(); }
+  });
+
+  it("retains detached named refs until the renderer releases them", async () => {
+    const dom = new JSDOM("<button>Single</button><i>Row</i>");
+    const single = dom.window.document.querySelector("button")!;
+    const row = dom.window.document.querySelector("i")!;
+    const references = { refs: new Map<string, Set<Element>>([["single", new Set()], ["row", new Set()]]), iteratedRefs: ["row"] };
+    let host!: Host;
+    const harness = await controllerHarness(value => { host = value; }, references);
+    try {
+      assert.equal(host.refs.single, undefined);
+      assert.deepEqual(host.refs.row, []);
+      references.refs.get("single")!.add(single);
+      references.refs.get("row")!.add(row);
+      assert.equal(host.refs.single, single);
+      assert.deepEqual(host.refs.row, [row]);
+      single.remove(); row.remove();
+      assert.equal(host.refs.single, single, "a controller may temporarily detach its surface");
+      assert.deepEqual(host.refs.row, [row]);
+      references.refs.get("single")!.delete(single);
+      references.refs.get("row")!.delete(row);
+      assert.equal(host.refs.single, undefined);
+      assert.deepEqual(host.refs.row, []);
+      assert.equal("single" in host.refs, true);
+      assert.equal("row" in host.refs, true);
+    } finally { harness.stop(); dom.window.close(); vi.unstubAllGlobals(); }
+  });
+
   it("warns and ignores invalid writes, separates resources, and retains native events", async () => {
     let host!: Host;
     const harness = await controllerHarness((value) => { host = value; });
@@ -213,7 +268,7 @@ describe("React controller contract", () => {
       vi.stubGlobal(name, dom.window[name]);
     }
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const modules = new Map<string, unknown>([["react", React]]);
+    const modules = new Map<string, unknown>([["react", React], ["react-dom", { flushSync }]]);
     const evaluate = async (source: string, loader: "ts" | "tsx" = "ts") => {
       const compiled = await transform(source, { loader, format: "cjs", target: "es2022" });
       const module = { exports: {} as Record<string, unknown> };

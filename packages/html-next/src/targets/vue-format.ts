@@ -5,6 +5,7 @@
 import { createContext } from "@dprint/formatter";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import ts from "typescript-compiler";
 
 const require = createRequire(import.meta.url);
 let context: ReturnType<typeof createContext> | undefined;
@@ -21,25 +22,17 @@ export function formatVue(source: string, filePath: string): string {
   return context.formatText({ filePath, fileText: source });
 }
 
-let reactContext: ReturnType<typeof createContext> | undefined;
+const reactPrinter = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
 
-/**
- * Formats generated React TSX with dprint's TypeScript plugin, in React's usual double quotes and
- * semicolons. Formatting only lays the code out: when dprint cannot (its Wasm printer can run out of
- * memory on deeply nested render props), the component keeps its unformatted, equally valid source.
- */
+/** Format generated TSX without layout search over deeply nested render props. */
 export function formatReact(source: string, filePath: string): string {
-  if (reactContext === undefined) {
-    reactContext = createContext({ indentWidth: 2, lineWidth: 100 });
-    reactContext.addPlugin(readFileSync(require.resolve("@dprint/typescript/plugin.wasm")));
+  const file = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function visit(node: ts.Node): void {
+    if (ts.isJsxAttributes(node)) ts.setEmitFlags(node, ts.EmitFlags.MultiLine);
+    ts.forEachChild(node, visit);
   }
-  try {
-    return reactContext.formatText({ filePath, fileText: source });
-  } catch {
-    // ponytail: a failed Wasm instance is discarded whole; flatten the nested output if this recurs.
-    reactContext = undefined;
-    return source;
-  }
+  visit(file);
+  return reactPrinter.printFile(file);
 }
 
 let svelteContext: ReturnType<typeof createContext> | undefined;

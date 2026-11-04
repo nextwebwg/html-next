@@ -41,6 +41,8 @@ export function generateVanilla(
   scriptURL?: (src: string, definition: ComponentDefinition) => string | undefined,
   /** The linked graph, which another component's `:state()` tests resolve against. */
   graph?: ComponentStyleGraph,
+  guardNestedDepth = false,
+  modulePreparation?: { readonly source: string },
   /** Record what the template writes on its root, for replacing the definition. */
   hot = false,
 ): { readonly module: string; readonly declaration: string } {
@@ -89,7 +91,7 @@ export function generateVanilla(
       ...Object.entries(contract.slots!).map(([slot, declaration]) => `  readonly ${tsKey(slot === "" ? "default" : slot)}: ${slotPropsType(declaration.props)};`),
       "}",
     ],
-    `export declare function create${contract.name}${genericDeclaration}(props${hasRequired ? "" : "?"}: ${contract.name}Props${genericReference}): ${elementType};`,
+    `export declare function create${contract.name}${genericDeclaration}(props${hasRequired ? "" : "?"}: ${contract.name}Props${genericReference}${hydrate ? ", html?: Readonly<Record<string, string>>, root?: Element" : ""}): ${elementType};`,
     // `componentRegistry.create` types this tag's props and root, as HTMLElementTagNameMap types createElement.
     "declare global {",
     "  interface ComponentTagMap {",
@@ -108,5 +110,5 @@ export function generateVanilla(
       ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
       : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
   });
-  return { module: emitBlocks(blockPlan(definition, invocations, transitions, graph), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL, hot), declaration };
+  return { module: emitBlocks(blockPlan(definition, invocations, transitions, graph), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL, guardNestedDepth, hydrate ? modulePreparation : undefined, hot), declaration };
 }

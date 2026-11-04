@@ -2,14 +2,19 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
-import { afterEach, describe, it } from "vitest";
-import { build } from "vite";
+import { afterEach, describe, it, vi } from "vitest";
+import { build, createBuilder } from "vite";
+import { JSDOM } from "jsdom";
+import { parseComponent } from "@nextwebwg/html-next";
+import { renderComponents } from "@nextwebwg/html-next/server";
 
 import {
   componentModule,
   componentsModule,
   htmlNext,
+  preparationModule,
   supportModule,
 } from "../src/index.js";
 
@@ -32,6 +37,24 @@ afterEach(async () => {
 });
 
 describe("HTML Next unplugin", () => {
+  it("keeps module stylesheet identities compatible with canonical native roots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-module-css-"));
+    temporary.push(root);
+    await writeFile(join(root, "a.html"), '<template component="x-a" module="./module.js"><div></div></template>');
+    await writeFile(join(root, "module.js"), 'import "./module.css"; export function connect() {}');
+    await writeFile(join(root, "module.css"), '[data-component~="x-a"] .document :where([data-component]) { white-space: normal; }');
+    await writeFile(join(root, "main.js"), `export { createXA } from ${JSON.stringify(componentsModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["a.html"] })],
+      resolve: { alias: generatedRuntimeAlias },
+      build: { minify: false, cssMinify: false, lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } } });
+    const css = await readFile(join(root, "dist/components.css"), "utf8");
+    const selector = /([^{}]+)\{\s*white-space: normal/.exec(css)![1]!;
+    const { document } = new JSDOM('<div component="x-a"><main class="document"><section component="x-b"></section></main></div>').window;
+    assert.equal(document.querySelectorAll(selector).length, 1, css);
+    document.querySelectorAll("[component]").forEach(element => { element.setAttribute("data-component", element.getAttribute("component")!); element.removeAttribute("component"); });
+    assert.equal(document.querySelectorAll(selector).length, 1, css);
+  });
+
   it("resolves shared CSS through Vite, emits one compatible body in graph order, and builds stylesheet-relative assets", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-shared-css-"));
     temporary.push(root);
@@ -110,6 +133,80 @@ describe("HTML Next unplugin", () => {
     await rm(host);
     await (plugin as unknown as { api: { sync(): Promise<void> } }).api.sync();
     assert.equal(await readFile(host, "utf8"), generated);
+  });
+
+  it("builds native factories that adopt server markup and keep its node identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-hydration-")); temporary.push(root);
+    const source = `<template component="ui-counter"><defs><state name="count" type="number" value="0"></state><handler name="add"><set name="count" expr:value="$count + 1"></set></handler></defs><button on:click="add">{$count}</button></template>`;
+    await writeFile(join(root, "counter.html"), source);
+    await writeFile(join(root, "main.js"), `import { createUiCounter } from ${JSON.stringify(componentsModule)}; export const mount = root => createUiCounter({}, undefined, root);`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["counter.html"], hydrate: true })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["iife"], name: "HydratedFixture", cssFileName: "components", fileName: () => "app.js" } } });
+    const rendered = await renderComponents('<ui-counter></ui-counter>', { definitions: [parseComponent(source)], state: { '[component~="ui-counter"]': { count: 2 } } });
+    const { window } = new JSDOM(rendered.html, { runScripts: "dangerously" });
+    window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
+    const before = window.document.querySelector("button")!;
+    const fixture = (window as unknown as { HydratedFixture: { mount(root: Element): Element } }).HydratedFixture;
+    assert.equal(fixture.mount(before), before);
+    before.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(window.document.querySelector("button"), before);
+    assert.equal(before.textContent, "3");
+    window.close();
+  });
+
+  for (const nested of [false, true]) it(`prepares native producer data and adopts its read without repeating it in the browser${nested ? " through a prepared parent" : ""}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-native-prepared-")); temporary.push(root);
+    const source = '<template component="ui-prepared" module="./producer.js"><defs><prop name="count" type="integer" default="2">Count.</prop><prop name="filters" type="list(string)" default="[]">Filters.</prop><prop name="rows" type="list(string)">Prepared rows.</prop><state name="current" type="integer" from="$count"></state></defs><ol><li $each="row of $rows">{$row}</li></ol></template>';
+    await writeFile(join(root, "prepared.html"), source);
+    const parent = '<link rel="component" href="./prepared.html"><link rel="component" href="./box.html"><template component="ui-prepared-wrapper" module="./producer.js"><defs><prop name="count" type="integer" default="2">Count.</prop><prop name="filters" type="list(string)" default="[]">Filters.</prop><prop name="rows" type="list(string)">Prepared rows.</prop><state name="current" type="integer" from="$count"></state></defs><section><ui-prepared-box><ui-prepared from:count="$rows.length" from:filters="$rows"></ui-prepared></ui-prepared-box></section></template>';
+    const box = '<template component="ui-prepared-box"><div><slot></slot></div></template>';
+    if (nested) await writeFile(join(root, "wrapper.html"), parent);
+    if (nested) await writeFile(join(root, "box.html"), box);
+    await writeFile(join(root, "producer.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
+      const instances = new WeakMap();
+      function binding(host, source) {
+        let value = instances.get(host.props);
+        if (!value) { value = bindModule({ props: { rows: { input: (props, { state }) => ({ count: state.current, filters: props.filters }),
+          async load({ count, filters }) { if (typeof window !== "undefined") window.preparedReads = (window.preparedReads ?? 0) + 1; return Array.from({length: count}, (_, index) => count + ":" + index + ":" + filters.length); }
+        } }, connect(host) { host.root.setAttribute("data-connected", "true"); } }, { browser: { source } }); instances.set(host.props, value); }
+        return value;
+      }
+      export const prepare = (host, options) => binding(host, options.source).prepare(host, options);
+      export const adopt = (host, options) => {
+        if (typeof window !== "undefined") (window.preparedAdoptionInputs ??= []).push({ tag: host.root.getAttribute("component"), filters: host.props.filters.value });
+        return binding(host, options.snapshot.source).adopt(host, options);
+      };
+      export const connect = (host, options) => binding(host).connect(host, options);`);
+    const factory = nested ? "createUiPreparedWrapper" : "createUiPrepared";
+    const entries = [nested ? "wrapper.html" : "prepared.html"];
+    await writeFile(join(root, "client.js"), `import { ${factory} } from ${JSON.stringify(componentsModule)}; export const mount = root => ${factory}({}, undefined, root);`);
+    await writeFile(join(root, "server.js"), `export { prepare } from ${JSON.stringify(preparationModule)};`);
+    const alias = { ...generatedRuntimeAlias, "@nextwebwg/html-next/bindings": new URL("../../html-next/src/bindings.ts", import.meta.url).pathname };
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries, hydrate: true })], resolve: { alias },
+      build: { minify: false, lib: { entry: join(root, "client.js"), formats: ["iife"], name: "PreparedFixture", cssFileName: "components", fileName: () => "app.js" } } });
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries, hydrate: true })], resolve: { alias },
+      build: { ssr: join(root, "server.js"), outDir: join(root, "server"), minify: false, rolldownOptions: { output: { entryFileNames: "prepare.mjs" } } } });
+    const definitions = [parseComponent(source, pathToFileURL(join(root, "prepared.html")).href), ...nested ? [parseComponent(parent.slice(parent.indexOf("<template")), pathToFileURL(join(root, "wrapper.html")).href), parseComponent(box, pathToFileURL(join(root, "box.html")).href)] : []];
+    const rendered = await renderComponents(nested ? '<ui-prepared-wrapper></ui-prepared-wrapper>' : '<ui-prepared></ui-prepared>', { definitions,
+      prepare: { module: pathToFileURL(join(root, "server/prepare.mjs")).href } });
+    const { window } = new JSDOM(rendered.html, { runScripts: "dangerously" });
+    Object.assign(window, { fetch: globalThis.fetch });
+    try {
+      const element = window.document.querySelector(nested ? "section" : "ol")!;
+      const rows = [...element.querySelectorAll("li")];
+      assert.deepEqual(rows.map(row => row.textContent), nested ? ["2:0:2", "2:1:2"] : ["2:0:0", "2:1:0"]);
+      assert.ok(element.hasAttribute("data-html-next-bindings"));
+      window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
+      const fixture = window as unknown as { PreparedFixture: { mount(root: Element): Element }; preparedReads?: number; preparedAdoptionInputs: { tag: string; filters: string[] }[] };
+      assert.equal(fixture.PreparedFixture.mount(element), element);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(element.getAttribute("data-connected"), "true");
+      assert.equal(element.hasAttribute("data-html-next-bindings"), false);
+      assert.ok([...element.querySelectorAll("li")].every((row, index) => row === rows[index]), "SSR rows retain their node identity");
+      assert.equal(fixture.preparedAdoptionInputs.find(input => input.tag === "ui-prepared")!.filters.length, nested ? 2 : 0, "adoption reads the current typed caller inputs");
+      assert.equal(fixture.preparedReads ?? 0, 0);
+    } finally { window.close(); }
   });
 
   it("consumes a packed component folder with native factories and no configured entries", async () => {
@@ -363,8 +460,10 @@ describe("HTML Next unplugin", () => {
     // +11 B: a render counts its nesting, so components a row or block builds inside projected content
     // are created once the outermost render has inserted them; the step itself ships only with projection.
     // +12 B: lifecycle walks recognize canonical and legacy identity roots.
-    // -15 B: a definition replaces a registered one instead of raising HR001; replacing instances ships only in hot output.
-    assert.ok(gzip <= 9_378, `direct benchmark entry is ${gzip} B gzip-6`);
+    // +1 B: the unused hydration helper changes minified symbol allocation.
+    // +6 B: identical native attributes are left alone during updates.
+    // -18 B: a definition replaces a registered one instead of raising HR001; replacing instances ships only in hot output.
+    assert.ok(gzip <= 9_382, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
@@ -873,22 +972,29 @@ describe("HTML Next unplugin", () => {
     }), /app\.html: HC013:.*min constraint.*does not conform/);
   });
 
-  it("rejects cycles in compiled component invocations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "html-next-vite-invocation-cycle-"));
-    temporary.push(root);
-    await writeFile(join(root, "alpha.html"), `<link rel="component" href="./beta.html">
-      <template component="x-alpha" status="early" summary="Alpha."><x-beta></x-beta></template>`);
-    await writeFile(join(root, "beta.html"), `<link rel="component" href="./alpha.html">
-      <template component="x-beta" status="early" summary="Beta."><x-alpha></x-alpha></template>`);
-    await writeFile(join(root, "main.js"), `export { createXAlpha } from ${JSON.stringify(componentsModule)};`);
-
-    await assert.rejects(() => build({
-      root,
-      logLevel: "silent",
-      resolve: { alias: generatedRuntimeAlias },
-      plugins: [htmlNext.vite({ entries: ["alpha.html"], root })],
-      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
-    }), /HN002: Compiled component invocations form a cycle/);
+  it("compiles finite recursion and bounds non-terminating invocation cycles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-invocation-cycle-")); temporary.push(root);
+    await writeFile(join(root, "alpha.html"), `<link rel="component" href="./beta.html"><template component="x-alpha"><x-beta></x-beta></template>`);
+    await writeFile(join(root, "beta.html"), `<link rel="component" href="./alpha.html"><template component="x-beta"><x-alpha></x-alpha></template>`);
+    await writeFile(join(root, "node.html"), `<template component="x-node"><defs><prop name="node" type="object({ label: string, ... })" required>Node.</prop></defs><div><b>{$node.label}</b><x-node $each="child of $node.children" from:node="$child"></x-node></div></template>`);
+    await writeFile(join(root, "main.js"), `export { createXAlpha, createXNode } from ${JSON.stringify(componentsModule)}; export { componentRegistry, flushComponent } from "@nextwebwg/html-next/generated-runtime";`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["alpha.html", "node.html"], root })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["iife"], name: "RecursiveFixture", fileName: () => "app.js", cssFileName: "components" } } });
+    const { window } = new JSDOM('<!doctype html><body></body>', { runScripts: "dangerously" });
+    window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
+    const api = (window as unknown as { RecursiveFixture: {
+      createXAlpha(): Element; createXNode(props: { node: object }): Element;
+      componentRegistry: { update(root: Element, props: object): void }; flushComponent(root: Element): void;
+    } }).RecursiveFixture;
+    assert.throws(() => api.createXAlpha(), /HR008/);
+    const tree = (depth: number): object => ({ label: String(depth), children: depth > 1 ? [tree(depth - 1)] : [] });
+    const data = (depth: number): object => window.JSON.parse(JSON.stringify(tree(depth))) as object;
+    const element = api.createXNode({ node: data(4) }); window.document.body.append(element);
+    await vi.waitFor(() => assert.deepEqual([...element.querySelectorAll("b")].map(node => node.textContent), ["4", "3", "2", "1"]));
+    api.componentRegistry.update(element, { node: data(6) }); api.flushComponent(element);
+    await vi.waitFor(() => assert.deepEqual([...element.querySelectorAll("b")].map(node => node.textContent), ["6", "5", "4", "3", "2", "1"]));
+    assert.equal(api.createXNode({ node: data(1) }).textContent, "1", "a failed creation releases its nesting frame");
+    window.close();
   });
 
   it("diagnoses undeclared dynamic component boundaries before emission", async () => {
@@ -998,5 +1104,28 @@ describe("HTML Next unplugin", () => {
     const rebuilt = await readFile(join(root, "dist/app.js"), "utf8");
     assert.match(rebuilt, /Second/);
     assert.doesNotMatch(rebuilt, /First/);
+  });
+
+  it("shares the native source snapshot across a Vite builder's client and server environments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-shared-library-")); temporary.push(root);
+    const component = join(root, "counter.html");
+    await writeFile(component, '<template component="x-counter"><button>Shared source</button></template>');
+    const entry = join(root, "main.js");
+    await writeFile(entry, `export { createXCounter } from ${JSON.stringify(componentsModule)};`);
+    const output = (folder: string) => ({ minify: false as const, outDir: join(root, folder), lib: { entry, formats: ["es" as const], fileName: () => "index.js", cssFileName: "components" } });
+    const builder = await createBuilder({ configFile: false, root, logLevel: "silent",
+      plugins: [htmlNext.vite({ entries: ["counter.html"], root, manifestFile: false })],
+      resolve: { alias: generatedRuntimeAlias }, build: output("client"),
+      builder: { sharedConfigBuild: true, sharedPlugins: true },
+      environments: { client: { build: output("client") }, ssr: { consumer: "server", build: { ...output("server"), ssr: true } } },
+    });
+    await builder.build(builder.environments.client!);
+    // Both outputs belong to one preparation. A new build config reads changed sources instead.
+    await writeFile(component, '<template component="x-counter"><button>Changed source</button></template>');
+    const serverBuild = await builder.build(builder.environments.ssr!);
+    assert.match(await readFile(join(root, "client/index.js"), "utf8"), /Shared source/);
+    const server = (Array.isArray(serverBuild) ? serverBuild : [serverBuild]).flatMap(result => "output" in result ? result.output.flatMap(chunk => chunk.type === "chunk" ? [chunk.code] : []) : []).join("\n");
+    assert.match(server, /Shared source/);
+    assert.doesNotMatch(server, /Changed source/);
   });
 });

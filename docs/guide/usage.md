@@ -2,7 +2,7 @@
 title: Usage
 order: 1
 navGroup: guide
-blurb: HTML Next · Vue · React · Svelte
+blurb: HTML Next · Vue · React · Preact · Svelte · Angular
 eyebrow: HTML Next · Usage
 ---
 
@@ -36,9 +36,21 @@ Keep your project's usual React plugin. The current target is React 19.3.
 
 :::
 
+::: framework-preact
+
+Keep your project's usual Preact plugin. The current target is Preact 11.1.0.
+
+:::
+
 ::: framework-svelte
 
 Keep your project's usual Svelte plugin. The current target is Svelte 5.57.1. The adapter uses the standard, unpatched framework; see the [known keyed-focus limitation](/html-next/convert).
+
+:::
+
+::: framework-angular
+
+Use Angular 21.2.24 or later with matching Angular packages, `@angular/compiler-cli`, and a compatible TypeScript version. Keep the compiler pipeline already used by your Angular application.
 
 :::
 
@@ -85,6 +97,20 @@ export default defineConfig({
 
 :::
 
+::: framework-preact
+
+```ts title="vite.config.ts"
+import { defineConfig } from "vite";
+import preact from "@preact/preset-vite";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+export default defineConfig({
+  plugins: [htmlNext({ target: "preact" }), preact()],
+});
+```
+
+:::
+
 ::: framework-svelte
 
 ```ts title="vite.config.ts"
@@ -99,9 +125,26 @@ export default defineConfig({
 
 :::
 
+::: framework-angular
+
+Add the adapter to your existing Angular AOT Vite pipeline:
+
+```ts title="vite.config.ts"
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+const htmlComponents = htmlNext({
+  target: "angular",
+  entries: ["src/counter.html"],
+});
+```
+
+Include `htmlComponents` in your existing `plugins` array alongside your Angular compiler plugin. The adapter compiles imported HTML components and links Angular dependencies; your application pipeline compiles its own Angular templates.
+
+:::
+
 ## Use your component
 
-Build a small workshop check-in app: count guests as they arrive, then reset for the next session. Each example uses the same counter inside an `App` component and shows how to attach that app to the page. In an existing Vue, React, or Svelte project, keep its mounting code and add the counter to its `App` component.
+Build a small workshop check-in app: count guests as they arrive, then reset for the next session. Each example uses the same counter inside an `App` component and shows how to attach that app to the page. In an existing framework project, keep its mounting code and add the counter to its `App` component.
 
 ::: framework-html-next
 
@@ -230,6 +273,50 @@ The result uses React and native DOM roots. Generated components import the help
 
 :::
 
+::: framework-preact
+
+Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Use it inside the app:
+
+```tsx title="src/App.tsx"
+import { XCounter } from "./counter.html";
+
+export default function App() {
+  return (
+    <main>
+      <h1>Workshop check-in</h1>
+      <p>Count guests as they arrive. Reset for the next session.</p>
+      <XCounter />
+    </main>
+  );
+}
+```
+
+Attach `App` to the page:
+
+```tsx title="src/main.tsx"
+import { render } from "preact";
+import App from "./App";
+
+render(<App />, document.getElementById("app")!);
+```
+
+```html title="index.html"
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Workshop check-in</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+Run your project's usual `npm run dev` command. Click the counter and Reset.
+
+The result uses Preact and native DOM roots. Generated components import the helpers their features need and have no HTML Next runtime dependency. Editing the HTML definition updates the component in your app.
+
+:::
+
 ::: framework-svelte
 
 Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Use it inside the app:
@@ -269,6 +356,42 @@ mount(App, { target: document.getElementById("app")! });
 Run your project's usual `npm run dev` command. Click the counter and Reset.
 
 The result uses Svelte and native DOM roots. Generated components import the helpers their features need and have no HTML Next runtime dependency. Editing the HTML definition updates the component in your app.
+
+:::
+
+::: framework-angular
+
+Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Its declared root is a `div`, so use that element with the generated `x-counter` attribute selector:
+
+```ts title="src/app.ts"
+import { Component } from "@angular/core";
+import { XCounter } from "./counter.html";
+
+@Component({
+  selector: "app-root",
+  standalone: true,
+  imports: [XCounter],
+  template: `
+    <main>
+      <h1>Workshop check-in</h1>
+      <p>Count guests as they arrive. Reset for the next session.</p>
+      <div x-counter></div>
+    </main>
+  `,
+})
+export class App {}
+```
+
+Keep your application's normal bootstrap. For a standalone application:
+
+```ts title="src/main.ts"
+import { bootstrapApplication } from "@angular/platform-browser";
+import { App } from "./app";
+
+bootstrapApplication(App);
+```
+
+Angular retains that native host through rendering and hydration. A delegated component keeps its identities as attributes on the same element. Components whose root switches element type use an `ng-template` attribute selector so their rendered root can change. See the [Converter guide](/html-next/convert#angular).
 
 :::
 
@@ -320,6 +443,24 @@ If a component needs declarations before its first import, add `entries: ["src/c
 
 :::
 
+::: framework-preact
+
+Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Check components with `html-next-check`, then generate declarations before a standalone typecheck:
+
+```json title="package.json"
+{
+  "scripts": {
+    "typecheck": "html-next-check --target react src/counter.html && html-next-sync && tsc --noEmit"
+  }
+}
+```
+
+If a component needs declarations before its first import, add `entries: ["src/counter.html"]` to `htmlNext({ target: "preact" })`.
+
+
+Set `jsx` to `react-jsx` and `jsxImportSource` to `preact` in your TypeScript configuration.
+:::
+
 ::: framework-svelte
 
 Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Check components with `html-next-check`, then generate declarations before a standalone typecheck:
@@ -333,6 +474,31 @@ Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter 
 ```
 
 If a component needs declarations before its first import, add `entries: ["src/counter.html"]` to `htmlNext({ target: "svelte" })`.
+
+:::
+
+::: framework-angular
+
+Generate Angular metadata before checking templates. Extend the generated configuration from your application tsconfig, preserving your project's compiler options:
+
+```json title="tsconfig.json"
+{
+  "extends": "./src/html-next.angular.json",
+  "compilerOptions": { "allowArbitraryExtensions": true },
+  "angularCompilerOptions": { "strictTemplates": true },
+  "include": ["src/**/*.ts", "src/html-next.d.ts"]
+}
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "typecheck": "html-next-check --target angular src/counter.html && html-next-sync && ngc --noEmit"
+  }
+}
+```
+
+The generated config maps HTML and library imports to their Angular class metadata. If your application declares its own TypeScript `paths`, merge the generated mappings: TypeScript replaces inherited `paths` rather than merging them.
 
 :::
 
@@ -438,6 +604,16 @@ Use those exports like other React components. The names come from the library's
 
 :::
 
+::: framework-preact
+
+```js
+import { UiButton } from "your-library";
+```
+
+Use those exports like other Preact components. The names come from the library's README. Include the generated `src/html-next.d.ts` in your TypeScript project to get its component types.
+
+:::
+
 ::: framework-svelte
 
 ```js
@@ -445,6 +621,33 @@ import { UiButton } from "your-library";
 ```
 
 Use those exports like other Svelte components. The names come from the library's README. Include the generated `src/html-next.d.ts` in your TypeScript project to get its component types.
+
+:::
+
+::: framework-angular
+
+Import the library component into your standalone component's `imports`. Use the native root documented by the library with its attribute selector. For a component whose native root is `button`:
+
+```ts
+import { Component } from "@angular/core";
+import { UiButton } from "your-library";
+
+@Component({
+  selector: "app-actions",
+  standalone: true,
+  imports: [UiButton],
+  template: `<button ui-button>Save</button>`,
+})
+export class Actions {}
+```
+
+For a library component whose root switches between elements, use its generated attribute on `ng-template`. For example, Looma’s Button selects a native button or link from its `href` input:
+
+```html
+<ng-template ui-button href="/settings">Settings</ng-template>
+```
+
+The template renders the selected native element in place. Its inputs and controller remain available when that element changes.
 
 :::
 
@@ -491,9 +694,21 @@ For React, use the Vite adapter above. Choose HTML Next in this section for the 
 
 :::
 
+::: framework-preact
+
+For Preact, use the Vite adapter above. Choose HTML Next in this section for the direct browser-runtime setup.
+
+:::
+
 ::: framework-svelte
 
 For Svelte, use the Vite adapter above. Choose HTML Next in this section for the direct browser-runtime setup.
+
+:::
+
+::: framework-angular
+
+Use your Angular AOT build with the adapter above. Choose HTML Next in this section for the direct browser-runtime setup.
 
 :::
 
@@ -514,7 +729,7 @@ export default function initialize(host) {
 }
 ```
 
-The DOM runs capture listeners on an element before the event reaches a descendant, and before that element's own non-capture listeners when the element is the event's target, as it is for a component whose root is the wrapped component. So the consumer's non-capture `select` listeners on the root and above it never see the event, whenever they were added. A capture listener on an ancestor of the root still runs first, as does one the consumer added to the root before the controller connected. The pattern works the same in the browser runtime and in converted Vue, React, and Svelte components.
+The DOM runs capture listeners on an element before the event reaches a descendant, and before that element's own non-capture listeners when the element is the event's target, as it is for a component whose root is the wrapped component. So the consumer's non-capture `select` listeners on the root and above it never see the event, whenever they were added. A capture listener on an ancestor of the root still runs first, as does one the consumer added to the root before the controller connected. The pattern works the same in the browser runtime and in converted framework components.
 
 ## Ask the consumer for behavior {#requests}
 
@@ -595,6 +810,17 @@ Pass a function prop named after the request in camelCase, or listen with the ev
 
 :::
 
+::: framework-preact
+
+Pass a function prop named after the request in camelCase, or listen with the event form:
+
+```tsx title="src/App.tsx"
+<UiEditor mentionQuery={({ query }, { signal }) => searchPeople(query, { signal })} />
+<UiEditor onMentionQuery={(event) => event.respondWith(searchPeople(event.detail.query))} />
+```
+
+:::
+
 ::: framework-svelte
 
 Pass a function prop named after the request in camelCase, or listen with the event prop:
@@ -603,6 +829,25 @@ Pass a function prop named after the request in camelCase, or listen with the ev
 <UiEditor mentionQuery={({ query }, { signal }) => searchPeople(query, { signal })} />
 <UiEditor onmention-query={(event) => event.respondWith(searchPeople(event.detail.query))} />
 ```
+
+:::
+
+::: framework-angular
+
+Pass the request's camelCase input a function on your Angular component. Angular templates refer to that function:
+
+```html title="app template"
+<div ui-editor [mentionQuery]="findMentions"></div>
+```
+
+```ts title="app component field"
+readonly findMentions = (
+  { query }: { query: string },
+  { signal }: { signal: AbortSignal },
+) => searchPeople(query, { signal });
+```
+
+Import the converted `UiEditor` into the component's `imports`. The input is checked against the request's declared detail and answer types.
 
 :::
 
@@ -753,7 +998,7 @@ Some entries affect the whole page, its identity for search engines and sharing,
 
 A component reached through a bare specifier, such as an installed package or an import-map entry, is an imported component, and so is everything it links. Its page-wide head entries are ignored with an `HL011` warning; its other head declarations apply.
 
-A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. A `<title>`, `<meta>`, or `<link>` placed directly in a `<template component>`, outside `<defs>`, is `HS002`. Head declarations behave the same in the browser runtime, Vite output, and converted Vue, React and Svelte components, which share one head manager on the page.
+A definition rejects `<meta http-equiv>`, `<meta charset>`, `<base>`, `<link rel="stylesheet">`, inline scripts and import maps, the `blocking` and `nonce` attributes, and event-handler attributes, with an `HC025` error. Invalid JSON-LD, or a block with both literal content and `from:value`, is `HC026`, and two titles or canonical links in one definition are `HC027`. A `<title>`, `<meta>`, or `<link>` placed directly in a `<template component>`, outside `<defs>`, is `HS002`. Head declarations behave the same in the browser runtime, Vite output, and converted framework components, which share one head manager on the page.
 
 ### Load a third-party script {#declared-scripts}
 
@@ -805,6 +1050,12 @@ Server rendering with `renderComponents(html, { definitions, head })` returns th
 
 Converted components render the head on the server through their framework. Each target's `head` helper collects the head declarations the render reached, and `writeCollectedHead` writes them into a document holding the application's own head, with the same set-aside templates and preload links:
 
+::: framework-html-next
+
+Render the page with `renderComponents`, including the application's head in the input document. Its serialized result includes resolved head declarations and eager script preloads. See the [Node rendering guide](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/docs/server-rendering.md) for the page renderer and hydration setup.
+
+:::
+
 ::: framework-vue
 
 ```ts title="server.ts"
@@ -831,6 +1082,19 @@ writeCollectedHead(document, collector); // a server document, such as jsdom's, 
 
 :::
 
+::: framework-preact
+
+```tsx title="server.tsx"
+import renderToString from "preact-render-to-string";
+import { collectHead, createHeadCollector, writeCollectedHead } from "./generated/preact/head";
+
+const collector = createHeadCollector();
+const body = collectHead(collector, () => renderToString(<App />));
+writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
+```
+
+:::
+
 ::: framework-svelte
 
 ```ts title="server.ts"
@@ -841,6 +1105,27 @@ const collector = createHeadCollector();
 const { body } = render(App, { context: new Map([[HEAD_CONTEXT, collector]]) });
 writeCollectedHead(document, collector); // a server document, such as jsdom's, with the page's own <head>
 ```
+
+:::
+
+::: framework-angular
+
+Angular's generated head directive writes into the document supplied by Angular server rendering. Render the application normally; head contributions are included in the serialized document:
+
+```ts title="server.ts"
+import { renderApplication, provideServerRendering } from "@angular/platform-server";
+import { bootstrapApplication } from "@angular/platform-browser";
+import { App } from "./app";
+
+const html = await renderApplication(
+  context => bootstrapApplication(App, {
+    providers: [provideServerRendering()],
+  }, context),
+  { document: pageTemplate, url: requestURL },
+);
+```
+
+Use your server's page template and request URL. Browser hydration adopts the same managed head elements.
 
 :::
 

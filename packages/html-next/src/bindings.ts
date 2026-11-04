@@ -3,6 +3,7 @@ import { parseDuration } from "./duration.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import { componentInputs, READY_INPUT, sameInputStatus, type ComponentInputs, type InputFailure, type InputSnapshot, type InputSource, type InputStatus } from "./inputs.js";
 export { encodeHydrationValue, decodeHydrationValue, type HydrationValue } from "./hydration-value.js";
+export { adoptNativeModule, prepareNativeModules, type NativePreparedModule, type NativePreparationContext } from "./native-bindings.js";
 
 export type BindingPhase = "build" | "request" | "browser";
 export type BindingDuration = number | string;
@@ -692,6 +693,8 @@ export interface BindingPreparation {
   /** Outputs owned by this preparation, including reads deferred to the browser. */
   readonly names: readonly string[];
   snapshot(): BindingSnapshot;
+  /** Wait for reads started when retained server inputs change. */
+  settled?(): Promise<void>;
   dispose(): void;
 }
 

@@ -3,13 +3,22 @@ import { compileStyle } from "@vue/compiler-sfc";
 import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
-import { compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
+import { normalizeConversionStyleIdentities, compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
 import { loadNodeComponents } from "../src/node-loader.js";
 import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
+
+it("keeps Svelte ownership separate in mixed own and slotted selector lists", () => {
+  const definition = parseComponent('<template component="x-image"><figure><div class="frame"><img><slot></slot></div></figure></template>');
+  const css = compileComponentStylesForSvelte(".frame img, .frame :slotted(img) { max-width: 100%; & b { color: red; } }", definition).css;
+  assert.match(css, /:global\(\.frame img\):where\(\*\)/);
+  assert.match(css, /:global\(\.frame :is\(img\)\):not\(:scope, \* \*\)/);
+  assert.match(css, /:global\(& b\):where\(\*\)/);
+  assert.match(css, /:global\(& b\):not\(:scope, \* \*\)/);
+});
 
 it("preserves an implicit universal selector before a descendant pseudo-element", () => {
   assert.equal(guardComponentPseudoElements(".item ::before"), '.item :where(:not(:is([component]:not(template), [data-component]:not([component])), [data-slotted]))::before');
@@ -282,4 +291,29 @@ it("keeps a component type selector's namespace in Vue's class form", () => {
   assert.match(css, /:is\((htmlnextns\w+)\|x-ns, :where\(\1\|\*\.x-ns\)\)/);
   assert.match(css, /:is\(\*\|x-ns-child, :where\(\*\|\*\.x-ns-child\)\)/);
   assert.doesNotMatch(css, /\|:is\(/);
+});
+
+it("preserves native value CSS through SSR metadata without repeated expansion", () => {
+  const css = `textarea[value="a,b"]:not([value=""]), [VALUE^="a" i], [v\\61 lue], [/**/value/**/="a,b"] { content: attr(value/**/, "empty"); --quoted: "attr(value)"; }
+    [data-description="[value]"] { content: attr(data-description); }`;
+  const options = { nativeValueMetadata: true };
+  const normalized = normalizeConversionStyleIdentities(css, "component", options);
+  assert.match(normalized, /data-html-next-native-value="a,b"/);
+  assert.match(normalized, /data-html-next-native-value\^="a" i/);
+  assert.match(normalized, /content: attr\(data-html-next-native-value\/\*\*\/, "empty"\)/);
+  assert.ok(normalized.includes('content: attr(value/**/, "empty")'));
+  assert.ok(normalized.includes('--quoted: "attr(value)"'));
+  assert.ok(normalized.includes('[data-description="[value]"]'));
+  assert.equal(normalizeConversionStyleIdentities(normalized, "component", options), normalized);
+});
+
+it("preserves native value reads in nested rules and animated content", () => {
+  const css = `textarea { content: "earlier"; content: attr(value); @media (min-width: 1px) { &::after { content: attr(value); content: "last" !important; } } }
+    @keyframes label { to { content: attr(value, "empty"); } }`;
+  const options = { nativeValueMetadata: true };
+  const normalized = normalizeConversionStyleIdentities(css, "component", options);
+  assert.match(normalized, /content: attr\(value, attr\(data-html-next-native-value, "empty"\)\)/);
+  assert.match(normalized, /:where\(\[data-html-next-native-value\]:not\(\[value\]\)\)::after/);
+  assert.match(normalized, /content: attr\(data-html-next-native-value\); content: "last" !important/);
+  assert.equal(normalizeConversionStyleIdentities(normalized, "component", options), normalized);
 });

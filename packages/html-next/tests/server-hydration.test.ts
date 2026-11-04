@@ -8,12 +8,15 @@ import { chromium, firefox, webkit } from "playwright";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { renderComponents } from "../src/server.js";
+import { parseComponent } from "../src/source-parser.js";
 import { cases, compiledFixtures, definitions } from "./hydration-fixtures.js";
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to browser hydration", () => {
   let directory: string;
   let bundle: string;
   let compiledBundle: string;
+  let datesBundle: string;
+  const dates = parseComponent(`<template component="ssr-native-dates"><defs><state name="value" type="string" value="'2026-10-30'"></state><prop name="min" type="string" default="">Earliest date.</prop></defs><section><input id="bound" type="date" from:min="$min" bind:value="value"><input id="property" type="date" from:min="$min" .value="$value"></section></template>`, "native-dates.html");
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-server-hydration-"));
     bundle = join(directory, "runtime.js");
@@ -21,10 +24,34 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
     await build({ entryPoints: [new URL("../src/live.ts", import.meta.url).pathname], outfile: bundle,
       bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
     await writeFile(compiledBundle, await compiledFixtures("iife"));
+    datesBundle = join(directory, "dates.js");
+    await writeFile(datesBundle, await compiledFixtures("iife", "", [dates]));
   });
   afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it(`${engine} preserves incomplete native date segments through compiled hydration`, async () => {
+      const rendered = await renderComponents('<ssr-native-dates id="dates"></ssr-native-dates>', { definitions: [dates] });
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(rendered.html);
+        for (const id of ["bound", "property"]) {
+          await page.locator(`#${id}`).fill("");
+          await page.locator(`#${id}`).press("1");
+        }
+        const before = await page.evaluate(() => [...document.querySelectorAll("input")].map(input => ({ value: input.value, badInput: input.validity.badInput })));
+        await page.evaluate(() => { Object.assign(window, { originalDateControls: [...document.querySelectorAll("input")] }); });
+        await page.addScriptTag({ path: datesBundle });
+        const after = await page.evaluate(() => {
+          const context = window as unknown as { HtmlCompiled: { factories: Record<string, (props: object, html: undefined, root: Element) => Element> }; originalDateControls: Element[] };
+          context.HtmlCompiled.factories["ssr-native-dates"]!({}, undefined, document.querySelector("#dates")!);
+          return [...document.querySelectorAll("input")].map((input, index) => ({ value: input.value, badInput: input.validity.badInput, retained: input === context.originalDateControls[index] }));
+        });
+        assert.deepEqual(after, before.map(control => ({ ...control, retained: true })));
+      } finally { await browser.close(); }
+    });
+
     // The server copy hydrates live, or through compiled modules; the client copy is always live's.
     // A <template slot> written in the document needs the live delivery's parser.
     for (const [mode, fixture] of [...cases.map((fixture) => ["live", fixture] as const),

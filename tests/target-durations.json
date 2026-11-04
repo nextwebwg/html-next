@@ -1,4 +1,5 @@
 {
+  "packages/html-next-converter/tests/angular-public-conformance-parity.test.ts": 900,
   "packages/html-next-converter/tests/library-distribution.test.ts": 11,
   "packages/html-next-converter/tests/react-basic-parity.test.ts": 23,
   "packages/html-next-converter/tests/react-bound-prop-parity.test.ts": 35,

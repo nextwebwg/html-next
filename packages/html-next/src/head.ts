@@ -50,6 +50,14 @@ type DocumentRecord = { head?: HeadManager };
 const documentRecord = (document: Document): DocumentRecord =>
   (document as unknown as Record<symbol, DocumentRecord>)[runtimeKey] ??= {};
 
+/** Native baseURI in browsers; server DOMs may expose the getter without implementing it. */
+function documentBase(document: Document): string {
+  try { return document.baseURI; } catch {
+    const base = document.querySelector("base[href]")?.getAttribute("href");
+    return base === undefined || base === null ? document.URL : new URL(base, document.URL).href;
+  }
+}
+
 /**
  * The key of a head element or an entry, and the top-level competing key of its family. A shared
  * key has no family. Keys are prefixed by kind: `t` title, `c` canonical, `n` meta name, `p` meta
@@ -74,7 +82,7 @@ function keyOf(document: Document, tag: string, read: (name: string) => string |
     const href = read("href");
     if (href === null) return undefined;
     let resolved = href;
-    try { resolved = new URL(href, document.baseURI).href; } catch { /* kept as written */ }
+    try { resolved = new URL(href, documentBase(document)).href; } catch { /* kept as written */ }
     // One URL may represent both a language and x-default; each alternate owns its own shared key.
     const language = rel === "alternate" ? read("hreflang")?.trim().toLowerCase() : undefined;
     return [`l${rel} ${resolved}${language ? `\0${language}` : ""}`];
@@ -122,7 +130,7 @@ function managerFor(document: Document): HeadManager {
     const nodes = Array.from((template as HTMLTemplateElement).content.children).map((node) => document.adoptNode(node));
     const family = nodes[0] === undefined ? undefined : elementKey(nodes[0])?.[1];
     if (family !== undefined) manager.setAside.set(family, nodes);
-    template.remove();
+    template.parentNode?.removeChild(template);
   }
   return manager;
 }
@@ -195,14 +203,14 @@ function reconcile(document: Document, manager: HeadManager): void {
         target.forEach(([entry], index) => {
           const element = elements[index];
           if (element !== undefined) patch(element, entry);
-          else last.after(last = create(document, entry));
+          else { const next = create(document, entry); head.insertBefore(next, last.nextSibling); last = next; }
         });
-        for (const element of elements.slice(target.length)) element.remove();
+        for (const element of elements.slice(target.length)) element.parentNode?.removeChild(element);
       } else if ((authored.get(family)?.length ?? 0) > 0) {
         const aside = authored.get(family)!;
         manager.setAside.set(family, aside);
         for (const [entry] of target) head.insertBefore(create(document, entry), aside[0]!);
-        for (const element of aside) element.remove();
+        for (const element of aside) element.parentNode?.removeChild(element);
       } else {
         for (const [entry, tree, declared] of target) appended.push([tree, declared, create(document, entry)]);
       }
@@ -212,7 +220,7 @@ function reconcile(document: Document, manager: HeadManager): void {
         for (const element of aside) head.insertBefore(element, elements[0] ?? null);
         manager.setAside.delete(family);
       }
-      for (const element of elements) element.remove();
+      for (const element of elements) element.parentNode?.removeChild(element);
     }
   }
 
@@ -225,7 +233,7 @@ function reconcile(document: Document, manager: HeadManager): void {
     for (const element of elements) {
       const rel = element.localName === "link" ? element.getAttribute("rel")?.trim().toLowerCase() : undefined;
       if ((rel === "preload" || rel === "modulepreload") && manager.preloads.has((element as HTMLLinkElement).href)) continue;
-      element.remove();
+      element.parentNode?.removeChild(element);
     }
   }
 
@@ -246,13 +254,13 @@ function reconcile(document: Document, manager: HeadManager): void {
     });
     owned.set(contributor, after);
   }
-  for (const element of [...Array.from(manager.owned.values()).flat(), ...manager.adoptable]) element.remove();
+  for (const element of [...Array.from(manager.owned.values()).flat(), ...manager.adoptable]) element.parentNode?.removeChild(element);
   manager.owned = owned;
   manager.adoptable = [];
 
   // 7. New elements in tree order of their instances, then declared order.
   appended.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  for (const [, , element] of appended) head.append(element);
+  for (const [, , element] of appended) head.appendChild(element);
 }
 
 /** Reconciles now if a change is waiting, as an update's last step. */
@@ -352,13 +360,13 @@ const LAZY_MARGIN = "1250px";
 
 /** A script's URL: URL-like against the definition, bare through the document's import map. */
 function resolveScript(document: Document, manager: HeadManager, src: string, base: string): string {
-  if (URL_LIKE.test(src)) return new URL(src, /^https?:/.test(base) ? base : document.baseURI).href;
+  if (URL_LIKE.test(src)) return new URL(src, /^https?:/.test(base) ? base : documentBase(document)).href;
   if (manager.imports === undefined) {
     const imports: Record<string, string> = {};
     for (const script of Array.from(document.querySelectorAll('script[type="importmap"]'))) {
       try {
         for (const [key, target] of Object.entries((JSON.parse(script.textContent ?? "{}") as { imports?: Record<string, string> }).imports ?? {})) {
-          imports[key] ??= new URL(target, document.baseURI).href;
+          imports[key] ??= new URL(target, documentBase(document)).href;
         }
       } catch { /* the browser reports an invalid import map */ }
     }
@@ -384,7 +392,7 @@ function entryFor(document: Document, manager: HeadManager, url: string, module:
   const key = `${module ? "module" : "classic"} ${url}`;
   const known = (manager.scripts ??= new Map()).get(key);
   if (known !== undefined) return known;
-  const authored = Array.from(document.scripts).find((script) => !script.hasAttribute(HEAD_MARKER) && script.hasAttribute("src") &&
+  const authored = Array.from(document.querySelectorAll<HTMLScriptElement>("script")).find((script) => !script.hasAttribute(HEAD_MARKER) && script.hasAttribute("src") &&
     script.src === url && isModule(script) === module);
   let resolve!: () => void;
   let reject!: (reason: unknown) => void;
@@ -442,7 +450,7 @@ function insertScript(document: Document, entry: ScriptEntry, declaration: Decla
   entry.element = script;
   entry.status = Object.freeze({ pending: true, ok: false, error: null });
   for (const binding of entry.bindings) binding.changed();
-  document.head.append(script);
+  document.head.appendChild(script);
 }
 
 /** Calls for a lazy script when its root first comes near the viewport. */
@@ -570,29 +578,30 @@ export function writeServerHead(document: Document, eager: readonly DeclaredScri
     const marked = Array.from(document.head.children).filter((element) => element.hasAttribute(HEAD_MARKER) && elementKey(element)?.[1] === family);
     const template = document.createElement("template");
     template.setAttribute(HEAD_MARKER, "set-aside");
-    template.content.append(...elements);
-    (marked.at(-1) ?? document.head.lastChild)?.after(template);
+    for (const element of elements) template.content.appendChild(element);
+    document.head.insertBefore(template, (marked.at(-1) ?? document.head.lastChild)?.nextSibling ?? null);
   }
   manager.setAside.clear();
   for (const declaration of eager) {
     let url: string;
     try { url = resolveScript(document, manager, declaration.src, declaration.base); } catch { continue; }
+    manager.preloads.add(url);
     const module = declaration.type === "module";
     const rel = module ? "modulepreload" : "preload";
-    if (Array.from(document.scripts).some((script) => script.hasAttribute("src") && script.src === url && isModule(script) === module) ||
+    if (Array.from(document.querySelectorAll<HTMLScriptElement>("script")).some((script) => script.hasAttribute("src") && script.src === url && isModule(script) === module) ||
       Array.from(document.head.querySelectorAll(`link[${HEAD_MARKER}]`)).some((link) => (link as HTMLLinkElement).rel === rel && (link as HTMLLinkElement).href === url)) continue;
     const link = document.createElement("link");
     link.setAttribute("rel", rel);
     if (!module) link.setAttribute("as", "script");
     // A same-origin script's preload is a path, so it is the same URL wherever the page is served.
     const target = new URL(url);
-    link.setAttribute("href", target.origin === new URL(document.baseURI).origin ? target.pathname + target.search + target.hash : url);
+    link.setAttribute("href", target.origin === new URL(documentBase(document)).origin ? target.pathname + target.search + target.hash : url);
     for (const name of ["crossorigin", "integrity", "referrerpolicy", "fetchpriority"] as const) {
       const value = declaration[name];
       if (value !== undefined) link.setAttribute(name, value);
     }
     link.setAttribute(HEAD_MARKER, "");
-    document.head.append(link);
+    document.head.appendChild(link);
   }
 }
 

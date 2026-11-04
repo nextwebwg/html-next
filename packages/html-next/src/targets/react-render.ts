@@ -5,6 +5,8 @@
  * only the ones a component imports. Preact output reuses these with its compatibility API.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { NATIVE_VALUE_ATTRIBUTE, nativeValueCss } from "../native-value.js";
+import { closureFreeFunctionSource } from "./format-source.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 import { formatReact } from "./vue-format.js";
 import { expressionHelpersSource } from "./vue-lowering.js";
@@ -18,6 +20,58 @@ import type { ReactNode } from "react";
 ${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 
 ${expressionHelpersSource()}
+
+/** React removes a node from its declared parent even when a controller has temporarily moved it. */
+export function rememberParent(element: Element | null): () => void {
+  const parent = element?.parentNode;
+  const next = element?.nextSibling;
+  return () => {
+    if (parent && element && element.parentNode !== parent) parent.insertBefore(element, next?.parentNode === parent ? next : null);
+  };
+}
+
+export function useOwnedRootRef<T extends Element>(root: { current: T | null }): (element: T | null) => () => void {
+  return React.useCallback(element => {
+    root.current = element;
+    const restore = rememberParent(element);
+    return () => { restore(); root.current = null; };
+  }, [root]);
+}
+
+/** Publish native handles only when the consumer or native root changes. */
+export function useRootHandle<T extends Element>(root: { current: T | null }, ref: React.Ref<T> | undefined): void {
+  const previous = React.useRef<{ element: T | null; ref: React.Ref<T> | undefined } | undefined>(undefined);
+  const dispose = React.useRef<(() => void) | undefined>(undefined);
+  React.useLayoutEffect(() => () => {
+    dispose.current?.(); dispose.current = undefined; previous.current = undefined;
+  }, []);
+  React.useLayoutEffect(() => {
+    const element = root.current;
+    if (previous.current?.element === element && previous.current?.ref === ref) return;
+    dispose.current?.(); dispose.current = undefined;
+    previous.current = { element, ref };
+    if (!ref || !element) return;
+    if (typeof ref === "function") {
+      const cleanup = ref(element);
+      dispose.current = typeof cleanup === "function" ? cleanup : () => { ref(null); };
+    } else {
+      ref.current = element;
+      dispose.current = () => { ref.current = null; };
+    }
+  });
+}
+
+/** Structured prop metadata keeps its initial value; rendered bindings read current inputs. */
+export function useReflectedProp(): (name: string, value: unknown) => string | undefined {
+  const structured = React.useRef<Map<string, string> | undefined>(undefined);
+  return (name, value) => {
+    if (value == null) return undefined;
+    if (typeof value !== "object") return String(value);
+    const values = structured.current ??= new Map<string, string>();
+    if (!values.has(name)) values.set(name, JSON.stringify(value));
+    return values.get(name);
+  };
+}
 
 /**
  * React state a handler reads and writes in step order, as HTML Next handlers do: a write is the
@@ -61,10 +115,10 @@ function sameControlProps(previousProps: object, nextProps: object): boolean {
 interface ControlDefaults { readonly htmlNextDefault?: "defaultValue" | "defaultChecked"; readonly htmlNextAuthored?: unknown; readonly htmlNextInitial?: unknown }
 /** A bound control renders its initial default, then switches to its authored one as it mounts, rendering only itself. */
 function useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial }: ControlDefaults): Record<string, unknown> {
-  ${preact ? 'return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: htmlNextInitial };' : `const mounted = React.useRef(false);
+  ${preact ? 'const initial = React.useRef(htmlNextInitial);\n  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: htmlNextDefault === "defaultChecked" ? initial.current : htmlNextInitial };' : `const mounted = React.useRef(false);
   const [, settle] = React.useReducer((revision: number) => revision + 1, 0);
   React.useLayoutEffect(() => { if (htmlNextDefault !== undefined) { mounted.current = true; settle(); } }, []);
-  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
+  return htmlNextDefault === undefined || htmlNextDefault === "defaultChecked" && mounted.current ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
 }
 /** Inputs and textareas render through these, so React DOM, which rewrites an input's name and type and a textarea's default whenever it commits one, commits nothing to them on an unrelated render. */
 export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>
@@ -72,11 +126,84 @@ export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, ht
 export const HtmlNextTextarea = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
   <textarea {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 
-${preact ? `/** Preact's core select leaves option properties to the native binding helper after the first render. */
+${preact ? "" : `/** Native value attributes retain the browser's dirty-value flag and textarea attribute semantics. */
+${closureFreeFunctionSource(nativeValueCss, "nativeValueCss")}
+function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(value: unknown, ref: React.Ref<T> | undefined, style?: React.CSSProperties): { ref: React.RefObject<T | null>; style?: React.CSSProperties } {
+  const root = React.useRef<T | null>(null);
+  let represented = style;
+  const restored: [string, string][] = [];
+  for (const [name, authored] of Object.entries(style ?? {})) {
+    if (typeof authored !== "string") continue;
+    const rewritten = nativeValueCss(authored, ${JSON.stringify(NATIVE_VALUE_ATTRIBUTE)});
+    if (rewritten === authored) continue;
+    if (represented === style) represented = { ...style };
+    (represented as Record<string, unknown>)[name] = rewritten;
+    restored.push([name.startsWith("--") ? name : name.replace(/[A-Z]/g, letter => "-" + letter.toLowerCase()).replace(/^ms-/, "-ms-"), authored]);
+  }
+  React.useLayoutEffect(() => {
+    if (value == null) root.current?.removeAttribute("value");
+    else root.current?.setAttribute("value", String(value));
+    root.current?.removeAttribute(${JSON.stringify(NATIVE_VALUE_ATTRIBUTE)});
+  }, [value]);
+  React.useLayoutEffect(() => {
+    for (const [name, authored] of restored) root.current?.style.setProperty(name, authored);
+  });
+  useRootHandle(root, ref);
+  return { ref: root, style: represented };
+}
+export const HtmlNextValueInput = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, ...props }: React.ComponentProps<"input"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
+  <input {...props} ref={useValueAttribute<HTMLInputElement>(htmlNextValue, ref).ref} defaultValue={typeof document === "undefined" && htmlNextValue != null ? String(htmlNextValue) : undefined} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
+interface NativeTextareaProps extends React.ComponentPropsWithoutRef<"textarea"> { readonly htmlNextRoot: React.RefObject<HTMLTextAreaElement | null> }
+/** React rewrites an uncontrolled textarea's default on every commit. Snapshot controller-owned defaults before that mutation. */
+const NativeTextarea = /* @__PURE__ */ (() => class extends React.Component<NativeTextareaProps, {}, string | null> {
+  private committedChildren = this.props.children;
+  componentDidMount(): void { this.committedChildren = this.props.children; }
+  getSnapshotBeforeUpdate(previous: NativeTextareaProps): string | null {
+    return previous.defaultValue === this.props.defaultValue && previous.children === this.props.children
+      ? this.props.htmlNextRoot.current?.defaultValue ?? null : null;
+  }
+  componentDidUpdate(_previous: NativeTextareaProps, _state: {}, nativeDefault: string | null): void {
+    const element = this.props.htmlNextRoot.current;
+    if (element && nativeDefault !== null && element.defaultValue !== nativeDefault) element.defaultValue = nativeDefault;
+    this.committedChildren = this.props.children;
+  }
+  render(): ReactNode {
+    const { htmlNextRoot, children, ...props } = this.props;
+    const nativeDefault = props.defaultValue ?? (children !== this.committedChildren ? children : htmlNextRoot.current?.defaultValue ?? children);
+    const defaultText = String(nativeDefault ?? "");
+    return <textarea {...props} defaultValue={defaultText} ref={htmlNextRoot}
+      onInput={event => { props.onInput?.(event); if (event.currentTarget.defaultValue !== defaultText) this.forceUpdate(); }}
+      onChange={event => { props.onChange?.(event); if (event.currentTarget.defaultValue !== defaultText) this.forceUpdate(); }} />;
+  }
+})();
+export const HtmlNextValueTextarea = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, style, ...props }: React.ComponentProps<"textarea"> & ControlDefaults & { readonly htmlNextValue?: unknown }) => {
+  const native = useValueAttribute<HTMLTextAreaElement>(htmlNextValue, ref, style);
+  return <NativeTextarea {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} htmlNextRoot={native.ref} style={native.style} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />;
+}, sameControlProps);
+
+export const HtmlNextValueSelect = /* @__PURE__ */ React.memo(({ htmlNextValue, ref, style, ...props }: React.ComponentProps<"select"> & { readonly htmlNextValue?: unknown }) =>
+  <select {...props} ${NATIVE_VALUE_ATTRIBUTE}={htmlNextValue == null ? undefined : String(htmlNextValue)} {...useValueAttribute<HTMLSelectElement>(htmlNextValue, ref, style)} />, sameControlProps);
+`}
+
+${preact ? `/** The serializer cannot infer selection from the uppercase VALUE used for native attributes. */
+function initialSelectOptions(children: ReactNode, value: unknown): ReactNode {
+  const selected = new Set((Array.isArray(value) ? value : [value]).map(String));
+  const serverOptions = (child: ReactNode): ReactNode => {
+    if (Array.isArray(child)) return child.map(serverOptions);
+    if (!React.isValidElement(child)) return child;
+    const element = child as React.ReactElement<Record<string, any>>;
+    const attributes = element.props;
+    return React.cloneElement(element, element.type === "option"
+      ? { selected: selected.has(String(attributes.VALUE ?? attributes.value ?? attributes.children ?? "")) }
+      : { children: serverOptions(attributes.children) });
+  };
+  return serverOptions(children);
+}
+/** Preact's core select leaves option properties to the native binding helper after the first render. */
 export function HtmlNextSelect({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"select"> & ControlDefaults): ReactNode {
   const initial = React.useRef(true);
   React.useLayoutEffect(() => { initial.current = false; }, []);
-  return nativeElement("select", { ...props, value: initial.current ? htmlNextInitial as React.SelectHTMLAttributes<HTMLSelectElement>["value"] : undefined });
+  return nativeElement("select", { ...props, ...(typeof document === "undefined" ? { children: initialSelectOptions(props.children, htmlNextInitial) } : {}), value: initial.current ? htmlNextInitial as React.SelectHTMLAttributes<HTMLSelectElement>["value"] : undefined });
 }
 ` : ""}
 

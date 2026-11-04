@@ -14,7 +14,7 @@ export function importsVueProps(source: string): boolean {
 const SOURCE = `
 const CSS_NAMED_COLOR_SET = new Set<string>(${JSON.stringify(CSS_COLOR_KEYWORDS)});
 const HTML_EMAIL_PATTERN = ${HTML_EMAIL_PATTERN.toString()};
-const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!;
+const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")?.get;
 const eventBrands = new WeakMap<object, boolean>();
 function nativeEvent(value: unknown): boolean {
   if (typeof value !== "object" || value === null || !("type" in value) || eventType === undefined) return false;
@@ -414,13 +414,23 @@ const ariaMirrors = new WeakSet<Element>();
 // Elements given a validity API by vPropValidity. Their setCustomValidity reflects through
 // reflectValidity, so only the native one may be called from it.
 const managedValidityApis = new WeakSet<Element>();
+const nativeValidityMessages = new WeakMap<Element, string>();
+function ownsNativeValidityMessage(el: Element & { readonly validationMessage: string; readonly willValidate: boolean }): boolean {
+  const message = nativeValidityMessages.get(el);
+  return message !== undefined && (el.validationMessage === message || !el.willValidate && el.validationMessage === "");
+}
 const REASONS: readonly ValidityReason[] = ["valueMissing", "typeMismatch", "patternMismatch", "tooLong", "tooShort", "rangeUnderflow", "rangeOverflow", "stepMismatch", "badInput", "customError", "schemaMismatch", "untrustedValue"];
 function reflectValidity(el: Element, state: ManagedValidity): void {
   const errors = [...state.validity.errors, ...state.external];
   const valid = errors.length === 0;
   if (["button", "fieldset", "input", "object", "output", "select", "textarea"].includes(el.localName) &&
       !managedValidityApis.has(el) && "setCustomValidity" in el && typeof el.setCustomValidity === "function") {
-    el.setCustomValidity(valid ? "" : errors[0]!.message);
+    const control = el as HTMLInputElement;
+    if (control.validity.customError && !ownsNativeValidityMessage(control)) return;
+    const message = valid ? "" : errors[0]!.message;
+    control.setCustomValidity(message);
+    if (message === "") nativeValidityMessages.delete(el);
+    else nativeValidityMessages.set(el, message);
     return;
   }
   el.toggleAttribute("data-valid", valid);
@@ -484,6 +494,11 @@ export const vPropValidity = {
   unmounted(el: Element): void {
     const state = validityStates.get(el);
     state?.cleanup();
+    if (nativeValidityMessages.has(el)) {
+      const control = el as HTMLInputElement;
+      if (ownsNativeValidityMessage(control)) control.setCustomValidity("");
+      nativeValidityMessages.delete(el);
+    }
     validityStates.delete(el);
   },
 };

@@ -1,6 +1,6 @@
 // The native getter checks Event's internal brand and accepts events from another window.
 const eventType = typeof Event === "undefined" ? undefined
-  : Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!;
+  : Object.getOwnPropertyDescriptor(Event.prototype, "type")?.get;
 
 const eventBrands = new WeakMap<object, boolean>();
 

@@ -3,7 +3,7 @@
 import { convertComponents, type ConversionGraph, type FrameworkTarget } from "./index.js";
 
 function usage(): string {
-  return "Usage: html-next-convert <vue|react|preact|svelte> <component.html|directory|glob>... --mode <application|library> --out-dir <directory> [--public-root-url <url>] [--public-state]";
+  return "Usage: html-next-convert <vue|react|preact|svelte|angular> <component.html|directory|glob>... --mode <application|library> --out-dir <directory> [--public-root-url <url>] [--public-state]";
 }
 
 async function main(input: readonly string[]): Promise<void> {
@@ -17,7 +17,7 @@ async function main(input: readonly string[]): Promise<void> {
   const publicRootIndex = argv.indexOf("--public-root-url");
   const publicRootURL = publicRootIndex < 0 ? undefined : argv[publicRootIndex + 1];
   if (
-    target === undefined || !(["vue", "react", "preact", "svelte"] as const).includes(target) ||
+    target === undefined || !(["vue", "react", "preact", "svelte", "angular"] as const).includes(target) ||
     mode === undefined || !(["application", "library"] as const).includes(mode) ||
     modeIndex < 2 || outIndex !== modeIndex + 2 || outDirectory === undefined ||
     (publicRootIndex < 0 ? outIndex !== argv.length - 2 : publicRootIndex !== outIndex + 2 || publicRootIndex !== argv.length - 2 || publicRootURL === undefined)

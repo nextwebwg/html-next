@@ -179,11 +179,11 @@ export function recordInputs(record: RenderedInstanceRecord, source: "value" | "
  * hydration restores them; their inputs were given to its prop boundary (`recordInputs`).
  */
 export function restoreInstance(record: RenderedInstanceRecord, spec: { readonly n: readonly string[]; readonly k?: number },
-  values: unknown[], props?: { readonly props: object }): void {
+  values: unknown[], props?: { readonly props: object }, current: Readonly<Record<string, unknown>> = {}): void {
   const { n: names, k = names.length } = spec;
   for (let index = 0; index < k; index += 1) if (Object.hasOwn(record.state, names[index]!)) values[index] = record.state[names[index]!];
   if (props !== undefined) Object.keys(props.props).forEach((name, index) => {
-    if (Object.hasOwn(record.props, name)) values[names.length + index] = record.props[name];
+    if (!Object.hasOwn(current, name) && Object.hasOwn(record.props, name)) values[names.length + index] = record.props[name];
   });
 }
 
@@ -202,11 +202,16 @@ export function adoptLifecycle(element: Element, connect: () => () => void, hand
   adopted.push(record);
 }
 
+const heldControls = /* @__PURE__ */ new WeakMap<Element, number>();
+
+/** Native partial edits are opaque, so an initial adopting render must leave their controls alone. */
+export function canWriteControl(element: Element, name: string): boolean {
+  return !heldControls.has(element) && (name !== "selected" || !heldControls.has(element.closest("select")!));
+}
+
 /**
- * Captures what a reader may have changed in the server root's controls before startup, after the
- * serialized form defaults are restored, and starts an adoption. The returned function puts the
- * controls back once the root has rendered, with focus and selection, as the live runtime's hydration
- * does, and the outermost adoption's then connects every root it adopted.
+ * Captures reader edits after restoring serialized form defaults and holds initial control writes.
+ * The outermost adoption releases native state, focus and selection before connecting its roots.
  */
 export function holdControls(root: Element): () => void {
   adopting += 1;
@@ -215,6 +220,7 @@ export function holdControls(root: Element): () => void {
   const controls = "input, textarea, select";
   const held = [...root.matches(controls) ? [root] : [], ...root.querySelectorAll(controls)].map((control) => {
     const element = control as HTMLInputElement;
+    heldControls.set(element, (heldControls.get(element) ?? 0) + 1);
     const selection = element.localName === "select" ? undefined : [element.selectionStart, element.selectionEnd] as const;
     return [element, element.value, element.checked, selection] as const;
   });
@@ -226,6 +232,9 @@ export function holdControls(root: Element): () => void {
         if (element === active) element.focus({ preventScroll: true });
         element.setSelectionRange(selection[0], selection[1]);
       }
+      const remaining = heldControls.get(element)! - 1;
+      if (remaining) heldControls.set(element, remaining);
+      else heldControls.delete(element);
     }
     if (--adopting > 0) return;
     const records = adopted.splice(0).sort((a, b) => a.element === b.element ? 0 : a.element!.compareDocumentPosition(b.element!) & 4 ? -1 : 1);
