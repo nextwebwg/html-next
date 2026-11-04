@@ -122,6 +122,8 @@ A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/decla
 - Content a `<slot of>` outlet places reads the child's context, then the parent's, when the parent renders its children's roots before those outlets, as a header row before the body does.
 - A preset whose root is an accepted component is left out of the list, with a warning.
 - A hand-written React or Preact consumer writes accepted children as JSX in the accepting slot's content, directly or through arrays, fragments, conditions and loops, and gives their slot content with `slots`. A `key` gives a child's entry its identity; without one, its place in the content does. A wrapper component around an accepted child is content the slot doesn't accept, so it's left out with a warning.
+- In Vue, an SFC template and a render function give a table its columns as a converted consumer does. The table reads the vnodes of its slot, so a column is a vnode of the accepted component itself, directly or inside `v-if`, `v-for`, a `<template>` or a nested array. A component of your own that renders a column is another component to the table: it is left out of the list, with a warning, and renders where the slot's outlet places it.
+- In Vue, a slot that declares props, written `<template #cell="{ row }">` or as a render function's `cell`, renders at every outlet. Any other named slot, such as `<template #note>`, is plain content.
 - Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
 
 ## Converter validation
