@@ -210,14 +210,13 @@ export const render = () => renderToString(createSSRApp({ render: () => h(App) }
         assert.deepEqual({ vue: await tables(pages.vue, expected), hydrated: await tables(pages.hydrated, expected) }, { vue: expected, hydrated: expected });
         assert.equal(await pages.hydrated.evaluate(`window.serverCells.every((cell) => cell.isConnected)`), true, "hydration kept the server's cells");
 
-        let taken = (now: string[]): string[] => now;
         const step = async (button: string, check?: (tables: readonly string[]) => readonly string[] | void): Promise<void> => {
           for (const page of Object.values(pages)) await page.evaluate(mark);
           for (const page of Object.values(pages)) await page.locator(`button.${button}`).click();
           await pages.live.waitForTimeout(50);
           await pages.live.evaluate(LIVE_CONTROLLERS);
           await pages.live.waitForTimeout(20);
-          const read = taken(await tables(pages.live));
+          const read = await tables(pages.live);
           const now = check?.(read) ?? read;
           const [cells, ...others] = await Promise.all(Object.values(pages).map((page) => page.evaluate(marks)));
           assert.deepEqual({ vue: await tables(pages.vue, now), hydrated: await tables(pages.hydrated, now) }, { vue: now, hydrated: now }, button);
@@ -241,12 +240,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(App) }
         assert.equal(left.length, 3);
         assert.deepEqual({ vue: accepting(warnings.vue), hydrated: accepting(warnings.hydrated) }, { vue: left, hydrated: left });
         // An accepted child's \`<template slot>\` renders at every outlet; its plain content at the first, then the next when that one goes.
-        // When the first outlet goes, the plain note moves to the column's next outlet. Live's takeover
-        // fix lands on its own branch; until it merges, live leaves the note out, so this states the outcome.
-        taken = (now) => now.map((table, index) => index === 0 ? table.replace("<tfoot><tr><td></td>", '<tfoot><tr><td><i slot="note">kept</i></td>') : table);
         await step("unlead");
         for (const button of ["widen", "retag", "widen"]) await step(button);
-        const final = taken(await tables(pages.live));
+        const final = await tables(pages.live);
         assert.match(final[3]!, /<tfoot><tr><td><u>n<\/u><u>n<\/u><\/td><td>-<\/td><td>-<em>4px<\/em><\/td><td>-<em>4px<\/em><\/td>/);
         assert.match(final[3]!, /<b>W:quiet:compact<\/b>/);
         // Entries hold the props as each column resolves them: a rejected value takes the default.
