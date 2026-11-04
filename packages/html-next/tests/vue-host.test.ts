@@ -30,7 +30,7 @@ async function loadReactiveHost() {
 async function loadHost(incoming?: Record<string, unknown>) {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
   const instance = incoming === undefined ? "null" : JSON.stringify({ vnode: { props: incoming } });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createCommentVNode=()=>{},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined';`);
+  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createCommentVNode=()=>{},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined,camelize=(s)=>s,Comment={},isVNode=()=>false,renderSlot=()=>{},Text={}';`);
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
     useReflectedProp: () => (name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean) => string | undefined;
     createDispatch: (
@@ -155,6 +155,12 @@ describe("the shared Vue host", () => {
     for (const [a, b] of [[1.1, 0.1], [0.3, 0.1], [1.25, 2], [-5.5, 2], [1e-7, 2e-7], [1, 3], [1.5e-23, 1e-24], [-1.5, 0]]) {
       for (const [name, operate] of operations) assert.ok(Object.is(host[name]!(a!, b!), operate(a!, b!)), `${name}(${a}, ${b})`);
     }
+  });
+
+  it("fails to convert an accepting slot whose accepted component the conversion does not include", () => {
+    const table = parseComponent(`<template component="x-table"><defs><slot accepts="x-col" as="cols"></slot></defs><table><tr><template $slot></template></tr></table></template>`, "x-table.html");
+    assert.throws(() => generateVueComponent(table, { componentGraph: new Map([[table.contract.tag, table]]) }),
+      /HT030[\s\S]*`x-table` accepts `x-col`, which this conversion does not include; convert `x-col` with it\./);
   });
 
   it("imports only the decimal operations a component's number arithmetic uses", () => {

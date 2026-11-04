@@ -23,8 +23,8 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, createCommentVNode, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, ref, shallowRef, useSlots, watch, watchEffect } from "vue";
-import type { PropType, Ref, VNode } from "vue";
+import { camelize, Comment, computed, createCommentVNode, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, isVNode, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, ref, renderSlot, shallowRef, Text, useSlots, watch, watchEffect } from "vue";
+import type { FunctionalComponent, PropType, Ref, Slots, VNode } from "vue";
 ${INPUT_STATUS_SOURCE}
 
 ${MODULE_CONNECTION_SOURCE}
@@ -769,6 +769,168 @@ export const KeyedBoundary = /* @__PURE__ */ defineComponent({
     };
   },
 });
+
+/**
+ * What a \`<slot of>\` outlet knows of an accepted child's slots: those its own template places, those
+ * that declare props, every slot it declares, and those names as a warning lists them.
+ */
+type ChildSlotNames = readonly [outlets: readonly string[], scoped: readonly string[], known: readonly string[], listed: string];
+/** An accepted component, its tag, its props as its own instance resolves them, and its slots. */
+type ChildKind = readonly [component: unknown, tag: string, resolve: (given: Record<string, unknown>) => Record<string, unknown>, slots: ChildSlotNames];
+/**
+ * An \`as\` list entry's child: its latest vnode and resolved props, which outlet places each plain slot,
+ * and a version that tells the other outlets when that outlet goes.
+ */
+interface ChildRecord {
+  readonly tag: string; readonly slots: ChildSlotNames; readonly prefix: string;
+  readonly claims: Map<string, object>; readonly released: Ref<number>;
+  node: VNode; props: Record<string, unknown>; entry: object; read(): VNode;
+}
+const childRecords = new WeakMap<object, ChildRecord>();
+/** The empty slot a consumer adds beside a \`<template slot>\` it gives an accepted child, which places it afresh at every outlet. */
+const TEMPLATE_SLOT = "html-next-template-";
+
+/**
+ * A slot's \`as\` list (components#columns-as-markup): one stable, read-only entry per accepted child the
+ * consumer gives \`slot\`, in content order, following its \`v-if\`, \`v-for\` and \`<template>\` regions,
+ * holding the child's props as its instance resolves them. The list reads the consumer's vnodes, so it
+ * is complete on the first render, on the server too; the second value is those vnodes, which the
+ * slot's outlet renders (\`ChildNodes\`), so each entry knows its child's instance. Other children are
+ * left out with a warning. \`prefix\` begins each warning, as live's do.
+ */
+export function useChildList<List>(
+  slot: string, accepted: readonly ChildKind[], presets: Record<string, string>, prefix: string, named: string, listed: string,
+): readonly [Readonly<Ref<List>>, Readonly<Ref<VNode[]>>] {
+  const slots = useSlots();
+  const kinds = new Map(accepted.map((kind) => [kind[0], kind]));
+  const leftOut = (key: string, message: string): void => { warnUnless(false, prefix + "accepts:" + slot + ":" + key, prefix + message); };
+  const ids = new WeakMap<object, number>();
+  let count = 0;
+  const id = (key: unknown): string => typeof key !== "object" || key === null ? typeof key + ":" + String(key)
+    : "o" + (ids.get(key) ?? (ids.set(key, ++count), count));
+  let records = new Map<string, ChildRecord>();
+  const state = computed(() => {
+    const next = new Map<string, ChildRecord>();
+    const entries: object[] = [];
+    // A keyed v-for's children are known by key; anything else by its place (and branch key, for v-if).
+    const visit = (nodes: readonly unknown[], path: string, keyed: boolean): void => nodes.forEach((child, index) => {
+      if (!isVNode(child)) return;
+      const node = child as VNode;
+      const at = path + "/" + (keyed && node.key != null ? id(node.key) : index + (node.key == null ? "" : "~" + id(node.key)));
+      const kind = kinds.get(node.type);
+      if (kind !== undefined) {
+        let record = records.get(at);
+        if (record === undefined || record.tag !== kind[1]) {
+          const made: ChildRecord = record = { tag: kind[1], slots: kind[3], prefix, claims: new Map(), released: shallowRef(0), node, props: {}, entry: {},
+            read: () => { void state.value; return made.node; } };
+          // Reading an entry's prop reads the list, so it follows the consumer's changes.
+          made.entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(kind[2]({})).map((name) =>
+            [name, { enumerable: true, get: () => { void state.value; return made.props[name]; } }]))) as object);
+          childRecords.set(made.entry, made);
+        }
+        const given: Record<string, unknown> = {};
+        for (const key in node.props) given[camelize(key)] = node.props[key];
+        record.node = node;
+        record.props = kind[2](given);
+        next.set(at, record);
+        entries.push(record.entry);
+      } else if (node.type === Comment) {
+        // A v-if that renders nothing.
+      } else if (node.type === Text) {
+        if (/[^\\t\\n\\f\\r ]/.test(String(node.children))) leftOut("#text", named + " accepts " + listed + "; this text is left out.");
+      } else if (node.type === Fragment) {
+        visit(node.children as unknown[], at, (node.patchFlag & 128) !== 0);
+      } else if (node.type === KeyedBoundary) {
+        // The boundary renders the vnodes read here, so each entry keeps its child's instance.
+        const children = node.children as { default?: () => VNode[] } | null;
+        try {
+          const inner = children?.default?.() ?? [];
+          visit(inner, at, false);
+          node.children = { default: () => inner } as never;
+        } catch (error) {
+          node.children = { default: () => { throw error; } } as never;
+        }
+      } else {
+        const type = node.type as { __name?: string; name?: string } | string;
+        const tag = typeof type === "string" ? type : (type.__name ?? type.name ?? "component").replace(/\\B([A-Z])/g, "-$1").toLowerCase();
+        leftOut(tag, presets[tag] === undefined ? named + " accepts " + listed + "; this \`<" + tag + ">\` is left out."
+          : "\`<" + tag + ">\` is a preset of \`" + presets[tag] + "\`, which " + named + " accepts; a preset among accepted children is not supported yet, so it is left out.");
+      }
+    });
+    const nodes = (slots[slot === "" ? "default" : slot]?.() ?? []) as VNode[];
+    visit(nodes, "", false);
+    records = next;
+    return { entries: Object.freeze(entries) as List, nodes };
+  });
+  return [computed(() => state.value.entries), computed(() => state.value.nodes)];
+}
+
+/** An accepting slot's outlet: the consumer's vnodes the slot's \`as\` list read, or the fallback. */
+export const ChildNodes = /* @__PURE__ */ defineComponent({
+  props: { nodes: { type: Array as PropType<VNode[]>, required: true } },
+  setup(props, { slots }) {
+    return () => props.nodes.some((node) => node.type !== Comment) ? h(Fragment, props.nodes) : slots.default?.();
+  },
+});
+
+const ChildPlacement = /* @__PURE__ */ defineComponent({
+  props: { record: { type: Object as PropType<ChildRecord>, required: true }, name: { type: String, required: true }, given: { type: Object, required: true } },
+  setup(props, { slots }) {
+    const { record, name } = props;
+    const instance = getCurrentInstance()!;
+    // Content placed here injects from the child first, then the child's own ancestors. Vue has no public
+    // API to read another instance's provided values, so this takes the child's internal \`provides\`,
+    // which every Vue 3 release (3.0 through 3.5, tested with 3.5.43) keeps on the internal instance and
+    // children inject from; vue-columns-parity reads a column's context from cell content to catch a change.
+    // The child's instance exists only once its outlet rendered: a table renders the slot's outlet before its cells.
+    const child = record.node.component as { provides?: object } | null;
+    if (child?.provides !== undefined) (instance as unknown as { provides: object }).provides = child.provides;
+    onBeforeUnmount(() => {
+      if (record.claims.get(name) !== instance) return;
+      // Another outlet takes the plain content this one placed.
+      record.claims.delete(name);
+      record.released.value += 1;
+    });
+    return () => {
+      const node = record.read();
+      const [outlets, scoped, known, listed] = record.slots;
+      const warn = (key: string, message: string): void => { warnUnless(false, record.prefix + "of:" + record.tag + ":" + key, record.prefix + message); };
+      const fallback = () => slots.default?.() ?? [];
+      if (!known.includes(name)) {
+        warn(name, "\`" + record.tag + "\` declares the slots " + listed + "; \`" + name + "\` is unknown.");
+        return fallback();
+      }
+      const given = node.children as Slots | null;
+      const withProps = scoped.includes(name) || Object.keys(props.given).length > 0;
+      // The child's \`<template slot>\` renders afresh at every outlet.
+      if (given?.[TEMPLATE_SLOT + name] !== undefined) return renderSlot(given, name, props.given, fallback);
+      const plain = given?.[name] !== undefined || (given?.default?.() ?? []).some((content) => content.props?.slot === name);
+      if (plain && withProps) warn(name + ":plain", "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
+      if (given?.[name] === undefined || withProps || outlets.includes(name)) return fallback();
+      // Plain content is placed once: by the child's own outlet, else by the first \`<slot of>\` that renders it.
+      void record.released.value;
+      if ((record.claims.get(name) ?? instance) !== instance) return fallback();
+      record.claims.set(name, instance);
+      return renderSlot(given, name, {}, fallback);
+    };
+  },
+});
+
+/**
+ * \`<slot of="$column" name="cell" from:row="$row">\`: the consumer's content for that slot of the child
+ * whose entry \`of\` is, given the outlet's props as \`shapes\` checks them for the child's tag; else the
+ * outlet's fallback.
+ */
+export const ChildSlot: FunctionalComponent<{
+  of: unknown; name: string; given: Record<string, unknown>;
+  shapes?: Record<string, (given: Record<string, unknown>) => Record<string, unknown>> | undefined;
+}> = (props, { slots }) => {
+  const record = props.of !== null && typeof props.of === "object" ? childRecords.get(props.of) : undefined;
+  if (record === undefined) return slots.default?.();
+  const given = props.shapes?.[record.tag]?.(props.given) ?? props.given;
+  return h(ChildPlacement, { key: props.of as never, record, name: props.name, given }, slots);
+};
+ChildSlot.props = ["of", "name", "given", "shapes"];
 `;
 
 /** Every name the shared module exports, which a component's own identifiers must not take. */

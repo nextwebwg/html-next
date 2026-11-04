@@ -321,6 +321,14 @@ export function checkPropInput(value: unknown, type: TypeNode, htmlBoolean = tru
   return parse(value, type, "$");
 }
 
+/** An `as` list entry's prop, as its child resolves it: a null, absent or rejected value takes the declared default. */
+export function entryProp(value: unknown, type: TypeNode | undefined, fallback: unknown, optional: boolean): unknown {
+  if (value == null) return fallback;
+  if (type === undefined) return value;
+  const parsed = checkPropInput(value, type, true, optional);
+  return parsed.ok ? parsed.value : fallback;
+}
+
 type ValidityReason = "valueMissing" | "typeMismatch" | "patternMismatch" | "tooLong" | "tooShort" |
   "rangeUnderflow" | "rangeOverflow" | "stepMismatch" | "badInput" | "customError" | "schemaMismatch" | "untrustedValue";
 type ValidityError = { readonly reason: ValidityReason; readonly message: string; readonly path?: string };
