@@ -1996,6 +1996,19 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         then(click("toggle")), (host) => { read(host); }]);
     });
 
+    it("renders a column's cell content when its template has no slot outlet, like live", async () => {
+      const bare = `<template component="x-column" status="early" summary="Column."><th scope="col">{$header}</th><defs>
+        <prop name="field" type="string">Field.</prop><prop name="header" type="string">Header.</prop>
+        <slot name="note"></slot><slot name="cell"><prop name="row" type="object({ id: number, name: string, price: number })" required>Row.</prop></slot></defs></template>`;
+      const page = `<template component="x-bare" status="early" summary="Bare."><defs>
+        <state name="products" type="list(object({ id: number, name: string, price: number }))" value="[{ id: 1, name: 'Lamp', price: 49 }]"></state>
+        <handler name="rename"><set name="products" expr:value="[{ id: 1, name: 'Lamp', price: 45 }, { id: 2, name: 'Pen', price: 2 }]"></set></handler></defs>
+        <main><button type="button" class="rename" on:click="rename">Rename</button><x-datatable from:rows="$products">
+          <x-column field="name" header="Name"><i slot="note">kept</i></x-column>
+          <x-column header="Price"><template slot="cell">{$row.price}</template></x-column></x-datatable></main></template>`;
+      await same([page, table, bare], [read, then(click("rename"))]);
+    });
+
     it("warns for children a slot does not accept and for unsupported placements like live", async () => {
       const preset = `<template component="x-column-preset" status="early" summary="Preset."><x-column field="name"></x-column></template>`;
       const page = `<template component="x-warned" status="early" summary="Warned."><defs></defs><main><x-datatable from:rows="[{ id: 1, name: 'A', price: 1 }]">
@@ -2005,7 +2018,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     });
 
     describe("checks `<slot of>` props against the child's slot declaration like live", () => {
-      const col = `<template component="x-col" status="early" summary="Col."><th><slot></slot></th><defs>
+      const col = `<template component="x-col" status="early" summary="Col."><th>Col</th><defs>
         <slot name="cell"><prop name="row" type="object" required>Row.</prop><prop name="width" type="number">Width.</prop>
           <prop name="label" type="string" default="none">Label.</prop><prop name="tone" type="string" default="calm">Tone.</prop></slot>
         <slot name="foot"><prop name="total" type="number" required>Total.</prop><prop name="unit" type="string" default="USD">Unit.</prop></slot></defs></template>`;

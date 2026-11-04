@@ -2482,9 +2482,10 @@ export function emitBlocks(
   }
   const propNames = Object.keys(contract.props);
   const delegated = plan.root.spec === 5;
-  // A slot's `as` list reads the projection, outlet or not.
+  // A slot's `as` list reads the projection, outlet or not; so does a parent's `<slot of>` outlet, through
+  // a declared slot (components#columns-as-markup).
   const lists = plan.roots.flatMap((item, index) => item.list === undefined ? [] : [{ index, ...item.list }]);
-  const slotted = lists.length > 0 || blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
+  const slotted = lists.length > 0 || Object.keys(contract.slots ?? {}).length > 0 || blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
   /** Whether the props' `data-<tag>-prop-<name>` the root's template binds itself, which is then its output. */
   const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
     node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === propAttribute(contract.tag, name)));
