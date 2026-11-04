@@ -38,6 +38,7 @@ import {
   svelteDataArtifact,
   svelteReactivityArtifact,
   svelteRenderArtifact,
+  svelteContextArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
@@ -605,6 +606,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           ...((node.definition.module ?? node.definition.controller) === undefined ? {} : { controllerSpecifier: node.definition.module ?? node.definition.controller }),
           reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
           renderSpecifier: relativeImport(componentPath, "svelte/render.svelte.ts").replace(/\.ts$/, ""),
+          contextSpecifier: relativeImport(componentPath, "svelte/context.svelte"),
           importSpecifier,
           propContractsByTag,
           propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
@@ -740,6 +742,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (options.target === "svelte" && neededHelpers.has("render")) {
     claim(svelteRenderArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("context")) {
+    claim(svelteContextArtifact(), "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("data")) {
     claim(svelteDataArtifact(), "helper");

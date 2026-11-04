@@ -25,6 +25,7 @@ import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte
 import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
 import { svelteEventsArtifact as makeSvelteEventsArtifact } from "./targets/svelte-events.js";
 import { svelteHtmlArtifact as makeSvelteHtmlArtifact } from "./targets/svelte-html.js";
+import { svelteContextArtifact as makeSvelteContextArtifact } from "./targets/svelte-context.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
@@ -215,6 +216,11 @@ export function svelteDataArtifact(): GeneratedArtifact {
 /** The rendering helpers converted Svelte components share; every package that emits Svelte ships it once. */
 export function svelteRenderArtifact(): GeneratedArtifact {
   return makeSvelteRenderArtifact(GENERATOR_VERSION);
+}
+
+/** The component `<slot of>` outlets render a child's slot content in, with the child's contexts. */
+export function svelteContextArtifact(): GeneratedArtifact {
+  return makeSvelteContextArtifact(GENERATOR_VERSION);
 }
 
 export function sveltePropsArtifact(): GeneratedArtifact {
