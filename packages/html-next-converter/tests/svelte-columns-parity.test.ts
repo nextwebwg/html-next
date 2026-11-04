@@ -266,14 +266,13 @@ export const html = () => { void render(Strays).body; return render(App).body; }
           await same(/<tr><td>Pen<\/td><td><b>Pen:quiet:compact<\/b>2<\/td><td>2<\/td><td>Pen<\/td><\/tr><\/tbody>/);
           await hosts();
 
-          // When the outlet holding plain content goes, the next outlet takes it over. The live runtime keeps
-          // that outlet's fallback until its entry changes, so only the rest of the table is compared here.
+          // When the outlet holding plain content goes, the next outlet takes it over.
           await live.evaluate(`window.HtmlRuntime.getComponentHost(document.querySelector("#products table")).state.notes = false`);
           await svelte.evaluate(`window.tableHosts.find((host) => host.root.closest("#products")).state.notes = false`);
           await Promise.all([live, svelte].map((page) => page.waitForFunction(`document.querySelectorAll("#products tfoot tr").length === 1`)));
           const [native, converted] = await Promise.all([live, svelte].map((page) => page.evaluate(readTable("#products table")) as Promise<string>));
           assert.match(converted!, /<tfoot><tr><td><em slot="note">n<\/em>\|<\/td><td><i>t<\/i>\|1<\/td><td>=\|<\/td><td>=\|<\/td><\/tr><\/tfoot>/);
-          assert.equal(converted!.replace(/<tfoot>.*/, ""), native!.replace(/<tfoot>.*/, ""));
+          assert.equal(converted, native);
           await hosts();
 
           // Columns under $with and $match follow them.
