@@ -114,6 +114,15 @@ Use the slot names declared by the component. Scoped slot templates also carry t
 
 The current converter reports errors for component two-way bindings, multiple two-way bindings on one native control, bound selects with structural or projected options, inline `<template $html>`, and compiled child views inside raw HTML regions. Ordinary elements, state, inputs, event handlers, slots, data reads, modules, requests and head declarations are supported within those boundaries. Check a library's source graph before adopting its Angular output.
 
+## Columns as markup {#columns}
+
+A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/declarative-components/components#slot-accepts-as) converts to every target. Its list holds every accepted child before the component renders, on the server too, and `<slot of>` outlets render each child's slot content in the target's own idiom: a render prop in React and Preact, a scoped slot in Vue, a snippet in Svelte, and a template outlet in Angular.
+
+- Convert an accepted component together with every component that accepts it. Vue reports an error when the accepting component's conversion lacks it, and Angular gives the child its list entry only in that conversion.
+- Content a `<slot of>` outlet places reads the child's context, then the parent's, when the parent renders its children's roots before those outlets, as a header row before the body does.
+- A preset whose root is an accepted component is left out of the list, with a warning.
+- Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
+
 ## Converter validation
 
 Changes to HTML Next, the converter, and the Vite plugin require the complete Looma catalog to
