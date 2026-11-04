@@ -646,7 +646,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }).join(", ");
       const shapes = outletPropsSource(node, context);
       const given = shapes === undefined ? `{ ${values} }` : `(${shapes}[${placed}.tag]?.({ ${values} }) ?? { ${values} })`;
-      return `{#if true}{@const ${outlet} = {}}{@const ${placed} = childSlot(${lowering.value(node.of.expressionPlan.ast, scope)}, ${name}, ${outlet})}{#if ${placed}}<HtmlNextContextScope contexts={${placed}.contexts} release={${placed}.release}>{@render ${placed}.snippet({ p: ${given}, s: ${placed}.scope, a: ${placed}.place })}</HtmlNextContextScope>${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
+      return `{#if true}{@const ${outlet} = {}}{@const ${placed} = childSlot(${lowering.value(node.of.expressionPlan.ast, scope)}, ${name}, ${outlet})}{#if ${placed}}<HtmlNextContextScope contexts={${placed}.contexts} release={${placed}.release}>{@render ${placed}.snippet(${placed}.args(${given}))}</HtmlNextContextScope>${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
     }
     const selected = context.freshIdentifier("slot");
     const scoped = (node.props?.length ?? 0) > 0;
@@ -1428,7 +1428,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "htmlNextPrepared htmlNextPreparationId htmlNextPlaced checkListedProp retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext getAllContexts HtmlNextContextScope rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets reflectedProp retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "htmlNextPrepared htmlNextPreparationId htmlNextPlaced htmlNextAccepted checkListedProp retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext getAllContexts HtmlNextContextScope rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets reflectedProp retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of ["PropInputs", "InputBindings", "propInputs", "statusInputs", "inputVersion", "inputStatus", "inputReads", "checkPropInput", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "inputComputed", "inputRead", "inputDefault", "evaluateInput", "initializedState", "copyStateSeed"]) reserved.add(name);
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
@@ -1549,8 +1549,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     .map((name) => ({ name, type: `((event: CustomEvent<${event.detailType}>) => void) | null` })));
   const slotType = (slot: SlotContract): string => `Snippet<[${(slot.props?.length ?? 0) === 0 ? "Record<string, any>"
     : slot.declared !== undefined ? slotPropsType(slot.declared) : `Readonly<{ ${slot.props!.map((name) => `${quote(name)}: any;`).join(" ")} }>`}]>`;
-  const slotsType = target.slots.length === 0 ? "Record<string, Snippet<[Record<string, any>]> | null>"
-    : `Readonly<{ ${target.slots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`).join(" ")} }>`;
+  // An accepted child also takes snippets for the slots only its parent's `<slot of>` outlets render.
+  const slotTypes = [...target.slots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`),
+    ...(accepted ? Object.entries(definition.contract.slots ?? {}) : []).filter(([name]) => !target.slots.some((slot) => (slot.name ?? "") === name))
+      .map(([name, declared]) => `${quote(name)}?: Snippet<[${Object.keys(declared.props).length === 0 ? "Record<string, any>" : slotPropsType(declared.props)}]> | null;`)];
+  const slotsType = slotTypes.length === 0 ? "Record<string, Snippet<[Record<string, any>]> | null>" : `Readonly<{ ${slotTypes.join(" ")} }>`;
   // Each request is a function prop that answers it, and the event prop Svelte uses for declared events.
   const requestProps = target.requests.map((request) => ({
     request, listenerProp: `on${request.name}`, responder: freshIdentifier("htmlNextResponder"), listener: freshIdentifier("htmlNextRequestListener"),
@@ -1773,9 +1776,13 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     `const rest = ${options.modulePreparation === undefined ? `${rawRest} as Record<string, unknown>` : `$derived(htmlNextPrepared.attributes(${rawRest} as Record<string, unknown>))`};`,
     ...(hasProps ? [`const ${context.reflectedPropName} = reflectedProp();`] : []),
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
-    ...listRoots.map(({ variable, slot, type }) => `let ${variable} = $derived.by(() => ((rest[${quote(LISTS_PROP)}] as Record<string, (() => ${type}) | undefined> | undefined)?.[${quote(slot)}]?.() ?? []) as ${type});`),
+    // The compiled consumer's lists, or the accepted children that join them (`acceptChildren`).
+    ...(listRoots.length === 0 ? [] : [`const htmlNextAccepted = acceptChildren({ ${listRoots.map(({ slot }) => `${quote(slot)}: ${JSON.stringify(definition.contract.slots![slot]!.accepts ?? [])}`).join(", ")} }, () => rest[${quote(LISTS_PROP)}]);`]),
+    ...listRoots.map(({ variable, slot, type }) => `let ${variable} = $derived.by(() => htmlNextAccepted.list(${quote(slot)}) as ${type});`),
     // The child's own props reach its entry through `inputReads`, declared below, so they are read late.
-    ...(accepted ? [`const htmlNextPlaced = ownChild(() => rest[${quote(ENTRY_PROP)}], getAllContexts()${hasProps ? ", () => inputReads" : ""});`] : []),
+    // A consumer that builds no list gives the child its slot snippets through `slots`; plain content for a
+    // slot the child renders itself stays with it.
+    ...(accepted ? [`const htmlNextPlaced = ownChild(() => rest[${quote(ENTRY_PROP)}], getAllContexts(), ${hasProps ? "() => inputReads" : "undefined"}, { tag: ${quote(definition.contract.tag)}, props: ${JSON.stringify(target.props.map((prop) => prop.name))}, slots: () => ${publicSlots ? "undefined" : "slots"}, keep: ${JSON.stringify(Object.entries(definition.contract.slots ?? {}).filter(([name, declared]) => Object.keys(declared.props).length === 0 && (definition.slots ?? []).some((outlet) => (outlet.name ?? "") === name)).map(([name]) => name))}, root: () => rootElement });`] : []),
     ...context.outletProps,
     ...(initialBindingSources.length === 0 ? [] : [
       `function ${context.nativeBindingReadName}(name: string): (() => unknown) | undefined {`,
@@ -1979,7 +1986,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => untrack(() => { ${state.initializer === undefined ? `if (!Object.is(${code.get(state.name)}, value)) ` : ""}${code.get(state.name)} = value as typeof ${code.get(state.name)}; }) }`).join(", ")} },`,
       `  computed: { ${[...[...computed, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }),
         ...listRoots.map(({ as, variable }) => `${objectKey(as)}: () => ${variable}`)].join(", ")} },`,
-      ...(accepted ? ["  placed: htmlNextPlaced,"] : []),
+      ...(!accepted && listRoots.length === 0 ? [] : [`  placed: ${!accepted ? "htmlNextAccepted.roots" : listRoots.length === 0 ? "htmlNextPlaced" : "(name: string) => [...htmlNextPlaced(name), ...htmlNextAccepted.roots(name)]"},`]),
       ...(computed.length === 0 && availability.size === 0 ? [] : [`  availability: { ${[...computed.map(value => `${objectKey(value.name)}: () => ${computedNames.get(value)!}.status()`), ...[...availability].map(([name, status]) => `${objectKey(name)}: () => ${status}`)].join(", ")} },`]),
       `  data: { ${data.map((value) => `${objectKey(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
       ...(scriptNames.size === 0 ? [] : ["  scripts: htmlNextHeadScripts,"]),
