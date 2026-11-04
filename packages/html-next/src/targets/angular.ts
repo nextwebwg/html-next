@@ -23,6 +23,7 @@ import { DOM_INTERFACES } from "../generated/dom-properties.js";
 import { resolveDomProperty } from "../platform.js";
 import { angularValidityArtifact } from "./angular-validity.js";
 import { angularControlArtifact } from "./angular-control.js";
+import { invocationValue } from "../prop-values.js";
 import { declaredStateLiteral, literalInitial, revertSource, withRevert, publishedStates } from "./state-roots.js";
 import { expressionHelpersSource, AUTHORED_CHECK_SOURCE, inputScope, present, typeOf, UNKNOWN, type Scope } from "./vue-lowering.js";
 import { escapeHtml, isVoidElement, isNativeBooleanAttribute, quote, propTypeSource, selectorGenerics, dependentPropTypeSource, slotPropsType, slotPropValueSource, svgAttributeName } from "./shared.js";
@@ -109,6 +110,17 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     }
     return entry;
   };
+  // Columns as markup (components#slot-accepts-as): the tags some slot in the build accepts. An accepted
+  // child gives its parent an entry and the templates for the slots it declares but does not render itself.
+  // ponytail: so a column converted in a build without an accepting table has no entry, and a table built
+  // elsewhere cannot list it. Reading it from the table would need the column's input fields by reflection,
+  // its prop resolution again in the table, a shared slot-template directive matched to each column, and
+  // document-order sorting across tags; convert the column with its table until a library needs otherwise.
+  const acceptedTags = new Set([...graph.values()].flatMap(item => Object.values(item.contract.slots ?? {}).flatMap(slot => slot.accepts ?? [])));
+  const placedSlots = (child: ComponentDefinition): string[] => !acceptedTags.has(child.contract.tag) ? []
+    : Object.keys(child.contract.slots ?? {}).filter(name => !(child.slots ?? []).some(own => (own.name ?? "") === name));
+  const childProviders: string[] = [];
+  let ownNames: Names | undefined;
   const chain: ComponentDefinition[] = [];
   const models: { definition: ComponentDefinition; names: Names; raw: Map<string, string>; inputs: Map<string, string>; types: Map<string, unknown>; source?: string; requests: readonly TargetRequest[]; responders: Map<string, readonly [string, string]>; readNames: string[] }[] = [];
   const providers: string[] = [];
@@ -281,6 +293,36 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     helper("html");
     return `{ value: ${value(plan, names)}, owner: ${quote(names.definition.contract.tag)}, fallback: ${quote(node.children.map(child => child.kind === "text" ? child.value : "").join(""))} }`;
   };
+  /** Warns once when the component is created, as live warns while it renders. */
+  const warn = (key: string, message: string): void => {
+    helper("state");
+    fields.push(`private readonly ${field()} = warnUnless(false, ${quote(key)}, ${quote(message)});`);
+  };
+  /** Content for a slot with `accepts` keeps only accepted components, through structural templates; the rest is left out with a warning. */
+  const accepted = (child: ComponentDefinition, projected: TemplateNode): TemplateNode | undefined => {
+    if (projected.kind === "slot") return projected;
+    const slot = projected.kind === "element" ? projected.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "slot") : undefined;
+    const name = slot?.kind === "literal" ? slot.value : "";
+    const accepts = child.contract.slots?.[name]?.accepts;
+    if (accepts === undefined) return projected;
+    const quoted = accepts.map(tag => `\`${tag}\``);
+    const named = `\`${child.contract.tag}\`'s ${name === "" ? "default slot" : `\`${name}\` slot`}`;
+    const listed = `${named} accepts ${quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`}`;
+    if (projected.kind === "text") {
+      if (projected.expressionPlan === undefined && projected.segments === undefined && !/[^\t\n\f\r ]/.test(projected.value)) return projected;
+      warn(`accepts:${child.contract.tag}:${name}:#text`, `${listed}; this text is left out.`);
+      return undefined;
+    }
+    if (projected.name === "template" && slot === undefined) return { ...projected, children: projected.children.flatMap(item => accepted(child, item) ?? []) };
+    if (accepts.includes(projected.name)) return projected;
+    const seen = new Set<string>();
+    let delegated = graph.get(projected.name);
+    while (delegated !== undefined && !accepts.includes(delegated.template.name) && !seen.has(delegated.contract.tag)) { seen.add(delegated.contract.tag); delegated = graph.get(delegated.template.name); }
+    if (delegated !== undefined && !accepts.includes(delegated.template.name)) delegated = undefined;
+    warn(`accepts:${child.contract.tag}:${name}:${projected.name}`, delegated === undefined ? `${listed}; this \`<${projected.name}>\` is left out.`
+      : `\`<${projected.name}>\` is a preset of \`${delegated.template.name}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+    return undefined;
+  };
   const renderChildren = (nodes: readonly TemplateNode[], names: Names, projection?: Projection, rootView = false): string => {
     let result = "";
     for (let index = 0; index < nodes.length; index++) {
@@ -322,6 +364,49 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         const read = `finiteResult(${value(prop.expressionPlan, names)})`; helper("state");
         return [prop.name, source === undefined ? read : `(${source})(${read})`, prop.type] as const;
       });
+      if (node.of !== undefined) {
+        // `<slot of>` places an accepted child's slot: the consumer's template for it, with this outlet's props, or the fallback.
+        const accepts = Object.values(names.definition.contract.slots ?? {}).find(item => item.as === node.of!.list)?.accepts ?? [];
+        // The props each accepted tag's template receives, as live's `childSlotProps` checks them against that
+        // tag's slot declaration: a static prop converts by its declared type, a bound one is checked in full,
+        // null, rejected and left-out props take the declared default, and undeclared or missing required props warn.
+        const file = options.definitionURL?.(names.definition.contract.tag) ?? names.definition.source.file;
+        const owner = { source: { file }, contract: names.definition.contract };
+        const read = (prop: NonNullable<typeof node.props>[number]): string => `finiteResult(${value(prop.expressionPlan, names)})`;
+        const shapes = accepts.flatMap(tag => {
+          const child = graph.get(tag);
+          if (child === undefined) return [];
+          const props = child.contract.slots?.[slot]?.props ?? {};
+          const outlet = `<slot of name="${slot}">`;
+          const warnings: string[] = [];
+          const warnOf = (prop: string, message: string): void => { warnings.push(`warnUnless(false, ${quote(`${file}#${tag}:of:${slot}:${prop}`)}, ${quote(`${file}: HR007: ${message}`)})`); };
+          const entries = (node.props ?? []).map(prop => {
+            const contract = props[prop.name];
+            if (contract === undefined) {
+              warnOf(prop.name, `${outlet} gives prop \`${prop.name}\`, which \`${tag}\`'s slot \`${slot}\` does not declare.`);
+              return `${propertyKey(prop.name)}: ${read(prop)}`;
+            }
+            if (prop.raw !== undefined) return `${propertyKey(prop.name)}: ${sourceValue(invocationValue(contract, prop.raw, "html", true) ?? null)}`;
+            const type = normalizeType(contract.type);
+            const check = slotPropValueSource(owner, slot === "" ? undefined : slot, { name: prop.name, ...type.kind === "terminal" && type.name === "unknown" ? {} : { type: contract.type }, ...contract.default === undefined ? {} : { default: contract.default } }, true);
+            return `${propertyKey(prop.name)}: ${check === undefined ? read(prop) : `(${check})(${read(prop)})`}`;
+          });
+          for (const [prop, contract] of Object.entries(props)) {
+            if ((node.props ?? []).some(given => given.name === prop)) continue;
+            if (contract.required) warnOf(prop, `${outlet} must give prop \`${prop}\`, which \`${tag}\`'s slot \`${slot}\` declares as required.`);
+            if (contract.default !== undefined) entries.push(`${propertyKey(prop)}: ${sourceValue(contract.default)}`);
+          }
+          return entries.length === 0 && warnings.length === 0 ? [] : [[tag, `(${[...warnings, `{ ${entries.join(", ")} }`].join(", ")})`] as const];
+        });
+        const entry = value(node.of.expressionPlan, names);
+        const given = shapes.length === 0 ? (node.props?.length ? `{ ${node.props.map(prop => `${propertyKey(prop.name)}: ${read(prop)}`).join(", ")} }` : undefined)
+          : shapes.length === 1 && accepts.length === 1 ? shapes[0]![1]
+          : `((tag: string | undefined) => ${shapes.map(([tag, shape]) => `tag === ${quote(tag)} ? ${shape} : `).join("")}{})(childTag(${entry}))`;
+        const plainWarning = (node.props?.length ?? 0) === 0 ? "" : ` hnNextChildSlotPlainWarning="${escapeHtml(`${file}: HR007: \`${slot}\` has props, so its content is a \`<template slot="${slot}">\`.`)}"`;
+        helper("children"); helper("slots"); helper("state"); helper("value");
+        const fallback = `hnFallback${serial++}`;
+        return `<ng-template #${fallback}>${renderChildren(node.fallback ?? [], names, projection)}</ng-template><ng-container [hnNextChildSlot]="${expression(`childSlot(${entry}, ${quote(slot)})`, names, false, true)}" [hnNextChildSlotFallback]="${fallback}"${given === undefined ? "" : ` [hnNextChildSlotContext]="${expression(given, names, false, true)} | hnNextSlotValues"`}${plainWarning}></ng-container>`;
+      }
       if (projection !== undefined) {
         const selected = projection.nodes.filter(child => (child.kind === "element" ? child.attributes.find((attribute): attribute is import("../template.js").LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value : undefined) === (slot === "" ? undefined : slot));
         if (selected.length > 0) {
@@ -413,10 +498,30 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       if (child === undefined) return renderChildren(node.children, names, projection);
       const structural = tag === "ng-template";
       const slots = new Map<string, string>();
-      const content = node.children.map(projected => {
+      const slotDirective = (name: string): string => {
+        const directive = `${child.contract.name}${pascalCase(name || "default")}Slot`;
+        const imported = slotImports.get(child.contract.tag) ?? new Set(); imported.add(directive); slotImports.set(child.contract.tag, imported);
+        return directive;
+      };
+      const content = node.children.flatMap(projected => accepted(child, projected) ?? []).map(projected => {
         const slot = projected.kind !== "element" ? undefined : projected.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "slot");
         const contract = slot?.kind === "literal" ? child.contract.slots?.[slot.value] : undefined;
-        if (slot?.kind !== "literal" || projected.kind !== "element") return render(projected, names, projection);
+        // A `$match` among a component's children renders its arms as one region.
+        if (slot?.kind !== "literal" || projected.kind !== "element") return renderChildren([projected], names, projection);
+        if (contract !== undefined && acceptedTags.has(child.contract.tag) && !structural) {
+          // An accepted child's slot its parent places: scoped content must be a template, and plain
+          // content for a slot the child does not render itself is a template its parent's `<slot of>` renders.
+          if (Object.keys(contract.props).length > 0 && projected.name !== "template") {
+            warn(`of:${child.contract.tag}:${slot.value}:plain`, `\`${slot.value}\` has props, so its content is a \`<template slot="${slot.value}">\`.`);
+            return "";
+          }
+          if (Object.keys(contract.props).length === 0 && placedSlots(child).includes(slot.value)) {
+            slotDirective(slot.value);
+            if (projected.name === "template") return `<ng-template ${child.contract.tag}-${slot.value || "default"}>${renderChildren(projected.children, names, projection)}</ng-template>`;
+            helper("children");
+            return `<ng-template ${child.contract.tag}-${slot.value || "default"} hnNextPlain>${render(projected, names, projection)}</ng-template>`;
+          }
+        }
         if (structural) {
           // Group all siblings for a named slot in one consumer-owned template.
           if (!slots.has(slot.value)) slots.set(slot.value, `hnSupplied${serial++}`);
@@ -424,8 +529,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         }
         if (projected.name !== "template") return render(projected, names, projection);
         if (contract === undefined || Object.keys(contract.props).length === 0) return `<ng-container ngProjectAs="[slot='${slot.value}']">${renderChildren(projected.children, names, projection)}</ng-container>`;
-        const directive = `${child.contract.name}${pascalCase(slot.value || "default")}Slot`;
-        const imported = slotImports.get(child.contract.tag) ?? new Set(); imported.add(directive); slotImports.set(child.contract.tag, imported);
+        slotDirective(slot.value);
         const locals = Object.entries(contract.props).map(([name, prop]) => ({ name, type: normalizeType(prop.type), id: `local${serial++}` }));
         const scoped = localScope(names, locals.map(item => [item.id, item.id, item.type]));
         const code = new Map(scoped.code); locals.forEach(item => code.set(item.name, item.id));
@@ -464,6 +568,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const handlers = new Map<string, string>();
     const statuses = new Map<string, string>();
     const names: Names = { code, types, writes, handlers, statuses, locals: [], definition: current };
+    if (current === definition) ownNames = names;
     const declarationIds = new Map<string, string>();
     for (const declaration of current.declarations ?? []) {
       if (declaration.kind === "handler" || declaration.kind === "event") continue;
@@ -500,6 +605,22 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       statuses.set(name, status);
       contexts.set(`${current.contract.tag}:${name}`, `this.${checked}`);
       code.set(name, `this.${checked}()`); types.set(name, { ...present(normalizeType(prop.type)), nullable: !prop.required });
+    }
+    // A slot's `as` list: the accepted children a content query finds, in the consumer's content order,
+    // complete before this template first renders (and on the server).
+    for (const [slot, declaration] of Object.entries(current.contract.slots ?? {})) {
+      if (declaration.as === undefined) continue;
+      if (current !== definition || nativeView) return unsupported(`\`as\` lists on a delegated or template root (<${current.contract.tag}>).`);
+      helper("children");
+      const accepts = declaration.accepts ?? [];
+      const props = new Map<string, TypeNode[]>();
+      for (const tag of accepts) for (const [name, prop] of Object.entries(graph.get(tag)?.contract.props ?? {})) props.set(name, [...props.get(name) ?? [], normalizeType(prop.type)]);
+      const item: TypeNode = { kind: "object", open: false, fields: [...props].map(([name, members]) => ({ name, optional: true, type: members.length === 1 ? members[0]! : { kind: "union", members } })) };
+      const entry = `{ ${[...props].map(([name, members]) => `readonly ${propertyKey(name)}?: ${members.map(typeScriptType).join(" | ")} | null`).join("; ")} }`;
+      const id = field();
+      fields.push(`readonly ${id}Children = contentChildren(ACCEPTED_CHILD);`);
+      fields.push(`readonly ${id} = computed<readonly ${entry}[]>(() => this.${id}Children().flatMap(child => child.slot === ${quote(slot)} && ${sourceValue(accepts)}.includes(child.tag) ? [child.entry] : []));`);
+      code.set(declaration.as, `this.${id}()`); types.set(declaration.as, present({ kind: "list", item })); statuses.set(declaration.as, "READY_INPUT");
     }
     const target = targetComponent(current);
     const requests = target.requests;
@@ -669,6 +790,15 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     return renderChildren(root.children, names, projection);
   };
   let template = compose(definition);
+  if (acceptedTags.has(definition.contract.tag)) {
+    // An accepted child: its parent's content query finds this entry, and `<slot of>` renders the slot templates it lists.
+    if (nativeView) return unsupported(`an accepted component with a template root (<${definition.contract.tag}>).`);
+    for (const name of placedSlots(definition)) outlet(name, definition);
+    helper("children");
+    const entry = field();
+    fields.push(`readonly ${entry} = acceptedChild(${quote(definition.contract.tag)}, this.hnRoot.nativeElement, { ${Object.keys(definition.contract.props).map(name => `${propertyKey(name)}: () => ${ownNames!.code.get(name)}`).join(", ")} }, { ${[...slotDirectives].map(([name, slot]) => `${propertyKey(name)}: () => this.${slot.query}()?.template`).join(", ")} });`);
+    childProviders.push(`{ provide: ACCEPTED_CHILD, useFactory: () => inject(${definition.contract.name}).${entry} }`);
+  }
   if (helpers.has("html-fragment")) template += angularHtmlFragmentTemplate();
   if (requiredReadiness.length > 0) {
     fields.push("private hnWasReady = false;");
@@ -720,7 +850,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       responders: { ${model.requests.map(request => `${propertyKey(request.name)}: () => propResponder(this.${model.responders.get(request.name)![0]}(), this.${model.responders.get(request.name)![1]}())`).join(", ")} },`}
 
       state: ${entries(mutable.map(item => item.name), name => `{ get: () => ${names.code.get(name)}, set: value => this.${names.writes.get(name)}(value) }`)},
-      computed: ${entries(immutable.map(item => item.kind === "context" ? item.as ?? item.name : item.name), name => `() => ${names.code.get(name)}`)},
+      computed: ${entries([...immutable.map(item => item.kind === "context" ? item.as ?? item.name : item.name), ...Object.values(current.contract.slots ?? {}).flatMap(slot => slot.as ?? [])], name => `() => ${names.code.get(name)}`)},
       data: ${entries((current.declarations ?? []).flatMap(item => item.kind === "data" ? [item.name] : []), name => `() => ${names.code.get(name)}`)},
       initials: ${sourceValue(Object.fromEntries(mutable.map(item => [item.name, declaredStateLiteral(current, item.name)])))},
       acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, (${sourceValue(stateTypes)} as Record<string, any>)[name], keys),
@@ -768,11 +898,11 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   const rootBindings = rootControls.length === 0 && rootHtml === undefined && rootProperties.length === 0 ? "" : `hnRootBindings(): string { ${rootProperties.join(" ")} ${rootControls.length === 0 ? "" : `this.hnControl.bindings = [${rootControls.join(", ")}];`} ${rootHtml === undefined ? "" : `this.hnHtml.binding = ${rootHtml};`} return ""; }`;
   if (rootBindings !== "") host[`[attr.${VUE_ROOT_ATTRIBUTE}]`] = "hnRootBindings()";
   const helperPath = (name: string) => quote(options.helperSpecifier?.(name) ?? `./${name}`);
-  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}\n${helpers.has("expressions") ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
+  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}${helpers.has("children") ? `\nimport { contentChildren } from "@angular/core";\nimport { ACCEPTED_CHILD, acceptedChild, childSlot, childTag, HtmlNextChildSlot, HtmlNextPlain } from ${helperPath("children")};` : ""}\n${helpers.has("expressions") ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
 export class ${slot.name} {
   readonly template = inject<TemplateRef<${slot.type}>>(TemplateRef);
   static ngTemplateContextGuard(_directive: ${slot.name}, _context: unknown): _context is ${slot.type} { return true; }
-}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext ? `providers: [${providers.join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
+}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext || childProviders.length > 0 ? `providers: [${[...providers, ...childProviders].join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
   if (nativeView) {
     helper("view");
     helper("events");
@@ -785,8 +915,8 @@ export class ${slot.name} {
       arguments: generics.length === 0 ? "" : `<${generics.map(() => "any").join(", ")}>`,
       template, host, fields, methods: [...methods, rootBindings], styles,
       slotQueries: [...slotDirectives].map(([name, slot]) => `readonly ${slot.query} = () => { const template = this.hnSlotTemplates()[${quote(name)}]; return template ? { template } : undefined; };`),
-      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])],
-      providers,
+      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])],
+      providers: [...providers, ...childProviders],
       injections: [...(usesValidity ? [{ name: "hnValidity", type: "HtmlNextValidity" }] : []), ...(rootEvents.length > 0 ? [{ name: "hnEvents", type: "HtmlNextEvents" }] : []), ...(usesProjection ? [{ name: "hnProjection", type: "HtmlNextProjection" }] : []), ...(usesHost ? [{ name: "hnHost", type: "HtmlNextHost" }] : []), ...(usesHead ? [{ name: "hnHead", type: "HtmlNextHead" }] : [])],
       initialize: `${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""}`,
       props: Object.keys(definition.contract.props), events: [...events].map(([name, type]) => ({ name, type })),
@@ -905,6 +1035,89 @@ export function initializedState(evaluate: () => { value: unknown; status: Input
     set(next: unknown): void { initialized = true; value = next; version.update(value => value + 1); } });
 }
 \nexport function revertValue(value: unknown, fallback: unknown): unknown { return value ?? fallback; }\n${NATIVE_PATH_WRITE_SOURCE.replace("writeBoundPath", "updatePath")}\nexport function stateTokens(values: Record<string, unknown>): string {\n  return Object.entries(values).flatMap(([name, value]) => [\n    ...(value === true || typeof value === "string" && value.length > 0 || typeof value === "number" && value !== 0 && Number.isFinite(value) ? [name] : []),\n    ...(typeof value === "string" || typeof value === "number" ? [name + "=" + encodeURIComponent(String(value))] : [])\n  ]).join(" ");\n}\n` },
+    { path: "angular/children.ts", content: `import { ChangeDetectorRef, Directive, ElementRef, InjectionToken, Input, TemplateRef, ViewContainerRef, inject } from "@angular/core";
+/** An accepted child (components#slot-accepts-as): its tag, the slot its \`slot\` attribute routes it to, and the entry its parent's \`as\` list holds. */
+export interface AcceptedChild { readonly tag: string; readonly slot: string; readonly entry: object }
+/** Each accepted child provides this, so a content query lists them in the consumer's content order. */
+export const ACCEPTED_CHILD = new InjectionToken<AcceptedChild>("html-next.accepted-child");
+const children = new WeakMap<object, { readonly tag: string; readonly slots: Readonly<Record<string, () => TemplateRef<any> | undefined>> }>();
+/** A stable, read-only entry holding the child's resolved props; its tag and slot templates stay private to \`<slot of>\`. */
+export function acceptedChild(tag: string, root: Element, props: Readonly<Record<string, () => unknown>>, slots: Readonly<Record<string, () => TemplateRef<any> | undefined>>): AcceptedChild {
+  const entry = Object.freeze(Object.defineProperties({}, Object.fromEntries(Object.entries(props).map(([name, read]) => [name, { get: read, enumerable: true }]))));
+  children.set(entry, { tag, slots });
+  return { tag, get slot() { return root.getAttribute("slot") ?? ""; }, entry };
+}
+const child = (entry: unknown) => entry !== null && typeof entry === "object" ? children.get(entry) : undefined;
+/** The consumer's template for an entry's slot, or undefined for a null entry or a slot it gave no content. */
+export function childSlot(entry: unknown, name: string): TemplateRef<any> | undefined { return child(entry)?.slots[name]?.(); }
+/** The accepted component an entry belongs to, whose slot declaration shapes the outlet's props. */
+export function childTag(entry: unknown): string | undefined { return child(entry)?.tag; }
+// By the template's anchor: each directive that injects TemplateRef receives its own object for one template.
+const plain = new WeakSet<object>();
+/** Marks a consumer's plain content for a child's slot, which keeps its identity where \`<slot of>\` places it. */
+@Directive({ selector: "ng-template[hnNextPlain]", standalone: true })
+export class HtmlNextPlain { constructor() { plain.add(inject(TemplateRef).elementRef.nativeElement); } }
+const warned = new Set<string>();
+const claims = new WeakMap<TemplateRef<any>, HtmlNextChildSlot>();
+const waiting = new WeakMap<TemplateRef<any>, Set<HtmlNextChildSlot>>();
+/**
+ * \`<slot of>\`: renders an accepted child's content for one of its slots with the outlet's props, or the fallback.
+ * Plain content keeps its identity: it renders at the first outlet that places it, later outlets show their
+ * fallback, and when that outlet lets it go the first waiting outlet in document order takes it. An outlet
+ * that gives props shows its fallback for plain content, and warns once with \`plainWarning\`.
+ */
+@Directive({ selector: "[hnNextChildSlot]", standalone: true })
+export class HtmlNextChildSlot {
+  @Input("hnNextChildSlot") template: TemplateRef<any> | undefined;
+  @Input("hnNextChildSlotContext") context: Record<string, unknown> = {};
+  @Input("hnNextChildSlotFallback") fallback: TemplateRef<any> | undefined;
+  @Input("hnNextChildSlotPlainWarning") plainWarning: string | undefined;
+  private readonly container = inject(ViewContainerRef);
+  private readonly anchor = inject<ElementRef<Node>>(ElementRef).nativeElement;
+  private readonly changes = inject(ChangeDetectorRef);
+  private shown: TemplateRef<any> | undefined;
+  private claimed: TemplateRef<any> | undefined;
+  private waits: TemplateRef<any> | undefined;
+  ngOnChanges(): void { this.render(); }
+  private render(): void {
+    let template = this.template;
+    if (this.claimed !== template) this.release();
+    if (this.waits !== template) this.stopWaiting();
+    if (template !== undefined && plain.has(template.elementRef.nativeElement) && this.plainWarning !== undefined) {
+      if (!warned.has(this.plainWarning)) { warned.add(this.plainWarning); console.warn(this.plainWarning); }
+      template = undefined;
+    } else if (template !== undefined && plain.has(template.elementRef.nativeElement)) {
+      const owner = claims.get(template);
+      if (owner === undefined || owner === this) { claims.set(template, this); this.claimed = template; } else {
+        let queue = waiting.get(template);
+        if (queue === undefined) waiting.set(template, queue = new Set());
+        queue.add(this); this.waits = template; template = undefined;
+      }
+    }
+    template ??= this.fallback;
+    if (template === this.shown) return;
+    this.container.clear();
+    this.shown = template;
+    // The view reads the outlet's current props, as NgTemplateOutlet's context does.
+    if (template !== undefined) this.container.createEmbeddedView(template, new Proxy({}, { get: (_target, name) => Reflect.get(this.context, name) }));
+  }
+  private stopWaiting(): void {
+    if (this.waits !== undefined) waiting.get(this.waits)?.delete(this);
+    this.waits = undefined;
+  }
+  private release(): void {
+    const template = this.claimed;
+    this.claimed = undefined;
+    if (template === undefined || claims.get(template) !== this) return;
+    claims.delete(template);
+    // 4: DOCUMENT_POSITION_FOLLOWING, without the browser's Node global on the server.
+    const next = [...waiting.get(template) ?? []].sort((a, b) => a.anchor.compareDocumentPosition(b.anchor) & 4 ? -1 : 1)[0];
+    if (next === undefined) return;
+    next.stopWaiting(); next.render(); next.changes.markForCheck();
+  }
+  ngOnDestroy(): void { this.release(); this.stopWaiting(); }
+}
+` },
     { path: "angular/projection.ts", content: `import { Directive, ElementRef, inject } from "@angular/core";
 @Directive({ selector: "[hnNextProjection]", standalone: true })
 export class HtmlNextProjection {

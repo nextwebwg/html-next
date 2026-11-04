@@ -26,7 +26,8 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../te
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue, componentStateNames, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import { invocationValue } from "../prop-values.js";
 import type { PropContract } from "../types.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
@@ -68,7 +69,7 @@ const RESERVED = new Set([
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
-  "SanitizedHtml", "RetainedInlineText", "inlineTextSegment",
+  "SanitizedHtml", "RetainedInlineText", "inlineTextSegment", "entryProp",
   "String", "Boolean", "Number", "Math", "Object", "Array", "Symbol", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
   "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS, ...VUE_HOST_EXPORTS,
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum",
@@ -157,6 +158,12 @@ interface Context {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   /** Prop declarations in the linked component graph, keyed by receiving tag. */
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
+  /** The linked graph's definitions, by tag. */
+  readonly componentGraph?: ReadonlyMap<string, ComponentDefinition>;
+  /** Each accepting slot with an `as` list, by slot name: the variable holding the consumer's vnodes its outlet renders. */
+  readonly childNodes: ReadonlyMap<string, string>;
+  /** The `as` lists' names. */
+  readonly childLists: ReadonlySet<string>;
   readonly lowering: Lowering;
   readonly imports: Set<string>;
   /** Template refs, by ref name, and the script variable holding each. */
@@ -183,6 +190,10 @@ interface Context {
   usesHtml: boolean;
   /** An outlet checks a declared slot prop with the props module's parser. */
   usesSlotPropChecks?: boolean;
+  /** Each `<slot of>` outlet's props checks, by accepted tag: `outletProps0`, … */
+  readonly outletProps: string[];
+  /** An `as` list resolves its entries' props with the props module's `entryProp`. */
+  usesEntryProps?: boolean;
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
   usesInputStatus?: boolean;
@@ -420,12 +431,14 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
     lowering.list(listNode, scope, item, { ...options, itemScope: local.script })))
     ?? lowering.list(listNode, names.template, item, options);
   const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, local.template);
+  // An `as` list's entry is its own key: Vue keys vnodes by identity, though its types take only property keys.
+  const entryKey = flow.keyPlan?.ast.kind === "id" && flow.keyPlan.ast.name === flow.item && listNode.kind === "id" && context.childLists.has(listNode.name);
   const { flow: _flow, ...body } = node;
   const needsLoop = readsLoop(body) || readsLoop(flow.keyPlan?.ast);
   const row = needsLoop ? `({ item: ${item}, index: ${index}, loop })` : flow.index === undefined && flow.keyPlan !== undefined ? item : `(${item}, ${index})`;
   const checkedList = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
   const rows = needsLoop ? lowering.eachRows(checkedList) : checkedList;
-  const directives = [`v-for=${bound(`${row} in ${rows}`)}`, `:key=${bound(key)}`];
+  const directives = [`v-for=${bound(`${row} in ${rows}`)}`, `:key=${bound(entryKey ? `${key} as any` : key)}`];
   const markup = node.kind === "slot"
     ? `<template ${directives.join(" ")}>${renderNode(body as SlotNode, local, context)}</template>`
     : wrap(body as ElementNode, directives, local, context);
@@ -459,7 +472,9 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
     if (children.some(isSlotTemplate)) continue;
     // Default content stays implicit unless a `<template slot="">` names the default slot. Elements
     // for a scoped slot stay there too, where the receiving host reports the missing template.
-    if (slot === "" || (contractOf(slot)?.props?.length ?? 0) > 0) groups.delete(slot);
+    // A slot declared with props that no outlet of its own renders, such as one a `<slot of>` places, is scoped too.
+    const declared = contractOf(slot)?.props ?? Object.keys(context.componentGraph?.get(tag)?.contract.slots?.[slot]?.props ?? {});
+    if (slot === "" || declared.length > 0) groups.delete(slot);
   }
   const named = [...groups].map(([slot, children]) => {
     const carrier = children.find(isSlotTemplate);
@@ -476,8 +491,74 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
     const scopeBinding = props.length === 0 ? "" : `=${bound(alias ?? `{ ${props.join(", ")} }`)}`;
     return `<template ${slotName}${scopeBinding}>${content}</template>`;
   });
+  // An accepted child's `<template slot>` renders at every `<slot of>` outlet, and its plain content at
+  // the first only: an empty marker slot beside each `<template slot>` tells its outlets which it is.
+  const accepted = [...context.componentGraph?.values() ?? []].some((definition) =>
+    Object.values(definition.contract.slots ?? {}).some((declared) => declared.accepts?.includes(tag) === true));
+  const markers = !accepted ? [] : [...groups].filter(([slot, children]) => /^[A-Za-z_][\w-]*$/.test(slot) && children.some(isSlotTemplate))
+    .map(([slot]) => `<template #html-next-template-${slot} />`);
   const loose = renderChildren(nodes.filter((child) => !groups.has(assignedSlot(child))), names, context);
-  return [loose, ...named].filter((part) => part !== "").join("\n");
+  return [loose, ...named, ...markers].filter((part) => part !== "").join("\n");
+}
+
+/**
+ * `<slot of="$column" name="cell" from:row="$row">`: the consumer's content for that slot of the
+ * accepted child `of` names, with the outlet's props as the child's slot declaration shapes them.
+ */
+function renderChildSlot(node: SlotNode, of: NonNullable<SlotNode["of"]>, names: Names, context: Context): string {
+  const name = node.name!;
+  // A static prop is given as its text; the child's slot declaration converts it (`outletPropsSource`).
+  const given = (node.props ?? []).map((prop) =>
+    `${propKey(prop.name)}: ${prop.raw === undefined ? context.lowering.value(prop.expressionPlan.ast, names.template) : quote(prop.raw)}`);
+  const shapes = outletPropsSource(node, context);
+  const fallback = renderChildren(node.fallback ?? [], names, context);
+  const open = `<ChildSlot :of=${bound(context.lowering.value(of.expressionPlan.ast, names.template))} name=${quote(name)} :given=${bound(`{ ${given.join(", ")} }`)}${shapes === undefined ? "" : ` :shapes=${bound(shapes)}`}`;
+  return fallback === "" ? `${open} />` : `${open}>${fallback}</ChildSlot>`;
+}
+
+/**
+ * A `<slot of>` outlet's props, by accepted tag, as live's `childSlotProps` checks them against the
+ * child's slot declaration: a static prop converts by its declared type, a bound one its type rejects
+ * warns (HR007), and it, a null one and a declared one the outlet leaves out take the declared default.
+ * An undeclared or missing required prop warns. The name of a body constant, or undefined when no
+ * accepted tag declares or is given any.
+ */
+function outletPropsSource(node: SlotNode, context: Context): string | undefined {
+  const name = node.name ?? "";
+  const given = node.props ?? [];
+  const outlet = `<slot of name="${name}">`;
+  const file = context.definition.source.file;
+  const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
+  const accepts = Object.values(context.definition.contract.slots ?? {}).find((declared) => declared.as === node.of!.list)?.accepts ?? [];
+  const shapes = accepts.flatMap((tag) => {
+    const accepted = context.componentGraph?.get(tag);
+    const declared = accepted?.contract.slots?.[name]?.props ?? {};
+    if (accepted === undefined || given.length + Object.keys(declared).length === 0) return [];
+    const warn = (prop: string, message: string): string => `warnUnless(false, ${quote(`${file}#${context.definition.contract.tag}:of:${name}:${prop}`)}, ${quote(`${prefix}${message}`)}); `;
+    let warnings = "";
+    const values = given.map((prop) => {
+      const key = quote(prop.name);
+      const contract = declared[prop.name];
+      if (contract === undefined) {
+        warnings += warn(prop.name, `${outlet} gives prop \`${prop.name}\`, which \`${tag}\`'s slot \`${name}\` does not declare.`);
+        return `if (${key} in s) t[${key}] = s[${key}];`;
+      }
+      if (prop.raw !== undefined) return `t[${key}] = ${JSON.stringify(invocationValue(contract, prop.raw, "html", true) ?? null)};`;
+      const type = normalizeType(contract.type);
+      const absent = contract.default === undefined ? "null" : JSON.stringify(contract.default);
+      if (type.kind === "terminal" && type.name === "unknown") return `if (${key} in s) t[${key}] = s[${key}] ?? ${absent};`;
+      context.usesSlotPropChecks = true;
+      const message = `${prefix}Slot \`${name}\` prop \`${prop.name}\` does not satisfy its declared type \`${formatType(type)}\`.`;
+      return `if (${key} in s) { const y = s[${key}]; t[${key}] = y != null && typeof y !== "symbol" && warnUnless(acceptsSlotProp(y, ${JSON.stringify(type)}), ${quote(`${file}#slot:${name}:${prop.name}`)}, ${quote(message)}) ? y : ${absent}; }`;
+    });
+    for (const [prop, contract] of Object.entries(declared)) {
+      if (given.some((entry) => entry.name === prop)) continue;
+      if (contract.required) warnings += warn(prop, `${outlet} must give prop \`${prop}\`, which \`${tag}\`'s slot \`${name}\` declares as required.`);
+      if (contract.default !== undefined) values.push(`t[${quote(prop)}] = ${JSON.stringify(contract.default)};`);
+    }
+    return [`${quote(tag)}: (s: Record<string, unknown>) => { ${warnings}const t: Record<string, unknown> = {}; ${values.join(" ")} return t; }`];
+  });
+  return shapes.length === 0 ? undefined : `outletProps${context.outletProps.push(`{ ${shapes.join(", ")} }`) - 1}`;
 }
 
 function renderNode(node: TemplateNode, names: Names, context: Context): string {
@@ -516,6 +597,12 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
   }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEachNode(node, node.flow, names, context);
+    if (node.of !== undefined) return renderChildSlot(node, node.of, names, context);
+    const childNodes = context.childNodes.get(node.name ?? "");
+    if (childNodes !== undefined) {
+      const fallback = renderChildren(node.fallback ?? [], names, context);
+      return fallback === "" ? `<ChildNodes :nodes=${bound(childNodes)} />` : `<ChildNodes :nodes=${bound(childNodes)}>${fallback}</ChildNodes>`;
+    }
     const scoped = (node.props?.length ?? 0) > 0;
     const slotName = quote(node.name ?? "");
     const name = scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
@@ -1063,6 +1150,12 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const name = contextNames.get(declaration)!;
     define(declaration.as ?? declaration.name, name, `${name}.value`, UNKNOWN);
   }
+  // A slot's `as` list (components#columns-as-markup): read-only, like a context.
+  const childLists = Object.entries(contract.slots ?? {}).flatMap(([slot, declared]) => declared.accepts === undefined || declared.as === undefined ? [] : [{
+    slot, accepts: declared.accepts, as: declared.as, name: identifiers.take(declared.as, "List"), nodes: identifiers.take(`${declared.as}Nodes`, ""),
+    type: childListType(declared.accepts, options.componentGraph),
+  }]);
+  for (const list of childLists) define(list.as, list.name, `${list.name}.value`, list.type);
   const handlerNames = new Map(handlers.map((handler) => [handler.name, identifiers.take(handler.name, "Handler")]));
 
   const selectorStateNames = new Set(target.props.flatMap((prop) => {
@@ -1100,6 +1193,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
         : availability.get(name) ?? (computedValues.some(value => value.name === name) ? read.replace(/\.get\(\)$/, ".status()") : undefined)),
     ...(options.slotsByTag === undefined ? {} : { slotsByTag: options.slotsByTag }),
     ...(options.propContractsByTag === undefined ? {} : { propContractsByTag: options.propContractsByTag }),
+    ...(options.componentGraph === undefined ? {} : { componentGraph: options.componentGraph }),
+    childNodes: new Map(childLists.map((list) => [list.slot, list.nodes])),
+    childLists: new Set(childLists.map((list) => list.as)),
+    outletProps: [],
     lowering,
     imports: new Set(),
     refs: new Map(),
@@ -1340,6 +1437,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       const name = contextNames.get(declaration)!;
       return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
+    ...childLists.map((list) => `const [${list.name}, ${list.nodes}] = ${childListSource(list, contract.tag, context, options)};`),
+    ...context.outletProps.map((shapes, index) => `const outletProps${index} = ${shapes};`),
     ...(availability.size === 0 ? [] : [`const declarationStatuses = { ${[...seeded.map(state => `${quote(state.name)}: () => ${stateNames.get(state)}.status()`),
       ...contexts.map(context => { const variable = contextNames.get(context)!; return `${quote(context.as ?? context.name)}: () => ${variable}.status?.() ?? (${variable}.value === undefined ? UNRESOLVED_INPUT : READY_INPUT)`; })].join(", ")} } as Record<string, () => typeof READY_INPUT>;`, "const declarationStatus = (name: string) => declarationStatuses[name]!();"]),
     ...(hasStateSelected ? [
@@ -1395,7 +1494,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       computed: new Map(computedValues.map((value) => [value.name, stateNames.get(value)!])),
       availability: new Map([...availability, ...computedValues.map(value => [value.name, `${stateNames.get(value)}.status()`] as const)]),
       data: new Map(data.map((value) => [value.name, dataNames.get(value)!])),
-      context: new Map(contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!])),
+      context: new Map([...contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!] as const), ...childLists.map((list) => [list.as, list.name] as const)]),
       hydrationInstanceName,
       scripts: scriptNames.size > 0,
     }, options.controllerSpecifier ?? (definition.module ?? definition.controller), options.modulePreparation),
@@ -1410,9 +1509,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   // The shared module holds what every component's host and dispatcher do the same way.
   const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
     "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
-    "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", ...Object.values(WRITE_PREDICATES)]
+    "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", "useChildList", "ChildNodes", "ChildSlot", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)),
-    ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks ? ["warnUnless"] : []])].sort();
+    ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks || context.outletProps.length > 0 ? ["warnUnless"] : []])].sort();
   const vueTypes = target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"];
   const requestHelpers = (definition.module ?? definition.controller) === undefined ? [] : REQUEST_HELPERS.filter((name) => new RegExp(`\\b${name}\\(`).test(code));
   const lines: string[] = [
@@ -1423,6 +1522,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...((definition.module ?? definition.controller) !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
       ? [`import { acceptsControllerWrite } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`] : []),
     ...(!context.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
+    ...(!context.usesEntryProps ? [] : [`import { entryProp } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(target.props.length === 0 && !context.usesInputStatus && computedValues.length === 0 && seeded.length === 0 && availability.size === 0 ? [] : [`import { ${target.props.length === 0 ? computedValues.length === 0 && seeded.length === 0 && availability.size === 0 && !context.usesInputExpressions ? "" : "BINDING_INPUTS_PROP, " : "checkedProp, vPropValidity, checkPropInput, vuePropInputs, BINDING_INPUTS_PROP, type InputBindings, "}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computedValues.length === 0 ? "" : ", inputComputed"}${computedValues.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : ", inputRead, inputDefault"}${context.usesInputExpressions || seeded.length > 0 ? ", evaluateInput" : ""}${seeded.length > 0 ? ", copyStateSeed" : ""}${(definition.module ?? definition.controller) === undefined || target.props.length === 0 ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
     ...(options.modulePreparation === undefined ? [] : [`import { usePreparedModule } from ${quote(options.helperSpecifier?.("bindings") ?? VUE_BINDINGS_SPECIFIER)};`]),
@@ -1534,4 +1634,58 @@ function hostSource(
 /** `query-change` as `QueryChange`, for a name derived from a declared event. */
 function pascal(name: string): string {
   return name.replace(/(?:^|[^A-Za-z0-9])([A-Za-z0-9])/g, (_match, character: string) => character.toUpperCase());
+}
+
+/** An `as` list's type: entries holding the accepted component's props, when the slot accepts one known component. */
+function childListType(accepts: readonly string[], graph: ReadonlyMap<string, ComponentDefinition> | undefined): Static {
+  const props = accepts.length === 1 ? graph?.get(accepts[0]!)?.contract.props : undefined;
+  const item: TypeNode = props === undefined ? UNKNOWN.type : { kind: "object", open: false, fields: Object.entries(props).map(([name, prop]) => {
+    const type = normalizeType(prop.type);
+    const present = prop.required || prop.default !== undefined && prop.default !== null;
+    return { name, type: present ? type : { kind: "union", members: [type, { kind: "terminal", name: "null" }] }, optional: false };
+  }) };
+  return { type: { kind: "list", item }, nullable: false };
+}
+
+/**
+ * The `useChildList` call for an accepting slot, with what it knows of each accepted component from the
+ * graph: its props as its own instance resolves them, and its slots. An accepted component the
+ * conversion does not include is an error, since its entries could not hold its props.
+ */
+function childListSource(list: { readonly slot: string; readonly accepts: readonly string[]; readonly type: Static }, tag: string, context: Context, options: VueConversionOptions): string {
+  const graph = options.componentGraph;
+  const listed = (names: readonly string[]): string => {
+    const quoted = names.map((name) => `\`${name}\``);
+    return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+  };
+  const kinds = list.accepts.map((accepted) => {
+    const definition = graph?.get(accepted);
+    if (definition === undefined) fail("HT030", `\`${tag}\` accepts \`${accepted}\`, which this conversion does not include; convert \`${accepted}\` with it.`);
+    context.imports.add(accepted);
+    // A null, absent or rejected prop takes its default, as the child's own instance resolves it.
+    const props = Object.entries(definition.contract.props).map(([name, prop]) => {
+      const absent = JSON.stringify(prop.default ?? null);
+      const read = `g[${quote(name)}]`;
+      if (prop.select !== undefined) return `${propKey(name)}: ${read} ?? ${absent}`;
+      context.usesEntryProps = true;
+      return `${propKey(name)}: entryProp(${read}, ${JSON.stringify(normalizeType(prop.type))}, ${absent}, ${!prop.required})`;
+    });
+    const declared = definition.contract.slots ?? {};
+    const outlets = (definition.slots ?? []).map((slot) => slot.name ?? "");
+    const scoped = [...new Set([...Object.keys(declared).filter((name) => Object.keys(declared[name]!.props).length > 0),
+      ...(definition.slots ?? []).filter((slot) => (slot.props?.length ?? 0) > 0).map((slot) => slot.name ?? "")])];
+    const known = [...new Set([...Object.keys(declared), ...outlets])].filter((name) => name !== "");
+    return `[${componentName(accepted)}, ${quote(accepted)}, (g: Record<string, unknown>) => ({ ${props.join(", ")} }), ${JSON.stringify([outlets, scoped, known, listed(known)])}]`;
+  });
+  // A preset, whose root is an accepted component, is not supported yet: the list leaves it out with a warning.
+  const presets = [...graph ?? []].flatMap(([preset, definition]) => {
+    const lineage = [preset];
+    for (let root = definition.root; root?.kind === "component" && !lineage.includes(root.tag); root = graph!.get(root.tag)?.root) lineage.push(root.tag);
+    const delegated = lineage.slice(1).find((candidate) => list.accepts.includes(candidate));
+    return delegated === undefined ? [] : [`${propKey(preset)}: ${quote(delegated)}`];
+  });
+  const named = `\`${tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
+  const file = context.definition.source.file;
+  const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
+  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))})`;
 }

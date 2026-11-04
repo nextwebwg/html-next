@@ -151,6 +151,58 @@ export const definitions = [
     <tfoot><tr><template $slot="total" $if="$rows.length > 1"><td><span>Many</span></td></template></tr></tfoot></table></section></template>`,
   `<template component="ssr-grid-page"><article><ssr-grid><template slot=""><th>Who</th></template>
     <template slot="row"><tr><td><b $value="$item"></b></td></tr></template></ssr-grid></article></template>`,
+  // Columns as markup (components#columns-as-markup): a table reads its accepted columns as a list,
+  // and each cell places its column's slot. A table-part root comes before its <defs>.
+  `<template component="ssr-column"><th scope="col"><slot name="header">{$header}</slot></th><defs>
+    <prop name="field" type="string">The row field a cell shows when no cell content is given.</prop>
+    <prop name="header" type="string">The header text.</prop>
+    <state name="tone" type="string" value="quiet"></state>
+    <slot name="header"></slot><slot name="note"></slot>
+    <slot name="cell"><prop name="row" type="object" required>The row this cell shows.</prop></slot></defs></template>`,
+  `<template component="ssr-datatable"><defs>
+    <prop name="rows" type="list(object({ id: number, name: string, price: number }))" required>One entry per table row.</prop>
+    <state name="density" type="string" value="compact"></state>
+    <slot accepts="ssr-column" as="columns"></slot></defs>
+    <table><caption>{$columns.length} columns</caption><thead><tr><template $slot></template></tr></thead>
+    <tbody><tr $each="row of $rows" $key="$row.id"><td $each="column of $columns" $key="$column"><slot of="$column" name="cell" from:row="$row">{$row[$column.field]}</slot></td></tr></tbody>
+    <tfoot><tr><td $each="column of $columns" $key="$column"><slot of="$column" name="note">-</slot></td></tr></tfoot></table></template>`,
+  `<template component="ssr-badge"><defs><prop name="text" type="string">Text.</prop>
+    <context name="tone" from="ssr-column"></context><context name="density" from="ssr-datatable"></context></defs>
+    <b>{$text}:{$tone}:{$density}</b></template>`,
+  `<template component="ssr-products"><defs>
+    <state name="products" type="list(object({ id: number, name: string, price: number }))"
+      value="[{ id: 1, name: 'Desk lamp', price: 49 }, { id: 2, name: 'Notebook', price: 6.5 }]"></state>
+    <state name="showId" type="boolean" value="false"></state>
+    <state name="extra" type="list(object({ key: string, label: string }))" value="[{ key: 'name', label: 'N' }, { key: 'price', label: 'P' }]"></state>
+    <handler name="change"><set name="showId" expr:value="not $showId"></set>
+    <set name="extra" expr:value="[{ key: 'price', label: 'P' }, { key: 'name', label: 'N' }]"></set>
+    <set name="products" expr:value="[{ id: 2, name: 'Notebook', price: 6.5 }, { id: 1, name: 'Lamp', price: 49 }]"></set></handler>
+    </defs><main><button type="button" on:click="change">Change</button><ssr-datatable from:rows="$products">
+      <ssr-column $if="$showId" field="id" header="Id"></ssr-column>
+      <ssr-column field="name" header="Name"><i slot="note">kept</i></ssr-column>
+      <ssr-column class="numeric"><abbr slot="header" title="Price in US dollars">Price</abbr>
+        <template slot="cell"><span><ssr-badge from:text="$row.name"></ssr-badge></span>{$row.price}</template></ssr-column>
+      <ssr-column $each="column of $extra" $key="$column.key" from:field="$column.key" from:header="$column.label"></ssr-column>
+    </ssr-datatable></main></template>`,
+  // A column whose own template has no slot outlet: its projected cell content stays for the table's `<slot of>`.
+  `<template component="ssr-bare-column"><th scope="col">{$header}</th><defs>
+    <prop name="field" type="string">The row field a cell shows when no cell content is given.</prop>
+    <prop name="header" type="string">The header text.</prop>
+    <slot name="note"></slot>
+    <slot name="cell"><prop name="row" type="object({ id: number, name: string, price: number })" required>The row this cell shows.</prop></slot></defs></template>`,
+  `<template component="ssr-bare-table"><defs>
+    <prop name="rows" type="list(object({ id: number, name: string, price: number }))" required>One entry per table row.</prop>
+    <slot accepts="ssr-bare-column" as="columns"></slot></defs>
+    <table><thead><tr><template $slot></template></tr></thead>
+    <tbody><tr $each="row of $rows" $key="$row.id"><td $each="column of $columns" $key="$column"><slot of="$column" name="cell" from:row="$row">{$row[$column.field]}</slot></td></tr></tbody>
+    <tfoot><tr><td $each="column of $columns" $key="$column"><slot of="$column" name="note">-</slot></td></tr></tfoot></table></template>`,
+  `<template component="ssr-bare-products"><defs>
+    <state name="products" type="list(object({ id: number, name: string, price: number }))" value="[{ id: 1, name: 'Lamp', price: 49 }]"></state>
+    <handler name="change"><set name="products" expr:value="[{ id: 1, name: 'Lamp', price: 45 }, { id: 2, name: 'Pen', price: 2 }]"></set></handler>
+    </defs><main><button type="button" on:click="change">Change</button><ssr-bare-table from:rows="$products">
+      <ssr-bare-column field="name" header="Name"></ssr-bare-column>
+      <ssr-bare-column header="Price"><template slot="cell"><span>{$row.price}</span></template><i slot="note">kept</i></ssr-bare-column>
+    </ssr-bare-table></main></template>`,
 ].map((source) => parseComponent(source));
 
 export const cases = [
@@ -190,6 +242,9 @@ export const cases = [
   { name: "dynamic text before an empty conditional named-slot region", html: '<ssr-slot-text id="subject"></ssr-slot-text>', state: { shortcut: "" } },
   { name: "<template $slot> outlets in table parts, showing their fallback", html: '<ssr-grid id="subject"></ssr-grid>', state: { rows: ["Ada", "Bea"] } },
   { name: "<template $slot> outlets in table parts, rendering a consumer's rows and header cells", html: '<ssr-grid-page id="subject"></ssr-grid-page>', state: {} },
+  { name: "columns as markup: a table's accepted columns, their cell templates, plain content and contexts", html: '<ssr-products id="subject"></ssr-products>', state: {} },
+  { name: "columns as markup with a consumer $if column shown", html: '<ssr-products id="subject"></ssr-products>', state: { showId: true } },
+  { name: "columns as markup with columns whose templates have no slot outlet", html: '<ssr-bare-products id="subject"></ssr-bare-products>', state: {} },
 ] as const;
 
 /**

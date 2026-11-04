@@ -559,7 +559,8 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       }
       case "index": {
         const object = this.#operand(node.object, scope);
-        const index = this.value(node.index, scope);
+        // TypeScript rejects a nullable key; the read itself is unchanged.
+        const index = typeOf(node.index, scope).nullable ? `(${this.value(node.index, scope)})!` : this.value(node.index, scope);
         if (mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope)) {
           return `((objectValue: any, indexValue: any) => objectValue === Symbol.for("html-next.invalid-result") || indexValue === Symbol.for("html-next.invalid-result") ? Symbol.for("html-next.invalid-result") : objectValue${typeOf(node.object, scope).nullable ? "?." : ""}[indexValue])(${object}, ${index})`;
         }

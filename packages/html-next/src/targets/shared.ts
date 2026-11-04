@@ -281,7 +281,7 @@ export function literalAttribute(value: string): string {
 export function serializedDefinition(definition: ComponentDefinition): string {
   const props = runtimeProps(definition);
   const runtime = {
-    contract: { tag: definition.contract.tag, props },
+    contract: { tag: definition.contract.tag, props, ...(definition.contract.slots === undefined ? {} : { slots: definition.contract.slots }) },
     template: definition.template,
     ...(definition.declarations === undefined ? {} : { declarations: definition.declarations }),
     ...(definition.root === undefined ? {} : { root: definition.root }),

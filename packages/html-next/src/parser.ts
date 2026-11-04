@@ -285,6 +285,21 @@ interface ParseScope {
   readonly loops?: number;
   /** Among table-structure or SVG-container children, where whitespace-only text never renders. */
   readonly discardsWhitespace?: boolean;
+  /** `$each` items that stand for an entry of one of the component's `as` lists: item name to list name. */
+  readonly entries?: ReadonlyMap<string, string>;
+}
+
+/** The names a structural directive binds for its subtree, recording which stand for an `as` list's entries. */
+function withEntries(scope: ParseScope, flow: Flow | undefined, contract: ComponentContract): ParseScope {
+  if (flow === undefined) return scope;
+  const bound = flow.kind === "each" ? [flow.item, flow.index, "loop"] : flow.kind === "with" || flow.kind === "match" ? [flow.alias] : [];
+  const source = flow.kind === "each" ? flow.listPlan?.ast : undefined;
+  const list = source?.kind === "id" && Object.values(contract.slots ?? {}).some((slot) => slot.as === source.name) ? source.name : undefined;
+  if (list === undefined && !bound.some((name) => name !== undefined && scope.entries?.has(name) === true)) return scope;
+  const entries = new Map(scope.entries);
+  for (const name of bound) if (name !== undefined) entries.delete(name);
+  if (list !== undefined) entries.set((flow as Extract<Flow, { kind: "each" }>).item, list);
+  return { ...scope, entries };
 }
 
 /**
@@ -786,8 +801,8 @@ const slotDeclarations = (slots: Record<string, SlotDeclaration>): { slots?: Rec
 
 /**
  * The `<slot>` declarations in `<defs>`, by slot name (`""` for the default slot): the props a slot's
- * outlets give its consumer's template, declared with the component `<prop>` vocabulary. A slot that
- * gives no props is not declared.
+ * outlets give its consumer's template, declared with the component `<prop>` vocabulary, or the
+ * components it `accepts` and the `as` list that gives them to the template.
  */
 function readSlotDeclarations(
   group: Element | undefined,
@@ -803,18 +818,29 @@ function readSlotDeclarations(
     if (authored !== undefined && !isIdentifier(authored)) fail("HC013", slotNameMessage(authored), source);
     if (Object.hasOwn(slots, name)) fail("HC020", `${authored === undefined ? "The default slot" : `Slot \`${name}\``} is declared more than once.`, source);
     for (const attribute of sourceAttributes(element)) {
-      if (attribute.name !== "name") fail("HC013", `A <slot> declaration takes only \`name\`; \`${attribute.name}\` is not one of its attributes.`, source);
+      if (!["name", "accepts", "as"].includes(attribute.name)) fail("HC013", `A <slot> declaration takes \`name\`, \`accepts\` and \`as\`; \`${attribute.name}\` is not one of its attributes.`, source);
     }
     for (const child of significant(sourceChildren(element))) {
       if (!isElement(child) || sourceTag(child) !== "prop") fail("HC013", "A <slot> declaration in <defs> holds only <prop> elements.", source);
     }
+    const written = attr(element, "accepts");
+    const accepts = written?.split(/[\t\n\f\r ]+/).filter((tag) => tag !== "");
+    if (accepts !== undefined && (accepts.length === 0 || accepts.some((tag) => !/^[a-z][a-z0-9._]*-[a-z0-9._-]*$/.test(tag)))) {
+      fail("HC013", `\`accepts\` lists component tags, such as \`accepts="x-column"\`; \`${written}\` is not.`, source);
+    }
+    const as = attr(element, "as");
+    if (as !== undefined && accepts === undefined) fail("HC013", "`as` lists accepted components; add `accepts` with their tags, such as `accepts=\"x-column\"`.", source);
+    if (as !== undefined && !isIdentifier(as)) fail("HC013", `\`as\` names a list the template reads as \`$${as}\`, so it is an identifier; \`${as}\` is not.`, source);
+    if (accepts !== undefined && directElements(element, "prop").length > 0) {
+      fail("HC013", "A <slot> declaration has either `accepts` or <prop> children: with `accepts`, its content is component instances, and with props, it is templates.", source);
+    }
     // A slot prop is written as an attribute only when an outlet gives it statically, so any type is declarable.
     const props = readProps(element, {}, source, false, warnInvalidDeclaration, onDiagnostic, false);
-    if (Object.keys(props).length === 0) fail("HC013", "A <slot> declaration declares at least one <prop>; a slot that gives no props is not declared.", source);
     for (const [prop, contract] of Object.entries(props)) {
+      if (prop === "name" || prop === "of") fail("HC013", `Slot prop \`${prop}\` is reserved: \`name\` and \`of\` are the outlet's own attributes.`, source);
       if (contract.select !== undefined) fail("HC013", `Slot prop \`${prop}\` cannot select its type with <type from>.`, source);
     }
-    slots[name] = { props };
+    slots[name] = { props, ...accepts === undefined ? {} : { accepts }, ...as === undefined ? {} : { as } };
   }
   return slots;
 }
@@ -1000,7 +1026,16 @@ function readDeclarations(
       if (!/^(?:prop|type|state|computed|data|context|handler|event|request|slot)$/.test(kind) && !HEAD_ELEMENT_RE.test(kind)) {
         fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
       }
-      // A slot declaration's props are its outlets' (readSlotDeclarations), not the component's scope.
+      // A slot declaration's props are its outlets' (readSlotDeclarations), not the component's scope;
+      // its `as` list is in that scope.
+      const as = kind === "slot" ? attr(element, "as") : undefined;
+      if (as !== undefined && isIdentifier(as)) {
+        if (names.has(as) || Object.hasOwn(contract.props, as)) {
+          fail("HC020", `\`${as}\` is already declared; an \`as\` name shares the declaration namespace.`, source);
+        }
+        names.add(as);
+        roots.add(as);
+      }
       if (kind === "type" || kind === "slot") continue;
       if (HEAD_ELEMENT_RE.test(kind)) {
         // A named declared script shares the flat namespace: `$stripe` reads its status.
@@ -1849,14 +1884,14 @@ function parseElementAtSource(
     fail("HT031", "An await branch must be part of a sibling group inside the component's root.", source);
   }
   const flow = extractFlow(flowValues, scope, source);
-  const nodeScope = withAliases(
+  const nodeScope = withEntries(withAliases(
     flow?.kind === "each"
       ? withRoots(scope, flow.item, flow.index, "loop")
       : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
         ? withRoots(scope, flow.alias)
         : scope,
     flow,
-  );
+  ), flow, contract);
   // The receiving component declares these names, so a standalone consumer definition cannot
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   // A <template> renders its children among its parent's; a projected one, wherever its slot is.
@@ -1904,13 +1939,17 @@ function parseElementAtSource(
         fail("HT008", "A slot's name is written as `name`, never computed with `from:name`; for content that varies by item, use one named scoped slot that passes the item as a prop, such as `<slot name=\"option\" from:item=\"$row\">`.", source);
       }
       const flowValues: Record<string, string> = {};
-      const rawProps: Array<{ name: string; expression: string; type?: PropType; default?: PropValue }> = [];
+      const rawProps: Array<{ name: string; expression: string; type?: PropType; default?: PropValue; raw?: string }> = [];
       const staticProps: Array<{ name: string; value: string }> = [];
+      let ofSource: string | undefined;
       for (const attribute of sourceAttributes(child)) {
         if (FLOW_NAME_RE.test(attribute.name)) {
           flowValues[attribute.name] = attribute.value;
+        } else if (attribute.name === "of") {
+          ofSource = attribute.value;
         } else if (attribute.name.startsWith("from:")) {
           const prop = attribute.name.slice("from:".length);
+          if (prop === "of") fail("HT008", "`of` names whose slot the outlet places and already takes an expression, as `of=\"$column\"`; it is never a slot prop.", source);
           if (!isIdentifier(prop)) {
             fail("HT008", `Slot prop \`${prop}\` is not an expression-scope name.`, source);
           }
@@ -1922,7 +1961,15 @@ function parseElementAtSource(
           staticProps.push({ name: attribute.name, value: attribute.value });
         }
       }
-      rawProps.push(...slotOutletProps(name, contract.slots?.[name ?? ""], rawProps, staticProps, source));
+      if (ofSource === undefined) rawProps.push(...slotOutletProps(name, contract.slots?.[name ?? ""], rawProps, staticProps, source));
+      else {
+        if (name === undefined) fail("HT008", "A `<slot of>` outlet names the child's slot it places, as `<slot of=\"$column\" name=\"cell\">` or `<template $slot=\"cell\" of=\"$column\">`.", source);
+        // The child declares this slot's props, so they are checked and converted when it renders.
+        for (const { name: prop, value } of staticProps) rawProps.push({ name: prop, expression: valueExpression(value, prop, source), raw: value });
+        const given = rawProps.map((prop) => prop.name);
+        const repeated = given.find((prop, index) => given.indexOf(prop) !== index);
+        if (repeated !== undefined) fail("HT008", `<slot name="${name}"> gives prop \`${repeated}\` more than once; give it as a static attribute or with \`from:${repeated}\`, not both.`, source);
+      }
       const parsedFlow = extractFlow(flowValues, childScope, source);
       if (parsedFlow !== undefined && parsedFlow.kind !== "each" && parsedFlow.kind !== "if") {
         fail("HT008", "A slot only supports `$each` or `$if` structural flow.", source);
@@ -1933,7 +1980,13 @@ function parseElementAtSource(
       const place = (node: TemplateNode): void => {
         children.push(condition === undefined ? node : { kind: "element", name: "template", attributes: [], children: [node], flow: condition });
       };
-      const slotScope = flow === undefined ? childScope : withAliases(withRoots(childScope, flow.item, flow.index, "loop"), flow);
+      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index, "loop"), flow), flow, contract);
+      const ofPlan = ofSource === undefined ? undefined : compileScopedExpression(ofSource, slotScope, source);
+      const ofList = ofPlan?.ast.kind === "id" ? slotScope.entries?.get(ofPlan.ast.name) : undefined;
+      if (ofPlan !== undefined && ofList === undefined) {
+        const list = Object.values(contract.slots ?? {}).find((slot) => slot.as !== undefined)?.as ?? "columns";
+        fail("HT008", `\`of\` takes an entry of this component's \`as\` list, such as \`$item\` from \`$each="item of $${list}"\`; \`${ofSource}\` is not one.`, source);
+      }
       const props = rawProps.map((prop) => ({
         ...prop,
         expressionPlan: compileScopedExpression(prop.expression, slotScope, source),
@@ -1948,11 +2001,13 @@ function parseElementAtSource(
         }
       }
       const declared = contract.slots?.[name ?? ""]?.props;
-      if (name === undefined) {
+      // A `<slot of>` outlet places a child's slot, so it is none of this component's own.
+      if (ofPlan !== undefined) {
+        if (!isIdentifier(name!)) fail("HT008", slotNameMessage(name!), source);
+      } else if (name === undefined) {
         slotState.defaults += 1;
         if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
-      }
-      if (name !== undefined) {
+      } else {
         if (name === "" || slotState.names.has(name)) {
           fail("HT008", `Slot name \`${name}\` is empty or duplicated.`, source);
         }
@@ -1968,15 +2023,22 @@ function parseElementAtSource(
         if (typeof fallbackNode === "string") fallback.push(...parseText(fallbackNode, slotScope, source));
         else fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
       }
-      const slotContract: { name?: string; required: boolean; props?: readonly string[]; declared?: Readonly<Record<string, PropContract>> } = {
+      const slotContract: {
+        name?: string; required: boolean; props?: readonly string[]; declared?: Readonly<Record<string, PropContract>>;
+        accepts?: readonly string[]; as?: string;
+      } = {
         required: fallback.length === 0,
       };
       if (name !== undefined) slotContract.name = name;
       if (props.length > 0) slotContract.props = props.map((prop) => prop.name);
       if (declared !== undefined && props.length > 0) slotContract.declared = declared;
+      const accepting = contract.slots?.[name ?? ""];
+      if (accepting?.accepts !== undefined) slotContract.accepts = accepting.accepts;
+      if (accepting?.as !== undefined) slotContract.as = accepting.as;
       // Root arms repeat their slots; the contract lists each once, required if any arm requires it.
       const existing = slotState.contracts.findIndex((contract) => contract.name === name);
-      if (existing === -1) slotState.contracts.push(slotContract);
+      if (ofPlan !== undefined) { /* the child's slot, none of this component's own */ }
+      else if (existing === -1) slotState.contracts.push(slotContract);
       else {
         const previous = slotState.contracts[existing]!;
         const names = [...new Set([...(previous.props ?? []), ...(slotContract.props ?? [])])];
@@ -1995,6 +2057,7 @@ function parseElementAtSource(
           flow?: Extract<Flow, { kind: "each" }>;
           props?: readonly { name: string; expression: string; expressionPlan: CompiledExpression }[];
           fallback: TemplateNode[];
+          of?: { expression: string; expressionPlan: CompiledExpression; list: string };
         } = {
           kind: "slot",
           fallback,
@@ -2002,6 +2065,7 @@ function parseElementAtSource(
         if (name !== undefined) slot.name = name;
         if (flow !== undefined) slot.flow = flow;
         if (props.length > 0) slot.props = props;
+        if (ofPlan !== undefined) slot.of = { expression: ofSource!, expressionPlan: ofPlan, list: ofList! };
         place(slot);
       }
       continue;

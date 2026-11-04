@@ -8,7 +8,7 @@ import { parseBrowserComponent } from "../src/browser-source.js";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
-import type { ElementNode } from "../src/template.js";
+import type { ElementNode, SlotNode, TemplateNode } from "../src/template.js";
 import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeScriptType } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -482,8 +482,8 @@ describe("parseComponent", () => {
     assert.match(message(disclosure(`<slot name="summary" count="many"></slot>`)), /HT008: .*the value `many`, which does not satisfy its declared type `number`/);
     assert.match(message(disclosure(`<slot name="summary" count="1" tone="soft"></slot>`)), /HT008: .*the value `soft`/);
     assert.match(message(disclosure(`<slot name="other" from:item="$items"></slot>`)), /HT008: .*gives props to slot `other`, which declares none; declare them in <defs>: <slot name="other"><prop name="item"/);
-    // A slot without props is never declared; a declaration declares at least one prop, once.
-    assert.match(message(disclosure(`<slot name="summary"></slot>`, `<slot name="summary"></slot>`)), /HC013: .*at least one <prop>/);
+    // A declaration without props describes the slot (components#columns-example declares `header` so); each is declared once.
+    assert.deepEqual(JSON.parse(JSON.stringify(parseComponent(disclosure(`<slot name="summary"></slot>`, `<slot name="summary"></slot>`)).contract.slots)), { summary: { props: {} } });
     assert.match(message(disclosure(`<slot name="summary" count="1"></slot>`, `<slot name="summary"><prop name="count" type="number">C.</prop></slot><slot name="summary"><prop name="count" type="number">C.</prop></slot>`)), /HC020: Slot `summary` is declared more than once/);
     assert.match(message(disclosure(`<slot></slot>`, `<slot name="label-action"><prop name="a" type="string">A.</prop></slot>`)), /HC013: Slot name `label-action` is not an identifier/);
     // A bound value that reads nothing is known now: one its declared type rejects, checked in full, is an error.
@@ -494,6 +494,46 @@ describe("parseComponent", () => {
     parseComponent(disclosure(`<slot name="summary" count="1" from:row="{ id: 'a' }"></slot>`, row));
     // A plain slot needs no declaration, and a declared slot's props may be any type, as only static ones are attributes.
     parseComponent(disclosure(`<slot name="summary" from:count="$items.length"></slot>`, `<slot name="summary"><prop name="count" type="unknown" required>C.</prop></slot>`));
+  });
+
+  it("reads accepted children as an `as` list and places a child's slot with `<slot of>`", () => {
+    const message = (source: string): string => {
+      try { parseComponent(source, "component.html"); } catch (error) { if (error instanceof HtmlDiagnosticError) return `${error.diagnostic.code}: ${error.diagnostic.message}`; }
+      return "";
+    };
+    const table = (defs: string, body = `<td $each="column of $columns" $key="$column"><slot of="$column" name="cell" from:row="$row">{$row.id}</slot></td>`): string =>
+      `<template component="x-datatable" summary="T."><defs><prop name="rows" type="list(object({ id: number }))" required>Rows.</prop>${defs}</defs>` +
+      `<table><thead><tr><template $slot></template></tr></thead><tbody><tr $each="row of $rows" $key="$row.id">${body}</tr></tbody></table></template>`;
+    const accepts = `<slot accepts="x-column" as="columns"></slot>`;
+    const definition = parseComponent(table(accepts));
+    assert.deepEqual(JSON.parse(JSON.stringify(definition.contract.slots)), { "": { props: {}, accepts: ["x-column"], as: "columns" } });
+    const outlet = (function find(node: TemplateNode): SlotNode | undefined {
+      if (node.kind === "slot") return node.of === undefined ? undefined : node;
+      if (node.kind === "text") return undefined;
+      for (const child of node.children) { const found = find(child); if (found !== undefined) return found; }
+      return undefined;
+    })(definition.template);
+    assert.equal(outlet?.name, "cell");
+    assert.deepEqual([outlet?.of?.expression, outlet?.of?.list, outlet?.props?.map((prop) => prop.name)], ["$column", "columns", ["row"]]);
+    // Several accepted tags; a named slot keeps its own list; a static prop keeps its text for the child's declared type.
+    assert.deepEqual(JSON.parse(JSON.stringify(parseComponent(table(`<slot name="actions" accepts="x-action x-menu-action" as="actions"></slot>`, `<td><template $each="action of $actions" $key="$action"><slot of="$action" name="label" size="2"></slot></template></td>`)).contract.slots?.actions)),
+      { props: {}, accepts: ["x-action", "x-menu-action"], as: "actions" });
+    // Declaration mistakes (components#columns-errors).
+    assert.match(message(table(`<slot as="columns"></slot>`)), /HC013: `as` lists accepted components; add `accepts` with their tags, such as `accepts="x-column"`\./);
+    assert.match(message(table(`<slot accepts="x-column" as="rows"></slot>`)), /HC020: `rows` is already declared; an `as` name shares the declaration namespace\./);
+    assert.match(message(table(`<slot accepts="x-column" as="columns"><prop name="row" type="object">R.</prop></slot>`)), /HC013: A <slot> declaration has either `accepts` or <prop> children/);
+    assert.match(message(table(`<slot accepts="column" as="columns"></slot>`)), /HC013: .*`column`/);
+    assert.match(message(table(`<slot accepts="x-column" as="the-columns"></slot>`)), /HC013: .*`the-columns`/);
+    assert.match(message(table(`<slot accepts="x-column" as="columns" size="2"></slot>`)), /HC013: .*`size`/);
+    assert.match(message(table(accepts + `<slot name="cell"><prop name="of" type="object">O.</prop></slot>`)), /HC013: Slot prop `of` is reserved/);
+    assert.match(message(table(accepts + `<slot name="cell"><prop name="name" type="string">N.</prop></slot>`)), /HC013: Slot prop `name` is reserved/);
+    // Outlet mistakes: `of` takes an entry of an own `as` list, under a literal `name`.
+    assert.match(message(table(accepts, `<td><slot of="$row" name="cell"></slot></td>`)), /HT008: `of` takes an entry of this component's `as` list, such as `\$item` from `\$each="item of \$columns"`; `\$row` is not one\./);
+    assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$column"></slot></td>`)), /HT008: A `<slot of>` outlet names the child's slot it places/);
+    assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot from:of="$column" name="cell"></slot></td>`)), /HT008: /);
+    assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$column" name="cell" size="1" from:size="2"></slot></td>`)), /HT008: .*`size` more than once/);
+    // An entry of the list, not an expression reaching one.
+    assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$columns[0]" name="cell"></slot></td>`)), /HT008: `of` takes an entry/);
   });
 
   it("parses repeated scoped slots and exposes their row bindings", () => {

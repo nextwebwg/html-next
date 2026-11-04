@@ -36,7 +36,7 @@ import {
 import { kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
-  currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
+  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, writeMark, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -64,12 +64,14 @@ import {
   type CompiledComponentStyles,
   type ComponentStyleGraph,
   markProjectedRoot,
+  PROJECTED_ATTRIBUTE,
   stateAttribute,
   stateAttributeValue,
 } from "./component-styles.js";
 import {
   declarationTypeNode,
   formatType,
+  normalizeType,
   parseTypedValue,
   typeCheck,
   type TypeNode,
@@ -946,6 +948,10 @@ function componentScope(
       declaration.kind === "data"
     ) scope.set(declaration.name, null);
   }
+  // An `as` list is filled from the projection before the template renders (installChildList).
+  for (const slot of definition.contract.slots === undefined ? [] : Object.values(definition.contract.slots)) {
+    if (slot.as !== undefined) scope.set(slot.as, []);
+  }
   for (const script of definition.scripts ?? []) {
     if (script.name !== undefined) scope.set(script.name, { pending: false, ok: false, error: null });
   }
@@ -1401,6 +1407,8 @@ interface RuntimeRenderContext {
   committed: boolean;
   /** Server slot ranges, consumed in template order while hydrating. */
   hydrationRanges?: HydrationRange[] | undefined;
+  /** Server ranges `<slot of>` outlets rendered (`of` on their start mark), consumed in template order while hydrating. */
+  childRanges?: HydrationRange[] | undefined;
   /** SVG while rendering inside an `<svg>` subtree (outside `<foreignObject>`); otherwise HTML. */
   readonly namespace?: typeof SVG_NAMESPACE;
 }
@@ -1841,6 +1849,7 @@ function renderDynamicNode(
     if (slotted) markRegionContent(start, output);
     end.before(...output);
     if (slotted) regionChanged(start);
+    if (childLists) childListeners.get(start)?.();
     built = chosen;
     syncContainingSelect(end);
   });
@@ -2130,6 +2139,7 @@ function renderEachRegion(
     blocks = next;
     syncContainingSelect(end);
     if (slotted) regionChanged(start);
+    if (childLists) childListeners.get(start)?.();
   });
   for (const root of roots) {
     let previous: Value | typeof NONCONFORMING | undefined = ABSENT;
@@ -2866,6 +2876,376 @@ function projectedSlotName(node: Node, context: RuntimeRenderContext): string {
     (node instanceof Element ? node.getAttribute("slot") ?? "" : "");
 }
 
+/**
+ * Renders a consumer's `<template slot>` at an outlet: lazily, like an `$if` body, in the consumer's
+ * scope plus the outlet's slot props, and afresh each time.
+ */
+function renderScopedTemplate(
+  carrier: HTMLTemplateElement,
+  name: string,
+  props: NonNullable<SlotNode["props"]>,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  existing?: readonly Node[],
+): Node[] {
+  const authored = projectedTemplates.get(carrier);
+  if (authored === undefined && projectedSlotParser === undefined) {
+    fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
+  }
+  const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
+  const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
+  // A `<slot>` in the template is the consumer's outlet, so it reads the consumer's projection and
+  // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
+  const projectionContext = authored === undefined ? context : Object.create(context, {
+    definition: { value: authored.context.definition, enumerable: true },
+    refs: { value: authored.context.refs, enumerable: true },
+    projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
+    projectedSlotNames: { value: authored.context.projectedSlotNames, enumerable: true },
+    hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
+  }) as RuntimeRenderContext;
+  for (const prop of props) {
+    ownEffect(context, scope, () => {
+      const value = evalConforming(prop.expression, scope, context.definition);
+      if (value === NONCONFORMING) return;
+      // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
+      // accept warns once (HR007). It, and absent input, take the prop's default, or null.
+      const absent = value == null || value === ABSENT;
+      if (absent && prop.type === undefined && prop.default !== undefined) {
+        projectedScope.set(prop.name, prop.default as Value);
+        return;
+      }
+      if (prop.type !== undefined && (absent || !parseTypedValue(value, prop.type, "$", "value").ok)) {
+        if (!absent) {
+          warnAuthored(context.definition, `slot:${name}:${prop.name}`,
+            `${name === "" ? "The default slot" : `Slot \`${name}\``} prop \`${prop.name}\` does not satisfy its declared type \`${formatType(prop.type)}\`.`);
+        }
+        projectedScope.set(prop.name, (prop.default ?? null) as Value);
+        return;
+      }
+      projectedScope.set(prop.name, value);
+    });
+  }
+  const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {
+    const adopted: Node[] = [];
+    let cursor = 0;
+    for (const child of content) {
+      const nodes = materialize(renderTemplateNode(child, projectedScope, document, projectionContext, existing[cursor]), document);
+      adopted.push(...nodes);
+      cursor += nodes.length;
+    }
+    return adopted;
+  })();
+  for (const child of rendered) markProjectedRoot(child);
+  // host.slots lists these roots while this outlet renders them, following a component's lowered root.
+  const roots = rendered.filter((child): child is Element => child.nodeType === 1);
+  roots.forEach((root, index) => { if (root.localName.includes("-")) whenLowered(root, (lowered) => { roots[index] = lowered; }); });
+  ownEffect(context, scope, () => {
+    let renderings = templateRenderings.get(carrier);
+    if (renderings === undefined) templateRenderings.set(carrier, renderings = new Set());
+    renderings.add(roots);
+    return () => { renderings.delete(roots); };
+  });
+  return rendered;
+}
+
+// ---- Columns as markup (components#columns-as-markup): `as` lists and `<slot of>` outlets ----
+
+/** An accepted child of a slot with `as`: the stable, read-only entry its list holds, and where it renders from. */
+interface ChildEntry {
+  /** What the template reads as an entry: the child's resolved props, read through its own scope. */
+  readonly value: object;
+  readonly tag: string;
+  readonly definition: ComponentDefinition;
+  /** The child's invocation, then the root it lowers to; or its server-rendered root. */
+  element: Element;
+}
+const childEntries = new WeakMap<object, ChildEntry>();
+const entriesByElement = new WeakMap<Element, ChildEntry>();
+/** A child's invocation read when its entry was made, so its own preparation shares that prop scope. */
+const earlyInvocations = new WeakMap<Element, ReturnType<typeof readInvocation>>();
+/** A list's update, by the start mark of each consumer region among the children it reads. */
+const childListeners = new WeakMap<Node, () => void>();
+/** The child whose slot a `<slot of>` outlet placed each node from, its logical parent for context. */
+const placedOwners = new WeakMap<Node, ChildEntry>();
+/** Set once any slot keeps an `as` list, so region updates without one never look. */
+let childLists = false;
+/** Set once any `<slot of>` outlet placed content, so lowering without one never looks. */
+let childPlacements = false;
+/** A server root's carried nodes, read before that child hydrates. */
+const serverCarried = new WeakMap<Element, readonly Node[]>();
+
+/** The tags an element stands for, outermost first: its rendered lineage, or its invocation's delegation chain. */
+function childLineage(element: Element, registry: DocumentRegistry): string[] {
+  const identity = componentIdentity(element);
+  if (identity !== "") return identity.split(/\s+/);
+  const lineage = [element.localName];
+  for (let root = registry.definitions.get(element.localName)?.definition.root;
+    root?.kind === "component" && !lineage.includes(root.tag); root = registry.definitions.get(root.tag)?.definition.root) lineage.push(root.tag);
+  return lineage;
+}
+
+/** The entry of an accepted child, made once: its prop scope is the one its own instance gets. */
+function childEntry(element: Element, tag: string, definition: ComponentDefinition, parent: RuntimeInstance): ChildEntry {
+  const known = entriesByElement.get(element);
+  if (known !== undefined) return known;
+  const owner = runtimeInstance(element);
+  const instance = owner?.definition.contract.tag === tag ? owner : owner?.delegates.find((delegate) => delegate.definition.contract.tag === tag);
+  let scope = instance?.scope;
+  if (scope === undefined) {
+    // A server root has no invocation left: its props come from its hydration record.
+    const read = untracked(() => readInvocation(element, definition, element.localName !== tag, parent));
+    earlyInvocations.set(element, read);
+    scope = read.scope;
+  }
+  const props: PropertyDescriptorMap = {};
+  for (const name of Object.keys(definition.contract.props)) props[name] = { get: () => scope.read(name), enumerable: true };
+  const entry: ChildEntry = { value: Object.freeze(Object.create(null, props) as object), tag, definition, element };
+  childEntries.set(entry.value, entry);
+  entriesByElement.set(element, entry);
+  if (element.localName === tag) whenLowered(element, (root) => { entry.element = root; entriesByElement.set(root, entry); });
+  return entry;
+}
+
+/** "`a`", "`a` and `b`", "`a`, `b` and `c`". */
+function listed(names: readonly string[]): string {
+  const quoted = names.map((name) => `\`${name}\``);
+  return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+}
+
+/**
+ * Keeps a slot's `as` list: one entry per accepted child assigned to it, in content order, following
+ * the consumer's `$if`, `$each` and `$match` regions as they render. Other children are left out.
+ */
+function installChildList(instance: RuntimeInstance, context: RuntimeRenderContext, slot: string, accepts: readonly string[], as: string, document: Document): void {
+  const registry = registryFor(document);
+  const owner = instance.definition;
+  const named = `\`${owner.contract.tag}\`'s ${slot === "" ? "default slot" : `\`${slot}\` slot`}`;
+  const leftOut = (key: string, message: string): void => warnAuthored(owner, `accepts:${slot}:${key}`, message);
+  let current: readonly object[] = [];
+  childLists = true;
+  const update = (): void => {
+    const next: object[] = [];
+    for (const [node, name] of withRegionContent(context.projectedNodes.map((node) => [node, projectedSlotName(node, context)] as const))) {
+      if (name !== slot) continue;
+      if (node.nodeType === 8) {
+        const data = (node as Comment).data;
+        if (data === "html-next:start" || data === "html-next:each-start") childListeners.set(node, update);
+        continue;
+      }
+      if (node.nodeType === 3 && !HTML_WHITESPACE.test((node as Text).data)) leftOut("#text", `${named} accepts ${listed(accepts)}; this text is left out.`);
+      if (node.nodeType !== 1) continue;
+      const element = node as Element;
+      const lineage = childLineage(element, registry);
+      const tag = lineage[0]!;
+      const definition = registry.definitions.get(tag)?.definition;
+      if (accepts.includes(tag) && definition !== undefined) {
+        next.push(childEntry(element, tag, definition, instance).value);
+        continue;
+      }
+      const delegated = lineage.find((candidate) => accepts.includes(candidate));
+      leftOut(tag, delegated === undefined || delegated === tag
+        ? `${named} accepts ${listed(accepts)}; this \`<${element.localName}>\` is left out.`
+        : `\`<${tag}>\` is a preset of \`${delegated}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+    }
+    if (next.length === current.length && next.every((value, index) => value === current[index])) return;
+    for (const value of current) {
+      if (next.includes(value)) continue;
+      // A child dropped before it lowered never prepares, so nothing else stops what its scope started.
+      const element = childEntries.get(value)!.element;
+      const early = earlyInvocations.get(element);
+      earlyInvocations.delete(element);
+      for (const effect of early?.effects ?? []) effect.stop();
+    }
+    current = Object.freeze(next);
+    instance.scope.set(as, current as unknown as Value);
+  };
+  untracked(update);
+}
+
+const HTML_WHITESPACE = /^[\t\n\f\r ]*$/;
+
+/** The nodes a child assigned to its slot `name`: from its instance, its invocation, or its server carrier. */
+function childSlotNodes(entry: ChildEntry, name: string): Node[] {
+  const element = entry.element;
+  const owner = runtimeInstance(element);
+  const projection = (owner?.definition.contract.tag === entry.tag ? owner
+    : owner?.delegates.find((delegate) => delegate.definition.contract.tag === entry.tag))?.projection;
+  let nodes: readonly Node[];
+  if (projection !== undefined) {
+    nodes = currentProjection(projection.nodes);
+  } else if (element.localName === entry.tag) nodes = Array.from(element.childNodes);
+  else {
+    nodes = serverCarried.get(element) ?? serverRanges(element, false, entry.tag)?.carried ?? [];
+    serverCarried.set(element, nodes);
+    nodes = [...nodes, ...borrowedRanges.get(element) ?? []];
+  }
+  return nodes.filter((node) => node.nodeType === 1 && (projection?.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") === name);
+}
+
+const childSlotPropCache = new WeakMap<SlotNode, WeakMap<ComponentDefinition, NonNullable<SlotNode["props"]>>>();
+
+/**
+ * A `<slot of>` outlet's props, checked against the child's slot declaration as an outlet's own are:
+ * a bound prop takes its declared type and default, a static one converts by its declared type, and
+ * a declared default fills a prop the outlet leaves out. A literal null with a default gives a value.
+ */
+function childSlotProps(node: SlotNode, definition: ComponentDefinition, owner: ComponentDefinition): NonNullable<SlotNode["props"]> {
+  let cached = childSlotPropCache.get(node);
+  if (cached === undefined) childSlotPropCache.set(node, cached = new WeakMap());
+  const known = cached.get(definition);
+  if (known !== undefined) return known;
+  const name = node.name!;
+  const declared = definition.contract.slots?.[name]?.props ?? {};
+  const absent = compileExpression("null");
+  const outlet = `<slot of name="${name}">`;
+  const props: NonNullable<SlotNode["props"]>[number][] = (node.props ?? []).map((prop) => {
+    const contract = declared[prop.name];
+    if (contract === undefined) {
+      warnAuthored(owner, `of:${name}:${prop.name}`, `${outlet} gives prop \`${prop.name}\`, which \`${definition.contract.tag}\`'s slot \`${name}\` does not declare.`);
+      return prop;
+    }
+    if (prop.raw !== undefined) return { name: prop.name, expression: "null", expressionPlan: absent, default: invocationValue(contract, prop.raw, "html", true) ?? null };
+    return { ...prop, ...isUnknownType(contract.type) ? {} : { type: contract.type }, ...contract.default === undefined ? {} : { default: contract.default } };
+  });
+  for (const [prop, contract] of Object.entries(declared)) {
+    if (props.some((given) => given.name === prop)) continue;
+    if (contract.required) warnAuthored(owner, `of:${name}:${prop}`, `${outlet} must give prop \`${prop}\`, which \`${definition.contract.tag}\`'s slot \`${name}\` declares as required.`);
+    if (contract.default !== undefined) props.push({ name: prop, expression: "null", expressionPlan: absent, default: contract.default });
+  }
+  cached.set(definition, props);
+  return props;
+}
+
+function isUnknownType(type: ComponentDefinition["contract"]["props"][string]["type"]): boolean {
+  const node = normalizeType(type);
+  return node.kind === "terminal" && node.name === "unknown";
+}
+
+/**
+ * What a `<slot of>` outlet renders for one entry (or for none): the child's `<template slot>` afresh,
+ * its plain content where no outlet placed it yet, or the outlet's fallback.
+ */
+function placeChildSlot(
+  node: SlotNode,
+  entry: ChildEntry | null,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  existing: readonly Node[] | undefined,
+  mark: Node,
+  retry: () => void,
+): { readonly nodes: Node[]; readonly fallback: boolean; readonly scoped: boolean } {
+  const name = node.name!;
+  let scoped = (node.props?.length ?? 0) > 0;
+  const fallback = (): { nodes: Node[]; fallback: boolean; scoped: boolean } => {
+    if (existing === undefined) return { nodes: materialize(renderChildren(node.fallback ?? [], scope, document, context), document), fallback: true, scoped };
+    const nodes: Node[] = [];
+    for (const child of node.fallback ?? []) nodes.push(...renderTemplateNode(child, scope, document, context, existing[nodes.length]));
+    return { nodes, fallback: true, scoped };
+  };
+  if (entry === null) return fallback();
+  const declared = entry.definition.contract.slots?.[name];
+  const outlets = (entry.definition.slots ?? []).map((slot) => slot.name ?? "");
+  if (declared === undefined && !outlets.includes(name)) {
+    const known = [...new Set([...Object.keys(entry.definition.contract.slots ?? {}), ...outlets])].filter((slot) => slot !== "");
+    warnAuthored(context.definition, `of:${entry.tag}:${name}`, `\`${entry.tag}\` declares the slots ${listed(known)}; \`${name}\` is unknown.`);
+    return fallback();
+  }
+  scoped ||= Object.keys(declared?.props ?? {}).length > 0;
+  const content = childSlotNodes(entry, name);
+  const carrier = content.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
+  let nodes: Node[];
+  if (carrier !== undefined) {
+    nodes = renderScopedTemplate(carrier, name, childSlotProps(node, entry.definition, context.definition), scope, document, context, existing);
+    for (const placed of nodes) placedOwners.set(placed, entry);
+    childPlacements = true;
+    return { nodes, fallback: false, scoped: true };
+  }
+  if (content.length === 0) return fallback();
+  if (scoped) {
+    warnAuthored(context.definition, `of:${entry.tag}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
+    return fallback();
+  }
+  // Plain content keeps its identity: the child's own outlet places it, else the first `<slot of>` that
+  // renders it. A later outlet takes it over when that one lets it go.
+  if (outlets.includes(name)) return fallback();
+  if (content.some((candidate) => borrowedContent.has(candidate))) {
+    const cancel = awaitContent(content, mark, retry);
+    ownEffect(context, scope, () => cancel);
+    return fallback();
+  }
+  for (const placed of content) { borrowedContent.add(placed); placedOwners.set(placed, entry); }
+  childPlacements = true;
+  ownEffect(context, scope, () => () => releaseContent(content));
+  if (existing !== undefined) nodes = [...existing];
+  else if (context.committed) {
+    nodes = currentProjection(content);
+    for (const placed of nodes) markProjectedRoot(placed);
+  } else {
+    const anchor = document.createComment(`html-next:slot:${name}`);
+    context.slotInsertions.push({ anchor, nodes: content });
+    nodes = [anchor];
+  }
+  return { nodes, fallback: false, scoped: false };
+}
+
+/**
+ * `<slot of="$column" name="cell">`: the child's own `cell` slot, placed by this component. Its range
+ * carries the entry's index in its `as` list (rendered-form#borrowed-slot-ranges), and it renders again
+ * only when `of` names another entry.
+ */
+function renderChildSlot(
+  node: SlotNode,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  candidate?: Node,
+): Node[] {
+  const of = node.of!;
+  const name = node.name!;
+  const hydrating = context.childRanges?.shift() ?? (candidate === undefined ? undefined : serverRangeAt(candidate, name));
+  const start = (hydrating?.markers[0] ?? renderedFormMark(document, "start", "")) as Comment;
+  const end = (hydrating?.markers.at(-1) ?? renderedFormMark(document, "end", "")) as Comment;
+  const fragment = hydrating === undefined ? document.createDocumentFragment() : undefined;
+  fragment?.append(start, end);
+  let adopting = hydrating?.content;
+  let shown: ChildEntry | null | undefined;
+  let owned: RenderOwned | undefined;
+  let flags = "";
+  let index = -1;
+  const mark = (): void => writeMark(start, "start", `slot="${name}" of="${index < 0 ? "" : index}"${flags}`);
+  const place = (entry: ChildEntry | null): void => {
+    owned?.stop();
+    owned = renderOwned(context.owned);
+    const existing = adopting;
+    adopting = undefined;
+    if (existing === undefined) clearRange(start, end);
+    // An adopted range of plain content holds the child's own nodes: they join its slot content.
+    else if (entry !== null && !hydrating!.fallback && !hydrating!.scoped) {
+      const element = entry.element;
+      borrowedRanges.set(element, [...borrowedRanges.get(element) ?? [], ...existing]);
+    }
+    // Released plain content another outlet placed: this outlet places it now (`retry`).
+    const retry = (): void => { if (shown === entry) { place(entry); mark(); } };
+    const placed = untracked(() => placeChildSlot(node, entry, scope, document, ownedContext(context, owned!), existing, start, retry));
+    // Adopted nodes may come back through a fragment, so they go back before the end mark too.
+    for (const stale of existing ?? []) if (!placed.nodes.includes(stale)) stale.parentNode?.removeChild(stale);
+    end.before(...placed.nodes);
+    flags = `${placed.fallback ? ' fallback=""' : ""}${placed.scoped ? ' scoped=""' : ""}`;
+  };
+  ownEffect(context, scope, () => {
+    const value = evalConforming(of.expressionPlan, scope, context.definition);
+    if (value === NONCONFORMING) return;
+    const list = scope.read(of.list);
+    index = value !== null && typeof value === "object" && Array.isArray(list) ? list.indexOf(value) : -1;
+    const entry = index < 0 ? null : childEntries.get(value as object) ?? null;
+    if (entry !== shown) place(shown = entry);
+    mark();
+  });
+  return fragment === undefined ? rangeNodes(start, end) : [fragment];
+}
+
 function renderSlot(
   node: SlotNode,
   scope: ReactiveScope,
@@ -2873,6 +3253,7 @@ function renderSlot(
   context: RuntimeRenderContext,
   candidate?: Node,
 ): Node[] {
+  if (node.of !== undefined) return renderChildSlot(node, scope, document, context, candidate);
   const name = node.name ?? "";
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
   const props = node.props ?? [];
@@ -2882,64 +3263,7 @@ function renderSlot(
   const lazy = props.length > 0 || carrier !== undefined;
   const renderScoped = (existing?: readonly Node[]): Node[] => {
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
-    const authored = projectedTemplates.get(carrier);
-    if (authored === undefined && projectedSlotParser === undefined) {
-      fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
-    }
-    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
-    const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
-    // A `<slot>` in the template is the consumer's outlet, so it reads the consumer's projection and
-    // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
-    const projectionContext = authored === undefined ? context : Object.create(context, {
-      definition: { value: authored.context.definition, enumerable: true },
-      refs: { value: authored.context.refs, enumerable: true },
-      projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
-      projectedSlotNames: { value: authored.context.projectedSlotNames, enumerable: true },
-      hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
-    }) as RuntimeRenderContext;
-    for (const prop of props) {
-      ownEffect(context, scope, () => {
-        const value = evalConforming(prop.expression, scope, context.definition);
-        if (value === NONCONFORMING) return;
-        // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
-        // accept warns once (HR007). It, and absent input, take the prop's default, or null.
-        const absent = value == null || value === ABSENT;
-        if (absent && prop.type === undefined && prop.default !== undefined) {
-          projectedScope.set(prop.name, prop.default as Value);
-          return;
-        }
-        if (prop.type !== undefined && (absent || !parseTypedValue(value, prop.type, "$", "value").ok)) {
-          if (!absent) {
-            warnAuthored(context.definition, `slot:${name}:${prop.name}`,
-              `${name === "" ? "The default slot" : `Slot \`${name}\``} prop \`${prop.name}\` does not satisfy its declared type \`${formatType(prop.type)}\`.`);
-          }
-          projectedScope.set(prop.name, (prop.default ?? null) as Value);
-          return;
-        }
-        projectedScope.set(prop.name, value);
-      });
-    }
-    const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {
-      const adopted: Node[] = [];
-      let cursor = 0;
-      for (const child of content) {
-        const nodes = materialize(renderTemplateNode(child, projectedScope, document, projectionContext, existing[cursor]), document);
-        adopted.push(...nodes);
-        cursor += nodes.length;
-      }
-      return adopted;
-    })();
-    for (const child of rendered) markProjectedRoot(child);
-    // host.slots lists these roots while this outlet renders them, following a component's lowered root.
-    const roots = rendered.filter((child): child is Element => child.nodeType === 1);
-    roots.forEach((root, index) => { if (root.localName.includes("-")) whenLowered(root, (lowered) => { roots[index] = lowered; }); });
-    ownEffect(context, scope, () => {
-      let renderings = templateRenderings.get(carrier);
-      if (renderings === undefined) templateRenderings.set(carrier, renderings = new Set());
-      renderings.add(roots);
-      return () => { renderings.delete(roots); };
-    });
-    return rendered;
+    return renderScopedTemplate(carrier, name, props, scope, document, context, existing);
   };
   // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
   // delimited, so server output can rebuild the same instance.
@@ -3104,7 +3428,7 @@ export function serializeRenderedForm(container: Element): string {
       ? [instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, entry.projection?.nodes])
       : compiled === undefined ? [] : [compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, entry.J?.map(([node]) => node)]);
     for (const [tag, recorded] of owners) {
-      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node));
+      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node) && !borrowedContent.has(node));
       for (const node of unrendered) if (!carriedBy.has(node)) carriedBy.set(node, carriers.length);
       carriers.push({ root: copy, tag, nodes: unrendered });
     }
@@ -3298,7 +3622,10 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, explicit, propInputs, inputRevisions } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  // An accepted child its list already read keeps that prop scope, so its entry and instance agree.
+  const early = frameworkProps === undefined ? earlyInvocations.get(invocation) : undefined;
+  if (early !== undefined) earlyInvocations.delete(invocation);
+  const { scope, passThrough, effects, explicit, propInputs, inputRevisions } = early ?? readInvocation(invocation, definition, hydration, parent, frameworkProps);
   const rootNode = elementMatchRoot(componentRoot(definition, scope));
   const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
   const renderScope = rootWith === undefined ? scope : scope.fork();
@@ -3313,14 +3640,22 @@ function prepareRuntimeInvocation(
   }
   let hydratedNodes = projectedNodes;
   let hydrationRanges: HydrationRange[] | undefined;
+  let childRanges: HydrationRange[] | undefined;
+  const lists = definition.contract.slots === undefined ? undefined
+    : Object.entries(definition.contract.slots).filter(([, slot]) => slot.as !== undefined);
   if (hydration && hydratedNodes === undefined) {
     const server = serverRanges(invocation, true, definition.contract.tag);
     if (server !== undefined) {
       // The rendered form names every slot range, and the serializer carried the
       // projected nodes no slot currently renders. Together they are the authored projection.
       hydrationRanges = server.ranges;
+      // A `<slot of>` range borrows a child's slot (rendered-form#borrowed-slot-ranges): its outlet adopts it.
+      if (lists?.length) {
+        childRanges = server.ranges.filter((range) => serverMark(range.markers[0]!)?.attributes.has("of"));
+        hydrationRanges = server.ranges.filter((range) => !childRanges!.includes(range));
+      }
       const nodes: Node[] = [];
-      for (const range of server.ranges) {
+      for (const range of hydrationRanges) {
         if (range.fallback || range.scoped) continue;
         for (const node of range.content) {
           projectedSlotNames.set(node, range.slot);
@@ -3405,7 +3740,9 @@ function prepareRuntimeInvocation(
     frameworkOwned,
     committed: hydration,
     hydrationRanges,
+    childRanges,
   };
+  for (const [slot, { accepts, as }] of lists ?? []) installChildList(instance, context, slot, accepts ?? [], as!, invocation.ownerDocument);
   const lifecycle = definition.lifecycle;
   if (lifecycle !== undefined) {
     // One connection-owned effect, as a controller's `host.on`: it runs `on:connect` each time the
@@ -3437,6 +3774,7 @@ function prepareRuntimeInvocation(
     hydration ? invocation : undefined,
   );
   context.hydrationRanges = undefined;
+  context.childRanges = undefined;
   const nativeRoot = rendered[0] as Element;
   if (hydration && nativeRoot !== invocation) {
     fail("HR005", `Server markup for <${definition.contract.tag}> has an incompatible root.`);
@@ -3571,11 +3909,16 @@ function scriptOwners(document: Document, instance: RuntimeInstance, scope: Reac
 
 /** Capture the closest component owner while an invocation still sits in its authored tree. */
 function invocationParent(element: Element, pending: WeakMap<Element, RuntimeInstance>): RuntimeInstance | undefined {
-  for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
-    const prepared = pending.get(ancestor);
-    if (prepared !== undefined) return prepared;
-    const existing = runtimeInstance(ancestor);
-    if (existing !== undefined) return existing;
+  for (let ancestor: Element | null = element; ancestor !== null; ancestor = ancestor.parentElement) {
+    if (ancestor !== element) {
+      const prepared = pending.get(ancestor);
+      if (prepared !== undefined) return prepared;
+      const existing = runtimeInstance(ancestor);
+      if (existing !== undefined) return existing;
+    }
+    // Content a `<slot of>` outlet placed has the slot's owner as its logical parent (components#component-ancestry-for-shared-state).
+    const placed = childPlacements ? placedOwners.get(ancestor) : undefined;
+    if (placed !== undefined) return pending.get(placed.element) ?? runtimeInstance(placed.element);
   }
   return undefined;
 }
@@ -3750,6 +4093,8 @@ function commitRuntimeInvocations(
     if (invocation.replace) {
       supersededInvocations.add(invocation.invocation);
       invocation.invocation.replaceWith(invocation.nativeRoot);
+      // A projected invocation's root is the projected node now, so slotted styles reach it.
+      if (invocation.invocation.hasAttribute(PROJECTED_ATTRIBUTE)) markProjectedRoot(invocation.nativeRoot);
       runtimeInstances.delete(invocation.invocation);
       // Whatever a parent deferred for this invocation now has the element it was waiting for.
       for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) {
@@ -4638,6 +4983,8 @@ export function getComponentHost(element: Element, tag?: string): ComponentHost 
   const stateNames = new Set(declarations.flatMap((declaration) =>
     declaration.kind === "state" || declaration.kind === "computed" ? [declaration.name]
       : declaration.kind === "context" ? [declaration.as ?? declaration.name] : []));
+  // An `as` list reads like computed state: controllers see it, read-only.
+  for (const slot of Object.values(instance.definition.contract.slots ?? {})) if (slot.as !== undefined) stateNames.add(slot.as);
   const dataNames = new Set(declarations.filter((declaration) => declaration.kind === "data").map((declaration) => declaration.name));
   const nested = new WeakMap<object, Map<string, object>>();
   const write = (path: string, value: unknown, readonly: boolean, apply: () => void): boolean => {
