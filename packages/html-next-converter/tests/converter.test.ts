@@ -507,6 +507,19 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       "<section data-html-next-renderer=\"react\" component=\"x-feed\"><output class=\"value\"></output> <output class=\"pending\">true</output><output class=\"ok\">false</output></section>");
   });
 
+  for (const target of ["react", "preact"] as const) it(`typechecks repeated native property bindings in ${target}`, async () => {
+    const root = await fixture();
+    await writeFile(join(root, "x-card.html"), `<template component="x-card"><defs>
+      <prop name="items" type="list(object({ value: string, checked: boolean }))" required>Choices.</prop>
+      </defs><fieldset><label $each="item of $items" $key="$item.value">
+      <input type="checkbox" .checked="$item.checked"><span>{$item.value}</span>
+      </label></fieldset></template>`);
+    const outDirectory = join(root, `${target}-scoped-native-controls`);
+    const manifest = await convertComponents({ mode: "library", target, root, outDirectory, entries: ["x-card.html"] });
+    await typecheckReact(root, manifest.output.artifacts.filter(artifact => /\.tsx?$/.test(artifact.path))
+      .map(artifact => join(outDirectory, artifact.path)));
+  });
+
   it("typechecks native React control bindings and emits only their helper", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Controls."><defs>
