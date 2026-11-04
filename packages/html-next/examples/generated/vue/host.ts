@@ -1587,16 +1587,45 @@ interface ChildRecord {
   read(): VNode
 }
 const childRecords = new WeakMap<object, ChildRecord>()
+/** A slot's content as vnodes: a render function's slot may return one node, text or nothing, where a template's returns a list. */
+const slotContent = (value: unknown): VNode[] =>
+  (Array.isArray(value) ? value : [value]).map((child) =>
+    isVNode(child)
+      ? child
+      : Array.isArray(child)
+      ? h(Fragment, slotContent(child))
+      : child == null || typeof child === 'boolean'
+      ? createCommentVNode()
+      : createTextVNode(String(child))
+  )
+/** Renders a consumer's slot for a child, whether a template compiled it or a render function wrote it. */
+const renderChildSlot = (
+  given: Slots,
+  name: string,
+  props: Record<string, unknown>,
+  fallback: () => VNode[],
+): VNode => {
+  const slot = given[name]! as Slots[string] & { _c?: boolean }
+  return renderSlot(
+    slot._c === true
+      ? given
+      : { [name]: (inner: Record<string, unknown>) => slotContent(slot(inner)) },
+    name,
+    props,
+    fallback,
+  )
+}
 /** The empty slot a consumer adds beside a `<template slot>` it gives an accepted child, which places it afresh at every outlet. */
 const TEMPLATE_SLOT = 'html-next-template-'
 
 /**
  * A slot's `as` list (components#columns-as-markup): one stable, read-only entry per accepted child the
  * consumer gives `slot`, in content order, following its `v-if`, `v-for` and `<template>` regions,
- * holding the child's props as its instance resolves them. The list reads the consumer's vnodes, so it
- * is complete on the first render, on the server too; the second value is those vnodes, which the
- * slot's outlet renders (`ChildNodes`), so each entry knows its child's instance. Other children are
- * left out with a warning. `prefix` begins each warning, as live's do.
+ * holding the child's props as its instance resolves them. The list reads the consumer's vnodes, from a
+ * converted consumer, an SFC template or a render function alike, so it is complete on the first render,
+ * on the server too; the second value is those vnodes, which the slot's outlet renders (`ChildNodes`),
+ * so each entry knows its child's instance. A keyed child is known by its key, as Vue's diff knows it.
+ * Other children are left out with a warning. `prefix` begins each warning, as live's do.
  */
 export function useChildList<List>(
   slot: string,
@@ -1607,6 +1636,13 @@ export function useChildList<List>(
   listed: string,
 ): readonly [Readonly<Ref<List>>, Readonly<Ref<VNode[]>>] {
   const slots = useSlots()
+  const instance = getCurrentInstance()!
+  // A consumer's render that reads its values outside the slot function gives the table new vnodes
+  // without a change the list tracks: each new vnode from the consumer reads the slot afresh.
+  const source = shallowRef(instance.vnode)
+  onBeforeUpdate(() => {
+    source.value = instance.vnode
+  })
   const kinds = new Map(accepted.map((kind) => [kind[0], kind]))
   const leftOut = (key: string, message: string): void => {
     warnUnless(false, prefix + 'accepts:' + slot + ':' + key, prefix + message)
@@ -1621,15 +1657,12 @@ export function useChildList<List>(
   const state = computed(() => {
     const next = new Map<string, ChildRecord>()
     const entries: object[] = []
-    // A keyed v-for's children are known by key; anything else by its place (and branch key, for v-if).
-    const visit = (nodes: readonly unknown[], path: string, keyed: boolean): void =>
+    // A keyed child (a keyed v-for's, a v-if branch, a render function's) is known by key; anything else by its place.
+    const visit = (nodes: readonly unknown[], path: string): void =>
       nodes.forEach((child, index) => {
         if (!isVNode(child)) return
         const node = child as VNode
-        const at = path + '/'
-          + (keyed && node.key != null
-            ? id(node.key)
-            : index + (node.key == null ? '' : '~' + id(node.key)))
+        const at = path + '/' + (node.key == null ? index : '~' + id(node.key))
         const kind = kinds.get(node.type)
         if (kind !== undefined) {
           let record = records.get(at)
@@ -1678,13 +1711,13 @@ export function useChildList<List>(
             leftOut('#text', named + ' accepts ' + listed + '; this text is left out.')
           }
         } else if (node.type === Fragment) {
-          visit(node.children as unknown[], at, (node.patchFlag & 128) !== 0)
+          visit(slotContent(node.children), at)
         } else if (node.type === KeyedBoundary) {
           // The boundary renders the vnodes read here, so each entry keeps its child's instance.
           const children = node.children as { default?: () => VNode[] } | null
           try {
             const inner = children?.default?.() ?? []
-            visit(inner, at, false)
+            visit(inner, at)
             node.children = { default: () => inner } as never
           } catch (error) {
             node.children = {
@@ -1707,8 +1740,9 @@ export function useChildList<List>(
           )
         }
       })
+    void source.value
     const nodes = (slots[slot === '' ? 'default' : slot]?.() ?? []) as VNode[]
-    visit(nodes, '', false)
+    visit(nodes, '')
     records = next
     return { entries: Object.freeze(entries) as List, nodes }
   })
@@ -1765,13 +1799,19 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
         return fallback()
       }
       const given = node.children as Slots | null
+      const slot = given?.[name]
       const withProps = scoped.includes(name) || Object.keys(props.given).length > 0
-      // The child's `<template slot>` renders afresh at every outlet.
-      if (given?.[TEMPLATE_SLOT + name] !== undefined) {
-        return renderSlot(given, name, props.given, fallback)
+      // The child's `<template slot>` renders afresh at every outlet. Vue's own idiom for a slot that
+      // declares props, `<template #cell="{ row }">` or a render function's `cell`, is that template.
+      if (
+        slot !== undefined && (given?.[TEMPLATE_SLOT + name] !== undefined || scoped.includes(name))
+      ) {
+        return renderChildSlot(given!, name, props.given, fallback)
       }
-      const plain = given?.[name] !== undefined
-        || (given?.default?.() ?? []).some((content) => content.props?.slot === name)
+      const plain = slot !== undefined
+        || (given?.default === undefined ? [] : slotContent(given.default())).some((content) =>
+          content.props?.slot === name
+        )
       if (plain && withProps) {
         warn(
           name + ':plain',
@@ -1783,7 +1823,7 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
       void record.released.value
       if ((record.claims.get(name) ?? instance) !== instance) return fallback()
       record.claims.set(name, instance)
-      return renderSlot(given, name, {}, fallback)
+      return renderChildSlot(given, name, {}, fallback)
     }
   },
 })

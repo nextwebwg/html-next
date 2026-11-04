@@ -121,6 +121,8 @@ A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/decla
 - Convert an accepted component together with every component that accepts it. Vue reports an error when the accepting component's conversion lacks it, and Angular gives the child its list entry only in that conversion.
 - Content a `<slot of>` outlet places reads the child's context, then the parent's, when the parent renders its children's roots before those outlets, as a header row before the body does.
 - A preset whose root is an accepted component is left out of the list, with a warning.
+- In Vue, an SFC template and a render function give a table its columns as a converted consumer does. The table reads the vnodes of its slot, so a column is a vnode of the accepted component itself, directly or inside `v-if`, `v-for`, a `<template>` or a nested array. A component of your own that renders a column is another component to the table: it is left out of the list, with a warning, and renders where the slot's outlet places it.
+- In Vue, a slot that declares props, written `<template #cell="{ row }">` or as a render function's `cell`, renders at every outlet. Any other named slot, such as `<template #note>`, is plain content.
 - Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
 
 ## Converter validation

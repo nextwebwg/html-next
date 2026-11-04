@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.89
+
+- Hand-written Vue consumers fill a converted table's `as` list. An SFC template's `<template #cell="{ row }">` and a render function's `cell` render at every `<slot of>` outlet with its slot props. A render function's slot may return one node, text or nothing. A keyed column in a render function's flat or nested array keeps its entry and cells when it moves. A value the consumer reads outside the slot function updates the list when the consumer renders again. Columns come from the accepted component's own vnodes; a component that renders a column is left out with a warning.
+
 ## 1.0.0-alpha.88
 
 - Columns as markup. A `<slot>` declaration in `<defs>` takes `accepts`, one or more component tags, and `as`, the name of a read-only list of the accepted children's resolved props in content order. `<slot of="$entry" name="x">`, or `<template $slot of>` in table parts, places that child's slot with slot props and a fallback. The live runtime, compiled output, React, Preact, Vue, Svelte and Angular support it, with server rendering and hydration. A preset of an accepted component is left out of the list with a warning.
