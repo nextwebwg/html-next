@@ -36,7 +36,7 @@ import {
 import { kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
-  currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
+  borrowedContent, borrowedRanges, currentProjection, writeMark, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -64,6 +64,7 @@ import {
   type CompiledComponentStyles,
   type ComponentStyleGraph,
   markProjectedRoot,
+  PROJECTED_ATTRIBUTE,
   stateAttribute,
   stateAttributeValue,
 } from "./component-styles.js";
@@ -2971,8 +2972,6 @@ const placedOwners = new WeakMap<Node, ChildEntry>();
 let childLists = false;
 /** Set once any `<slot of>` outlet placed content, so lowering without one never looks. */
 let childPlacements = false;
-/** Plain slot content a `<slot of>` outlet placed: it keeps its identity, so later outlets show fallback. */
-const claimedNodes = new WeakSet<Node>();
 /** A server root's carried nodes, read before that child hydrates. */
 const serverCarried = new WeakMap<Element, readonly Node[]>();
 
@@ -3079,6 +3078,7 @@ function childSlotNodes(entry: ChildEntry, name: string): Node[] {
   else {
     nodes = serverCarried.get(element) ?? serverRanges(element, false, entry.tag)?.carried ?? [];
     serverCarried.set(element, nodes);
+    nodes = [...nodes, ...borrowedRanges.get(element) ?? []];
   }
   return nodes.filter((node) => node.nodeType === 1 && (projection?.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") === name);
 }
@@ -3166,10 +3166,10 @@ function placeChildSlot(
     return fallback();
   }
   // Plain content keeps its identity: the child's own outlet places it, else the first `<slot of>` that renders it.
-  if (outlets.includes(name) || content.some((candidate) => claimedNodes.has(candidate))) return fallback();
-  for (const placed of content) { claimedNodes.add(placed); placedOwners.set(placed, entry); }
+  if (outlets.includes(name) || content.some((candidate) => borrowedContent.has(candidate))) return fallback();
+  for (const placed of content) { borrowedContent.add(placed); placedOwners.set(placed, entry); }
   childPlacements = true;
-  ownEffect(context, scope, () => () => { for (const placed of content) claimedNodes.delete(placed); });
+  ownEffect(context, scope, () => () => { for (const placed of content) borrowedContent.delete(placed); });
   if (existing !== undefined) nodes = [...existing];
   else if (context.committed) {
     nodes = currentProjection(content);
@@ -3180,12 +3180,6 @@ function placeChildSlot(
     nodes = [anchor];
   }
   return { nodes, fallback: false, scoped: false };
-}
-
-/** Writes a rendered-form mark's data, as a processing instruction or the comment standing in for one. */
-function writeMark(mark: Node, target: string, data: string): void {
-  const text = mark.nodeType === 7 ? data : `?${target}${data === "" ? "" : ` ${data}`}?`;
-  if ((mark as CharacterData).data !== text) (mark as CharacterData).data = text;
 }
 
 /**
@@ -3224,6 +3218,11 @@ function renderChildSlot(
       const existing = adopting;
       adopting = undefined;
       if (existing === undefined) clearRange(start, end);
+      // An adopted range of plain content holds the child's own nodes: they join its slot content.
+      else if (entry !== null && !hydrating!.fallback && !hydrating!.scoped) {
+        const element = entry.element;
+        borrowedRanges.set(element, [...borrowedRanges.get(element) ?? [], ...existing]);
+      }
       const placed = untracked(() => placeChildSlot(node, entry, scope, document, ownedContext(context, owned!), existing));
       // Adopted nodes may come back through a fragment, so they go back before the end mark too.
       for (const stale of existing ?? []) if (!placed.nodes.includes(stale)) stale.parentNode?.removeChild(stale);
@@ -3417,7 +3416,7 @@ export function serializeRenderedForm(container: Element): string {
       ? [instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, entry.projection?.nodes])
       : compiled === undefined ? [] : [compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, entry.J?.map(([node]) => node)]);
     for (const [tag, recorded] of owners) {
-      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node));
+      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node) && !borrowedContent.has(node));
       for (const node of unrendered) if (!carriedBy.has(node)) carriedBy.set(node, carriers.length);
       carriers.push({ root: copy, tag, nodes: unrendered });
     }
@@ -4082,6 +4081,8 @@ function commitRuntimeInvocations(
     if (invocation.replace) {
       supersededInvocations.add(invocation.invocation);
       invocation.invocation.replaceWith(invocation.nativeRoot);
+      // A projected invocation's root is the projected node now, so slotted styles reach it.
+      if (invocation.invocation.hasAttribute(PROJECTED_ATTRIBUTE)) markProjectedRoot(invocation.nativeRoot);
       runtimeInstances.delete(invocation.invocation);
       // Whatever a parent deferred for this invocation now has the element it was waiting for.
       for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) {

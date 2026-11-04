@@ -34,7 +34,7 @@ export { importsVueBindings } from "./targets/vue-bindings.js";
 import { requestsArtifact as makeRequestsArtifact } from "./targets/request-host-source.js";
 import { headHelperArtifact as makeHeadArtifact } from "./targets/head-target.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
-import type { ComponentDefinition } from "./template.js";
+import type { ComponentDefinition, SlotContract } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
@@ -95,6 +95,18 @@ export interface Invoked {
   readonly definition: ComponentDefinition;
 }
 
+/**
+ * A component's slots for a framework target: its outlets, which carry their declarations' `accepts`
+ * and `as`, then each slot declared with `accepts` that no outlet renders, as its list alone reads it.
+ */
+function slotContracts(definition: ComponentDefinition): readonly SlotContract[] {
+  const outlets = definition.slots ?? [];
+  const listed = Object.entries(definition.contract.slots ?? {}).filter(([name, slot]) =>
+    slot.accepts !== undefined && !outlets.some((outlet) => (outlet.name ?? "") === name));
+  return listed.length === 0 ? outlets : [...outlets, ...listed.map(([name, slot]) =>
+    ({ ...name === "" ? {} : { name }, required: false, accepts: slot.accepts!, ...slot.as === undefined ? {} : { as: slot.as } }))];
+}
+
 export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
@@ -106,7 +118,7 @@ export function generateComponent(
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
     options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.guardNestedDepth === true, options?.modulePreparation, options?.hot === true);
   const vue = convertedToVue(definition, {
-    slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
+    slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, slotContracts(invoked)] as const)),
     propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
     componentGraph: graph,
     ...(options?.modulePreparation === undefined ? {} : { modulePreparation: options.modulePreparation }),

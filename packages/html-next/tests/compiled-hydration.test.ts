@@ -226,6 +226,9 @@ describe("compiled hydration of Node output", () => {
       const retained = compiled.querySelector("li");
       for (const box of [compiled, live]) box.querySelector<HTMLButtonElement>("button")?.click();
       await flush();
+      // Components a change adds are lowered by the live runtime's next pass, as its document observer runs one.
+      runtime.lowerDocument();
+      await flush();
       const nested = compiled.querySelector<HTMLElement>('[component~="ssr-bound-button"]');
       if (nested !== null) {
         for (const box of [compiled, live]) box.querySelector<HTMLElement>('[component~="ssr-bound-button"]')!.click();

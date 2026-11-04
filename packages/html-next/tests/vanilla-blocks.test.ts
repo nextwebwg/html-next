@@ -110,6 +110,18 @@ describe("direct-extend Vanilla generation", () => {
     assert.doesNotMatch(text, /function (?:subtract|multiply|remainder)\(/);
   });
 
+  it("adds nothing for columns as markup to components without `as` slots or `<slot of>`", () => {
+    const card = `<template component="x-card" status="early" summary="Card."><defs><prop name="title" type="string">Title.</prop>
+      <slot name="footer"></slot></defs><article><h2>{$title}</h2><slot></slot><footer><slot name="footer">-</slot></footer></article></template>`;
+    const page = `<template component="x-cards" status="early" summary="Cards."><defs><state name="open" type="boolean" value="true"></state></defs>
+      <main><x-card title="A"><p $if="$open">Body</p><small slot="footer">F</small></x-card></main></template>`;
+    const { modules } = graph([page, card]);
+    for (const module of modules.values()) {
+      assert.doesNotMatch(module, /\b(?:childList|childOutlet|listChanged|borrowedSlots)\b|const OF =/);
+    }
+    assert.match(modules.get("./XCards.js")!, /^import \{ attachGeneratedController, buildTemplate, clearRegion, dispose, invoke, projected, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+  });
+
   it("compiles every component without the general runtime", () => {
     // What the parser accepts compiles; anything it rejects never reaches the generator.
     for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="$x"></p>')]) {
@@ -1937,6 +1949,60 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       host.root.ownerDocument.querySelectorAll("template[slot]").length}`);
     const click = (name: string) => (host: any): void => host.root.ownerDocument.querySelector(`button.${name}`).click();
     await same([page, toggle, leaf], [read, click("toggle"), read, click("rename"), read, click("toggle"), read, click("toggle"), read]);
+  });
+
+  describe("columns as markup", () => {
+    const column = `<template component="x-column" status="early" summary="Column."><th scope="col"><slot name="header">{$header}</slot></th><defs>
+      <prop name="field" type="string">Field.</prop><prop name="header" type="string">Header.</prop>
+      <state name="tone" type="string" value="quiet"></state>
+      <slot name="header"></slot><slot name="note"></slot>
+      <slot name="cell"><prop name="row" type="object" required>Row.</prop></slot></defs></template>`;
+    const table = `<template component="x-datatable" controller="./host-reader.js" status="early" summary="Table."><defs>
+      <prop name="rows" type="list(object({ id: number, name: string, price: number }))" required>Rows.</prop>
+      <state name="density" type="string" value="compact"></state>
+      <slot accepts="x-column" as="columns"></slot></defs>
+      <table><caption>{$columns.length} columns</caption><thead><tr><template $slot></template></tr></thead>
+      <tbody><tr $each="row of $rows" $key="$row.id" from:data-id="$row.id"><td $each="column of $columns" $key="$column"><slot of="$column" name="cell" from:row="$row">{$row[$column.field]}</slot></td></tr></tbody>
+      <tfoot><tr><td $each="column of $columns" $key="$column"><slot of="$column" name="note">-</slot></td></tr></tfoot></table></template>`;
+    const badge = `<template component="x-cell-badge" status="early" summary="Badge."><defs><prop name="text" type="string">Text.</prop>
+      <context name="tone" from="x-column"></context><context name="density" from="x-datatable"></context></defs>
+      <b>{$text}:{$tone}:{$density}</b></template>`;
+    const products = `<template component="x-products" status="early" summary="Products."><defs>
+      <state name="products" type="list(object({ id: number, name: string, price: number }))"
+        value="[{ id: 1, name: 'Desk lamp', price: 49 }, { id: 2, name: 'Notebook', price: 6.5 }]"></state>
+      <state name="showId" type="boolean" value="false"></state>
+      <state name="extra" type="list(object({ key: string, label: string }))" value="[{ key: 'name', label: 'N' }, { key: 'price', label: 'P' }]"></state>
+      <handler name="toggle"><set name="showId" expr:value="not $showId"></set></handler>
+      <handler name="swap"><set name="extra" expr:value="[{ key: 'price', label: 'P' }, { key: 'name', label: 'N' }]"></set></handler>
+      <handler name="rename"><set name="products" expr:value="[{ id: 2, name: 'Notebook', price: 6.5 }, { id: 1, name: 'Lamp', price: 49 }, { id: 3, name: 'Pen', price: 2 }]"></set></handler>
+      </defs><main><button type="button" class="toggle" on:click="toggle">Id</button><button type="button" class="swap" on:click="swap">Swap</button>
+      <button type="button" class="rename" on:click="rename">Rename</button><x-datatable from:rows="$products">
+        <x-column $if="$showId" field="id" header="Id"></x-column>
+        <x-column field="name" header="Name"><i slot="note">kept</i></x-column>
+        <x-column class="numeric"><abbr slot="header" title="Price in US dollars">Price</abbr>
+          <template slot="cell"><span><x-cell-badge from:text="$row.name"></x-cell-badge></span>{$row.price}</template></x-column>
+        <x-column $each="column of $extra" $key="$column.key" from:field="$column.key" from:header="$column.label"></x-column>
+      </x-datatable></main></template>`;
+    const log = (text: string): void => { (globalThis as any).directExtendLog.events.push(text); };
+    // The table's entries, by their header or field, and the elements its default slot was given.
+    const read = (host: any): void => {
+      log(`columns ${(host.state.columns as any[]).map((entry) => entry.header ?? entry.field ?? "-")} slots ${host.slots.default.length}`);
+    };
+    const click = (name: string) => (host: any): void => host.root.ownerDocument.querySelector(`button.${name}`).click();
+    const then = (step: Step): Step => (host, update) => { step(host, update); read(host); };
+
+    it("collects accepted columns in order, renders their cells, notes and contexts like live", async () => {
+      await same([products, table, column, badge], [read, then(click("toggle")), then(click("swap")), then(click("rename")),
+        then(click("toggle")), (host) => { read(host); }]);
+    });
+
+    it("warns for children a slot does not accept and for unsupported placements like live", async () => {
+      const preset = `<template component="x-column-preset" status="early" summary="Preset."><x-column field="name"></x-column></template>`;
+      const page = `<template component="x-warned" status="early" summary="Warned."><defs></defs><main><x-datatable from:rows="[{ id: 1, name: 'A', price: 1 }]">
+        <x-column field="name"></x-column><x-colum></x-colum>stray<x-column-preset></x-column-preset>
+        <x-column><span slot="cell">plain</span></x-column></x-datatable></main></template>`;
+      await same([page, table, column, preset], [read]);
+    });
   });
 
   it("invokes a scalar prop component like live lowering", async () => {

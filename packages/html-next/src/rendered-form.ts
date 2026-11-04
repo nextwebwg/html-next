@@ -36,6 +36,12 @@ function regionMark(node: Node): number {
   return data === "html-next:start" || data === "html-next:each-start" ? 1 : data === "html-next:end" || data === "html-next:each-end" ? -1 : 0;
 }
 
+/** Writes a rendered-form mark's data, as a processing instruction or the comment standing in for one. */
+export function writeMark(mark: Node, target: string, data: string): void {
+  const text = mark.nodeType === 7 ? data : `?${target}${data === "" ? "" : ` ${data}`}?`;
+  if ((mark as CharacterData).data !== text) (mark as CharacterData).data = text;
+}
+
 /**
  * The consumer regions that make up all of a slot's assigned nodes, as [start, end] marks, or
  * undefined when the slot is given anything else.
@@ -178,6 +184,14 @@ export function serverRangeAt(start: Node, slot: string): HydrationRange | undef
   return undefined;
 }
 
+/**
+ * Plain slot content a `<slot of>` outlet placed (rendered-form#borrowed-slot-ranges). It keeps its
+ * identity where it renders, so later outlets show their fallback and no carrier copies it.
+ */
+export const borrowedContent = /* @__PURE__ */ new WeakSet<Node>();
+/** The content adopted `of` ranges placed from a child's server root, which joins that child's projection. */
+export const borrowedRanges = /* @__PURE__ */ new WeakMap<Element, Node[]>();
+
 /** The nodes a server carrier held, which hydration puts in place only where their slots render them. */
 const carriedRoots = new WeakSet<Node>();
 
@@ -240,6 +254,7 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
     for (const child of Array.from(carrier.content.childNodes)) carried.push(root.ownerDocument.adoptNode(child));
     carrier.remove();
   } else if (carrier !== undefined) carried.push(...Array.from(carrier.content.childNodes));
+  if (consume) carried.push(...borrowedRanges.get(root) ?? []);
   return { ranges, carried };
 }
 

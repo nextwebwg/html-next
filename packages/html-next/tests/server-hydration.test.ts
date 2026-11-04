@@ -111,6 +111,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             const host = runtime.getComponentHost(clientRoot)!;
             for (const [name, value] of Object.entries(state)) host.state[name] = value;
             await new Promise((resolve) => setTimeout(resolve, 0));
+            runtime.lowerDocument();
             const inspect = (box: Element) => Array.from(box.querySelectorAll("[component]"), (element) => runtime.inspectInstance(element));
             const initial = { server: inspect(server), client: inspect(client) };
             const identity = root === context.originalRoot && context.originalNodes.every((node) => server.contains(node));
@@ -122,6 +123,9 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             const retained = server.querySelector("li");
             server.querySelector<HTMLButtonElement>("button")?.click();
             client.querySelector<HTMLButtonElement>("button")?.click();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            // Components a change adds are lowered by the live runtime's next pass, as its document observer runs one.
+            runtime.lowerDocument();
             await new Promise((resolve) => setTimeout(resolve, 0));
             const nested = server.querySelector<HTMLElement>('[component~="ssr-bound-button"]');
             let parentBindings = null;

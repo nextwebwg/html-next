@@ -215,6 +215,41 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
       }
     });
 
+    it(`${engine} places plain slot content once, so no carrier copies it and hydration keeps it`, async () => {
+      const definitions = [
+        `<template component="x-note"><th><slot name="label"></slot></th><defs><slot name="label"></slot><slot name="detail"></slot></defs></template>`,
+        `<template component="x-notes"><defs><slot accepts="x-note" as="notes"></slot></defs><table><thead><tr><template $slot></template></tr></thead>
+          <tbody><tr><td $each="note of $notes" $key="$note"><slot of="$note" name="detail">none</slot></td></tr></tbody></table></template>`,
+        `<template component="page-notes"><defs><state name="first" type="boolean" value="false"></state></defs>
+          <main><x-notes><x-note $if="$first"><i slot="label">First</i></x-note><x-note><i slot="label">Kept</i><b slot="detail">kept</b></x-note><x-note></x-note></x-notes></main></template>`,
+      ].map((source) => parseComponent(source));
+      const rendered = await renderComponents('<page-notes id="subject"></page-notes>', { definitions });
+      assert.equal(rendered.html.match(/>kept</g)?.length, 1);
+      assert.match(rendered.html, /start slot="detail" of="0"\?><b slot="detail"[^>]*>kept<\/b>/);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.setContent(`<div id="server">${rendered.html}</div>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const kept = document.querySelector("b");
+          window.HtmlRuntime.registerComponentDefinitions(JSON.parse(${JSON.stringify(JSON.stringify(definitions))}));
+          window.HtmlRuntime.observeDocument(document);
+          const cells = () => Array.from(document.querySelectorAll("td"), (cell) => cell.textContent.trim());
+          const initial = cells();
+          window.HtmlRuntime.getComponentHost(document.querySelector("main")).state.first = true;
+          await ${tick}; await ${tick};
+          return { initial, changed: cells(), same: document.querySelector("b") === kept && kept.isConnected };
+        })()`);
+        assert.deepEqual(result, { initial: ["kept", "none"], changed: ["none", "kept", "none"], same: true });
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${engine} warns for children a slot does not accept and for unknown or prop-less placements`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -82,6 +82,8 @@ interface Root {
   readonly computed?: CompiledExpression | undefined;
   /** A `<context>`: the providing component's tag and the state it reads; these follow the computeds. */
   readonly context?: { readonly from: string; readonly name: string };
+  /** A slot's `as` list of accepted children, read-only like a context; these follow the contexts. */
+  readonly list?: { readonly slot: string; readonly accepts: readonly string[] };
   /** A `<data>` read, whose state roots follow the props. */
   readonly data?: DataDeclaration;
   /** A root `$with`'s expression: the alias keeps its last conforming value, and follows the reads. */
@@ -177,6 +179,11 @@ interface Region {
   readonly propTypes?: readonly (TypeNode | undefined)[];
   /** Each prop's declared default as source, which a null or rejected value takes. */
   readonly propDefaults?: readonly (string | undefined)[];
+  /** `<slot of>`: the entry whose slot it places, and the root of the `as` list that entry is in. */
+  readonly of?: Lowered;
+  readonly listRoot?: number;
+  /** A consumer region at the top of content for a slot with `accepts`: that slot's list follows it. */
+  readonly listed?: boolean;
 }
 
 interface Block {
@@ -214,6 +221,8 @@ interface Block {
   projection?: boolean;
   /** A consumer's <template slot> content, which renders only when an outlet renders it. */
   template?: boolean;
+  /** The body of a consumer region at the top of content for a slot with `accepts` (`Region.listed`). */
+  listing?: boolean;
   /** An element here carries the `transitions` extension's directives. */
   transitions?: boolean;
 }
@@ -252,6 +261,11 @@ interface Invocation {
   readonly controls: readonly string[];
   /** `$value` or `$html` on the invocation: its first value is the content projected into the component. */
   readonly content?: { readonly kind: "value" | "html"; readonly expression: Lowered } | undefined;
+  /**
+   * A component at the top of the content projected into a slot with `accepts`: it is created at
+   * once, as the receiving component's list reads it (or warns that it is left out) before rendering.
+   */
+  readonly accepted?: boolean;
 }
 
 /** Whether a block, or a region below it, listens: removing it must stop those listeners. */
@@ -289,6 +303,14 @@ export interface BlockPlan {
   readonly head: readonly string[];
   /** Each declared script: its status root (-1 for an unnamed one) and the handlers its `on:load` and `on:error` run. */
   readonly scripts: readonly { readonly declaration: ScriptDeclaration; readonly root: number; readonly load?: string; readonly error?: string }[];
+  /** What `<slot of>` outlets know of each accepted child's slots (`ChildSlots` in generated-runtime). */
+  readonly children?: Readonly<Record<string, readonly [readonly string[], readonly string[], readonly string[], string]>>;
+}
+
+/** "`a`", "`a` and `b`", "`a`, `b` and `c`". */
+function listed(names: readonly string[]): string {
+  const quoted = names.map((name) => `\`${name}\``);
+  return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
 }
 
 /** What the parser already rules out; reaching it is a compiler defect, reported at build time. */
@@ -787,6 +809,9 @@ function outerOf(value: Lowered, level: number): number {
   return value.bits | (value.nested || (value.items ?? 0) & outer ? NESTED : 0) | ((value.positional ?? 0) & outer ? POSITION : 0);
 }
 
+/** A root the template and the controller only read: a context, or a slot's `as` list. */
+const readOnlyRoot = (root: Root): boolean => root.context !== undefined || root.list !== undefined;
+
 function compileRoots(definition: ComponentDefinition): Root[] {
   const declarations = definition.declarations ?? [];
   const conforming = conformingStates(definition);
@@ -830,6 +855,9 @@ function compileRoots(definition: ComponentDefinition): Root[] {
       checked: node !== undefined && !conforming.has(declaration.name),
     });
   }
+  // Each slot's `as` list follows, read-only.
+  const lists: Root[] = Object.entries(definition.contract.slots ?? {}).flatMap(([slot, declaration]) => declaration.as === undefined ? []
+    : [{ name: declaration.as, type: "?" as const, initial: "null", list: { slot, accepts: declaration.accepts ?? [] } }]);
   // Props follow, read-only: an accepted value always satisfies its type, so reads need no check.
   const props: Root[] = Object.entries(definition.contract.props).map(([name, prop]) => {
     // A select prop's type follows its selector, so every read checks it against the current choice.
@@ -840,7 +868,7 @@ function compileRoots(definition: ComponentDefinition): Root[] {
   // A named declared script's status reads as a `<data>` read's state does, starting before insertion.
   const scripts: Root[] = (definition.scripts ?? []).flatMap((script, index) => script.name === undefined ? []
     : [{ name: script.name, type: "?" as const, initial: "{ pending: false, ok: false, error: null }", script: index }]);
-  return [...states, ...computeds, ...contexts, ...props, ...reads, ...scripts];
+  return [...states, ...computeds, ...contexts, ...lists, ...props, ...reads, ...scripts];
 }
 
 
@@ -862,6 +890,8 @@ class Planner {
   private projecting: { block: Block; readonly definition: ComponentDefinition } | undefined;
   /** The next block planned is a consumer's <template slot> content. */
   private templateContent = false;
+  /** The next block planned is the body of a region whose children a slot's `as` list reads. */
+  private listingContent = false;
   /** The `transitions` extension's rules, by the class each value's elements carry. */
   readonly transitionRules = new Map<string, string>();
 
@@ -1049,6 +1079,10 @@ class Planner {
     if (this.templateContent) {
       this.templateContent = false;
       block.template = true;
+    }
+    if (this.listingContent) {
+      this.listingContent = false;
+      block.listing = true;
     }
     const scope: Scope = { ...outer, block };
     if (fragment && !root) {
@@ -1258,10 +1292,17 @@ class Planner {
     }
     block.invocations.push({
       site, factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined, controls, content,
+      ...(block.projection === true ? path.length === 1 : block.listing === true && path.length <= 1) && this.accepts(node).length > 0 ? { accepted: true } : {},
       events: (node.events ?? []).map((event) => ({ site, name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers })),
       ref: node.ref === undefined ? undefined : { name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) },
     });
     return 5;
+  }
+
+  /** The tags the slot `node` is projected into accepts, in the component the content is projected into. */
+  accepts(node: ElementNode): readonly string[] {
+    const slot = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
+    return this.projecting?.definition.contract.slots?.[slot?.kind === "literal" ? slot.value : ""]?.accepts ?? [];
   }
 
   /**
@@ -1296,12 +1337,14 @@ class Planner {
       const projecting = this.projecting;
       if (projecting === undefined || projecting.block !== block || path.length > 0) return [["template", ["slot", slot]]];
       const contracts = (projecting.definition.slots ?? []).filter((contract) => (contract.name ?? "") === slot);
-      const props = [...new Set(contracts.flatMap((contract) => contract.props ?? []))];
+      // A slot another component places (`<slot of>`) gives the props its declaration names.
+      const declaredSlot = projecting.definition.contract.slots?.[slot]?.props ?? {};
+      const props = [...new Set([...contracts.flatMap((contract) => contract.props ?? []), ...Object.keys(declaredSlot)])];
       const inner: Scope = { ...scope, level: scope.level + 1 };
       const types: TypeScope = { get: () => undefined };
       // A declared slot prop has its declared type; the template reads it as its outlet gave it.
       const declared = (name: string): TypeNode | undefined => {
-        const prop = contracts.find((contract) => contract.declared?.[name] !== undefined)?.declared?.[name];
+        const prop = contracts.find((contract) => contract.declared?.[name] !== undefined)?.declared?.[name] ?? declaredSlot[name];
         return prop === undefined ? undefined : normalizeType(prop.type);
       };
       declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, declared(name)])));
@@ -1335,6 +1378,14 @@ class Planner {
       const slot = node.name ?? "";
       const fallback = this.block({ kind: "element", name: "template", attributes: [], children: node.fallback ?? [] },
         false, { ...scope, level: scope.level + 1 }, false, svg, false);
+      if (node.of !== undefined) {
+        // ponytail: a static prop is given as its text, unconverted; live converts it by the child's declared type.
+        const given = (node.props ?? []).map((prop) => prop.raw !== undefined ? none(`raw:${prop.raw}`, JSON.stringify(prop.raw)) : this.checked(prop.expressionPlan, scope));
+        block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
+          of: this.checked(node.of.expressionPlan, scope), listRoot: this.roots.findIndex((root) => root.name === node.of!.list),
+          props: given, propNames: (node.props ?? []).map((prop) => prop.name) });
+        return 4;
+      }
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
       block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
         ...props === undefined ? {} : { props, propNames: node.props!.map((prop) => prop.name),
@@ -1369,7 +1420,8 @@ class Planner {
     // A region among a component's children, for an element with `slot`, is projected into that slot.
     const slotted = block.projection === true && path.length === 1
       ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot") : undefined;
-    const projected = slotted?.kind === "literal" ? { projected: slotted.value } : {};
+    const listed = block.projection === true && path.length === 1 && this.accepts(node).length > 0;
+    const projected = { ...slotted?.kind === "literal" ? { projected: slotted.value } : {}, ...listed ? { listed } : {} };
     // Content for a named slot is projected content wherever it renders, as `:slotted()` selects it.
     const body: typeof authored = slotted === undefined || node.name === "template" || authored.attributes.some((attribute) => attribute.name === PROJECTED_ATTRIBUTE) ? authored
       : { ...authored, attributes: [...authored.attributes, { kind: "literal", name: PROJECTED_ATTRIBUTE, value: "" }] };
@@ -1378,6 +1430,7 @@ class Planner {
     const inner: Scope = { ...scope, level: scope.level + 1 };
     if (flow.kind === "if") {
       const decision = { test: truthiness(this.checked(plan(flow.testPlan, flow.test), scope)) };
+      this.listingContent = listed;
       block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), ...decision, ...projected });
       return 1;
     }
@@ -1396,6 +1449,7 @@ class Planner {
           : `awaitInput(${prop ? "B" : "undefined"}, ${JSON.stringify(binding.name)}, ${binding.handlesError}${prop ? "" : `, ${value.source}`})`,
       } };
       const aliasScope = this.layer(inner, flow.alias, type, "item");
+      this.listingContent = listed;
       block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), ...decision, alias: flow.alias, ...projected });
       return 1;
     }
@@ -1432,6 +1486,7 @@ class Planner {
       const decision = { test: { ...none(`match:${site}`, selection), ...reads, fails: true } };
       const armBlocks = chosen.map((arm) => {
         const { flow: _armFlow, ...armBody } = arm;
+        this.listingContent = listed;
         return this.block(armBody, false, armScope, false, svg, alias !== undefined);
       });
       block.regions.push({ kind: "match", site, block: armBlocks[0] ?? this.block({ ...body, children: [] }, false, inner, false, svg, false),
@@ -1460,6 +1515,7 @@ class Planner {
     const keyScope: Scope = { ...positions(scope, "o", "j", "loopRecord({ j, l })"), closure: true };
     const key = flow.key === undefined ? undefined : lower(plan(flow.keyPlan, flow.key).ast, keyScope);
     const shaped = this.shape(flow, scope, list, itemType);
+    this.listingContent = listed;
     const rows = this.block(body, true, rowScope, false, svg);
     // Rows keep their position when something in them, below them, or their key reads it.
     const own = levelBit(rows.level);
@@ -1593,10 +1649,22 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
         ? `[${JSON.stringify(attribute.name)}, ${JSON.stringify(attribute.value)}]`
         : `[${JSON.stringify(attribute.name)}, ${bound(attribute.expressionPlan!, `(x) => toAttribute(x, ${JSON.stringify(attribute.name)})`)}]`).join(", ")}])]`;
     });
+    // Each accepted child's slots, which `<slot of>` outlets place: its own outlets, those with props, and all it declares.
+    const outlets = planner.blocks.some((block) => block.regions.some((region) => region.of !== undefined));
+    const children = !outlets ? undefined : Object.fromEntries(roots.flatMap((item) => item.list?.accepts ?? []).flatMap((tag) => {
+      const accepted = graph?.get(tag) ?? invocations?.get(tag)?.definition;
+      if (accepted === undefined) return [];
+      const own = (accepted.slots ?? []).map((slot) => slot.name ?? "");
+      const declared = Object.entries(accepted.contract.slots ?? {});
+      const known = [...new Set([...declared.map(([name]) => name), ...own])];
+      return [[tag, [own, declared.flatMap(([name, slot]) => Object.keys(slot.props).length > 0 ? [name] : []), known,
+        listed(known.filter((name) => name !== ""))] as const]];
+    }));
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
+      ...children === undefined ? {} : { children },
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       seeds: roots.flatMap((item, index) => item.initializer === undefined ? [] : [{ index, source: convertible(planner.checked(item.initializer, { ...planner.scope, observesInputs: true })) }]),
-      states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
+      states: roots.length - props - roots.filter((item) => item.computed !== undefined || readOnlyRoot(item)).length, shown: roots.length - props, reads,
       aliased: roots.flatMap((item, index) => item.alias === undefined ? [] : [{ index, value: planner.checked(item.alias, planner.scope) }]),
       ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } },
       ...planner.transitionRules.size === 0 ? {} : { transitions: [...planner.transitionRules.values()].filter(Boolean).join("\n") } };
@@ -1727,7 +1795,9 @@ function rootsWritten(reads: Reads): string {
 function regionOuter(block: Block, level: number): number {
   let mask = 0;
   for (const region of block.regions) {
-    for (const value of [region.test, region.list, region.key, ...region.props ?? []]) if (value !== undefined) mask |= outerOf(value, level);
+    for (const value of [region.test, region.list, region.key, region.of, ...region.props ?? []]) if (value !== undefined) mask |= outerOf(value, level);
+    // A `<slot of>` range carries its entry's index in the list.
+    if (region.listRoot !== undefined) mask |= region.listRoot < 29 ? rootBit(region.listRoot) : OVERFLOW;
     // Rows below follow the same outer changes: a sweep reaches them through each row between.
     for (const body of [region.block, ...region.arms ?? []]) mask |= blockOuter(body, level);
   }
@@ -1822,7 +1892,7 @@ export function emitBlocks(
       const marked = region.projected === undefined ? start : `slotRegion(${start}, ${end}, ${JSON.stringify(region.projected)})`;
       if (region.kind !== "each") {
         entries.push(`a${region.site}: ${marked}`, `e${index}: ${end}`, `b${index}: ${hydrate ? "z && ADOPT" : "undefined"}`,
-          ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined ? [] : [`x${index}: undefined`]] : []);
+          ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined || region.of !== undefined ? [] : [`x${index}: undefined`]] : []);
       } else {
         const child = region.block.id;
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
@@ -1861,7 +1931,7 @@ export function emitBlocks(
       }),
     ];
     // In projected content a component waits until a slot places it, as live lowering does.
-    const waits = inProjection(block);
+    const waits = inProjection(block) && invocation.accepted !== true;
     return [
       waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, -1, new Map()))) {` : `  if (r.h${index} === undefined) {`,
       ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.matches(':is([component]:not(template), [data-component]:not([component]))');`] : [],
@@ -2056,6 +2126,14 @@ export function emitBlocks(
         const fill = hydrate ? `const ad = ${body} === ADOPT; ${body} = undefined; const at = (ad ? adoptSlot : fillSlot)` : "const at = fillSlot";
         const place = hydrate ? `if (${body}.n !== at) placeFallback(at, ${body}.n);` : `at.before(${body}.n);`;
         const props = region.props;
+        if (region.of !== undefined) {
+          // `<slot of>` places an accepted child's slot, and renders again when `of` names another entry.
+          lines.push(
+            `  if (r.f${index} === undefined) r.f${index} = childOutlet(r, r.a${region.site}, r.e${index}, ${name}, OF, S, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}, ${(props?.length ?? 0) > 0}${hydrate ? `, ${body} === ADOPT` : ""});`,
+            `  r.f${index}(${convertible(region.of)}, v[${region.listRoot}], { ${(props ?? []).map((prop, at) => `${JSON.stringify(region.propNames![at])}: ${convertible(prop)}`).join(", ")} }, c, d);`,
+          );
+          return;
+        }
         if (props === undefined) {
           lines.push(
             // A consumer's <template slot> renders here afresh, and is let go when this outlet goes.
@@ -2222,6 +2300,8 @@ export function emitBlocks(
     // A region for a named slot tells that slot it rendered, which shows its fallback or the region's content.
     block.regions.forEach((region, index) => {
       if (region.projected !== undefined) lines.push(`  regionChanged(${region.kind === "each" ? `r.L${index}.s` : `r.a${region.site}`});`);
+      // A region whose children a slot's `as` list reads tells that list it rendered.
+      if (region.listed === true) lines.push(`  listChanged(${region.kind === "each" ? `r.L${index}.s` : `r.a${region.site}`});`);
     });
     return lines;
   };
@@ -2288,7 +2368,9 @@ export function emitBlocks(
     const regions = block.regions.flatMap((region) => region.projected === undefined || block.sites[region.site]!.length !== 1 ? []
       : [`${position(block.sites[region.site]![0]!)}: ${JSON.stringify(region.projected)}`]);
     const slotted = regions.length === 0 ? "" : `${invoked === "" ? ", []" : ""}, { ${regions.join(", ")} }`;
-    return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked}${slotted});`];
+    // An accepted child's plain content its parent's `<slot of>` outlet rendered is found in that outlet's range.
+    const borrowed = into.accepted !== true ? "" : `${invoked === "" ? ", []" : ""}${slotted === "" ? ", {}" : ""}, borrowedSlots`;
+    return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked}${slotted}${borrowed});`];
   };
   /** The block's node: the one it adopted, or its prototype's clone. Projected content leaves its nodes where the server put them. */
   const node = (block: Block): string => {
@@ -2358,7 +2440,9 @@ export function emitBlocks(
   }
   const propNames = Object.keys(contract.props);
   const delegated = plan.root.spec === 5;
-  const slotted = blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
+  // A slot's `as` list reads the projection, outlet or not.
+  const lists = plan.roots.flatMap((item, index) => item.list === undefined ? [] : [{ index, ...item.list }]);
+  const slotted = lists.length > 0 || blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
   /** Whether the props' `data-<tag>-prop-<name>` the root's template binds itself, which is then its output. */
   const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
     node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === propAttribute(contract.tag, name)));
@@ -2431,12 +2515,15 @@ export function emitBlocks(
       ...region.counted === true ? [`  R.L${index}.q = true;`] : [],
     ]),
   );
-  const contextStart = plan.roots.findIndex((item) => item.context !== undefined);
+  // Contexts and `as` lists are read-only: the host reads them as it reads a computed.
+  const contextStart = plan.roots.findIndex(readOnlyRoot);
   const channel = plan.computeds.length > 0 || contextStart >= 0 || plan.seeds.length > 0;
   const observesBindings = blocks.some(block => block.invocations.some(invocation => invocation.props.some(prop => prop.snapshot)));
   // A component another's <context> may read tells it about its renders (`noContextReaders` proves none does).
   const provides = !noContextReaders && plan.states > 0;
-  const render = plan.arms === undefined ? "((c, d) => p0(R, c, d))" : "p";
+  const drawn = plan.arms === undefined ? "((c, d) => p0(R, c, d))" : "p";
+  // An entry whose props changed is marked in the render's written objects first.
+  const render = lists.length === 0 ? drawn : `((c, d) => { ${lists.map((list) => `c |= L${list.index}(c, d);`).join(" ")} ${drawn}(c, d); })`;
   // Declared reads re-request before the template renders, as live's priority-0 request effects run first.
   // A root `$with` keeps its last conforming value, refreshed before the template renders.
   const aliased = plan.aliased.map(({ index, value }) => `{ const x = ${convertible(value)}; if (x !== NONCONFORMING && !Object.is(x, v[${index}])) { v[${index}] = x; ${
@@ -2449,7 +2536,7 @@ export function emitBlocks(
   // A component that declares requests gives its controller a host with `host.request`, which reads the instance.
   const scripted = (definition.scripts ?? []).some((script) => script.name !== undefined);
   const asks = (definition.module ?? definition.controller) !== undefined && (Object.keys(contract.requests ?? {}).length > 0 || scripted);
-  const instance = asks || hydrate || provides || contextStart >= 0 || plan.seeds.length > 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const instance = asks || hydrate || provides || contextStart >= 0 || lists.length > 0 || plan.seeds.length > 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
     transitionMask !== 0 || headed || plan.scripts.length > 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
@@ -2460,6 +2547,11 @@ export function emitBlocks(
     // An adopted root connects once the outermost adoption has finished.
     ...hydrate ? ["  if (h) I.L = adoptLifecycle;"] : [],
     ...(slotted ? [hydrate ? "  const J = Y ? project(I, ...Y) : project(I, children, slots);" : "  const J = project(I, children, slots);"] : []),
+    // Each `as` list is read from the projection before the template first renders.
+    ...lists.map((list) => {
+      const named = `\`${contract.tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
+      return `  const L${list.index} = childList(I, S, v, ${list.index}, J, ${JSON.stringify(list.slot)}, ${JSON.stringify(list.accepts)}, ${JSON.stringify(named)}, ${JSON.stringify(listed(list.accepts))});`;
+    }),
     ...provides ? ["  I.R = new Set();"] : [],
     // host.data shows each declared read's state; reading one tracks it by name.
     ...plan.reads.length === 0 ? [] : [`  const DT = { ${plan.reads.map((read) => `${JSON.stringify(read.declaration.name)}: ${read.index}`).join(", ")} };`,
@@ -2594,7 +2686,7 @@ export function emitBlocks(
     // A context's value is its own: the host reads it as it reads a computed.
     ...(channel || observesBindings ? [
       "  const CS = [];",
-      `  const inputStatus = (j) => { ${plan.seeds.map(seed => `if (j === ${seed.index}) return E.status(j); `).join("")}${plan.computeds.length === 0 ? "" : `if (j >= ${plan.computeds[0]!.index} && j < ${plan.computeds.at(-1)!.index + 1}) { g(j); return CS[j] ?? UNRESOLVED_INPUT; } `}${contextStart < 0 ? "" : `if (j >= ${contextStart} && j < ${contextStart + plan.roots.filter(root => root.context !== undefined).length}) return CS[j] ?? UNRESOLVED_INPUT; `}${plan.roots.flatMap((root, index) => root.prop ? [`if (j === ${index}) return awaitInput(B, ${JSON.stringify(root.name)}, true); `] : []).join("")}return v[j] === undefined ? UNRESOLVED_INPUT : READY_INPUT; };`,
+      `  const inputStatus = (j) => { ${plan.seeds.map(seed => `if (j === ${seed.index}) return E.status(j); `).join("")}${plan.computeds.length === 0 ? "" : `if (j >= ${plan.computeds[0]!.index} && j < ${plan.computeds.at(-1)!.index + 1}) { g(j); return CS[j] ?? UNRESOLVED_INPUT; } `}${!plan.roots.some((root) => root.context !== undefined) ? "" : `if (j >= ${contextStart} && j < ${contextStart + plan.roots.filter(root => root.context !== undefined).length}) return CS[j] ?? UNRESOLVED_INPUT; `}${plan.roots.flatMap((root, index) => root.prop ? [`if (j === ${index}) return awaitInput(B, ${JSON.stringify(root.name)}, true); `] : []).join("")}return v[j] === undefined ? UNRESOLVED_INPUT : READY_INPUT; };`,
     ] : []),
     ...((contextStart >= 0 || plan.seeds.length > 0) && plan.computeds.length === 0 ? ["  const X = { e: 0, g: (j) => v[j], w: new Set(), a: CS, i: inputStatus };"] : []),
     ...(plan.computeds.length === 0 ? [] : [
@@ -2685,7 +2777,7 @@ export function emitBlocks(
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
-    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce",
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots",
     "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
@@ -2718,6 +2810,7 @@ export function emitBlocks(
     ...registration === "" ? [] : [registration],
     ...specs,
     ...slotPropChecks.map((check, at) => `const K${at} = ${check};`),
+    ...plan.children === undefined ? [] : [`const OF = ${JSON.stringify(plan.children)};`],
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
     // A fresh row's first patch has nothing written yet.
     ...(blocks.some((block) => block.row) ? ["const emptyDirty = new Map();"] : []),
