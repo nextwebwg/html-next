@@ -22,14 +22,17 @@ export const DECORATIONS_PROP = "\0html-next:decorations";
 export const BINDING_INPUTS_PROP = "\0html-next:binding-inputs";
 export const LITERAL_INPUTS_PROP = "\0html-next:literal-inputs";
 export const NATIVE_BINDINGS_PROP = "\0html-next:native-bindings";
-const INTERNAL_PROPS = [ROOT_OWNER_PROP, DECORATIONS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP, SLOTS_PROP];
+/** A component's `as` lists, by slot (`childList`), and an accepted child's place in one (`ownChild`). */
+export const LISTS_PROP = "\0html-next:lists";
+export const ENTRY_PROP = "\0html-next:entry";
+const INTERNAL_PROPS = [ROOT_OWNER_PROP, DECORATIONS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP, SLOTS_PROP, LISTS_PROP, ENTRY_PROP];
 
 /** Helpers a component calls by these names; the expression helpers come from its lowering. */
 export const SVELTE_RENDER_COMPONENTS = ["formatValue", "isString", "isNumber", "isInteger", "isBoolean", "rootAttributes",
   "retainedValue", "retainedStructuralValue", "writePath", "checkedSlot", "setProperty",
-  "decorate", "hostStateTokens", "publishState", "injectContext", "reflectedProp"] as const;
+  "decorate", "hostStateTokens", "publishState", "injectContext", "reflectedProp", "childList", "childSlot", "ownChild"] as const;
 
-const SOURCE = `import { getContext, setContext, untrack } from "svelte";
+const SOURCE = `import { getContext, setContext, untrack, type Snippet } from "svelte";
 ${INPUT_STATUS_SOURCE}
 import { createAttachmentKey } from "svelte/attachments";
 
@@ -142,6 +145,139 @@ export function injectContext<T>(reader: string, from: string, name: string): { 
   if (context !== undefined) return context;
   const message = "<" + reader + "> requires context \u0060" + name + "\u0060 from <" + from + ">.";
   throw Object.assign(new Error("HR009: " + message), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message }) });
+}
+
+/** A child an \`as\` list holds: its tag, prop reads, each slot's snippet with the consumer's locals and whether it renders at one outlet, and its contexts. */
+interface ListedChild {
+  readonly tag: string;
+  props: Record<string, () => unknown>;
+  slots: Record<string, readonly [Snippet<[any]>, unknown, boolean]>;
+  contexts?: Map<unknown, unknown>;
+  /** The child's own resolved props, once it renders: an entry reads them, so it never disagrees with the child. */
+  reads?: () => Readonly<Record<string, { readonly value: unknown }>>;
+  /** The outlet that holds each slot whose plain content renders at one outlet. */
+  readonly claims: Map<string, object>;
+  /** The elements outlets render for each slot, which the child's \`host.slots\` lists. */
+  readonly placed: Map<string, Set<Element>>;
+  readonly list: () => unknown;
+}
+type ListedItem = readonly [readonly unknown[], string, ListedChild["props"], ListedChild["slots"]] | string;
+const listedChildren = new WeakMap<object, ListedChild>();
+const reportedChildren = new Set<string>();
+const objectKeys = new WeakMap<object, number>();
+let nextObjectKey = 0;
+/** Changes when an outlet lets plain content go, so outlets showing their fallback look again. */
+let claimsChanged = $state(0);
+/** Changes when an outlet renders or removes an element, so \`host.slots\` reads again. */
+let placedChanged = $state(0);
+const releases = new WeakMap<object, WeakMap<ListedChild, () => void>>();
+
+/** A child's key in its list: its place among the consumer's children, then each enclosing \`$each\` key, objects by identity. */
+function childKey(parts: readonly unknown[]): string {
+  return parts.map((value) => {
+    if (value === null || typeof value !== "object" && typeof value !== "function") return typeof value + ":" + String(value);
+    let key = objectKeys.get(value);
+    if (key === undefined) objectKeys.set(value, key = nextObjectKey++);
+    return "object:" + key;
+  }).join("/");
+}
+
+/**
+ * A slot's \`as\` list (components#slot-accepts-as), which the consumer builds before the receiving
+ * component renders: one stable, read-only entry per accepted child, in content order. \`build\` gives
+ * each child its key parts, tag, prop reads and slot snippets, or a warning for content the slot leaves
+ * out. An entry reads the child's own props once it renders, and the latest build's before then.
+ */
+export function childList(build: () => readonly unknown[]) {
+  const children = new Map<string, readonly [object, ListedChild]>();
+  const list = $derived.by(() => {
+    const next: object[] = [];
+    const seen = new Set<string>();
+    // The consumer's items are tuples TypeScript infers as arrays, so they are read as \`ListedItem\`s here.
+    for (const item of build() as readonly ListedItem[]) {
+      if (typeof item === "string") {
+        if (!reportedChildren.has(item)) { reportedChildren.add(item); console.warn(item); }
+        continue;
+      }
+      const [parts, tag, props, slots] = item;
+      const key = childKey(parts);
+      seen.add(key);
+      let known = children.get(key);
+      if (known === undefined) {
+        const child: ListedChild = { tag, props, slots, claims: new Map(), placed: new Map(), list: () => list };
+        const entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(props).map((name) =>
+          [name, { enumerable: true, get: () => { void list; const own = child.reads?.()[name]; return own === undefined ? child.props[name]!() : own.value; } }]))) as object);
+        listedChildren.set(entry, child);
+        children.set(key, known = [entry, child]);
+      } else {
+        known[1].props = props;
+        known[1].slots = slots;
+      }
+      next.push(known[0]);
+    }
+    for (const key of children.keys()) if (!seen.has(key)) children.delete(key);
+    return Object.freeze(next);
+  });
+  return Object.assign(() => list, {
+    own: (parts: readonly unknown[], contexts: Map<unknown, unknown>, reads?: ListedChild["reads"]): ListedChild | undefined => {
+      void list;
+      const known = children.get(childKey(parts));
+      if (known === undefined) return undefined;
+      known[1].contexts = contexts;
+      known[1].reads = reads;
+      return known[1];
+    },
+  });
+}
+
+/**
+ * An accepted child's contexts and resolved props, given to the list that holds it (\`given\` is the list
+ * and the child's key parts), so the content its parent places for it reads them before the parent's.
+ * It gives back what the child's \`host.slots\` lists for each slot: the elements outlets render for it.
+ */
+export function ownChild(given: () => unknown, contexts: Map<unknown, unknown>, reads?: ListedChild["reads"]): (name: string) => Element[] {
+  const child = untrack(() => {
+    const value = given();
+    return Array.isArray(value) ? (value[0] as ReturnType<typeof childList>).own(value[1] as readonly unknown[], contexts, reads) : undefined;
+  });
+  return (name) => {
+    void placedChanged;
+    return [...child?.placed.get(name) ?? []].sort((left, right) => left.compareDocumentPosition(right) & 4 ? -1 : 1);
+  };
+}
+
+/**
+ * \`<slot of>\`: what outlet \`outlet\` renders for slot \`name\` of the child \`entry\` lists: the snippet the
+ * consumer gave, the consumer's locals it reads, the child's contexts and tag, and, for plain content, the
+ * release of its hold; nothing when the consumer gave none. Plain content renders at the first outlet that
+ * renders it, and the next takes it over when that outlet goes; a \`<template slot>\` renders at each.
+ * ponytail: an outlet that renders before the child's own instance (one placed before the child's root
+ * in the parent's default outlet) has no child contexts yet, so its content reads the parent's.
+ */
+export function childSlot(entry: unknown, name: string, outlet: object): { readonly snippet: Snippet<[any]>; readonly scope: unknown; readonly contexts: Map<unknown, unknown> | undefined; readonly tag: string; readonly release: (() => void) | undefined; readonly place: (element: Element) => () => void } | undefined {
+  const child = entry !== null && typeof entry === "object" ? listedChildren.get(entry) : undefined;
+  if (child === undefined) return undefined;
+  child.list();
+  const slot = Object.hasOwn(child.slots, name) ? child.slots[name] : undefined;
+  if (slot === undefined) return undefined;
+  let release: (() => void) | undefined;
+  if (slot[2]) {
+    const holder = child.claims.get(name);
+    if (holder !== undefined && holder !== outlet) { void claimsChanged; return undefined; }
+    child.claims.set(name, outlet);
+    let known = releases.get(outlet);
+    if (known === undefined) releases.set(outlet, known = new WeakMap());
+    release = known.get(child);
+    if (release === undefined) known.set(child, release = () => { if (child.claims.get(name) === outlet) { child.claims.delete(name); untrack(() => claimsChanged++); } });
+  }
+  const place = (element: Element): (() => void) => {
+    let placed = child.placed.get(name);
+    if (placed === undefined) child.placed.set(name, placed = new Set());
+    placed.add(element);
+    untrack(() => placedChanged++);
+    return () => { placed.delete(element); untrack(() => placedChanged++); };
+  };
+  return { snippet: slot[0], scope: slot[1], contexts: child.contexts, tag: child.tag, release, place };
 }
 
 /** A scoped slot's snippet; plain children cannot fill it (HR007). */
