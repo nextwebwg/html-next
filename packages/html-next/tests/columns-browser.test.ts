@@ -250,6 +250,47 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
       }
     });
 
+    it(`${engine} moves plain slot content to the next outlet when its outlet goes, before and after hydration`, async () => {
+      const definitions = [
+        `<template component="x-note"><th>Note</th><defs><slot name="detail"></slot></defs></template>`,
+        `<template component="x-notes"><defs><prop name="rows" type="list(number)">Row ids.</prop><slot accepts="x-note" as="notes"></slot></defs><table><thead><tr><template $slot></template></tr></thead>
+          <tbody><tr $each="row of $rows" $key="$row"><td $each="note of $notes" $key="$note"><slot of="$note" name="detail">none</slot></td></tr></tbody></table></template>`,
+        `<template component="page-notes"><defs><state name="rows" type="list(number)" value="[1, 2, 3]"></state></defs>
+          <main><x-notes from:rows="$rows"><x-note><b slot="detail">kept</b></x-note></x-notes></main></template>`,
+      ].map((source) => parseComponent(source));
+      const rendered = await renderComponents('<page-notes id="subject"></page-notes>', { definitions });
+      const browser = await browserType.launch({ headless: true });
+      try {
+        for (const html of [rendered.html, "<page-notes></page-notes>"]) {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", (error) => errors.push(error.message));
+          await page.setContent(`<div id="server">${html}</div>`);
+          await page.addScriptTag({ path: bundlePath });
+          const result = await page.evaluate(`(async () => {
+            window.HtmlRuntime.registerComponentDefinitions(JSON.parse(${JSON.stringify(JSON.stringify(definitions))}));
+            window.HtmlRuntime.observeDocument(document);
+            await ${tick};
+            const kept = document.querySelector("b");
+            const cells = () => Array.from(document.querySelectorAll("td"), (cell) => cell.textContent.trim());
+            const initial = cells();
+            const state = window.HtmlRuntime.getComponentHost(document.querySelector("main")).state;
+            state.rows = [2, 3];
+            await ${tick}; await ${tick};
+            const dropped = cells();
+            state.rows = [3];
+            await ${tick}; await ${tick};
+            return { initial, dropped, last: cells(), same: document.querySelector("b") === kept && kept.isConnected };
+          })()`);
+          assert.deepEqual(result, { initial: ["kept", "none", "none"], dropped: ["kept", "none"], last: ["kept"], same: true });
+          assert.deepEqual(errors, []);
+          await page.close();
+        }
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${engine} hydrates a column whose only content its table places`, async () => {
       const definitions = [
         `<template component="x-note"><th>Note</th><defs><slot name="detail"></slot></defs></template>`,

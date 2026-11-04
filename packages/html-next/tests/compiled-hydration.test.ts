@@ -149,6 +149,35 @@ describe("compiled hydration of Node output", () => {
     }
   });
 
+  it("moves a column's plain content to the next row's outlet when its row goes, in live and compiled components", async () => {
+    const components = [
+      `<template component="x-note"><th>Note</th><defs><slot name="detail"></slot></defs></template>`,
+      `<template component="x-notes"><defs><prop name="rows" type="list(number)">Row ids.</prop><slot accepts="x-note" as="notes"></slot></defs><table><thead><tr><template $slot></template></tr></thead>
+        <tbody><tr $each="row of $rows" $key="$row"><td $each="note of $notes" $key="$note"><slot of="$note" name="detail">none</slot></td></tr></tbody></table></template>`,
+      `<template component="x-page"><defs><state name="rows" type="list(number)" value="[1, 2, 3]"></state>
+        <handler name="drop"><set name="rows" expr:value="$rows.length = 3 ? [2, 3] : [3]"></set></handler></defs>
+        <main><button class="drop" on:click="drop">Drop</button><x-notes from:rows="$rows"><x-note><b slot="detail">kept</b></x-note></x-notes></main></template>`,
+    ].map(source => parseComponent(source));
+    const rendered = await renderComponents('<x-page id="subject"></x-page>', { definitions: components });
+    const code = await compiledFixtures("esm", 'export { registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";', components);
+    const { document, runtime } = await page(rendered.html, code);
+    runtime.factories["x-page"]!({}, undefined, document.querySelector("#compiled #subject")!);
+    runtime.registerComponentDefinitions(components);
+    runtime.lowerDocument();
+    await flush();
+    for (const box of document.querySelectorAll("main#compiled, main#live")) {
+      const kept = box.querySelector("b");
+      const cells = (): string[] => Array.from(box.querySelectorAll("td"), (cell) => cell.textContent!.trim());
+      assert.deepEqual(cells(), ["kept", "none", "none"], box.id);
+      for (const expected of [["kept", "none"], ["kept"]]) {
+        box.querySelector<HTMLButtonElement>("button.drop")!.click();
+        await flush();
+        assert.deepEqual(cells(), expected, box.id);
+        assert.equal(box.querySelector("b"), kept, box.id);
+      }
+    }
+  });
+
   it("hydrates native attributes on repeated roots projected through a named slot", async () => {
     const components = [
       `<template component="x-result"><defs><prop name="selected" type="boolean" default="false">Whether selected.</prop></defs><button from:aria-current="$selected"><slot name="title"></slot></button></template>`,

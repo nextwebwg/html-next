@@ -36,7 +36,7 @@ import {
 import { kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
-  borrowedContent, borrowedRanges, currentProjection, writeMark, regionChanged, slotRegions, switchFallback, withRegionContent,
+  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, writeMark, regionChanged, slotRegions, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -3133,6 +3133,8 @@ function placeChildSlot(
   document: Document,
   context: RuntimeRenderContext,
   existing: readonly Node[] | undefined,
+  mark: Node,
+  retry: () => void,
 ): { readonly nodes: Node[]; readonly fallback: boolean; readonly scoped: boolean } {
   const name = node.name!;
   let scoped = (node.props?.length ?? 0) > 0;
@@ -3165,11 +3167,17 @@ function placeChildSlot(
     warnAuthored(context.definition, `of:${entry.tag}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
     return fallback();
   }
-  // Plain content keeps its identity: the child's own outlet places it, else the first `<slot of>` that renders it.
-  if (outlets.includes(name) || content.some((candidate) => borrowedContent.has(candidate))) return fallback();
+  // Plain content keeps its identity: the child's own outlet places it, else the first `<slot of>` that
+  // renders it. A later outlet takes it over when that one lets it go.
+  if (outlets.includes(name)) return fallback();
+  if (content.some((candidate) => borrowedContent.has(candidate))) {
+    const cancel = awaitContent(content, mark, retry);
+    ownEffect(context, scope, () => cancel);
+    return fallback();
+  }
   for (const placed of content) { borrowedContent.add(placed); placedOwners.set(placed, entry); }
   childPlacements = true;
-  ownEffect(context, scope, () => () => { for (const placed of content) borrowedContent.delete(placed); });
+  ownEffect(context, scope, () => () => releaseContent(content));
   if (existing !== undefined) nodes = [...existing];
   else if (context.committed) {
     nodes = currentProjection(content);
@@ -3205,31 +3213,35 @@ function renderChildSlot(
   let shown: ChildEntry | null | undefined;
   let owned: RenderOwned | undefined;
   let flags = "";
+  let index = -1;
+  const mark = (): void => writeMark(start, "start", `slot="${name}" of="${index < 0 ? "" : index}"${flags}`);
+  const place = (entry: ChildEntry | null): void => {
+    owned?.stop();
+    owned = renderOwned(context.owned);
+    const existing = adopting;
+    adopting = undefined;
+    if (existing === undefined) clearRange(start, end);
+    // An adopted range of plain content holds the child's own nodes: they join its slot content.
+    else if (entry !== null && !hydrating!.fallback && !hydrating!.scoped) {
+      const element = entry.element;
+      borrowedRanges.set(element, [...borrowedRanges.get(element) ?? [], ...existing]);
+    }
+    // Released plain content another outlet placed: this outlet places it now (`retry`).
+    const retry = (): void => { if (shown === entry) { place(entry); mark(); } };
+    const placed = untracked(() => placeChildSlot(node, entry, scope, document, ownedContext(context, owned!), existing, start, retry));
+    // Adopted nodes may come back through a fragment, so they go back before the end mark too.
+    for (const stale of existing ?? []) if (!placed.nodes.includes(stale)) stale.parentNode?.removeChild(stale);
+    end.before(...placed.nodes);
+    flags = `${placed.fallback ? ' fallback=""' : ""}${placed.scoped ? ' scoped=""' : ""}`;
+  };
   ownEffect(context, scope, () => {
     const value = evalConforming(of.expressionPlan, scope, context.definition);
     if (value === NONCONFORMING) return;
     const list = scope.read(of.list);
-    const index = value !== null && typeof value === "object" && Array.isArray(list) ? list.indexOf(value) : -1;
+    index = value !== null && typeof value === "object" && Array.isArray(list) ? list.indexOf(value) : -1;
     const entry = index < 0 ? null : childEntries.get(value as object) ?? null;
-    if (entry !== shown) {
-      shown = entry;
-      owned?.stop();
-      owned = renderOwned(context.owned);
-      const existing = adopting;
-      adopting = undefined;
-      if (existing === undefined) clearRange(start, end);
-      // An adopted range of plain content holds the child's own nodes: they join its slot content.
-      else if (entry !== null && !hydrating!.fallback && !hydrating!.scoped) {
-        const element = entry.element;
-        borrowedRanges.set(element, [...borrowedRanges.get(element) ?? [], ...existing]);
-      }
-      const placed = untracked(() => placeChildSlot(node, entry, scope, document, ownedContext(context, owned!), existing));
-      // Adopted nodes may come back through a fragment, so they go back before the end mark too.
-      for (const stale of existing ?? []) if (!placed.nodes.includes(stale)) stale.parentNode?.removeChild(stale);
-      end.before(...placed.nodes);
-      flags = `${placed.fallback ? ' fallback=""' : ""}${placed.scoped ? ' scoped=""' : ""}`;
-    }
-    writeMark(start, "start", `slot="${name}" of="${index < 0 ? "" : index}"${flags}`);
+    if (entry !== shown) place(shown = entry);
+    mark();
   });
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }

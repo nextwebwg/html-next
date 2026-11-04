@@ -185,11 +185,6 @@ export const render = () => renderApplication(context => bootstrapApplication(Ap
         return { page, errors, warned };
       };
       let live: unknown;
-      /**
-       * What a target shows: live's steps, except that after the foot row holding the plain note goes, the next
-       * row's outlet takes the note from its fallback. The live runtime shows the fallback there instead.
-       */
-      let expected: unknown;
       beforeAll(async () => {
         const reference = await open(async (page) => {
           // Live reads the same list through its host; the controller is the Angular build's.
@@ -213,7 +208,8 @@ export const render = () => renderApplication(context => bootstrapApplication(Ap
         // A rejected bound prop takes its default too.
         assert.match(steps[4]!, /<tr><td>Pen<\/td><td><b>Pen:quiet:compact<\/b>2\|4\|none<\/td>/);
         assert.deepEqual({ kept, leftOut, warned }, { kept: true, leftOut: "A", warned: WARNED.map(() => true) });
-        expected = { ...live as object, steps: [...steps.slice(0, -1), steps.at(-1)!.replace("<tfoot><tr><td>-.</td>", '<tfoot><tr><td><i slot="note">kept</i>.</td>')] };
+        // After the drop, the next foot row's outlet holds the plain note.
+        assert.match(steps.at(-1)!, /<tfoot><tr><td><i slot="note">kept<\/i>.<\/td>/);
       });
 
       it("renders the columns, follows consumer $if and keyed $each, and keeps cells by key like live", async () => {
@@ -223,7 +219,7 @@ export const render = () => renderApplication(context => bootstrapApplication(Ap
           await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
         });
         try {
-          assert.deepEqual(await run(page, warned), expected);
+          assert.deepEqual(await run(page, warned), live);
           assert.deepEqual(errors, []);
         } finally { await page.close(); }
       });
@@ -239,7 +235,7 @@ export const render = () => renderApplication(context => bootstrapApplication(Ap
           assert.equal(await page.evaluate(`window.server.every((node) => node.isConnected)`), true, "hydration keeps the server's cells");
           const result = await run(page, warned) as { warned: boolean[] };
           // Hydration warns again in the browser for left-out children, as each runtime does when it creates the component.
-          assert.deepEqual(result, expected);
+          assert.deepEqual(result, live);
           assert.deepEqual(errors, []);
         } finally { await page.close(); }
       });

@@ -18,7 +18,7 @@ import { applyBoundControlValue, controlValue, holdControl } from "./controls.js
 import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
 import {
-  borrowedContent, borrowedRanges, currentProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback, withRegionContent, writeMark,
+  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback, withRegionContent, writeMark,
 } from "./rendered-form.js";
 import type { HydrationRange, RenderedInstanceRecord } from "./rendered-form.js";
 import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
@@ -1989,10 +1989,13 @@ export function childOutlet(
 ): (value: unknown, list: unknown, props: Record<string, unknown>, changed: number, dirty: Map<unknown, 1 | 2>) => void {
   const doc = start.ownerDocument!;
   let open = start, close = end;
+  // Whether `open` and `close` are rendered-form marks: this outlet's, or the server's it adopted.
+  let marked = false;
   let shown: object | null | undefined;
   let rendering: readonly [ScopedTemplate, ScopedRecord] | undefined;
   let block: ReturnType<typeof make> | undefined;
   let claimed: Node[] = [];
+  let cancel: (() => void) | undefined;
   let shape: ((props: Record<string, unknown>) => Record<string, unknown>) | undefined;
   let flags = "";
   const clear = (): void => {
@@ -2003,12 +2006,14 @@ export function childOutlet(
     }
     dispose(block);
     block = undefined;
-    for (const node of claimed) borrowedContent.delete(node);
+    releaseContent(claimed);
     claimed = [];
+    cancel?.();
+    cancel = undefined;
   };
   (record.z ??= []).push(clear);
   placedOwner ??= (node) => placedOwners.get(node)?.e;
-  return (value, list, props, changed, dirty) => {
+  const update = (value: unknown, list: unknown, props: Record<string, unknown>, changed: number, dirty: Map<unknown, 1 | 2>): void => {
     if (value === NONCONFORMING) return;
     for (const key in props) if (props[key] === NONCONFORMING) delete props[key];
     const index = value !== null && typeof value === "object" && Array.isArray(list) ? list.indexOf(value) : -1;
@@ -2018,8 +2023,11 @@ export function childOutlet(
       shown = entry;
       clear();
       const contents: Node[] = [];
-      if (server !== undefined) for (let node = open.nextSibling; node !== null && node !== close; node = node.nextSibling) contents.push(node);
-      else if (open === start) {
+      if (server !== undefined) {
+        marked = true;
+        for (let node = open.nextSibling; node !== null && node !== close; node = node.nextSibling) contents.push(node);
+      } else if (!marked) {
+        marked = true;
         open = renderedFormMark(doc, "start", "") as ChildNode;
         close = renderedFormMark(doc, "end", "") as ChildNode;
         start.replaceWith(open);
@@ -2042,7 +2050,11 @@ export function childOutlet(
         content = withRegionContent(child.J ?? []).flatMap(([node, slot]) => slot === name && node.nodeType === 1 ? [node] : []);
         if (content.some((node) => (node as Element).localName === "template")) mode = 1;
         else if (content.length > 0 && scoped) warnOnce(spec, `of:${child.S.g}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
-        else if (content.length > 0 && !known[0].includes(name) && !content.some((node) => borrowedContent.has(node))) mode = 2;
+        else if (content.length > 0 && !known[0].includes(name)) {
+          if (!content.some((node) => borrowedContent.has(node))) mode = 2;
+          // Another outlet placed it: this one takes it over when that one lets it go.
+          else cancel = awaitContent(content, open, () => { if (shown === entry) { shown = released; update(value, list, props, 0, new Map()); } });
+        }
       }
       // The server rendered the same choice: its nodes are adopted. Otherwise they go, and it renders afresh.
       const kept = server !== undefined && (mode === 0) === server.attributes.has("fallback") && (mode === 1) === (mode !== 0 && server.attributes.has("scoped"));
@@ -2091,7 +2103,11 @@ export function childOutlet(
     } else if (block !== undefined) patch(block as never, changed, dirty);
     writeMark(open, "start", `slot="${name}" of="${index < 0 ? "" : index}"${flags}`);
   };
+  return update;
 }
+
+/** Marks an outlet as showing no entry, so it renders its entry again. */
+const released = {};
 
 /** A compiled factory that adopts a server-rendered root given as its third argument. */
 type AdoptingFactory = (options: object, html: Readonly<Record<string, string>> | undefined, root: Element) => Element;

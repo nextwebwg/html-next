@@ -2009,6 +2009,20 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       await same([page, table, bare], [read, then(click("rename"))]);
     });
 
+    it("moves a column's plain content to the next row's outlet when its row goes, like live", async () => {
+      const note = `<template component="x-note" status="early" summary="Note."><th>Note</th><defs><slot name="detail"></slot></defs></template>`;
+      const notes = `<template component="x-notes" status="early" summary="Notes."><defs><prop name="rows" type="list(number)">Rows.</prop><slot accepts="x-note" as="notes"></slot></defs>
+        <table><thead><tr><template $slot></template></tr></thead>
+        <tbody><tr $each="row of $rows" $key="$row"><td $each="note of $notes" $key="$note"><slot of="$note" name="detail">none</slot></td></tr></tbody></table></template>`;
+      const page = `<template component="x-note-page" status="early" summary="Page."><defs><state name="rows" type="list(number)" value="[1, 2, 3]"></state>
+        <handler name="drop"><set name="rows" expr:value="$rows.length = 3 ? [2, 3] : [3]"></set></handler></defs>
+        <main><button type="button" class="drop" on:click="drop">Drop</button><x-notes from:rows="$rows"><x-note><b slot="detail" data-id="kept">kept</b></x-note></x-notes></main></template>`;
+      const run = await same([page, notes, note], [click("drop"), click("drop")]);
+      assert.deepEqual(run.snapshots.slice(0, 3).map((html) => html.match(/<td>.*?<\/td>/g)!.map((cell) => cell.includes(">kept<") ? "kept" : "none")),
+        [["kept", "none", "none"], ["kept", "none"], ["kept"]]);
+      assert.deepEqual(run.identities.slice(1, 3), ["kept:same", "kept:same"]);
+    });
+
     it("warns for children a slot does not accept and for unsupported placements like live", async () => {
       const preset = `<template component="x-column-preset" status="early" summary="Preset."><x-column field="name"></x-column></template>`;
       const page = `<template component="x-warned" status="early" summary="Warned."><defs></defs><main><x-datatable from:rows="[{ id: 1, name: 'A', price: 1 }]">

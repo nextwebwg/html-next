@@ -192,6 +192,36 @@ export const borrowedContent = /* @__PURE__ */ new WeakSet<Node>();
 /** The content adopted `of` ranges placed from a child's server root, which joins that child's projection. */
 export const borrowedRanges = /* @__PURE__ */ new WeakMap<Element, Node[]>();
 
+/** Outlets showing their fallback because another outlet placed the content, by the content's first node. */
+const contentWaiters = /* @__PURE__ */ new WeakMap<Node, Set<readonly [mark: Node, place: () => void]>>();
+
+/** Waits for `content` to be released, to place it then if this outlet comes first in document order. Returns the cancel. */
+export function awaitContent(content: readonly Node[], mark: Node, place: () => void): () => void {
+  const waiter = [mark, place] as const;
+  let waiters = contentWaiters.get(content[0]!);
+  if (waiters === undefined) contentWaiters.set(content[0]!, waiters = new Set());
+  waiters.add(waiter);
+  return () => waiters.delete(waiter);
+}
+
+/**
+ * The outlet that placed `content` lets it go: the first waiting outlet in document order places it
+ * next. That runs once the current change settles, so outlets going with the same change are gone.
+ */
+export function releaseContent(content: readonly Node[]): void {
+  for (const node of content) borrowedContent.delete(node);
+  const waiters = content.length === 0 ? undefined : contentWaiters.get(content[0]!);
+  if (waiters !== undefined) queueMicrotask(() => {
+    if (content.some((node) => borrowedContent.has(node))) return;
+    let first: readonly [Node, () => void] | undefined;
+    for (const waiter of waiters) {
+      if (!waiter[0].isConnected) continue;
+      if (first === undefined || first[0].compareDocumentPosition(waiter[0]) & 2) first = waiter; // 2: precedes
+    }
+    first?.[1]();
+  });
+}
+
 /** The nodes a server carrier held, which hydration puts in place only where their slots render them. */
 const carriedRoots = new WeakSet<Node>();
 
