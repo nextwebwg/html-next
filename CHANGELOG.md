@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.89
+
+- Converted Svelte components list accepted children that a consumer writes in Svelte. Each child joins its accepting parent's `as` list as the slot's outlet renders it, in content order on the server and through hydration, and the list follows `{#if}`, `{#each}`, keyed moves and changed props. Entries hold the child's resolved props, a child's `slots` snippets render through `<slot of>` with the outlet's slot props and the child's contexts, and `host.state` and the parent's `host.slots` list them. An accepted component's `slots` type includes the slots its parent's outlets place. Consumers compiled from HTML Next keep building the list themselves. Components that neither accept, list nor place children generate the same output as before.
+
 ## 1.0.0-alpha.88
 
 - Columns as markup. A `<slot>` declaration in `<defs>` takes `accepts`, one or more component tags, and `as`, the name of a read-only list of the accepted children's resolved props in content order. `<slot of="$entry" name="x">`, or `<template $slot of>` in table parts, places that child's slot with slot props and a fallback. The live runtime, compiled output, React, Preact, Vue, Svelte and Angular support it, with server rendering and hydration. A preset of an accepted component is left out of the list with a warning.

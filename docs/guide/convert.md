@@ -123,6 +123,23 @@ A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/decla
 - A preset whose root is an accepted component is left out of the list, with a warning.
 - Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
 
+A `.svelte` consumer writes the accepted children as components, directly or under `{#if}` and `{#each}`, and passes their slots as snippets:
+
+```svelte
+{#snippet cell({ row })}<b>{row.name}</b>{/snippet}
+<UiDataTable {rows}>
+  <UiColumn field="total" header="Total" />
+  {#if showStatus}<UiColumn header="Status" slots={{ cell }} />{/if}
+</UiDataTable>
+```
+
+- A child joins the list when the slot's outlet renders it, and leaves when it goes. The list holds the children that outlet renders, in the order their roots appear in the document.
+- On the server and during hydration, content after the outlet reads the whole list. Content before the outlet renders with an empty list on the server and updates once hydration has rendered the outlet, so read the list after the outlet, as a body after a header row does.
+- A snippet renders at every outlet that places it, as a `<template slot>` does. A snippet for a slot without props that the child renders itself stays with the child, and a `<slot of>` for that slot shows its fallback.
+- Any accepted child the outlet renders joins, including one inside the consumer's own wrapper component or a preset.
+- Other content in the outlet renders where it is written, with no warning.
+- A child's `host.slots` lists what its own template places. A snippet's elements that a `<slot of>` outlet renders are in the DOM and absent from it.
+
 ## Converter validation
 
 Changes to HTML Next, the converter, and the Vite plugin require the complete Looma catalog to
