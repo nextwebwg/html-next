@@ -160,6 +160,9 @@ export interface SlotContract {
   readonly props?: readonly string[];
   /** The slot's declared props, from its `<slot>` declaration in `<defs>`. */
   readonly declared?: Readonly<Record<string, PropContract>>;
+  /** From the slot's declaration: the component tags it accepts, and the list that gives them to the template. */
+  readonly accepts?: readonly string[];
+  readonly as?: string;
 }
 
 export type TemplateNode = ElementNode | TextNode | SlotNode;
@@ -169,7 +172,8 @@ export function definitionMayInvokeComponents(definition: ComponentDefinition): 
   if (definition.root?.kind === "component") return true;
   const visit = (node: TemplateNode): boolean => {
     if (node.kind === "text") return false;
-    if (node.kind === "slot") return (node.fallback ?? []).some(visit);
+    // A `<slot of>` outlet places a child's consumer content, which may invoke components.
+    if (node.kind === "slot") return node.of !== undefined || (node.fallback ?? []).some(visit);
     return node.name.includes("-") || node.children.some(visit);
   };
   return visit(definition.template);
@@ -271,8 +275,15 @@ export interface SlotNode {
     readonly type?: PropType;
     /** A bound prop's declared default, which a null or rejected value takes. */
     readonly default?: PropValue;
+    /** On a `<slot of>` outlet, a static prop's attribute text, converted by the child's declared type when it renders. */
+    readonly raw?: string;
   }[];
   readonly fallback?: readonly TemplateNode[];
+  /**
+   * `<slot of>`: the outlet places this slot of a child the component reads through `as`, rather than
+   * its own. `list` is the `as` list whose entry `expression` names.
+   */
+  readonly of?: { readonly expression: string; readonly expressionPlan: CompiledExpression; readonly list: string };
 }
 
 export type TemplateAttribute =
