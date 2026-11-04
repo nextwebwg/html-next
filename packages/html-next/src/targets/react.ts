@@ -8,7 +8,7 @@ import { parseDuration } from "../duration.js";
 import { componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact } from "./vue-format.js";
@@ -20,7 +20,8 @@ import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, 
 import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, inputScope, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
-import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, parseTypedValue, type TypeNode } from "../type-system.js";
+import { invocationValue } from "../prop-values.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
 import { parseFragment } from "parse5";
@@ -49,6 +50,7 @@ const REACT_RESERVED = new Set([
   "selectedPropNode", "acceptsControllerWrite",
   "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
   "useComponentHost", "useLifecycle", "componentContext", "NestedDepthContext", "ScopedAttachment",
+  "htmlNextChildSlots", "htmlNextOutletProps", "htmlNextLists", "htmlNextContent", "_htmlNextAs", "_htmlNextEntry",
   ...REACT_RENDER_EXPORTS, ...REACT_EVENTS_EXPORTS,
 ]);
 
@@ -86,7 +88,8 @@ function pascal(name: string): string {
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
 const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextValueInput", "HtmlNextValueTextarea", "HtmlNextValueSelect", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
-  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle"] as const;
+  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle",
+  "identityKey", "useChildLists", "useEntryProviders", "ChildSlot", "ChildEntries"] as const;
 
 export interface ReactConversionOptions {
   readonly modulePreparation?: { readonly source: string };
@@ -166,6 +169,16 @@ interface RenderState {
   readonly slotsByTag: ReadonlyMap<string, readonly SlotContract[]> | undefined;
   readonly propsByTag: ReadonlyMap<string, ReadonlySet<string>> | undefined;
   readonly propContractsByTag: ReadonlyMap<string, Readonly<Record<string, PropContract>>> | undefined;
+  readonly componentGraph: ReadonlyMap<string, ComponentDefinition> | undefined;
+  /** Columns as markup: the component declares an `as` list, whose entries key by identity. */
+  readonly lists: boolean;
+  /** Each accepted child the consumer gives an entry, by its attributes: its entry's key segments (`entryKeySource`). */
+  readonly entrySites: Map<readonly unknown[], readonly KeySegment[]>;
+  /** The key of the row each `$each` is rendering, by that `$each`'s attributes, as source. */
+  readonly rowKeys: Map<readonly unknown[], string>;
+  usesChildSlots?: boolean;
+  /** Each `<slot of>` outlet's props checks, by accepted tag: `htmlNextOutletProps0`, … */
+  readonly outletProps: string[];
   nextSlotAlias: number;
   nextRetainedAlias: number;
   usesHtml: boolean;
@@ -398,7 +411,11 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
-      const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, scoped);
+      const keyed = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, scoped);
+      // An `as` list's entry keys by its identity, as live keys by `Object.is`.
+      const key = state.lists && flow.keyPlan !== undefined && typeOf(flow.keyPlan.ast, scoped).type.kind === "object" ? `identityKey(${keyed})` : keyed;
+      // An accepted child in these rows keys its entry by the row's key.
+      if (node.kind === "element") state.rowKeys.set(node.attributes, key);
       const child = renderNode(body, scoped, lowering, imports, handlers, attachments, state, undefined, projected, inSvg);
       const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
       const rows = lowering.eachRows(checked);
@@ -467,6 +484,15 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       return withAlias(`<>{${expression}}</>`);
     }
     fail("HT030", `React conversion of $${flow.kind} is not implemented.`);
+  }
+  if (node.kind === "slot" && node.of !== undefined) {
+    // `<slot of>` places a slot of the accepted child its entry stands for (components#columns-as-markup).
+    // A static prop is given as its text; the child's slot declaration converts it (`outletPropsSource`).
+    state.usesChildSlots = true;
+    const values = (node.props ?? []).map((prop) => `${quote(prop.name)}: ${prop.raw !== undefined ? quote(prop.raw) : lowering.value(prop.expressionPlan.ast, scope)}`);
+    const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
+    const shapes = outletPropsSource(node, state);
+    return `<ChildSlot entry={${lowering.value(node.of.expressionPlan.ast, scope)}} name=${quote(node.name ?? "")}${values.length === 0 ? "" : ` values={{ ${values.join(", ")} }}`} slots={htmlNextChildSlots}${shapes === undefined ? "" : ` shapes={${shapes}}`} file=${quote(state.definition.source.file)} fallback={<>${fallback}</>} />`;
   }
   if (node.kind === "slot") {
     const name = quote(node.name ?? "");
@@ -802,37 +828,50 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   }
   let componentChildren = node.children;
   if (component) {
-    const slots = new Map<string, TemplateNode[]>();
-    const defaults: TemplateNode[] = [];
-    for (const child of node.children) {
-      if (child.kind !== "element") { defaults.push(child); continue; }
-      const assigned = child.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
-      // `slot=""` names the default slot, as no `slot` does.
-      if (assigned?.kind !== "literal" || assigned.value === "") { defaults.push(child); continue; }
-      const group = slots.get(assigned.value) ?? [];
-      group.push(child);
-      slots.set(assigned.value, group);
-    }
+    const { slots, defaults } = slotGroups(node.children);
     // A slot's first `<template slot>` is its whole content, and the slot renders that template's children.
     const defaultCarrier = defaults.find((child): child is ElementNode => child.kind === "element" && child.name === "template"
       && child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot"));
     componentChildren = defaultCarrier?.children ?? defaults;
-    if (slots.size > 0) bindings.push(`slots={{ ${[...slots].map(([name, children]) => {
+    // `templates`: a `<template slot>` for a slot without props renders afresh at each `<slot of>` outlet, so an entry gives it as a function.
+    const slotsSource = (tag: string, groups: ReadonlyMap<string, readonly TemplateNode[]>, slotScope: RenderScope, templates = false): string => `{ ${[...groups].map(([name, children]) => {
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
-      const contracts = state.slotsByTag?.get(node.name);
-      const contract = contracts?.find((slot) => slot.name === name);
+      const contracts = state.slotsByTag?.get(tag);
+      // A slot declared with props that no outlet of the component renders is placed by its parent's `<slot of>`.
+      const declared = contracts?.some((slot) => slot.name === name) === true ? undefined : state.componentGraph?.get(tag)?.contract.slots?.[name];
+      const contract = contracts?.find((slot) => slot.name === name)
+        ?? (declared === undefined ? undefined : { name, required: false, props: Object.keys(declared.props), declared: declared.props });
       if ((contract?.props?.length ?? 0) > 0) {
         const alias = `__slotProps${state.nextSlotAlias++}`;
         const projectedScope: RenderScope = {
-          code: new Map([...scope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
-          types: new Map([...scope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
+          code: new Map([...slotScope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
+          types: new Map([...slotScope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
           local: true,
         };
         if (carrier !== undefined) return `${quote(name)}: (${alias}: Record<string, any>) => <>${carrier.children.map((child) => renderNode(child, projectedScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
       }
       const content = carrier === undefined ? children : carrier.children;
-      return `${quote(name)}: ${content.length === 0 ? "undefined" : `<>${content.map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`}`;
-    }).join(", ")} }}`);
+      if (templates && carrier !== undefined) return `${quote(name)}: () => <>${content.map((child) => renderNode(child, slotScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
+      return `${quote(name)}: ${content.length === 0 ? "undefined" : `<>${content.map((child) => renderNode(child, slotScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`}`;
+    }).join(", ")} }`;
+    // Columns as markup: a slot with `accepts` and `as` takes one entry per accepted child, which the
+    // receiving component reads before it renders (components#columns-as-markup). The entries are
+    // written first, so each accepted child knows its entry's key when it renders.
+    const invoked = state.componentGraph?.get(node.name);
+    const accepting = Object.entries(invoked?.contract.slots ?? {}).filter(([, declared]) => declared.as !== undefined && (declared.accepts?.length ?? 0) > 0);
+    // Whitespace between accepted children is not content, and a table part's outlet must not render it.
+    if (accepting.some(([slot]) => slot === "")) componentChildren = componentChildren.filter((child) => !isWhitespace(child));
+    const lists = accepting.length === 0 ? undefined : `htmlNextAs={{ ${accepting.map(([slot, declared]) => {
+      const group = slot === "" ? componentChildren : slots.get(slot) ?? [];
+      const carrier = group.find((child): child is ElementNode => child.kind === "element" && child.name === "template"
+        && child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot"));
+      return `${quote(declared.as!)}: [${childDescriptors(carrier?.children ?? group, scope, lowering, state, invoked!, slot, declared.accepts!, declared.as!, slotsSource)}]`;
+    }).join(", ")} }}`;
+    if (slots.size > 0) bindings.push(`slots={${slotsSource(node.name, slots, scope)}}`);
+    if (lists !== undefined) bindings.push(lists);
+    // An accepted child that provides contexts gives them to its entry, found by the entry's key.
+    const site = state.entrySites.get(node.attributes);
+    if (site !== undefined && providesContexts(node.name, state.componentGraph)) bindings.push(`htmlNextEntry={${entryKeySource(site, state.rowKeys)}}`);
   }
   if (classes.length > 0) bindings.push(`className={[${classes.join(", ")}${rootTag === undefined ? "" : ", nativeAttrs.className"}].filter(Boolean).join(" ")}`);
   if (literalStyles.length > 0 || reactiveStyles.length > 0) bindings.push(`style={{ ${[
@@ -892,6 +931,186 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     `<RetainedValue value={${retained.value}}${retained.accepts === undefined ? "" : ` accepts={${retained.accepts}}`} render={(${retained.alias}) => ${result}} />`, scopedMarkup);
 }
 
+/** A component invocation's children by the slot each is assigned to; `slot=""` names the default slot, as no `slot` does. */
+function slotGroups(children: readonly TemplateNode[]): { readonly slots: Map<string, TemplateNode[]>; readonly defaults: TemplateNode[] } {
+  const slots = new Map<string, TemplateNode[]>();
+  const defaults: TemplateNode[] = [];
+  for (const child of children) {
+    if (child.kind !== "element") { defaults.push(child); continue; }
+    const assigned = child.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
+    if (assigned?.kind !== "literal" || assigned.value === "") { defaults.push(child); continue; }
+    const group = slots.get(assigned.value) ?? [];
+    group.push(child);
+    slots.set(assigned.value, group);
+  }
+  return { slots, defaults };
+}
+
+const isWhitespace = (node: TemplateNode): boolean => node.kind === "text" && node.expressionPlan === undefined && node.segments === undefined && /^[\t\n\f\r ]*$/.test(node.value);
+
+/** "`a`", "`a` and `b`", "`a`, `b` and `c`". */
+function listed(names: readonly string[]): string {
+  const quoted = names.map((name) => `\`${name}\``);
+  return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+}
+
+/** Whether the graph reads a component's states as context, so content placed from its slots needs its providers. */
+function providesContexts(tag: string, graph: ReadonlyMap<string, ComponentDefinition> | undefined): boolean {
+  return (graph?.get(tag)?.declarations ?? []).some((declaration) => declaration.kind === "state") &&
+    [...graph!.values()].some((definition) => (definition.declarations ?? []).some((declaration) => declaration.kind === "context" && declaration.from === tag));
+}
+
+/**
+ * A `<slot of>` outlet's props, by accepted tag, as live's `childSlotProps` checks them against the
+ * child's slot declaration: a static prop converts by its declared type, a bound one its type rejects
+ * warns (HR007), and it, a null one and a declared one the outlet leaves out take the declared default.
+ * An undeclared or missing required prop warns. The name of a module constant, or undefined when no
+ * accepted tag declares or is given any.
+ */
+function outletPropsSource(node: SlotNode, state: RenderState): string | undefined {
+  const name = node.name ?? "";
+  const given = node.props ?? [];
+  const outlet = `<slot of name="${name}">`;
+  const file = state.definition.source.file;
+  const accepts = Object.values(state.definition.contract.slots ?? {}).find((declared) => declared.as === node.of!.list)?.accepts ?? [];
+  const shapes = accepts.flatMap((tag) => {
+    const accepted = state.componentGraph?.get(tag);
+    const declared = accepted?.contract.slots?.[name]?.props ?? {};
+    if (accepted === undefined || given.length + Object.keys(declared).length === 0) return [];
+    const warn = (prop: string, message: string): string => `warnUnless(false, ${quote(`${file}#${state.definition.contract.tag}:of:${name}:${prop}`)}, ${quote(`${warningPrefix(file)}${message}`)}); `;
+    let warnings = "";
+    const values = given.map((prop) => {
+      const key = quote(prop.name);
+      const contract = declared[prop.name];
+      if (contract === undefined) {
+        warnings += warn(prop.name, `${outlet} gives prop \`${prop.name}\`, which \`${tag}\`'s slot \`${name}\` does not declare.`);
+        return `if (${key} in s) t[${key}] = s[${key}];`;
+      }
+      if (prop.raw !== undefined) return `t[${key}] = ${JSON.stringify(invocationValue(contract, prop.raw, "html", true) ?? null)};`;
+      const type = normalizeType(contract.type);
+      const absent = contract.default === undefined ? "null" : JSON.stringify(contract.default);
+      if (type.kind === "terminal" && type.name === "unknown") return `if (${key} in s) t[${key}] = s[${key}] ?? ${absent};`;
+      state.usesSlotPropChecks = true;
+      const message = `${warningPrefix(file)}Slot \`${name}\` prop \`${prop.name}\` does not satisfy its declared type \`${formatType(type)}\`.`;
+      return `if (${key} in s) { const y = s[${key}]; t[${key}] = y != null && typeof y !== "symbol" && warnUnless(acceptsSlotProp(y, ${JSON.stringify(type)}), ${quote(`${file}#slot:${name}:${prop.name}`)}, ${quote(message)}) ? y : ${absent}; }`;
+    });
+    for (const [prop, contract] of Object.entries(declared)) {
+      if (given.some((entry) => entry.name === prop)) continue;
+      if (contract.required) warnings += warn(prop, `${outlet} must give prop \`${prop}\`, which \`${tag}\`'s slot \`${name}\` declares as required.`);
+      if (contract.default !== undefined) values.push(`t[${quote(prop)}] = ${JSON.stringify(contract.default)};`);
+    }
+    return [`${quote(tag)}: (s: Record<string, unknown>) => { ${warnings}const t: Record<string, unknown> = {}; ${values.join(" ")} return t; }`];
+  });
+  return shapes.length === 0 ? undefined : `htmlNextOutletProps${state.outletProps.push(`{ ${shapes.join(", ")} }`) - 1}`;
+}
+
+/** An authored warning's text: `HR007: …`, after the definition file when there is one. */
+const warningPrefix = (file: string): string => file === "" ? "HR007: " : `${file}: HR007: `;
+
+/**
+ * An accepted child's entry key, as source: its sites in its slot's content, and the key of each
+ * `$each` row it is in (by that `$each`'s attributes), from `rowKeys`.
+ */
+type KeySegment = string | readonly unknown[];
+function entryKeySource(segments: readonly KeySegment[], rowKeys: ReadonlyMap<readonly unknown[], string>): string {
+  return segments.map((segment) => typeof segment === "string" ? quote(segment) : `":" + identityKey(${rowKeys.get(segment) ?? "undefined"})`).join(" + ");
+}
+
+/**
+ * The entries a consumer gives a slot with `accepts` (components#columns-as-markup), as array spread
+ * source: one per accepted child in content order, following each child's `$if`, `$each`, `$with` and
+ * `$match`, and `<template>` regions, with its declared props resolved and its slot content. Other
+ * content is left out with a warning. Each accepted child's key segments are recorded in
+ * `state.entrySites`, so the child finds its entry when it renders.
+ */
+function childDescriptors(
+  children: readonly TemplateNode[], scope: RenderScope, lowering: Lowering, state: RenderState, receiver: ComponentDefinition,
+  slot: string, accepts: readonly string[], as: string,
+  slotsSource: (tag: string, groups: ReadonlyMap<string, readonly TemplateNode[]>, scope: RenderScope, templates: boolean) => string,
+): string {
+  const named = `\`${receiver.contract.tag}\`'s ${slot === "" ? "default slot" : `\`${slot}\` slot`}`;
+  // The receiver warns under its own file, as live warns under the slot's definition.
+  const leftOut = (key: string, message: string): string => `[{ leftOut: ${quote(`${receiver.contract.tag}:accepts:${slot}:${key}`)}, message: ${quote(message)} }]`;
+  const spread = (items: readonly string[]): string => `[${items.map((item) => `...${item}`).join(", ")}]`;
+  const items = (nodes: readonly TemplateNode[], itemScope: RenderScope, segments: readonly KeySegment[], rowKeys: ReadonlyMap<readonly unknown[], string>, top: boolean): string[] =>
+    nodes.flatMap((child, site) => one(child, itemScope, [...segments, `${top ? "" : "."}${site}`], rowKeys));
+  // One child, as array-expression sources.
+  const one = (node: TemplateNode, itemScope: RenderScope, segments: readonly KeySegment[], rowKeys: ReadonlyMap<readonly unknown[], string>): string[] => {
+    if (node.kind === "slot") return [];
+    if (node.kind === "text") return isWhitespace(node) ? [] : [leftOut("#text", `${named} accepts ${listed(accepts)}; this text is left out.`)];
+    // An element's own `$match` chooses among its children, which are its content.
+    const child = node.name === "template" ? node : elementMatchRoot(node);
+    const { flow, ...body } = child;
+    const entry = (bodyScope: RenderScope, keySegments: readonly KeySegment[], keys: ReadonlyMap<readonly unknown[], string>): string => {
+      if (body.name === "template") return spread(items(body.children, bodyScope, keySegments, keys, false));
+      if (!accepts.includes(body.name)) {
+        let preset: string | undefined;
+        for (let root = state.componentGraph?.get(body.name)?.root; root?.kind === "component" && preset === undefined; root = state.componentGraph?.get(root.tag)?.root) {
+          if (accepts.includes(root.tag)) preset = root.tag;
+        }
+        return preset === undefined ? leftOut(body.name, `${named} accepts ${listed(accepts)}; this \`<${body.name}>\` is left out.`)
+          : leftOut(body.name, `\`<${body.name}>\` is a preset of \`${preset}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+      }
+      state.entrySites.set(child.attributes, keySegments);
+      const declared = state.componentGraph?.get(body.name)?.contract.props ?? {};
+      const props = Object.entries(declared).map(([name, contract]) => {
+        const attribute = body.attributes.find((candidate) => (candidate.kind === "literal" || candidate.kind === "attribute" && candidate.target === undefined && candidate.twoWay !== true) &&
+          (candidate.name === name.toLowerCase() || candidate.name === kebabCase(name)));
+        const absent = "default" in contract ? JSON.stringify(contract.default) : "null";
+        if (attribute?.kind === "literal") {
+          const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
+          return `${propKey(name)}: ${parsed.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}`;
+        }
+        if (attribute?.kind === "attribute" && attribute.expressionPlan !== undefined) return `${propKey(name)}: (${lowering.value(attribute.expressionPlan.ast, bodyScope)}) ?? ${absent}`;
+        return `${propKey(name)}: ${absent}`;
+      });
+      const groups = slotGroups(body.children).slots;
+      return `[{ key: ${entryKeySource(keySegments, keys)}, tag: ${quote(body.name)}, props: { ${props.join(", ")} }${groups.size === 0 ? "" : `, slots: ${slotsSource(body.name, groups, bodyScope, true)}`} }]`;
+    };
+    if (flow === undefined) return [entry(itemScope, segments, rowKeys)];
+    if (flow.kind === "if" && flow.testPlan !== undefined) return [`(${lowering.condition(flow.testPlan.ast, itemScope)} ? ${entry(itemScope, segments, rowKeys)} : [])`];
+    if (flow.kind === "with" && flow.expressionPlan !== undefined) {
+      const alias = localIdentifier(flow.alias, itemScope, state);
+      const aliasScope = localScope(itemScope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, itemScope) : present(flow.aliasType), alias]]);
+      return [`(() => { const ${alias} = ${lowering.value(flow.expressionPlan.ast, itemScope)}; return ${entry(aliasScope, segments, rowKeys)}; })()`];
+    }
+    if (flow.kind === "each" && flow.listPlan !== undefined) {
+      const item = localIdentifier(flow.item, itemScope, state);
+      const index = localIdentifier(flow.index ?? "index", itemScope, state);
+      const itemType = typeOf(flow.listPlan.ast, itemScope).type;
+      const rowScope = localScope(itemScope, [
+        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item],
+        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+        ["loop", UNKNOWN],
+      ]);
+      const list = lowering.list(flow.listPlan.ast, itemScope, item, {
+        ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }), itemScope: rowScope,
+        sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
+        ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
+      });
+      const keys = new Map(rowKeys).set(child.attributes, flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, rowScope));
+      return [`${lowering.eachRows(list)}.flatMap(({ item: ${item}, index: ${index}, loop }) => ${entry(rowScope, [...segments, child.attributes], keys)})`];
+    }
+    if (flow.kind === "match" && body.name === "template") {
+      const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, itemScope, state);
+      const armScope = flow.alias === undefined ? itemScope : localScope(itemScope, [[flow.alias,
+        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, itemScope), alias]]);
+      const arms = body.children.filter((arm): arm is ElementNode => arm.kind === "element");
+      let chosen = "[]";
+      for (const [index, arm] of [...arms.entries()].toReversed()) {
+        const { flow: choice, ...armBody } = arm;
+        const content = spread(one(armBody, armScope, [...segments, `|${index}`], rowKeys));
+        if (choice?.kind === "else") chosen = content;
+        else if (choice?.kind === "when" && choice.testPlan !== undefined) chosen = `(${lowering.condition(choice.testPlan.ast, armScope)} ? ${content} : ${chosen})`;
+      }
+      if (alias === undefined || flow.expressionPlan === undefined) return [chosen];
+      return [`(() => { const ${alias} = ${lowering.value(flow.expressionPlan.ast, itemScope)}; return ${chosen}; })()`];
+    }
+    fail("HT030", `React conversion of $${flow.kind} among a slot's accepted children is not implemented.`);
+  };
+  return items(children, scope, [`${as}:`], new Map(), true).map((item) => `...${item}`).join(", ");
+}
+
 /** React component source and its feature-specific companion artifacts. */
 export function generateReactOutput(definition: ComponentDefinition, version: string, options: ReactConversionOptions = {}): ReactConversionOutput {
   definition = condenseWhitespace(definition);
@@ -939,6 +1158,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const stateTouches = new Map(states.filter(state => usesController && state.initializer === undefined).map(state => [state.name, allocate(`notify${pascal(valueNames.get(state.name)!)}`)] as const));
   const stateOwners = new Map(initializedStates.map(state => [state.name, allocate(`${valueNames.get(state.name)!}Seed`)] as const));
   const contextEntries = new Map(contexts.map((context, index) => [context.as ?? context.name, `__context${index}!`] as const));
+  // Columns as markup (components#columns-as-markup): each slot's `as` list, and whether a slot in the graph accepts this component.
+  const lists = Object.entries(definition.contract.slots ?? {}).flatMap(([slot, declared]) => declared.as === undefined ? [] : [{ slot, as: declared.as, accepts: declared.accepts ?? [] }]);
+  const listNames = new Map(lists.map((list) => [list.as, allocate(identifierFor(list.as), "List")] as const));
+  const acceptedBy = [...options.componentGraph?.values() ?? []].some((other) =>
+    Object.values(other.contract.slots ?? {}).some((declared) => declared.accepts?.includes(definition.contract.tag) === true));
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
   const invalidateSetterName = invalidateStateName !== "" && options.target === "preact" ? allocate("rerenderTick") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
@@ -1009,6 +1233,15 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     const declared = provider?.kind === "state" ? declarationTypeNode(provider.type, provider.shape) : undefined;
     types.set(alias, declared === undefined ? UNKNOWN : { ...present(declared), nullable: true });
   }
+  for (const list of lists) {
+    const entries = list.accepts.map((tag): TypeNode => {
+      const props = options.componentGraph?.get(tag)?.contract.props;
+      return props === undefined ? UNKNOWN.type : { kind: "object", open: false, fields: Object.entries(props).map(([name, prop]) =>
+        ({ name, type: { kind: "union", members: [normalizeType(prop.type), { kind: "terminal", name: "null" }] }, optional: false })) };
+    });
+    code.set(list.as, listNames.get(list.as)!);
+    types.set(list.as, { type: { kind: "list", item: entries.length === 1 ? entries[0]! : { kind: "union", members: entries } }, nullable: false });
+  }
   // A fresh render recreates these lazy cells. Forward references stay valid, and a cyclic read
   // reaches the diagnostic guard instead of failing while the generated declarations initialize.
   for (const value of computed) {
@@ -1042,6 +1275,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
       : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : declarationStatus(name, read)), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
+    componentGraph: options.componentGraph, lists: lists.length > 0, entrySites: new Map(), rowKeys: new Map(), outletProps: [],
     nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
@@ -1081,7 +1315,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const stateSelectors = [...new Set(stateSelectedProps.map((prop) => prop.contract.select!.from))];
   const validityType = (prop: PropContract) => prop.select === undefined ? normalizeType(prop.type)
     : { kind: "union" as const, members: prop.select.options.map((option) => option.type) };
-  const namedSlots = (definition.slots ?? []).filter((slot) => slot.name !== undefined);
+  const namedSlots: SlotContract[] = [...(definition.slots ?? []).filter((slot) => slot.name !== undefined),
+    ...Object.entries(definition.contract.slots ?? {}).flatMap(([name, declared]) => name === "" || (definition.slots ?? []).some((slot) => slot.name === name) ? []
+      : [{ name, required: false, props: Object.keys(declared.props), declared: declared.props }])];
   const slotValueType = (slot: SlotContract): string => (slot.props?.length ?? 0) === 0
     ? "ReactNode"
     : `(props: ${slot.declared === undefined ? `Readonly<{ ${slot.props!.map((prop) => `${propKey(prop)}: any;`).join(" ")} }>` : slotPropsType(slot.declared)}) => ReactNode`;
@@ -1089,8 +1325,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ? "Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>"
     : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")} }>`;
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
-  const contextMarkup = states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
-    `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${code.get(state.name)!}, ${state.initializer === undefined ? `subscribe: ${stateSubscriptions.get(state.name)!}, ` : `status: ${stateOwners.get(state.name)!}.status(), readStatus: ${stateOwners.get(state.name)!}.readStatus, subscribe: ${stateOwners.get(state.name)!}.subscribe, `}read: ${stateGetters.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
+  const provide = (inner: string): string => states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
+    `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${code.get(state.name)!}, ${state.initializer === undefined ? `subscribe: ${stateSubscriptions.get(state.name)!}, ` : `status: ${stateOwners.get(state.name)!}.status(), readStatus: ${stateOwners.get(state.name)!}.readStatus, subscribe: ${stateOwners.get(state.name)!}.subscribe, `}read: ${stateGetters.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, inner);
+  const contextMarkup = provide(lists.length === 0 ? rootMarkup : `<ChildEntries value={htmlNextLists.entries}>${rootMarkup}</ChildEntries>`);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
   const HEAD_IMPORTS = "/* html-next head imports */";
   const written = [
@@ -1134,6 +1371,15 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...[...new Map(contexts.filter((context) => context.from !== definition.contract.tag || !providedContexts.has(context.name))
       .map((context) => [`${context.from}:${context.name}`, context] as const)).values()]
       .map((context) => `const ${contextExportName(context.from, context.name)} = componentContext<${types.get(context.as ?? context.name) === UNKNOWN ? "unknown" : `${typeScript(types.get(context.as ?? context.name)!)} | undefined`}>(${quote(context.from)}, ${quote(context.name)});`),
+    ...(!renderState.usesChildSlots ? [] : [`const htmlNextChildSlots = ${JSON.stringify(Object.fromEntries(lists.flatMap((list) => list.accepts).flatMap((tag) => {
+      const accepted = options.componentGraph?.get(tag);
+      if (accepted === undefined) return [];
+      const own = (accepted.slots ?? []).map((slot) => slot.name ?? "");
+      const declared = Object.entries(accepted.contract.slots ?? {});
+      const known = [...new Set([...declared.map(([name]) => name), ...own])];
+      return [[tag, [own, declared.flatMap(([name, slot]) => Object.keys(slot.props).length > 0 ? [name] : []), known, listed(known.filter((name) => name !== ""))]]];
+    })))} as const;`]),
+    ...renderState.outletProps.map((shapes, index) => `const htmlNextOutletProps${index} = ${shapes};`),
     ...(checksControllerWrites ? [`const controllerStateTypes = ${JSON.stringify(controllerStateTypes)} as const;`] : []),
     ...(usesController && target.requests.length > 0 ? [`const requestAsk = ${frameworkRequestSource(target.requests, definition.source.file)};`] : []),
     ...target.events.map((event) =>
@@ -1169,7 +1415,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "    throw Object.assign(new Error(`HR008: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR008', message }) });",
       "  }",
     ]),
-    `  const { children: _children, slots: _slots, ${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
+    `  const { children: _children, slots: _slots, ${lists.length === 0 ? "" : "htmlNextAs: _htmlNextAs, "}${acceptedBy ? "htmlNextEntry: _htmlNextEntry, " : ""}${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
       .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     '  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];',
     '  delete nativeAttrs["component"];',
@@ -1206,6 +1452,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         return `    ${propKey(prop.name)}: ${stateSelectedProps.includes(prop) ? `propInputs.read(${quote(prop.name)}) as ${type}` : `propInputs.value<${type}>(${quote(prop.name)}, props[${quote(prop.name)}], _inputBindings as any, inputAccepted)`},`;
       }),
       "  };",
+    ]),
+    ...(lists.length === 0 ? [] : [
+      `  const htmlNextLists = useChildLists(_htmlNextAs, ${JSON.stringify(lists.map((list) => list.as))}, ${quote(definition.source.file)});`,
+      ...lists.map((list) => `  const ${listNames.get(list.as)!} = htmlNextLists.lists[${quote(list.as)}] as ${typeScript(types.get(list.as)!)};`),
     ]),
     ...contexts.flatMap((context, index) => {
       const variable = `__context${index}`;
@@ -1532,6 +1782,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(stateWritesName === "" ? [] : [`    written: () => ${stateWritesName}.current.splice(0),`]),
       `    computed: { ${[
         ...computed.map((value) => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.get()`),
+        ...lists.map((list) => `${propKey(list.as)}: () => ${listNames.get(list.as)!}`),
         ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => (${contextEntries.get(value.as ?? value.name)!}.read === undefined ? ${valueNames.get(value.as ?? value.name)!} : ${contextEntries.get(value.as ?? value.name)!}.read!())`),
       ].join(", ")} },`,
       ...(computed.length + initializedStates.length + contexts.length === 0 ? [] : [`    availability: { ${[
@@ -1558,6 +1809,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       // A handler that reads $event gets a connection event, as a controller's host.on callback does.
       return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
+    ...(!acceptedBy || providedContexts.size === 0 ? [] : [`  useEntryProviders(_htmlNextEntry, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")});`]),
     // Server rendering reads how many head-declaring components enclose each one from this context.
     `  return (${definition.head !== undefined ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",

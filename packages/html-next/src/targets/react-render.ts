@@ -316,6 +316,121 @@ export function renderScopedSlot<T extends Record<string, unknown>>(slot: ReactN
   return markProjected(slot(values));
 }
 
+/** A React key for a value: an object keys by its identity, as live keys a list by \`Object.is\`. */
+const identities = new WeakMap<object, string>();
+let nextIdentity = 0;
+export function identityKey(value: unknown): string {
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) return String(value);
+  let key = identities.get(value);
+  if (key === undefined) identities.set(value, key = "#" + nextIdentity++);
+  return key;
+}
+
+/**
+ * Columns as markup: what a consumer gave for one accepted child, which its parent keeps as one
+ * stable entry while the key stays. The entry's getters read the latest props; the link carries the
+ * child's slot content and, once the child renders, its context providers.
+ */
+type ChildDescriptor = { readonly key: string; readonly tag: string; readonly props: Readonly<Record<string, unknown>>; readonly slots?: Readonly<Record<string, unknown>> }
+  // Content the slot does not accept, which the parent warns about under its own file.
+  | { readonly leftOut: string; readonly message: string };
+type ChildLink = {
+  readonly tag: string; props: Readonly<Record<string, unknown>>; slots: Readonly<Record<string, unknown>> | undefined;
+  wrap?: (content: ReactNode) => ReactNode; claims: Map<string, object>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
+};
+const childLinks = new WeakMap<object, ChildLink>();
+/** A parent's entries by key, which its accepted children find theirs in. */
+export const ChildEntries = React.createContext<ReadonlyMap<string, object> | undefined>(undefined);
+const noSubscribe = (): (() => void) => () => {};
+
+/** A component's \`as\` lists, by name, from the descriptors its consumer gave; each entry keeps its identity by key. */
+export function useChildLists(given: unknown, names: readonly string[], file: string): { readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ReadonlyMap<string, object> } {
+  const kept = React.useRef(new Map<string, object>()).current;
+  const descriptors = (given ?? {}) as Readonly<Record<string, readonly ChildDescriptor[] | undefined>>;
+  const current = new Map<string, object>();
+  const lists: Record<string, readonly object[]> = {};
+  for (const name of names) lists[name] = Object.freeze((descriptors[name] ?? []).flatMap((descriptor) => {
+    if ("leftOut" in descriptor) {
+      warnUnless(false, file + "#" + descriptor.leftOut, (file === "" ? "" : file + ": ") + "HR007: " + descriptor.message);
+      return [];
+    }
+    let entry = kept.get(descriptor.key);
+    let link = entry === undefined ? undefined : childLinks.get(entry);
+    if (link === undefined || link.tag !== descriptor.tag) {
+      const listeners = new Set<() => void>();
+      const made: ChildLink = { tag: descriptor.tag, props: descriptor.props, slots: descriptor.slots, claims: new Map(), listeners,
+        subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
+      link = made;
+      entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(descriptor.props).map((prop) =>
+        [prop, { get: () => made.props[prop], enumerable: true }]))) as object);
+      childLinks.set(entry, made);
+    }
+    // Plain content is claimed afresh each render by the first outlet that places it.
+    link.props = descriptor.props; link.slots = descriptor.slots; link.claims = new Map();
+    current.set(descriptor.key, entry!);
+    return entry!;
+  }));
+  kept.clear();
+  for (const [key, entry] of current) kept.set(key, entry);
+  return { lists, entries: kept };
+}
+
+/**
+ * An accepted child gives its entry its context providers, so content its parent places through
+ * \`<slot of>\` reads the child's contexts, then the parent's. Limit: an outlet that renders before the
+ * child's own root reads the child's contexts only after the child commits, and not in server output.
+ */
+export function useEntryProviders(key: unknown, wrap: (content: ReactNode) => ReactNode): void {
+  const entries = React.useContext(ChildEntries);
+  const entry = typeof key === "string" ? entries?.get(key) : undefined;
+  const link = entry === undefined ? undefined : childLinks.get(entry);
+  if (link !== undefined) link.wrap = wrap;
+  React.useLayoutEffect(() => { for (const listener of link?.listeners ?? []) listener(); });
+}
+
+/** Each accepted tag's slots: those its own template places, those with props, all it declares, and those names as text. */
+export type ChildSlots = Readonly<Record<string, readonly [readonly string[], readonly string[], readonly string[], string]>>;
+
+/**
+ * \`<slot of="$column" name="cell">\`: the entry's child's \`<template slot>\` rendered with the outlet's
+ * values, its plain content where its own template does not place it and no earlier outlet took it, or
+ * the fallback.
+ */
+export function ChildSlot(props: {
+  readonly entry: unknown; readonly name: string; readonly values?: Record<string, unknown>; readonly slots: ChildSlots; readonly file: string; readonly fallback: ReactNode;
+  /** By accepted tag: the outlet's values checked and converted by that tag's slot declaration, as live's \`childSlotProps\`. */
+  readonly shapes?: Readonly<Record<string, (values: Record<string, unknown>) => Record<string, unknown>>>;
+}): ReactNode {
+  const { entry, name, values, slots, file, fallback, shapes } = props;
+  const prefix = file === "" ? "HR007: " : file + ": HR007: ";
+  const link = entry !== null && typeof entry === "object" ? childLinks.get(entry) : undefined;
+  const wrap = React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.wrap, () => link?.wrap);
+  const claim = React.useRef({}).current;
+  if (link === undefined) return fallback;
+  const known = slots[link.tag];
+  const location = file + "#of:" + link.tag + ":" + name;
+  if (known !== undefined && !known[2].includes(name)) {
+    warnUnless(false, location, prefix + "\`" + link.tag + "\` declares the slots " + known[3] + "; \`" + name + "\` is unknown.");
+    return fallback;
+  }
+  const slot = link.slots?.[name];
+  let content: ReactNode;
+  // A \`<template slot>\` renders afresh at every outlet; plain content renders at one.
+  if (typeof slot === "function") content = (slot as (values: Record<string, unknown>) => ReactNode)(shapes?.[link.tag]?.(values ?? {}) ?? values ?? {});
+  else if (!hasSlotContent(slot as ReactNode)) return fallback;
+  else if (values !== undefined || known?.[1].includes(name) === true) {
+    warnUnless(false, location + ":plain", prefix + "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
+    return fallback;
+  } else {
+    if (known?.[0].includes(name) === true) return fallback;
+    if (!link.claims.has(name)) link.claims.set(name, claim);
+    if (link.claims.get(name) !== claim) return fallback;
+    content = slot as ReactNode;
+  }
+  const placed = markProjected(content);
+  return wrap === undefined ? placed : wrap(placed);
+}
+
 /** Projected elements carry \`data-slotted\`, which the component's \`:slotted()\` rules select. */
 export function markProjected(value: ReactNode): ReactNode {
   // Several projected children keep their places as a fragment's arguments; returned as an array they would be a list needing keys.
