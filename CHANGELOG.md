@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.89
+
+- Hand-written React and Preact consumers get complete `as` lists. An accepting component reads its accepted children from its own slot content, through arrays, fragments, conditions and keyed loops, on the first render, in server output and through hydration. Entries, `slots` content, `<slot of>` takeover, context, `host.state` and `HR007` warnings match a compiled consumer's. A wrapper component around an accepted child is content the slot doesn't accept, so it's left out with a warning.
+
 ## 1.0.0-alpha.88
 
 - Columns as markup. A `<slot>` declaration in `<defs>` takes `accepts`, one or more component tags, and `as`, the name of a read-only list of the accepted children's resolved props in content order. `<slot of="$entry" name="x">`, or `<template $slot of>` in table parts, places that child's slot with slot props and a fallback. The live runtime, compiled output, React, Preact, Vue, Svelte and Angular support it, with server rendering and hydration. A preset of an accepted component is left out of the list with a warning.

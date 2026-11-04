@@ -496,7 +496,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   }
   if (node.kind === "slot") {
     const name = quote(node.name ?? "");
-    const supplied = node.name === undefined ? "props.children" : `props.slots?.[${name}]`;
+    // A slot with `as` renders its content as its lists read it, each accepted child with its entry.
+    const supplied = state.definition.contract.slots?.[node.name ?? ""]?.as !== undefined ? `htmlNextLists.content[${name}]`
+      : node.name === undefined ? "props.children" : `props.slots?.[${name}]`;
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
     if ((node.props?.length ?? 0) > 0) {
       state.usesScopedSlots = true;
@@ -1161,8 +1163,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // Columns as markup (components#columns-as-markup): each slot's `as` list, and whether a slot in the graph accepts this component.
   const lists = Object.entries(definition.contract.slots ?? {}).flatMap(([slot, declared]) => declared.as === undefined ? [] : [{ slot, as: declared.as, accepts: declared.accepts ?? [] }]);
   const listNames = new Map(lists.map((list) => [list.as, allocate(identifierFor(list.as), "List")] as const));
-  const acceptedBy = [...options.componentGraph?.values() ?? []].some((other) =>
-    Object.values(other.contract.slots ?? {}).some((declared) => declared.accepts?.includes(definition.contract.tag) === true));
+  const acceptedTags = new Set([...options.componentGraph?.values() ?? []].flatMap((other) => Object.values(other.contract.slots ?? {}).flatMap((declared) => declared.accepts ?? [])));
+  const acceptedBy = acceptedTags.has(definition.contract.tag);
+  // A hand-written consumer's accepting parent finds this component among its children by its tag, and a preset by its root's.
+  const childTags = [definition.contract.tag];
+  for (let root = definition.root; root?.kind === "component" && !childTags.includes(root.tag); root = options.componentGraph?.get(root.tag)?.root) childTags.push(root.tag);
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
   const invalidateSetterName = invalidateStateName !== "" && options.target === "preact" ? allocate("rerenderTick") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
@@ -1454,7 +1459,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  };",
     ]),
     ...(lists.length === 0 ? [] : [
-      `  const htmlNextLists = useChildLists(_htmlNextAs, ${JSON.stringify(lists.map((list) => list.as))}, ${quote(definition.source.file)});`,
+      `  const htmlNextLists = useChildLists(_htmlNextAs, ${JSON.stringify(Object.fromEntries(lists.map((list) => [list.as, [list.slot, list.accepts]])))}, ${quote(definition.contract.tag)}, ${quote(definition.source.file)}, props);`,
       ...lists.map((list) => `  const ${listNames.get(list.as)!} = htmlNextLists.lists[${quote(list.as)}] as ${typeScript(types.get(list.as)!)};`),
     ]),
     ...contexts.flatMap((context, index) => {
@@ -1813,6 +1818,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     // Server rendering reads how many head-declaring components enclose each one from this context.
     `  return (${definition.head !== undefined ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",
+    ...(!childTags.some((tag) => acceptedTags.has(tag)) ? [] : [`${name}.htmlNextChild = { tags: ${JSON.stringify(childTags)}, props: { ${Object.entries(definition.contract.props ?? {})
+      .map(([prop, contract]) => `${propKey(prop)}: ${"default" in contract ? JSON.stringify(contract.default) : "null"}`).join(", ")} } };`]),
     ...(usesScopedAttachments ? [
       "",
       "type ScopedPath = (() => readonly (string | number)[]) | undefined;",

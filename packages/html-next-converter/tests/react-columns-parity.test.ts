@@ -80,6 +80,49 @@ const controller = `export default function initialize(host) {
   return host.effect(() => host.root.setAttribute("data-columns", host.state.columns.map((column) => column.header ?? column.field ?? "-").join(",")));
 }`;
 
+/**
+ * Hand-written consumers in each framework's own JSX, giving the same tables as `x-products`,
+ * `x-more` and `x-warned`: columns written directly, in a conditional and in a keyed loop, `slots`
+ * render props and plain content, and a column whose props change in place.
+ */
+const hand = (target: Target, entry: string): string => `${target === "preact" ? `/** @jsxImportSource preact */
+import { useState } from "preact/hooks";` : `import { useState } from "react";`}
+import { XBadge, XColumn, XColumnPreset, XDatatable } from "./${entry}";
+export function HandProducts() {
+  const [products, setProducts] = useState([{ id: 1, name: "Desk lamp", price: 49 }, { id: 2, name: "Notebook", price: 6.5 }]);
+  const [showId, setShowId] = useState(false);
+  const [extra, setExtra] = useState([{ key: "name", label: "N" }, { key: "price", label: "P" }]);
+  return <main><button type="button" className="toggle" onClick={() => setShowId(!showId)}>Id</button>
+    <button type="button" className="swap" onClick={() => setExtra([{ key: "price", label: "P" }, { key: "name", label: "N" }])}>Swap</button>
+    <button type="button" className="rename" onClick={() => setProducts([{ id: 2, name: "Notebook", price: 6.5 }, { id: 1, name: "Lamp", price: 49 }, { id: 3, name: "Pen", price: 2 }])}>Rename</button>
+    <XDatatable rows={products}>
+      {showId && <XColumn field="id" header="Id" />}
+      <XColumn field="name" header="Name" slots={{ note: <i>kept</i> }} />
+      <XColumn className="numeric" slots={{ header: <abbr title="Price in US dollars">Price</abbr>,
+        cell: ({ row }: { row: any }) => <><span><XBadge text={row.name} /></span>{row.price}</> }} />
+      {extra.map((column) => <XColumn key={column.key} field={column.key} header={column.label} />)}
+    </XDatatable></main>;
+}
+export function HandMore() {
+  const [wide, setWide] = useState(false);
+  const [tags, setTags] = useState(["p", "q"]);
+  return <main><button type="button" className="widen" onClick={() => setWide(!wide)}>Widen</button>
+    <button type="button" className="retag" onClick={() => setTags(["q", "r"])}>Retag</button>
+    <XDatatable rows={[{ id: 1, name: "A", price: 1 }]}>
+      {wide ? <XColumn field="price" header="Wide" /> : <XColumn field="name" header="Narrow" slots={{ note: () => <u>n</u> }} />}
+      {tags.map((tag) => <XColumn key={tag} header={tag} slots={{ cell: () => <XBadge text={tag} />,
+        tag: ({ size, unit }: { size: number; unit: string }) => <em>{size + 1}{unit}</em> }} />)}
+    </XDatatable></main>;
+}
+export function HandWarned() {
+  return <main><XDatatable rows={[{ id: 1, name: "A", price: 1 }]}>
+    <XColumn field="name" /><span>no</span>stray<XColumnPreset />
+    <XColumn slots={{ cell: <span>plain</span> as any }} /></XDatatable></main>;
+}
+`;
+const PAGES = { XProducts: "", XWarned: "#warned", XMore: "#more", HandProducts: "#hand-products", HandWarned: "#hand-warned", HandMore: "#hand-more" } as const;
+type PageName = keyof typeof PAGES;
+
 /** The rendered tables without marks, carriers or runtime attributes. */
 const READ = `Array.from(document.querySelectorAll("table"), (table) => {
   const read = (node) => {
@@ -114,15 +157,19 @@ describe.skipIf(!enabled)("columns as markup in React and Preact", () => {
       const out = join(directory, target);
       const manifest = await convertComponents({ mode: "application", target, root: directory, outDirectory: out, entries: ["components/**"] });
       const entry = join(out, "mount.tsx");
+      const generated = manifest.output.entry.replace(/\.tsx?$/, "");
+      await writeFile(join(out, "hand.tsx"), hand(target, generated));
+      await writeFile(join(out, "pages.tsx"), `export { XMore, XProducts, XWarned } from "./${generated}";\nexport * from "./hand";`);
+      const pick = `const App = (pages as Record<string, any>)[Object.entries(${JSON.stringify(PAGES)}).find(([, hash]) => hash === location.hash)![0]];`;
       await writeFile(entry, target === "react" ? `import { createRoot, hydrateRoot } from "react-dom/client";
-import { XMore, XProducts, XWarned } from "./${manifest.output.entry.replace(/\.tsx?$/, "")}";
-const App = location.hash === "#warned" ? XWarned : location.hash === "#more" ? XMore : XProducts;
+import * as pages from "./pages";
+${pick}
 const mount = document.querySelector("#mount")!;
 if (mount.hasChildNodes()) hydrateRoot(mount, <App />); else createRoot(mount).render(<App />);`
         : `/** @jsxImportSource preact */
 import { hydrate, render } from "preact";
-import { XMore, XProducts, XWarned } from "./${manifest.output.entry.replace(/\.tsx?$/, "")}";
-const App = location.hash === "#warned" ? XWarned : location.hash === "#more" ? XMore : XProducts;
+import * as pages from "./pages";
+${pick}
 const mount = document.querySelector("#mount")!;
 if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);`);
       const bundle = join(out, "mount.js");
@@ -130,10 +177,10 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
         loader: { ".css": "empty" }, nodePaths: [nodeModules] });
       bundles.set(target, bundle);
       const server = join(out, "server.mjs");
-      await build({ entryPoints: [join(out, manifest.output.entry)], outfile: server, bundle: true, platform: "node", format: "esm",
+      await build({ entryPoints: [join(out, "pages.tsx")], outfile: server, bundle: true, platform: "node", format: "esm",
         packages: "external", jsx: "automatic", loader: { ".css": "empty" } });
       const components = await import(pathToFileURL(server).href) as Record<string, unknown>;
-      for (const name of ["XProducts", "XWarned", "XMore"]) {
+      for (const name of Object.keys(PAGES)) {
         servers.set(`${target}:${name}`, target === "react" ? renderReact(reactElement(components[name] as ReactComponent))
           : renderPreact(preactElement(components[name] as PreactComponent, {})));
       }
@@ -164,28 +211,31 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
       for (const table of document.querySelectorAll("table")) initialize(window.HtmlRuntime.getComponentHost(table, "x-datatable")); })()`);
     return warnings;
   };
-  const openTarget = async (page: Page, target: Target, mode: Mode, name: "XProducts" | "XWarned" | "XMore"): Promise<string[]> => {
+  const openTarget = async (page: Page, target: Target, mode: Mode, name: PageName): Promise<string[]> => {
     const warnings: string[] = [];
     page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
     await page.route("https://app.example/**", (route) => route.fulfill({ contentType: "text/html",
       body: `<div id="mount">${mode === "hydrate" ? servers.get(`${target}:${name}`)! : ""}</div>` }));
-    await page.goto(`https://app.example/${name === "XWarned" ? "#warned" : name === "XMore" ? "#more" : ""}`);
+    await page.goto(`https://app.example/${PAGES[name]}`);
     await page.evaluate(`window.serverCells = Array.from(document.querySelectorAll("td, th"))`);
     await page.addScriptTag({ path: bundles.get(target)! });
     await page.locator("table").first().waitFor();
     return warnings;
   };
   const settle = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  const tables = async (page: Page, expected?: string): Promise<string> => {
-    if (expected !== undefined) await page.waitForFunction(`${READ} === ${JSON.stringify(expected)}`, undefined, { timeout: 5_000 }).catch(() => {});
+  // A hand-written consumer gives slot content as `slots`, so its elements carry no `slot` attribute.
+  const tables = async (page: Page, expected?: string, hand = false): Promise<string> => {
+    const read = hand ? `(${READ}).replace(/ slot="[a-z]+"/g, "")` : READ;
+    if (expected !== undefined) await page.waitForFunction(`${read} === ${JSON.stringify(expected)}`, undefined, { timeout: 5_000 }).catch(() => {});
     await settle(page);
-    return page.evaluate(READ) as Promise<string>;
+    return page.evaluate(read) as Promise<string>;
   };
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-    for (const target of ["react", "preact"] as const) {
+    for (const target of ["react", "preact"] as const) for (const hand of [false, true]) {
+      const consumer = hand ? `${target} hand-written` : target;
       for (const mode of ["mount", "hydrate"] as const) {
-        it(`${target} ${mode} matches live in ${engine}: entries, $if and keyed $each columns, cells, notes and contexts`, async () => {
+        it(`${consumer} ${mode} matches live in ${engine}: entries, $if and keyed $each columns, cells, notes and contexts`, async () => {
           const browser = await browserType.launch({ headless: true });
           try {
             const live = await browser.newPage();
@@ -194,20 +244,20 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
             for (const page of [live, converted]) page.on("pageerror", (error) => errors.push(error.message));
             converted.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
             await openLive(live, "x-products");
-            await openTarget(converted, target, mode, "XProducts");
-            const initial = await tables(live);
-            assert.equal(initial, `<table><caption>4 columns</caption><thead><tr><th scope="col">Name</th><th class="numeric" scope="col"><abbr title="Price in US dollars" slot="header">Price</abbr></th><th scope="col">N</th><th scope="col">P</th></tr></thead><tbody>` +
+            await openTarget(converted, target, mode, hand ? "HandProducts" : "XProducts");
+            assert.equal(await tables(live), `<table><caption>4 columns</caption><thead><tr><th scope="col">Name</th><th class="numeric" scope="col"><abbr title="Price in US dollars" slot="header">Price</abbr></th><th scope="col">N</th><th scope="col">P</th></tr></thead><tbody>` +
               `<tr><td>Desk lamp</td><td><span><b>Desk lamp:quiet:compact</b></span>49</td><td>Desk lamp</td><td>49</td></tr>` +
               `<tr><td>Notebook</td><td><span><b>Notebook:quiet:compact</b></span>6.5</td><td>Notebook</td><td>6.5</td></tr></tbody>` +
               `<tfoot><tr><td><i slot="note">kept</i></td><td>-</td><td>-</td><td>-</td></tr></tfoot></table>\ncolumns: Name,-,N,P`);
-            assert.equal(await tables(converted, initial), initial);
+            const initial = await tables(live, undefined, hand);
+            assert.equal(await tables(converted, initial, hand), initial);
             if (mode === "hydrate") assert.equal(await converted.evaluate(`window.serverCells.every((cell) => cell.isConnected)`), true);
             for (const button of ["toggle", "swap", "rename", "toggle"]) {
               // Cells of keyed columns move with their column: after `toggle`, the swapped columns are the fourth and fifth.
               await converted.evaluate(`window.before = Array.from(document.querySelectorAll("tbody tr:first-child td"))`);
               await Promise.all([live, converted].map((page) => page.locator(`button.${button}`).click()));
-              const expected = await tables(live);
-              assert.equal(await tables(converted, expected), expected, `after ${button}`);
+              const expected = await tables(live, undefined, hand);
+              assert.equal(await tables(converted, expected, hand), expected, `after ${button}`);
               if (button === "swap") {
                 assert.equal(await converted.evaluate(`(() => { const after = Array.from(document.querySelectorAll("tbody tr:first-child td")); return window.before[3] === after[4] && window.before[4] === after[3] && window.before[0] === after[0]; })()`), true);
               }
@@ -217,14 +267,14 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
         });
       }
 
-      it(`${target} warns like live for children a slot does not accept, presets and plain content for a slot with props in ${engine}`, async () => {
+      it(`${consumer} warns like live for children a slot does not accept, presets and plain content for a slot with props in ${engine}`, async () => {
         const browser = await browserType.launch({ headless: true });
         try {
           const live = await browser.newPage();
           const converted = await browser.newPage();
-          const warned = [await openLive(live, "x-warned"), await openTarget(converted, target, "mount", "XWarned")];
-          const expected = await tables(live);
-          assert.equal(await tables(converted, expected), expected);
+          const warned = [await openLive(live, "x-warned"), await openTarget(converted, target, "mount", hand ? "HandWarned" : "XWarned")];
+          const expected = await tables(live, undefined, hand);
+          assert.equal(await tables(converted, expected, hand), expected);
           // The same messages; each names its own definition file.
           const [native, generated] = warned.map((messages) => [...new Set(messages.filter((message) => message.includes("HR007"))
             .map((message) => message.replace(/^.*HR007: /, "")))].sort());
@@ -235,23 +285,23 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
       });
 
       for (const mode of ["mount", "hydrate"] as const) {
-        it(`${target} ${mode} matches live in ${engine}: $match and <template> regions, templates at every outlet, static outlet props and defaults`, async () => {
+        it(`${consumer} ${mode} matches live in ${engine}: $match and <template> regions, templates at every outlet, static outlet props and defaults`, async () => {
           const browser = await browserType.launch({ headless: true });
           try {
             const live = await browser.newPage();
             const converted = await browser.newPage();
             const errors: string[] = [];
             for (const page of [live, converted]) page.on("pageerror", (error) => errors.push(error.message));
-            const warned = [await openLive(live, "x-more"), await openTarget(converted, target, mode, "XMore")];
+            const warned = [await openLive(live, "x-more"), await openTarget(converted, target, mode, hand ? "HandMore" : "XMore")];
             const initial = await tables(live);
             assert.equal(initial, `<table><caption>3 columns</caption><thead><tr><th scope="col">Narrow</th><th scope="col">p</th><th scope="col">q</th></tr></thead>` +
               `<tbody><tr><td>A</td><td><b>p:quiet:compact</b></td><td><b>q:quiet:compact</b></td></tr></tbody>` +
               `<tfoot><tr><td><u>n</u><u>n</u></td><td>-<em>4px</em></td><td>-<em>4px</em></td></tr></tfoot></table>\ncolumns: Narrow,p,q`);
-            assert.equal(await tables(converted, initial), initial);
+            assert.equal(await tables(converted, initial, hand), initial);
             for (const button of ["widen", "retag", "widen"]) {
               await Promise.all([live, converted].map((page) => page.locator(`button.${button}`).click()));
-              const expected = await tables(live);
-              assert.equal(await tables(converted, expected), expected, `after ${button}`);
+              const expected = await tables(live, undefined, hand);
+              assert.equal(await tables(converted, expected, hand), expected, `after ${button}`);
             }
             const [native, generated] = warned.map((messages) => [...new Set(messages.filter((message) => message.includes("HR007")))].sort());
             // Without a public root URL the generated definitions have no file, so warnings start at the code.
