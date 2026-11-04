@@ -1978,12 +1978,14 @@ export type ChildSlots = Readonly<Record<string, readonly [outlets: readonly str
  * The child's `<template slot>` renders afresh with the outlet's props; its plain content keeps its
  * identity, placed by the first outlet that renders it unless its own template places that slot; else
  * the outlet's fallback block renders (`make`, `patch`). It renders again only when `of` names
- * another entry. `adopt` adopts the range the server rendered.
+ * another entry. `shapes` checks and converts the props a template receives by the child's slot
+ * declaration, by its tag, as live's `childSlotProps` does. `adopt` adopts the range the server rendered.
  */
 export function childOutlet(
   record: { z?: (() => void)[] }, start: ChildNode, end: ChildNode, name: string, slots: ChildSlots, spec: GeneratedStateSpec,
   make: (dirty: Map<unknown, 1 | 2>, at?: ChildNode) => { readonly n: Node; z?: (() => void)[] },
-  patch: (block: never, changed: number, dirty: Map<unknown, 1 | 2>) => void, given: boolean, adopt?: boolean,
+  patch: (block: never, changed: number, dirty: Map<unknown, 1 | 2>) => void, given: boolean,
+  shapes: Readonly<Record<string, (props: Record<string, unknown>) => Record<string, unknown>>> | undefined, adopt?: boolean,
 ): (value: unknown, list: unknown, props: Record<string, unknown>, changed: number, dirty: Map<unknown, 1 | 2>) => void {
   const doc = start.ownerDocument!;
   let open = start, close = end;
@@ -1991,6 +1993,7 @@ export function childOutlet(
   let rendering: readonly [ScopedTemplate, ScopedRecord] | undefined;
   let block: ReturnType<typeof make> | undefined;
   let claimed: Node[] = [];
+  let shape: ((props: Record<string, unknown>) => Record<string, unknown>) | undefined;
   let flags = "";
   const clear = (): void => {
     if (rendering !== undefined) {
@@ -2045,6 +2048,8 @@ export function childOutlet(
       const kept = server !== undefined && (mode === 0) === server.attributes.has("fallback") && (mode === 1) === (mode !== 0 && server.attributes.has("scoped"));
       if (server !== undefined && !kept) for (const node of contents) node.parentNode?.removeChild(node);
       if (mode === 1) {
+        shape = shapes?.[child!.S.g];
+        if (shape !== undefined) props = shape(props);
         const carrier = content.find((node) => (node as Element).localName === "template") as HTMLTemplateElement;
         const template = scopedTemplates.get(carrier) ?? runtimeTemplate(carrier, Object.keys(props));
         const made = kept ? (template.m as (dirty: Map<unknown, 1 | 2>, props: Record<string, unknown>, at?: Node) => ScopedRecord)(dirty, props, open)
@@ -2078,6 +2083,7 @@ export function childOutlet(
       if (mode !== 0) for (let node = open.nextSibling; node !== null && node !== close; node = node.nextSibling) placedOwners.set(node, child!);
       flags = `${mode === 0 ? ' fallback=""' : ""}${scoped ? ' scoped=""' : ""}`;
     } else if (rendering !== undefined) {
+      if (shape !== undefined) props = shape(props);
       const current = rendering[1].s;
       let write = changed & NESTED;
       for (const key in props) if (!(key in current && Object.is(current[key], props[key]))) { current[key] = props[key]; write = 1; }

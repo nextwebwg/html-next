@@ -2003,6 +2003,39 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <x-column><span slot="cell">plain</span></x-column></x-datatable></main></template>`;
       await same([page, table, column, preset], [read]);
     });
+
+    describe("checks `<slot of>` props against the child's slot declaration like live", () => {
+      const col = `<template component="x-col" status="early" summary="Col."><th><slot></slot></th><defs>
+        <slot name="cell"><prop name="row" type="object" required>Row.</prop><prop name="width" type="number">Width.</prop>
+          <prop name="label" type="string" default="none">Label.</prop><prop name="tone" type="string" default="calm">Tone.</prop></slot>
+        <slot name="foot"><prop name="total" type="number" required>Total.</prop><prop name="unit" type="string" default="USD">Unit.</prop></slot></defs></template>`;
+      // Each test's warnings come from one outlet: across outlets, compiled rows report in another order.
+      const grid = (cell: string, foot = `<slot of="$column" name="foot" total="1">-</slot>`) => `<template component="x-grid" status="early" summary="Grid."><defs>
+        <prop name="rows" type="list(object({ id: number, name: string }))" required>Rows.</prop><prop name="blank" type="boolean">Blank.</prop>
+        <slot accepts="x-col" as="columns"></slot></defs>
+        <table><thead><tr><template $slot></template></tr></thead><tbody><tr $each="row of $rows" $key="$row.id"><td $each="column of $columns" $key="$column">${cell}</td></tr></tbody>
+        <tfoot><tr><td $each="column of $columns" $key="$column">${foot}</td></tr></tfoot></table></template>`;
+      const page = (cell: string) => `<template component="x-grid-page" status="early" summary="Page."><defs>
+        <state name="blank" type="boolean" value="false"></state><handler name="toggle"><set name="blank" expr:value="not $blank"></set></handler></defs>
+        <main><button type="button" class="toggle" on:click="toggle">Toggle</button>
+        <x-grid from:rows="[{ id: 1, name: 'A' }, { id: 2, name: 'B' }]" from:blank="$blank"><x-col>
+          <template slot="cell"><span>${cell}</span></template><template slot="foot"><em>{$unit}</em></template></x-col></x-grid></main></template>`;
+      const steps = [click("toggle"), click("toggle")];
+
+      it("converts a static prop by its declared type", async () => {
+        await same([page("{$width + 1}|{$row.name}"), grid(`<slot of="$column" name="cell" from:row="$row" width="3">-</slot>`), col], steps);
+      });
+
+      it("warns for an undeclared or missing required prop", async () => {
+        const run = await same([page("{$row.name}"), grid(`<slot of="$column" name="cell" from:row="$row">-</slot>`, `<slot of="$column" name="foot" extra="x">-</slot>`), col], steps);
+        assert.equal(run.warnings.length, 2);
+      });
+
+      it("gives a null or rejected prop, and one left out, its declared default", async () => {
+        const run = await same([page("{$label}|{$tone}"), grid(`<slot of="$column" name="cell" from:row="$row" from:label="$blank ? null : $row.name" from:tone="$row.id">-</slot>`), col], steps);
+        assert.equal(run.warnings.length, 1);
+      });
+    });
   });
 
   it("invokes a scalar prop component like live lowering", async () => {

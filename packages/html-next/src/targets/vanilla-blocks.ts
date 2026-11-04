@@ -35,6 +35,7 @@ import { parseDuration } from "../duration.js";
 import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
 import { hasBounds } from "../validate.js";
+import { invocationValue } from "../prop-values.js";
 import { kebabCase, propAttribute } from "../names.js";
 import { conformingStates, declaredStateLiteral, literalInitial, NotLiteral } from "./state-roots.js";
 import type { Invoked } from "../generate.js";
@@ -181,6 +182,8 @@ interface Region {
   readonly propDefaults?: readonly (string | undefined)[];
   /** `<slot of>`: the entry whose slot it places, and the root of the `as` list that entry is in. */
   readonly of?: Lowered;
+  /** `<slot of>`: each static prop's text, which converts by the type the child's slot declares. */
+  readonly propRaws?: readonly (string | undefined)[];
   readonly listRoot?: number;
   /** A consumer region at the top of content for a slot with `accepts`: that slot's list follows it. */
   readonly listed?: boolean;
@@ -305,6 +308,8 @@ export interface BlockPlan {
   readonly scripts: readonly { readonly declaration: ScriptDeclaration; readonly root: number; readonly load?: string; readonly error?: string }[];
   /** What `<slot of>` outlets know of each accepted child's slots (`ChildSlots` in generated-runtime). */
   readonly children?: Readonly<Record<string, readonly [readonly string[], readonly string[], readonly string[], string]>>;
+  /** Each accepted child's definition, by tag, whose slot declarations check `<slot of>` props. */
+  readonly accepted?: Readonly<Record<string, ComponentDefinition>>;
 }
 
 /** "`a`", "`a` and `b`", "`a`, `b` and `c`". */
@@ -1379,11 +1384,11 @@ class Planner {
       const fallback = this.block({ kind: "element", name: "template", attributes: [], children: node.fallback ?? [] },
         false, { ...scope, level: scope.level + 1 }, false, svg, false);
       if (node.of !== undefined) {
-        // ponytail: a static prop is given as its text, unconverted; live converts it by the child's declared type.
+        // A static prop is given as its text; the child's slot declaration converts it (`outletProps`).
         const given = (node.props ?? []).map((prop) => prop.raw !== undefined ? none(`raw:${prop.raw}`, JSON.stringify(prop.raw)) : this.checked(prop.expressionPlan, scope));
         block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
           of: this.checked(node.of.expressionPlan, scope), listRoot: this.roots.findIndex((root) => root.name === node.of!.list),
-          props: given, propNames: (node.props ?? []).map((prop) => prop.name) });
+          props: given, propNames: (node.props ?? []).map((prop) => prop.name), propRaws: (node.props ?? []).map((prop) => prop.raw) });
         return 4;
       }
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
@@ -1651,17 +1656,19 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
     });
     // Each accepted child's slots, which `<slot of>` outlets place: its own outlets, those with props, and all it declares.
     const outlets = planner.blocks.some((block) => block.regions.some((region) => region.of !== undefined));
+    const accepted: Record<string, ComponentDefinition> = {};
     const children = !outlets ? undefined : Object.fromEntries(roots.flatMap((item) => item.list?.accepts ?? []).flatMap((tag) => {
-      const accepted = graph?.get(tag) ?? invocations?.get(tag)?.definition;
-      if (accepted === undefined) return [];
-      const own = (accepted.slots ?? []).map((slot) => slot.name ?? "");
-      const declared = Object.entries(accepted.contract.slots ?? {});
+      const definition = graph?.get(tag) ?? invocations?.get(tag)?.definition;
+      if (definition === undefined) return [];
+      accepted[tag] = definition;
+      const own = (definition.slots ?? []).map((slot) => slot.name ?? "");
+      const declared = Object.entries(definition.contract.slots ?? {});
       const known = [...new Set([...declared.map(([name]) => name), ...own])];
       return [[tag, [own, declared.flatMap(([name, slot]) => Object.keys(slot.props).length > 0 ? [name] : []), known,
         listed(known.filter((name) => name !== ""))] as const]];
     }));
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
-      ...children === undefined ? {} : { children },
+      ...children === undefined ? {} : { children, accepted },
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       seeds: roots.flatMap((item, index) => item.initializer === undefined ? [] : [{ index, source: convertible(planner.checked(item.initializer, { ...planner.scope, observesInputs: true })) }]),
       states: roots.length - props - roots.filter((item) => item.computed !== undefined || readOnlyRoot(item)).length, shown: roots.length - props, reads,
@@ -1843,6 +1850,49 @@ export function emitBlocks(
   const blocks = plan.blocks;
   // Each declared slot prop's full check, made once for the module: `K0`, `K1`, …
   const slotPropChecks: string[] = [];
+  // A slot prop's value as live's `renderScopedTemplate` gives it: a typed one is checked in full, as a prop's
+  // input is, and one its type does not accept warns once (HR007). It, and absent input, take the default, or null.
+  const slotPropGiven = (value: string, slot: string | undefined, prop: string, type: TypeNode | undefined, fallback: string | undefined, check: () => string): string => {
+    if (type === undefined) return fallback === undefined ? value : `(${value} == null || ${value} === ABSENT ? ${fallback} : ${value})`;
+    const name = typeof slot === "string" && slot !== "" ? `Slot \`${slot}\`` : "The default slot";
+    const message = `${name} prop \`${prop}\` does not satisfy its declared type \`${formatType(type)}\`.`;
+    return `(${value} != null && ${value} !== ABSENT && (${check()}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${slot ?? ""}:${prop}`)}, ${JSON.stringify(message)}), false)) ? ${value} : ${fallback ?? "null"})`;
+  };
+  // Each `<slot of>` outlet's props, by accepted tag, as live's `childSlotProps` checks them against the
+  // child's slot declaration: `OP0`, `OP1`, …, or undefined when no tag declares or is given any.
+  const outletProps: string[] = [];
+  const outletPropsSource = (region: Region): string => {
+    const name = region.slot!;
+    const names = region.propNames ?? [];
+    const outlet = `<slot of name="${name}">`;
+    const shapes = (plan.roots[region.listRoot!]?.list?.accepts ?? []).flatMap((tag) => {
+      const declared = plan.accepted?.[tag]?.contract.slots?.[name]?.props ?? {};
+      if (plan.accepted?.[tag] === undefined || names.length + Object.keys(declared).length === 0) return [];
+      const warn = (prop: string, message: string): string => `warnOnce(S, ${JSON.stringify(`of:${name}:${prop}`)}, ${JSON.stringify(message)}); `;
+      let warnings = "";
+      const values = names.map((prop, at) => {
+        const key = JSON.stringify(prop);
+        const contract = declared[prop];
+        const raw = region.propRaws?.[at];
+        if (contract === undefined) {
+          warnings += warn(prop, `${outlet} gives prop \`${prop}\`, which \`${tag}\`'s slot \`${name}\` does not declare.`);
+          return `if (${key} in s) t[${key}] = s[${key}];`;
+        }
+        if (raw !== undefined) return `t[${key}] = ${valueSource(invocationValue(contract, raw, "html", true) ?? null)};`;
+        const node = normalizeType(contract.type);
+        const type = node.kind === "terminal" && node.name === "unknown" ? undefined : node;
+        const fallback = contract.default === undefined ? undefined : JSON.stringify(contract.default);
+        return `if (${key} in s) { const y = s[${key}]; t[${key}] = ${slotPropGiven("y", name, prop, type, fallback, () => `K${slotPropChecks.push(valueCheckSource(type!)) - 1}`)}; }`;
+      });
+      for (const [prop, contract] of Object.entries(declared)) {
+        if (names.includes(prop)) continue;
+        if (contract.required) warnings += warn(prop, `${outlet} must give prop \`${prop}\`, which \`${tag}\`'s slot \`${name}\` declares as required.`);
+        if (contract.default !== undefined) values.push(`t[${JSON.stringify(prop)}] = ${JSON.stringify(contract.default)};`);
+      }
+      return [`${JSON.stringify(tag)}: (s) => { ${warnings}const t = {}; ${values.join(" ")} return t; }`];
+    });
+    return shapes.length === 0 ? "undefined" : `OP${outletProps.push(`{ ${shapes.join(", ")} }`) - 1}`;
+  };
   const selectorRoot = (binding: Binding, region: Region): number => {
     if (binding.kind !== "class" || region.key === undefined || binding.exact !== undefined) return -1;
     const name = keyedEquality(JSON.parse(binding.expression.key), JSON.parse(region.key!.key), region.alias!);
@@ -2129,7 +2179,7 @@ export function emitBlocks(
         if (region.of !== undefined) {
           // `<slot of>` places an accepted child's slot, and renders again when `of` names another entry.
           lines.push(
-            `  if (r.f${index} === undefined) r.f${index} = childOutlet(r, r.a${region.site}, r.e${index}, ${name}, OF, S, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}, ${(props?.length ?? 0) > 0}${hydrate ? `, ${body} === ADOPT` : ""});`,
+            `  if (r.f${index} === undefined) r.f${index} = childOutlet(r, r.a${region.site}, r.e${index}, ${name}, OF, S, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}, ${(props?.length ?? 0) > 0}, ${outletPropsSource(region)}${hydrate ? `, ${body} === ADOPT` : ""});`,
             `  r.f${index}(${convertible(region.of)}, v[${region.listRoot}], { ${(props ?? []).map((prop, at) => `${JSON.stringify(region.propNames![at])}: ${convertible(prop)}`).join(", ")} }, c, d);`,
           );
           return;
@@ -2146,19 +2196,11 @@ export function emitBlocks(
         // A scoped slot renders the consumer's template with its props, and patches that rendering
         // when a prop changes or nested data may have: an expression that fails keeps its last value.
         const rendering = `r.x${index}`;
-        // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
-        // accept warns once (HR007). It, and absent input, take the prop's default, or null, as live gives it.
         const checks = new Map<number, string>();
-        const given = (value: string, at: number): string => {
-          const type = region.propTypes?.[at];
-          const fallback = region.propDefaults?.[at] ?? "null";
-          if (type === undefined) return region.propDefaults?.[at] === undefined ? value : `(${value} == null || ${value} === ABSENT ? ${fallback} : ${value})`;
-          if (!checks.has(at)) checks.set(at, `K${slotPropChecks.push(valueCheckSource(type)) - 1}`);
-          const check = checks.get(at)!;
-          const name = typeof region.slot === "string" && region.slot !== "" ? `Slot \`${region.slot}\`` : "The default slot";
-          const message = `${name} prop \`${region.propNames![at]}\` does not satisfy its declared type \`${formatType(type)}\`.`;
-          return `(${value} != null && ${value} !== ABSENT && (${check}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${region.slot ?? ""}:${region.propNames![at]}`)}, ${JSON.stringify(message)}), false)) ? ${value} : ${fallback})`;
-        };
+        const given = (value: string, at: number): string => slotPropGiven(value, region.slot, region.propNames![at]!, region.propTypes?.[at], region.propDefaults?.[at], () => {
+          if (!checks.has(at)) checks.set(at, `K${slotPropChecks.push(valueCheckSource(region.propTypes![at]!)) - 1}`);
+          return checks.get(at)!;
+        });
         lines.push(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
@@ -2779,7 +2821,7 @@ export function emitBlocks(
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots",
     "transitionStyles", "writeTransitionStyle"]
-    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}`));
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${outletProps.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && (definition.module ?? definition.controller) !== undefined) helpers.push("scriptHost");
@@ -2810,6 +2852,7 @@ export function emitBlocks(
     ...registration === "" ? [] : [registration],
     ...specs,
     ...slotPropChecks.map((check, at) => `const K${at} = ${check};`),
+    ...outletProps.map((shapes, at) => `const OP${at} = ${shapes};`),
     ...plan.children === undefined ? [] : [`const OF = ${JSON.stringify(plan.children)};`],
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
     // A fresh row's first patch has nothing written yet.
