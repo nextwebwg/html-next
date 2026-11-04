@@ -121,6 +121,7 @@ A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/decla
 - Convert an accepted component together with every component that accepts it. Vue reports an error when the accepting component's conversion lacks it, and Angular gives the child its list entry only in that conversion.
 - Content a `<slot of>` outlet places reads the child's context, then the parent's, when the parent renders its children's roots before those outlets, as a header row before the body does.
 - A preset whose root is an accepted component is left out of the list, with a warning.
+- A hand-written React or Preact consumer writes accepted children as JSX in the accepting slot's content, directly or through arrays, fragments, conditions and loops, and gives their slot content with `slots`. A `key` gives a child's entry its identity; without one, its place in the content does. A wrapper component around an accepted child is content the slot doesn't accept, so it's left out with a warning.
 - Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
 
 ## Converter validation

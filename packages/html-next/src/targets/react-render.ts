@@ -343,13 +343,34 @@ const childLinks = new WeakMap<object, ChildLink>();
 export const ChildEntries = React.createContext<ReadonlyMap<string, object> | undefined>(undefined);
 const noSubscribe = (): (() => void) => () => {};
 
-/** A component's \`as\` lists, by name, from the descriptors its consumer gave; each entry keeps its identity by key. */
-export function useChildLists(given: unknown, names: readonly string[], file: string): { readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ReadonlyMap<string, object> } {
+/** An accepting component's lists: by \`as\` name, the slot it reads and the tags that slot accepts. */
+type ChildListSlots = Readonly<Record<string, readonly [string, readonly string[]]>>;
+/** A converted component's static mark: its tag, then its root component's tags for a preset, and its declared props' defaults. */
+type ChildMark = { readonly tags: readonly string[]; readonly props: Readonly<Record<string, unknown>> };
+
+/**
+ * A component's \`as\` lists, by name, with each entry keeping its identity by key, and each accepting
+ * slot's content to render. A compiled consumer gives the descriptors; otherwise they come from the
+ * slot's own content, whose accepted elements render with their entry's key.
+ */
+export function useChildLists(given: unknown, lists: ChildListSlots, tag: string, file: string,
+  props: { readonly children?: ReactNode; readonly slots?: Readonly<Record<string, unknown>> }): {
+  readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ReadonlyMap<string, object>; readonly content: Readonly<Record<string, ReactNode>>;
+} {
   const kept = React.useRef(new Map<string, object>()).current;
-  const descriptors = (given ?? {}) as Readonly<Record<string, readonly ChildDescriptor[] | undefined>>;
+  const content: Record<string, ReactNode> = {};
+  let descriptors = given as Readonly<Record<string, readonly ChildDescriptor[] | undefined>> | undefined;
+  if (descriptors === undefined) {
+    const derived: Record<string, ChildDescriptor[]> = {};
+    for (const [name, [slot, accepts]] of Object.entries(lists)) {
+      const supplied = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
+      content[slot] = typeof supplied === "function" ? supplied : childDescriptors(supplied, tag, slot, accepts, name, derived[name] = []);
+    }
+    descriptors = derived;
+  } else for (const [slot] of Object.values(lists)) content[slot] = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
   const current = new Map<string, object>();
-  const lists: Record<string, readonly object[]> = {};
-  for (const name of names) lists[name] = Object.freeze((descriptors[name] ?? []).flatMap((descriptor) => {
+  const result: Record<string, readonly object[]> = {};
+  for (const name of Object.keys(lists)) result[name] = Object.freeze((descriptors[name] ?? []).flatMap((descriptor) => {
     if ("leftOut" in descriptor) {
       warnUnless(false, file + "#" + descriptor.leftOut, (file === "" ? "" : file + ": ") + "HR007: " + descriptor.message);
       return [];
@@ -372,7 +393,45 @@ export function useChildLists(given: unknown, names: readonly string[], file: st
   }));
   kept.clear();
   for (const [key, entry] of current) kept.set(key, entry);
-  return { lists, entries: kept };
+  return { lists: result, entries: kept, content };
+}
+
+/**
+ * The descriptors a slot's own content gives, as a compiled consumer's would: one per accepted element
+ * in content order, through arrays and fragments, keyed by its place and React key, with its declared
+ * props resolved and its \`slots\`. Other content is left out with a warning. The content returns with
+ * each accepted element given its entry's key, so it finds its entry when it renders.
+ */
+function childDescriptors(content: ReactNode, tag: string, slot: string, accepts: readonly string[], as: string, descriptors: ChildDescriptor[]): ReactNode {
+  const named = "\`" + tag + "\`'s " + (slot === "" ? "default slot" : "\`" + slot + "\` slot");
+  const quoted = accepts.map((name) => "\`" + name + "\`");
+  const listed = named + " accepts " + (quoted.length < 2 ? quoted.join("") : quoted.slice(0, -1).join(", ") + " and " + quoted.at(-1));
+  const leftOut = (name: string, message: string): void => { descriptors.push({ leftOut: tag + ":accepts:" + slot + ":" + name, message }); };
+  const walk = (node: ReactNode, key: string): ReactNode => {
+    if (Array.isArray(node)) return node.map((item: ReactNode, index) => walk(item, key + "." + (isElement(item) && item.key != null ? "$" + item.key : index)));
+    if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
+      if (!/^[\\t\\n\\f\\r ]*$/.test(String(node))) leftOut("#text", listed + "; this text is left out.");
+      return node;
+    }
+    if (!isElement(node)) return node;
+    if (node.type === React.Fragment) {
+      const children = walk(node.props.children as ReactNode, key);
+      return Array.isArray(children) ? React.cloneElement(node, {}, ...children) : React.cloneElement(node, {}, children);
+    }
+    const type = node.type as unknown as { readonly htmlNextChild?: ChildMark; readonly displayName?: string; readonly name?: string };
+    const mark = type.htmlNextChild;
+    if (mark !== undefined && accepts.includes(mark.tags[0]!)) {
+      descriptors.push({ key, tag: mark.tags[0]!, props: Object.fromEntries(Object.entries(mark.props).map(([prop, absent]) => [prop, node.props[prop] ?? absent])),
+        slots: node.props.slots as Readonly<Record<string, unknown>> | undefined });
+      return React.cloneElement(node, { htmlNextEntry: key });
+    }
+    const name = typeof node.type === "string" ? node.type : mark?.tags[0] ?? type.displayName ?? type.name ?? "";
+    const preset = mark?.tags.find((candidate) => accepts.includes(candidate));
+    leftOut(name, preset === undefined ? listed + "; this \`<" + name + ">\` is left out."
+      : "\`<" + name + ">\` is a preset of \`" + preset + "\`, which " + named + " accepts; a preset among accepted children is not supported yet, so it is left out.");
+    return node;
+  };
+  return walk(content, as + ":");
 }
 
 /**
