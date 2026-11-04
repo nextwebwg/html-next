@@ -122,6 +122,9 @@ A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/decla
 - Content a `<slot of>` outlet places reads the child's context, then the parent's, when the parent renders its children's roots before those outlets, as a header row before the body does.
 - A preset whose root is an accepted component is left out of the list, with a warning.
 - Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
+- A hand-written Angular template gives columns as the table's content: `<table ui-data-table [rows]="rows"><th ui-column field="name" header="Name"></th></table>`, with `@if` and `@for` around them. A slot with props takes `<ng-template ui-column-cell let-row="row">`, and plain content is an element with a `slot` attribute. A column's plain content renders at the first outlet, and the next outlet takes it over.
+- An Angular child that another template renders into the table's content, through `ngTemplateOutlet` or a wrapper component, joins the list of its nearest ancestor that accepts its tag, in document order. It joins once the table's slot outlet has placed it, so the table's first view pass lists it empty and the same change detection run repeats that pass with the full list. Server output and hydration hold the full list. The table reads those children's order again each time the view holding the table is checked.
+- An Angular consumer's template content that the slot does not accept renders where the slot places it, without a warning, and a wrapper component's accepted children join the list. Plain content for a slot with props warns and shows the outlet's fallback.
 
 ## Converter validation
 

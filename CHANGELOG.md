@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.89
+
+- Converted Angular columns work from hand-written consumers. A plain `slot` element in an Angular template reaches `<slot of>` with its identity and takeover, or warns when the outlet gives props, and children that `ngTemplateOutlet` or a wrapper component renders into the table's content join `$columns` in document order, read the table's context, and render on the server and through hydration.
+
 ## 1.0.0-alpha.88
 
 - Columns as markup. A `<slot>` declaration in `<defs>` takes `accepts`, one or more component tags, and `as`, the name of a read-only list of the accepted children's resolved props in content order. `<slot of="$entry" name="x">`, or `<template $slot of>` in table parts, places that child's slot with slot props and a fallback. The live runtime, compiled output, React, Preact, Vue, Svelte and Angular support it, with server rendering and hydration. A preset of an accepted component is left out of the list with a warning.
