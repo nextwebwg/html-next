@@ -2991,7 +2991,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} retains duplicate rules and custom-element precedence after discovery`, async () => {
+    it(`${name} replaces a registered definition with one discovered later, and keeps custom-element precedence`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -3003,23 +3003,27 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const stop = window.HtmlRuntime.observeDocument(document, {
             onError(error) { errors.push(error.diagnostic.code); },
           });
-          const duplicate = document.createElement("template");
-          duplicate.setAttribute("component", "demo-retained");
-          duplicate.setAttribute("status", "early");
-          duplicate.setAttribute("summary", "Duplicate.");
-          duplicate.innerHTML = "<span></span>";
-          document.body.append(duplicate);
+          document.body.insertAdjacentHTML("beforeend", '<demo-retained id="before"></demo-retained>');
           await tick();
-          duplicate.remove();
+          const lowered = document.querySelector("#before").localName;
+          const replacement = document.createElement("template");
+          replacement.setAttribute("component", "demo-retained");
+          replacement.setAttribute("status", "early");
+          replacement.setAttribute("summary", "Replacement.");
+          replacement.innerHTML = "<span></span>";
+          document.body.append(replacement);
+          await tick();
+          const replaced = document.querySelector("#before").localName;
+          document.querySelector("#before").remove();
           customElements.define("demo-retained", class extends HTMLElement {});
           document.body.insertAdjacentHTML("beforeend", '<demo-retained id="owned"></demo-retained>');
           await tick();
           const owned = document.querySelector("#owned");
           stop();
-          return { errors, name: owned.localName,
+          return { errors, lowered, replaced, carrier: replacement.isConnected, name: owned.localName,
             nativeUpgrade: owned instanceof customElements.get("demo-retained") };
         })()`);
-        assert.deepEqual(result, { errors: ["HR001"], name: "demo-retained", nativeUpgrade: true });
+        assert.deepEqual(result, { errors: [], lowered: "button", replaced: "span", carrier: false, name: "demo-retained", nativeUpgrade: true });
       } finally {
         await browser.close();
       }

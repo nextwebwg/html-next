@@ -43,6 +43,8 @@ export function generateVanilla(
   graph?: ComponentStyleGraph,
   guardNestedDepth = false,
   modulePreparation?: { readonly source: string },
+  /** Record what the template writes on its root, for replacing the definition. */
+  hot = false,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -108,5 +110,5 @@ export function generateVanilla(
       ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
       : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
   });
-  return { module: emitBlocks(blockPlan(definition, invocations, transitions, graph), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL, guardNestedDepth, hydrate ? modulePreparation : undefined), declaration };
+  return { module: emitBlocks(blockPlan(definition, invocations, transitions, graph), definition, version, rootLines, invocations, noContextReaders, hydrate, scriptURL, guardNestedDepth, hydrate ? modulePreparation : undefined, hot), declaration };
 }

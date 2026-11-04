@@ -462,7 +462,8 @@ describe("HTML Next unplugin", () => {
     // +12 B: lifecycle walks recognize canonical and legacy identity roots.
     // +1 B: the unused hydration helper changes minified symbol allocation.
     // +6 B: identical native attributes are left alone during updates.
-    assert.ok(gzip <= 9_400, `direct benchmark entry is ${gzip} B gzip-6`);
+    // -18 B: a definition replaces a registered one instead of raising HR001; replacing instances ships only in hot output.
+    assert.ok(gzip <= 9_382, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

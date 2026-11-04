@@ -7,6 +7,7 @@ import { chromium, firefox, webkit, type Browser } from "playwright";
 
 import { generateComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { hotReplacementFiles, hotReplacementResult } from "./hot-replacement.js";
 
 /**
  * componentRegistry (https://nextwebwg.org/declarative-components/javascript#component-registry) in
@@ -71,6 +72,9 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
         await ready;
         window.registry = componentRegistry;
       </script></body>`;
+    // A compiled page whose panel module is evaluated again with a changed template.
+    for (const [path, text] of Object.entries(await hotReplacementFiles())) files[path] = text;
+    files["/hot.html"] = "<!doctype html><body><main></main></body>";
     files["/compiled-lists.html"] = `<!doctype html><body><main></main>${listScript}</body>`;
     files["/"] = `<!doctype html><head><link rel="component" href="/callout.html"></head><body><main></main><script type="module">
       import * as live from "/browser.js";
@@ -79,10 +83,12 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
       window.bundles = { live: live.componentRegistry, compiled: compiled.componentRegistry };
     </script></body>`;
     // Inline definitions with controllers: one the observer discovers, one code defines.
-    files["/nested/inline.js"] = 'export default (host) => { host.root.dataset.controller = "inline"; };';
+    files["/nested/inline.js"] = 'export default (host) => { host.root.dataset.controller = "inline"; (window.hosts ??= []).push(host); };';
+    files["/nested/tally.js"] = "export default (host) => { (window.hosts ??= []).push(host); };";
     files["/nested/defined.js"] = 'export default (host) => { host.root.dataset.controller = "defined"; };';
     files["/nested/inline.html"] = `<!doctype html><body>
-      <template component="x-inline" controller="./inline.js"><p>Inline</p></template>
+      <template component="x-tally" controller="./tally.js"><defs><state name="n" type="number" value="0"></state></defs><b>{$n}</b></template>
+      <template component="x-inline" controller="./inline.js"><defs><state name="k" type="number" value="0"></state></defs><p>Inline <x-tally></x-tally></p></template>
       <main><x-inline id="discovered"></x-inline><x-defined id="authored"></x-defined></main>
       <script type="module">
         import { ready, componentRegistry } from "/browser.js";
@@ -276,6 +282,49 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
           };
         });
         assert.deepEqual(result, { discovered: "inline", authored: "defined", createdInline: "inline", createdDefined: "defined" });
+        assert.deepEqual(errors, []);
+        await page.close();
+      });
+
+      it("replaces a definition: a compiled module evaluated again, and an inline definition discovered later", async () => {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+        await page.route("https://registry.example/**", (route) => {
+          const path = new URL(route.request().url()).pathname;
+          return route.fulfill({ contentType: path.endsWith(".js") ? "text/javascript" : "text/html", body: files[path]! });
+        });
+        await page.goto("https://registry.example/hot.html");
+        // A string, so the test runner leaves its imports to the page.
+        const compiled = await page.evaluate(`(async () => {
+          await import("/first.js");
+          const { run } = await import("/scenario.js");
+          return run(() => import("/second.js"));
+        })()`);
+        assert.deepEqual(compiled, hotReplacementResult);
+        await page.goto("https://registry.example/nested/inline.html");
+        await page.waitForFunction(() => "registry" in window);
+        const live = await page.evaluate(async () => {
+          const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+          const old = document.querySelector("#discovered") as HTMLElement;
+          for (let tries = 0; tries < 100 && old.dataset.controller === undefined; tries += 1) await settle();
+          // The instance's state, and its <x-tally>'s.
+          for (const host of (window as unknown as { hosts: { root: Element; state: Record<string, unknown> }[] }).hosts) {
+            if (host.root === old) host.state.k = 3;
+            else if (old.contains(host.root)) host.state.n = 4;
+          }
+          await settle();
+          // The changed definition arrives in the document, as a development server would insert it.
+          document.body.insertAdjacentHTML("beforeend",
+            '<template component="x-inline" controller="./inline.js"><defs><state name="k" type="number" value="0"></state></defs><p>Replaced {$k} <x-tally></x-tally></p></template>');
+          await settle();
+          const root = document.querySelector("#discovered") as HTMLElement;
+          for (let tries = 0; tries < 100 && root.dataset.controller === undefined; tries += 1) await settle();
+          return { replaced: root !== old && !old.isConnected, text: root.textContent, controller: root.dataset.controller ?? null,
+            carrier: document.querySelector('template[component="x-inline"]') === null };
+        });
+        assert.deepEqual(live, { replaced: true, text: "Replaced 3 4", controller: "inline", carrier: true });
         assert.deepEqual(errors, []);
         await page.close();
       });

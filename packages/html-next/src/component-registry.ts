@@ -66,26 +66,24 @@ export const domError = (message: string, name: string): DOMException => new DOM
 const customElementOf = (root: Document, tag: string): unknown => root.defaultView?.customElements?.get(tag);
 
 /**
- * Registers `entry` and resolves whoever waits for its tag. An existing registration stays, unless
- * both come from compiled modules: a module evaluated again, as hot replacement does, replaces its own.
+ * Registers `entry` and resolves whoever waits for its tag. An existing registration stays unless
+ * `replace` is set: the live runtime replaces a definition with a different one, and a compiled
+ * module replaces another compiled module's, as evaluating a changed module does.
  */
-export function registerEntry(root: Document, entry: RegistryEntry, compiled = false): void {
+export function registerEntry(root: Document, entry: RegistryEntry, replace: boolean): void {
   const record = registryRecord(root);
   const tag = entry.d.tag;
-  const existing = record.d.get(tag);
-  if (existing !== undefined && !(compiled && typeof existing.k === "function")) return;
+  if (record.d.has(tag) && !replace) return;
   record.d.set(tag, entry);
   record.w.get(tag)?.[1](entry.d);
   record.w.delete(tag);
 }
 
-/** `define`'s steps 3 and 4: true when `tag` is already registered by this same definition. */
+/** `define`'s step 3, and step 4's test: true when `tag` is already registered by this same definition. */
 export function checkDefinable(root: Document, tag: string, key: unknown, same?: (entry: RegistryEntry) => boolean): boolean {
   if (customElementOf(root, tag) !== undefined) throw domError(`<${tag}> is a registered custom element.`, "NotSupportedError");
   const existing = registryRecord(root).d.get(tag);
-  if (existing === undefined) return false;
-  if (existing.k === key || same?.(existing) === true) return true;
-  throw domError(`HR001: More than one definition declares <${tag}>.`, "NotSupportedError");
+  return existing !== undefined && (existing.k === key || same?.(existing) === true);
 }
 
 /** The `TypeError` of `create` step 4 and `update` step 2, for a prop the definition does not declare. */

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
@@ -7,6 +10,7 @@ import { afterEach, describe, it, vi } from "vitest";
 
 import { generateComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { hotReplacementFiles, hotReplacementResult } from "./hot-replacement.js";
 
 /**
  * componentRegistry (https://nextwebwg.org/declarative-components/javascript#component-registry):
@@ -88,7 +92,7 @@ describe("componentRegistry in the live runtime", () => {
     assert.equal(root.getAttribute("data-tone"), "tip");
   });
 
-  it("throws define's errors: TypeError, SyntaxError, and NotSupportedError for a custom element or a second definition", async () => {
+  it("throws define's errors: TypeError, SyntaxError, and NotSupportedError for a custom element", async () => {
     const { document, window, registry } = await live();
     assert.throws(() => registry.define(document.createElement("div") as unknown as HTMLTemplateElement), TypeError);
     assert.throws(() => registry.define(document.createElement("template")), TypeError);
@@ -99,8 +103,86 @@ describe("componentRegistry in the live runtime", () => {
     const first = carrier(document, callout);
     registry.define(first);
     registry.define(first);
-    assert.throws(() => registry.define(carrier(document, '<template component="ui-callout"><p>Other</p></template>')),
-      domError("NotSupportedError", /HR001/));
+  });
+
+  it("replaces a registered definition: each connected instance re-renders with its state, props, attributes and slotted children", async () => {
+    const { document, registry, runtime } = await live();
+    const counter = (tag: string) => `<template component="${tag}"><defs><state name="n" type="number" value="0"></state>
+      <handler name="add"><set name="n" expr:value="$n + 1"></set></handler></defs><button on:click="add">{$n}</button></template>`;
+    const panel = (root: string, extra = "") => `<template component="ui-panel"><defs>
+      <prop name="title" type="string" default="Untitled">Title.</prop>
+      <state name="count" type="number" value="0"></state>${extra}</defs>${root}</template>`;
+    registry.define(carrier(document, counter("x-count")));
+    registry.define(carrier(document, panel(`<section class="panel" title="Old"><h2>{$title}</h2><x-count></x-count><slot></slot></section>`,
+      '<state name="open" type="boolean" value="false"></state>')));
+    const main = document.querySelector("main")!;
+    main.innerHTML = '<ui-panel id="p" class="mine" title="Hello"><x-count id="slotted"></x-count></ui-panel>';
+    await settle();
+    const before = main.firstElementChild!;
+    const slotted = document.getElementById("slotted")!;
+    slotted.click();
+    slotted.click();
+    for (let index = 0; index < 4; index += 1) (before.querySelector("button:not(#slotted)") as HTMLElement).click();
+    runtime.getComponentHost(before)!.state.count = 5;
+    await settle();
+    assert.equal(slotted.textContent, "2");
+    registry.define(carrier(document, panel(`<article class="panel2"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><x-count class="extra"></x-count><slot></slot></article>`,
+      '<state name="label" type="string" value="new"></state>')));
+    await settle();
+    const after = main.firstElementChild!;
+    assert.equal(after.localName, "article", "the new definition's root");
+    assert.equal(after.id, "p", "the invocation's attributes carry over");
+    assert.equal(after.getAttribute("class"), "panel2 mine", "the old template's class token goes, the invocation's stays");
+    assert.equal(after.hasAttribute("title"), false, "the old template's literal goes");
+    assert.equal(after.querySelector("h3")!.textContent, "Hello: 5 new", "props, kept state, and a new state's default");
+    assert.equal(document.getElementById("slotted"), slotted, "the slotted instance is the same element");
+    assert.equal(slotted.textContent, "2", "and keeps its state");
+    const nested = after.querySelector("button:not(#slotted):not(.extra)") as HTMLElement;
+    assert.equal(nested.textContent, "4", "the new template's first <x-count> keeps the old one's state");
+    assert.equal(after.querySelector(".extra")!.textContent, "0", "one with no counterpart starts from its declared state");
+    nested.click();
+    slotted.click();
+    await settle();
+    assert.deepEqual([nested.textContent, slotted.textContent], ["5", "3"], "both connected");
+    assert.equal(runtime.getComponentHost(after)!.state.open, undefined, "a removed state is gone");
+    registry.define(carrier(document, panel(`<article class="panel2"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><x-count class="extra"></x-count><slot></slot></article>`,
+      '<state name="label" type="string" value="new"></state>')));
+    assert.equal(main.firstElementChild, after, "the same definition again changes nothing");
+  });
+
+  it("keeps the state of the component instances a replaced template renders, at every depth", async () => {
+    const { document, registry, runtime } = await live();
+    registry.define(carrier(document, `<template component="x-count"><defs><state name="n" type="number" value="0"></state></defs><b>{$n}</b></template>`));
+    registry.define(carrier(document, `<template component="ui-mid"><defs><state name="open" type="boolean" value="false"></state></defs><div><x-count></x-count></div></template>`));
+    const outer = (root: string) => `<template component="ui-outer"><defs><state name="label" type="string" value="one"></state></defs>${root}</template>`;
+    registry.define(carrier(document, outer("<section><ui-mid></ui-mid></section>")));
+    const main = document.querySelector("main")!;
+    main.innerHTML = "<ui-outer></ui-outer>";
+    await settle();
+    runtime.getComponentHost(main.querySelector("[component~=ui-mid]")!)!.state.open = true;
+    runtime.getComponentHost(main.querySelector("b")!)!.state.n = 7;
+    await settle();
+    registry.define(carrier(document, outer("<article><h1>Outer</h1><ui-mid></ui-mid></article>")));
+    await settle();
+    assert.equal(main.firstElementChild!.localName, "article");
+    assert.deepEqual([runtime.getComponentHost(main.querySelector("[component~=ui-mid]")!)!.state.open, main.querySelector("b")!.textContent], [true, "7"]);
+  });
+
+  it("keeps a parent's bindings on an instance its definition replaced", async () => {
+    const { document, registry, runtime } = await live();
+    const inner = (root: string) => `<template component="ui-inner"><defs><prop name="text" type="string" default="">Text.</prop></defs>${root}</template>`;
+    registry.define(carrier(document, inner("<b>{$text}</b>")));
+    registry.define(carrier(document, `<template component="ui-outer"><defs><state name="label" type="string" value="one"></state></defs>
+      <div><ui-inner from:text="$label"></ui-inner></div></template>`));
+    const main = document.querySelector("main")!;
+    main.innerHTML = "<ui-outer></ui-outer>";
+    await settle();
+    registry.define(carrier(document, inner("<i>{$text}</i>")));
+    await settle();
+    assert.equal(main.querySelector("i")!.textContent, "one", "the bound value, on the new root");
+    runtime.getComponentHost(main.firstElementChild!)!.state.label = "two";
+    await settle();
+    assert.equal(main.querySelector("i")!.textContent, "two", "the binding still reaches it");
   });
 
   it("rejects whenDefined for a name that is not a valid custom element name", async () => {
@@ -215,6 +297,18 @@ describe("componentRegistry with compiled Vanilla modules", () => {
     const template = window.document.createElement("template");
     template.setAttribute("component", "ui-other");
     assert.throws(() => registry.define(template), domError("NotSupportedError"));
+  });
+
+  it("replaces a compiled definition when a changed module is evaluated: its instances re-render with their state, props, attributes, slotted children and parent bindings", async () => {
+    stubWindow();
+    const directory = await mkdtemp(join(tmpdir(), "html-next-hot-"));
+    try {
+      for (const [path, text] of Object.entries(await hotReplacementFiles())) await writeFile(join(directory, path), text);
+      const url = (path: string) => pathToFileURL(join(directory, path)).href;
+      await import(url("first.js"));
+      const { run } = await import(url("scenario.js")) as { run: (replace: () => Promise<unknown>) => Promise<unknown> };
+      assert.deepEqual(await run(() => import(url("second.js"))), hotReplacementResult);
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
   it("shares one registry between bundles: another bundle creates and updates what a compiled module defined", async () => {
