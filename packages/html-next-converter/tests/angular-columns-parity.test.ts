@@ -84,6 +84,13 @@ const WARNED = [
   /Slot `cell` prop `label` does not satisfy its declared type `string`\./,
 ];
 
+/** A hand-written consumer's reactive column props reach the header, the cells' field fallback and `host.state`. */
+const checkRename = async (page: Page): Promise<void> => {
+  await page.locator("button.rename").click();
+  await frames(page);
+  assert.deepEqual(await page.evaluate(`(() => { const table = document.querySelector("table"); return [table.dataset.columns.split(",")[0], table.querySelector("thead th").textContent.trim(), table.querySelector("tbody td").textContent.trim()]; })()`), ["Cost", "Cost", "6.5"]);
+};
+
 /** The rendered table without marks, carriers or framework attributes. */
 const READ = `(() => {
   const read = (node) => {
@@ -98,13 +105,16 @@ const READ = `(() => {
 /** The second table's body text, where the warned children are left out. */
 const LEFT_OUT = `document.querySelectorAll("table")[1]?.querySelector("tbody")?.textContent.replace(/\\s+/g, "") ?? null`;
 
+/** The compiled consumer, a hand-written Angular template, and hand-written columns rendered through ngTemplateOutlet. */
+const CONSUMERS = [["compiled", "app-root"], ["hand-written", "hand-root"], ["ngTemplateOutlet", "outlet-root"]] as const;
+
 const frames = (page: Page): Promise<void> => page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
 
 describe.skipIf(!enabled)("columns as markup in converted Angular", () => {
   let directory = "";
   let liveBundle = "";
   let angularBundle = "";
-  let server = "";
+  const servers: Record<string, string> = {};
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-angular-columns-"));
@@ -118,10 +128,41 @@ describe.skipIf(!enabled)("columns as markup in converted Angular", () => {
     const manifest = await convertComponents({ mode: "application", target: "angular", root: directory, outDirectory: out, entries: ["products.html", "warnings.html"] });
     const artifact = (tag: string): string => `./out/${manifest.components.find((entry) => entry.tag === tag)!.artifact.replace(/\.ts$/, "")}`;
     const app = join(directory, "app.ts");
-    await writeFile(app, `import { Component } from "@angular/core";
+    // Hand-written consumers of the same table, in an Angular component template: one declares the columns in the
+    // table's content, the other in a template it renders there through ngTemplateOutlet, as a wrapper or a
+    // dynamic renderer does. Each mirrors page-products, so each matches the live reference.
+    const columns = `@if (showId()) { <th x-column field="id" header="Id"></th> }
+  <th x-column [field]="nameField()" [header]="nameHeader()"><i slot="note">kept</i></th>
+  <th x-column class="numeric"><abbr slot="header" title="Price in US dollars">Price</abbr>
+    <ng-template x-column-cell let-row="row" let-width="width" let-label="label"><b x-badge [text]="$any(row.name)"></b>{{ row.price }}|{{ width! + 1 }}|{{ label }}</ng-template>
+    <ng-template x-column-sum let-unit="unit"><em>{{ unit }}</em></ng-template></th>
+  @if (showId()) { <th x-column field="id" header="M"></th> } @else { <th x-column header="Q"><ng-template x-column-cell let-label="label"><b x-badge [text]="label"></b></ng-template></th> }
+  @if (!showId()) { <th x-column field="price" header="W"></th> }
+  @for (column of extra(); track column.key) { <th x-column [field]="column.key" [header]="column.label"></th> }`;
+    const consumer = (selector: string, table: string): string => `@Component({ selector: "main[${selector}]", standalone: true, imports: [NgTemplateOutlet, XDatatable, XColumn, XColumnCellSlot, XColumnSumSlot, XBadge], template: \`
+  <button type="button" class="toggle" (click)="showId.set(!showId())">Id</button><button type="button" class="swap" (click)="extra.set([{ key: 'price', label: 'P' }, { key: 'name', label: 'N' }])">Swap</button>
+  <button type="button" class="add" (click)="products.set([one, two, { id: 3, name: 'Pen', price: 2 }])">Add</button><button type="button" class="drop" (click)="products.set([two, { id: 3, name: 'Pen', price: 2 }])">Drop</button>
+  <button type="button" class="rename" (click)="nameField.set('price'); nameHeader.set('Cost')">Rename</button>
+  ${table}\` })
+class ${selector === "hand-products" ? "HandProducts" : "OutletProducts"} {
+  readonly one = { id: 1, name: "Desk lamp", price: 49 }; readonly two = { id: 2, name: "Notebook", price: 6.5 };
+  readonly products = signal([this.one, this.two]); readonly showId = signal(false);
+  readonly nameField = signal("name"); readonly nameHeader = signal("Name");
+  readonly extra = signal([{ key: "name", label: "N" }, { key: "price", label: "P" }]);
+}`;
+    await writeFile(app, `import { Component, signal } from "@angular/core";
+import { NgTemplateOutlet } from "@angular/common";
 import PageProducts from "${artifact("page-products")}";
 import PageWarnings from "${artifact("page-warnings")}";
-@Component({ selector: "app-root", standalone: true, imports: [PageProducts, PageWarnings], template: '<main page-products></main><section page-warnings></section>' }) export class App {}`);
+import XDatatable from "${artifact("x-datatable")}";
+import XColumn, { XColumnCellSlot, XColumnSumSlot } from "${artifact("x-column")}";
+import XBadge from "${artifact("x-badge")}";
+@Component({ selector: "app-root", standalone: true, imports: [PageProducts, PageWarnings], template: '<main page-products></main><section page-warnings></section>' }) export class App {}
+${consumer("hand-products", `<table x-datatable [rows]="products()">${columns}</table>`)}
+${consumer("outlet-products", `<table x-datatable [rows]="products()"><ng-container [ngTemplateOutlet]="columns"></ng-container></table><ng-template #columns>${columns}</ng-template>`)}
+@Component({ selector: "hand-root", standalone: true, imports: [HandProducts, PageWarnings], template: '<main hand-products></main><section page-warnings></section>' }) export class HandApp {}
+@Component({ selector: "outlet-root", standalone: true, imports: [OutletProducts, PageWarnings], template: '<main outlet-products></main><section page-warnings></section>' }) export class OutletApp {}
+@Component({ selector: "warn-root", standalone: true, imports: [XDatatable, XColumn], template: \`<table x-datatable [rows]="[{ id: 1, name: 'A', price: 1 }]"><th x-column field="name"></th><th x-column><span slot="cell">plain</span></th></table>\` }) export class WarnApp {}`);
     const config = join(directory, "tsconfig.json");
     await writeFile(config, JSON.stringify({ compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", strict: true,
       skipLibCheck: true, experimentalDecorators: true, rewriteRelativeImportExtensions: true, rootDir: directory, outDir: join(directory, "compiled"), types: [] },
@@ -136,20 +177,23 @@ import PageWarnings from "${artifact("page-warnings")}";
     const browserEntry = join(directory, "browser.ts");
     await writeFile(browserEntry, `import "@angular/compiler";
 import { bootstrapApplication, provideClientHydration } from "@angular/platform-browser";
-import { App } from ${JSON.stringify(compiled)};
-bootstrapApplication(App, { providers: document.querySelector("app-root")?.hasAttribute("ngh") ? [provideClientHydration()] : [] }).then(() => { document.body.dataset.ready = "true"; });`);
+import { App, HandApp, OutletApp, WarnApp } from ${JSON.stringify(compiled)};
+const [selector, root] = ([["app-root", App], ["hand-root", HandApp], ["outlet-root", OutletApp], ["warn-root", WarnApp]] as const).find(([selector]) => document.querySelector(selector) !== null)!;
+bootstrapApplication(root, { providers: document.querySelector(selector)!.hasAttribute("ngh") ? [provideClientHydration()] : [] }).then(() => { document.body.dataset.ready = "true"; });`);
     angularBundle = join(directory, "angular.js");
     await build({ entryPoints: [browserEntry], outfile: angularBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], loader: { ".css": "empty" }, nodePaths: [nodeModules] });
     const serverEntry = join(directory, "server.ts");
     await writeFile(serverEntry, `import "@angular/compiler";
 import { renderApplication, provideServerRendering } from "@angular/platform-server";
 import { bootstrapApplication, provideClientHydration } from "@angular/platform-browser";
-import { App } from ${JSON.stringify(compiled)};
-export const render = () => renderApplication(context => bootstrapApplication(App, { providers: [provideServerRendering(), provideClientHydration()] }, context),
-  { document: '<html><head><base href="http://localhost/"></head><body><app-root></app-root></body></html>', url: "http://localhost/", allowedHosts: ["localhost"] });`);
+import { App, HandApp, OutletApp } from ${JSON.stringify(compiled)};
+const roots = { "app-root": App, "hand-root": HandApp, "outlet-root": OutletApp };
+export const render = (selector: keyof typeof roots) => renderApplication(context => bootstrapApplication(roots[selector], { providers: [provideServerRendering(), provideClientHydration()] }, context),
+  { document: \`<html><head><base href="http://localhost/"></head><body><\${selector}></\${selector}></body></html>\`, url: "http://localhost/", allowedHosts: ["localhost"] });`);
     const serverBundle = join(directory, "server.mjs");
     await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node", packages: "external", loader: { ".css": "empty" } });
-    server = await (await import(pathToFileURL(serverBundle).href) as { render(): Promise<string> }).render();
+    const { render } = await import(pathToFileURL(serverBundle).href) as { render(selector: string): Promise<string> };
+    for (const [, selector] of CONSUMERS) servers[selector] = await render(selector);
   }, 240_000);
 
   afterAll(async () => { if (directory !== "" && process.env.HTMLNEXT_KEEP !== "1") await rm(directory, { recursive: true, force: true }); });
@@ -212,33 +256,51 @@ export const render = () => renderApplication(context => bootstrapApplication(Ap
         assert.match(steps.at(-1)!, /<tfoot><tr><td><i slot="note">kept<\/i>.<\/td>/);
       });
 
-      it("renders the columns, follows consumer $if and keyed $each, and keeps cells by key like live", async () => {
+      it("warns about a hand-written consumer's plain content for a slot with props, and shows the fallback", async () => {
         const { page, errors, warned } = await open(async (page) => {
-          await page.setContent('<base href="http://localhost/"><app-root></app-root>');
+          await page.setContent('<base href="http://localhost/"><warn-root></warn-root>');
           await page.addScriptTag({ path: angularBundle });
           await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
         });
         try {
-          assert.deepEqual(await run(page, warned), live);
+          await frames(page);
+          assert.equal(await page.evaluate(`document.querySelector("tbody").textContent.replace(/\\s+/g, "")`), "A");
+          assert.ok(warned.some((text) => /`cell` has props, so its content is a `<template slot="cell">`\./.test(text)), warned.join("\n"));
           assert.deepEqual(errors, []);
         } finally { await page.close(); }
       });
 
-      it("renders the columns complete on the server and hydrates them in place like live", async () => {
-        const { page, errors, warned } = await open(async (page) => { await page.setContent(server); });
-        try {
-          // `$columns` is complete on the server: the caption, header row and cells read it before the client runs.
-          assert.equal(await page.evaluate(READ), (live as { steps: string[] }).steps[0]!.replace(/ data-columns="[^"]*"/, ""));
-          await page.evaluate(`window.server = Array.from(document.querySelectorAll("th, td, td *"))`);
-          await page.addScriptTag({ path: angularBundle });
-          await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
-          assert.equal(await page.evaluate(`window.server.every((node) => node.isConnected)`), true, "hydration keeps the server's cells");
-          const result = await run(page, warned) as { warned: boolean[] };
-          // Hydration warns again in the browser for left-out children, as each runtime does when it creates the component.
-          assert.deepEqual(result, live);
-          assert.deepEqual(errors, []);
-        } finally { await page.close(); }
-      });
+      for (const [consumer, selector] of CONSUMERS) {
+        it(`renders the ${consumer} consumer's columns, follows its conditions and keyed loop, and keeps cells by key like live`, async () => {
+          const { page, errors, warned } = await open(async (page) => {
+            await page.setContent(`<base href="http://localhost/"><${selector}></${selector}>`);
+            await page.addScriptTag({ path: angularBundle });
+            await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
+          });
+          try {
+            assert.deepEqual(await run(page, warned), live);
+            if (consumer !== "compiled") await checkRename(page);
+            assert.deepEqual(errors, []);
+          } finally { await page.close(); }
+        });
+
+        it(`renders the ${consumer} consumer's columns on the server and hydrates them in place like live`, async () => {
+          const { page, errors, warned } = await open(async (page) => { await page.setContent(servers[selector]!); });
+          try {
+            // `$columns` is complete on the server: the caption, header row and cells read it before the client runs.
+            assert.equal(await page.evaluate(READ), (live as { steps: string[] }).steps[0]!.replace(/ data-columns="[^"]*"/, ""));
+            await page.evaluate(`window.server = Array.from(document.querySelectorAll("th, td, td *"))`);
+            await page.addScriptTag({ path: angularBundle });
+            await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
+            assert.equal(await page.evaluate(`window.server.every((node) => node.isConnected)`), true, "hydration keeps the server's cells");
+            const result = await run(page, warned) as { warned: boolean[] };
+            // Hydration warns again in the browser for left-out children, as each runtime does when it creates the component.
+            assert.deepEqual(result, live);
+            if (consumer !== "compiled") await checkRename(page);
+            assert.deepEqual(errors, []);
+          } finally { await page.close(); }
+        });
+      }
     });
   }
 });
