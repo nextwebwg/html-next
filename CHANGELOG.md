@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.89
+
+- A compiled factory that adopts a server-rendered root uses the content its caller gives a slot, and the server's for each other slot. A renderer that moves the server's projection into regions of its own and passes them as `children` or `slots` keeps that content, so an accepting table hydrates with its column header cells and body cells.
+
 ## 1.0.0-alpha.88
 
 - Columns as markup. A `<slot>` declaration in `<defs>` takes `accepts`, one or more component tags, and `as`, the name of a read-only list of the accepted children's resolved props in content order. `<slot of="$entry" name="x">`, or `<template $slot of>` in table parts, places that child's slot with slot props and a fallback. The live runtime, compiled output, React, Preact, Vue, Svelte and Angular support it, with server rendering and hydration. A preset of an accepted component is left out of the list with a warning.

@@ -1817,9 +1817,12 @@ export function placeFallback(at: ChildNode, nodes: Node): void {
 
 /**
  * A server root's projection, as its factory is given one: what each of its rendered slot ranges
- * holds, then what the serializer carried, by slot. The carrier is consumed.
+ * holds, then what the serializer carried, by slot. The carrier is consumed. A slot its factory's
+ * caller gives content holds that content instead, such as a renderer's regions around the server's nodes.
  */
-export function serverProjection(root: Element, tag: string): [children: Node[], slots: Record<string, Node[]>] {
+export function serverProjection<T = Node>(
+  root: Element, tag: string, givenChildren: T[] = [], givenSlots: Record<string, T[]> = {},
+): [children: (Node | T)[], slots: Record<string, (Node | T)[]>] {
   const children: Node[] = [];
   const slots: Record<string, Node[]> = {};
   const server = serverRanges(root, true, tag);
@@ -1837,7 +1840,7 @@ export function serverProjection(root: Element, tag: string): [children: Node[],
     }
   }
   for (const node of server?.carried ?? []) add(node, node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
-  return [children, slots];
+  return [givenChildren.length > 0 ? givenChildren : children, { ...slots, ...givenSlots }];
 }
 
 /** Each accepted child's entry in its parent's `as` list, made once, and the child each entry stands for. */

@@ -2698,9 +2698,10 @@ export function emitBlocks(
     `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}${propNames.length > 0 || hydrate ? ", html" : ""}${hydrate ? ", h" : ""}) {`,
     propNames.length === 0 && !slotted && !delegated ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
     // An adopted root's props, prop inputs and state are the server instance's, and its controls keep what a reader typed.
-    // Its projection is what the server rendered in its slot ranges and carried, read before its content is adopted.
+    // Its projection is what the server rendered in its slot ranges and carried, read before its content is adopted,
+    // except each slot its caller gives content.
     ...hydrate ? [`  const Z = h && renderedInstanceRecord(h, ${JSON.stringify(contract.tag)}), W = h && holdControls(h)${
-      slotted ? `, Y = h && serverProjection(h, ${JSON.stringify(contract.tag)})` : ""};`] : [],
+      slotted ? `, Y = h && serverProjection(h, ${JSON.stringify(contract.tag)}, children, slots)` : ""};`] : [],
     ...delegated ? [
       // The root is the invoked component's, created when the root block first renders.
       hydrate ? "  const element = h ?? document.createTextNode(\"\");" : "  const element = document.createTextNode(\"\");",
