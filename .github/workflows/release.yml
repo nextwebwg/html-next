@@ -89,5 +89,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/registry-packages"
           for directory in html-next html-next-converter html-next-unplugin htmlkit; do
             package=$(node -p "const p = require('./packages/$directory/package.json'); p.name + '@' + p.version")
-            npm pack "$package" --pack-destination "$RUNNER_TEMP/registry-packages" --ignore-scripts
+            # The registry can take a few minutes to serve a version it just accepted.
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              npm pack "$package" --pack-destination "$RUNNER_TEMP/registry-packages" --ignore-scripts && break
+              [ "$attempt" = 10 ] && exit 1
+              sleep 30
+            done
           done
