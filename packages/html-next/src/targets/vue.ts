@@ -196,6 +196,8 @@ interface Context {
   usesEntryProps?: boolean;
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
+  /** The nodes being rendered come after an accepting slot's outlet. */
+  afterOutlet?: boolean;
   usesInputStatus?: boolean;
   usesInputExpressions?: boolean;
   usesRetainedInlineText: boolean;
@@ -562,6 +564,14 @@ function outletPropsSource(node: SlotNode, context: Context): string | undefined
 }
 
 function renderNode(node: TemplateNode, names: Names, context: Context): string {
+  // Content after an accepting slot's outlet renders in a component of its own, so it reads the `as`
+  // lists after the outlet's wrapped children have joined them, on the server and in hydration.
+  if (context.afterOutlet === true && (node.kind !== "text" || node.segments !== undefined || node.expressionPlan !== undefined)) {
+    context.afterOutlet = false;
+    const content = renderNode(node, names, context);
+    context.afterOutlet = true;
+    return `<KeyedBoundary>${content}</KeyedBoundary>`;
+  }
   const { lowering } = context;
   if (node.kind === "text") {
     if (node.segments?.length === 1) return renderNode(node.segments[0]!, names, context);
@@ -601,6 +611,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
     const childNodes = context.childNodes.get(node.name ?? "");
     if (childNodes !== undefined) {
       const fallback = renderChildren(node.fallback ?? [], names, context);
+      context.afterOutlet = true;
       return fallback === "" ? `<ChildNodes :nodes=${bound(childNodes)} />` : `<ChildNodes :nodes=${bound(childNodes)}>${fallback}</ChildNodes>`;
     }
     const scoped = (node.props?.length ?? 0) > 0;
@@ -1438,6 +1449,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
     ...childLists.map((list) => `const [${list.name}, ${list.nodes}] = ${childListSource(list, contract.tag, context, options)};`),
+    ...([...options.componentGraph?.values() ?? []].some((other) => Object.values(other.contract.slots ?? {}).some((declared) => declared.accepts?.includes(contract.tag) === true)) ? ["useChildEntry();"] : []),
     ...context.outletProps.map((shapes, index) => `const outletProps${index} = ${shapes};`),
     ...(availability.size === 0 ? [] : [`const declarationStatuses = { ${[...seeded.map(state => `${quote(state.name)}: () => ${stateNames.get(state)}.status()`),
       ...contexts.map(context => { const variable = contextNames.get(context)!; return `${quote(context.as ?? context.name)}: () => ${variable}.status?.() ?? (${variable}.value === undefined ? UNRESOLVED_INPUT : READY_INPUT)`; })].join(", ")} } as Record<string, () => typeof READY_INPUT>;`, "const declarationStatus = (name: string) => declarationStatuses[name]!();"]),
@@ -1509,7 +1521,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   // The shared module holds what every component's host and dispatcher do the same way.
   const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
     "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
-    "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", "useChildList", "ChildNodes", "ChildSlot", ...Object.values(WRITE_PREDICATES)]
+    "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", "useChildList", "useChildEntry", "ChildNodes", "ChildSlot", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)),
     ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks || context.outletProps.length > 0 ? ["warnUnless"] : []])].sort();
   const vueTypes = target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"];

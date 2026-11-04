@@ -16,6 +16,7 @@ import {
   onBeforeUpdate,
   onMounted,
   onUpdated,
+  provide,
   ref,
   renderSlot,
   shallowRef,
@@ -24,7 +25,14 @@ import {
   watch,
   watchEffect,
 } from 'vue'
-import type { FunctionalComponent, PropType, Ref, Slots, VNode } from 'vue'
+import type {
+  ComponentInternalInstance,
+  FunctionalComponent,
+  PropType,
+  Ref,
+  Slots,
+  VNode,
+} from 'vue'
 /** The public failure a template may read; stacks and producer capabilities stay with their owner. */
 interface InputFailure {
   readonly name: string
@@ -1585,6 +1593,8 @@ interface ChildRecord {
   props: Record<string, unknown>
   entry: object
   read(): VNode
+  /** A wrapped child's place in the list. */
+  at?: number
 }
 const childRecords = new WeakMap<object, ChildRecord>()
 /** A slot's content as vnodes: a render function's slot may return one node, text or nothing, where a template's returns a list. */
@@ -1617,6 +1627,32 @@ const renderChildSlot = (
 }
 /** The empty slot a consumer adds beside a `<template slot>` it gives an accepted child, which places it afresh at every outlet. */
 const TEMPLATE_SLOT = 'html-next-template-'
+/** What an accepted child finds through inject: the nearest accepting parent, which takes it if it accepts its component. */
+interface ChildOwner {
+  readonly kinds: ReadonlyMap<unknown, ChildKind>
+  readonly parent: ChildOwner | undefined
+  add(instance: ComponentInternalInstance, nearest: boolean): void
+}
+const ACCEPTING = Symbol.for('html-next:accepting')
+const givenProps = (node: VNode): Record<string, unknown> => {
+  const given: Record<string, unknown> = {}
+  for (const key in node.props) given[camelize(key)] = node.props[key]
+  return given
+}
+const nodeRoot = (entry: object): Node | null => childRecords.get(entry)!.node.el as Node | null
+
+/**
+ * An accepted child's place in its parent's list, which every accepted component takes as it sets up.
+ * A child the parent read from its slot's vnodes holds its place; any other, such as one inside the
+ * consumer's own wrapper component, joins the nearest ancestor that accepts its component.
+ */
+export function useChildEntry(): void {
+  const instance = getCurrentInstance()!
+  const nearest = inject<ChildOwner | undefined>(ACCEPTING, undefined)
+  let owner = nearest
+  while (owner !== undefined && !owner.kinds.has(instance.type)) owner = owner.parent
+  owner?.add(instance, owner === nearest)
+}
 
 /**
  * A slot's `as` list (components#columns-as-markup): one stable, read-only entry per accepted child the
@@ -1625,7 +1661,12 @@ const TEMPLATE_SLOT = 'html-next-template-'
  * converted consumer, an SFC template or a render function alike, so it is complete on the first render,
  * on the server too; the second value is those vnodes, which the slot's outlet renders (`ChildNodes`),
  * so each entry knows its child's instance. A keyed child is known by its key, as Vue's diff knows it.
- * Other children are left out with a warning. `prefix` begins each warning, as live's do.
+ * Plain elements, text and presets are left out with a warning, and a preset's root does not join the
+ * list. Any other component is the consumer's to render, and an accepted child it renders joins the list
+ * as it sets up (`useChildEntry`): as the outlet first renders, after the children rendered before it, and
+ * after that by the document order of the children's roots, which a MutationObserver on the roots' parents
+ * keeps current through a keyed move. On the server content after the outlet reads the list complete.
+ * `prefix` begins each warning, as live's do.
  */
 export function useChildList<List>(
   slot: string,
@@ -1654,6 +1695,50 @@ export function useChildList<List>(
       ? typeof key + ':' + String(key)
       : 'o' + (ids.get(key) ?? (ids.set(key, ++count), count))
   let records = new Map<string, ChildRecord>()
+  // Wrapped children, and what tells the list to read them again.
+  const version = shallowRef(0)
+  const reread = (): void => {
+    version.value++
+  }
+  const joined: ChildRecord[] = []
+  let filling = true
+  let placed = 0
+  let observer: MutationObserver | undefined
+  const newRecord = (kind: ChildKind, node: VNode): ChildRecord => {
+    const made: ChildRecord = {
+      tag: kind[1],
+      slots: kind[3],
+      prefix,
+      claims: new Map(),
+      released: shallowRef(0),
+      node,
+      props: {},
+      entry: {},
+      read: () => {
+        void state.value
+        void version.value
+        return made.node
+      },
+    }
+    // Reading an entry's prop reads the list, so it follows the consumer's changes.
+    made.entry = Object.freeze(
+      Object.create(
+        null,
+        Object.fromEntries(
+          Object.keys(kind[2]({})).map((name) => [name, {
+            enumerable: true,
+            get: () => {
+              void state.value
+              void version.value
+              return made.props[name]
+            },
+          }]),
+        ),
+      ) as object,
+    )
+    childRecords.set(made.entry, made)
+    return made
+  }
   const state = computed(() => {
     const next = new Map<string, ChildRecord>()
     const entries: object[] = []
@@ -1666,42 +1751,9 @@ export function useChildList<List>(
         const kind = kinds.get(node.type)
         if (kind !== undefined) {
           let record = records.get(at)
-          if (record === undefined || record.tag !== kind[1]) {
-            const made: ChildRecord = record = {
-              tag: kind[1],
-              slots: kind[3],
-              prefix,
-              claims: new Map(),
-              released: shallowRef(0),
-              node,
-              props: {},
-              entry: {},
-              read: () => {
-                void state.value
-                return made.node
-              },
-            }
-            // Reading an entry's prop reads the list, so it follows the consumer's changes.
-            made.entry = Object.freeze(
-              Object.create(
-                null,
-                Object.fromEntries(
-                  Object.keys(kind[2]({})).map((name) => [name, {
-                    enumerable: true,
-                    get: () => {
-                      void state.value
-                      return made.props[name]
-                    },
-                  }]),
-                ),
-              ) as object,
-            )
-            childRecords.set(made.entry, made)
-          }
-          const given: Record<string, unknown> = {}
-          for (const key in node.props) given[camelize(key)] = node.props[key]
+          if (record === undefined || record.tag !== kind[1]) record = newRecord(kind, node)
           record.node = node
-          record.props = kind[2](given)
+          record.props = kind[2](givenProps(node))
           next.set(at, record)
           entries.push(record.entry)
         } else if (node.type === Comment) {
@@ -1727,17 +1779,16 @@ export function useChildList<List>(
             } as never
           }
         } else {
-          const type = node.type as { __name?: string; name?: string } | string
-          const tag = typeof type === 'string'
-            ? type
-            : (type.__name ?? type.name ?? 'component').replace(/\B([A-Z])/g, '-$1').toLowerCase()
-          leftOut(
-            tag,
-            presets[tag] === undefined
-              ? named + ' accepts ' + listed + '; this `<' + tag + '>` is left out.'
-              : '`<' + tag + '>` is a preset of `' + presets[tag] + '`, which ' + named
+          const tag = tagOf(node.type)
+          if (typeof node.type === 'string') {
+            leftOut(tag, named + ' accepts ' + listed + '; this `<' + tag + '>` is left out.')
+          } else if (presets[tag] !== undefined) {
+            leftOut(
+              tag,
+              '`<' + tag + '>` is a preset of `' + presets[tag] + '`, which ' + named
                 + ' accepts; a preset among accepted children is not supported yet, so it is left out.',
-          )
+            )
+          }
         }
       })
     void source.value
@@ -1746,7 +1797,92 @@ export function useChildList<List>(
     records = next
     return { entries: Object.freeze(entries) as List, nodes }
   })
-  return [computed(() => state.value.entries), computed(() => state.value.nodes)]
+  let previous: readonly object[] = []
+  const list = computed(() => {
+    void version.value
+    const direct = state.value.entries as readonly object[]
+    if (joined.length === 0) return previous = direct
+    const next = [...direct]
+    for (const child of joined) next.splice(child.at!, 0, child.entry)
+    if (!filling && next.every((entry) => nodeRoot(entry)?.isConnected === true)) {
+      next.sort((left, right) =>
+        nodeRoot(left)!.compareDocumentPosition(nodeRoot(right)!) & 4 ? -1 : 1
+      )
+      for (const child of joined) child.at = next.indexOf(child.entry)
+      joined.sort((left, right) => left.at! - right.at!)
+    }
+    return next.length === previous.length
+        && next.every((entry, index) => entry === previous[index])
+      ? previous
+      : (previous = Object.freeze(next))
+  })
+  provide(
+    ACCEPTING,
+    {
+      kinds,
+      parent: inject<ChildOwner | undefined>(ACCEPTING, undefined),
+      add(child, isNearest) {
+        const top = outletChild(child)
+        if (isNearest && top === child) {
+          placed++
+          return
+        }
+        if (isNearest && presets[tagOf(top.type)] !== undefined) return
+        const record = newRecord(kinds.get(child.type)!, child.vnode)
+        const update = (): void => {
+          record.node = child.vnode
+          record.props = kinds.get(child.type)![2](givenProps(child.vnode))
+        }
+        update()
+        record.at = placed++
+        joined.push(record)
+        reread()
+        onBeforeUpdate(() => {
+          update()
+          reread()
+        })
+        onMounted(() => {
+          const parent = nodeRoot(record.entry)?.parentNode
+          if (parent != null) {
+            ;(observer ??= new MutationObserver(reread)).observe(parent, { childList: true })
+          }
+          reread()
+        })
+        onBeforeUnmount(() => {
+          joined.splice(joined.indexOf(record), 1)
+          reread()
+        })
+      },
+    } satisfies ChildOwner,
+  )
+  onMounted(() => {
+    filling = false
+    if (joined.length > 0) reread()
+  })
+  onUpdated(() => {
+    if (joined.length > 0) reread()
+  })
+  onBeforeUnmount(() => {
+    observer?.disconnect()
+  })
+  return [list as unknown as Readonly<Ref<List>>, computed(() => state.value.nodes)]
+}
+
+/** A component type's tag, as a warning names it. */
+const tagOf = (type: unknown): string =>
+  typeof type === 'string'
+    ? type
+    : ((type as { __name?: string; name?: string }).__name ?? (type as { name?: string }).name
+      ?? 'component').replace(/\B([A-Z])/g, '-$1').toLowerCase()
+/** The ancestor of an instance, or itself, that its nearest `ChildNodes` outlet renders, seen through keyed boundaries. */
+const outletChild = (instance: ComponentInternalInstance): ComponentInternalInstance => {
+  let top = instance
+  for (let up = instance.parent; up !== null; up = up.parent) {
+    const type: unknown = up.type
+    if (type === ChildNodes) break
+    if (type !== KeyedBoundary) top = up
+  }
+  return top
 }
 
 /** An accepting slot's outlet: the consumer's vnodes the slot's `as` list read, or the fallback. */

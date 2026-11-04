@@ -36,6 +36,8 @@ const source = `<template component="x-column" status="early" summary="Column.">
     <tbody><tr $each="row of $rows" $key="$row.id"><td $each="column of $columns" $key="$column">
       <slot of="$column" name="cell" from:row="$row">{$row[$column.field]}</slot></td></tr></tbody>
     <tfoot><tr><td $each="column of $columns" $key="$column"><template $if="$lead"><slot of="$column" name="note">-</slot></template><slot of="$column" name="note"></slot></td></tr></tfoot></table></template>
+<template component="x-first" status="early" summary="Reads its list before its outlet."><defs><slot accepts="x-column" as="columns"></slot></defs>
+  <section><p $each="column of $columns" $key="$column"><slot of="$column" name="note">{$column.header}</slot></p><table><thead><tr><template $slot></template></tr></thead></table></section></template>
 <template component="x-badge" status="early" summary="Badge."><defs><prop name="text" type="string">Text.</prop>
     <context name="tone" from="x-column"></context><context name="density" from="x-datatable"></context></defs>
   <b>{$text}:{$tone}:{$density}</b></template>
@@ -162,6 +164,142 @@ export default defineComponent({ setup() {
 } });
 `;
 
+/** The same app with its columns in components of its own: a condition inside one, keyed ones, and direct ones between them. */
+const wrappers = {
+  "IdColumn.vue": `<script setup lang="ts">
+import XColumn from "./XColumn.vue";
+defineProps<{ show: boolean; header: string }>();
+</script>
+<template><XColumn v-if="show" field="id" :header="header" /></template>
+`,
+  "PriceColumn.vue": `<script setup lang="ts">
+import XColumn from "./XColumn.vue";
+import XBadge from "./XBadge.vue";
+</script>
+<template>
+  <XColumn class="numeric" :span="2">
+    <template #header><abbr title="Price in US dollars">Price</abbr></template>
+    <template #cell="{ row }"><XBadge :text="row.name" />{{ row.price }}</template>
+  </XColumn>
+</template>
+`,
+  "ExtraColumn.vue": `<script setup lang="ts">
+import XColumn from "./XColumn.vue";
+defineProps<{ column: { key: string; label: string } }>();
+</script>
+<template><XColumn :field="column.key" :header="column.label" /></template>
+`,
+  // A wrapper whose own state changes its columns: nothing outside it re-renders.
+  "PairColumns.vue": `<script setup lang="ts">
+import { reactive, computed } from "vue";
+import XColumn from "./XColumn.vue";
+const state = reactive({ label: "B", field: "price", flip: false, more: false, off: false });
+(globalThis as { pair?: unknown }).pair = (next: object) => { Object.assign(state, next); };
+const columns = computed(() => {
+  const list = [{ key: "b", field: state.field, header: state.label }, { key: "c", field: "id", header: "C" }];
+  if (state.more) list.splice(1, 0, { key: "m", field: "name", header: "M" });
+  return state.off ? [] : state.flip ? list.reverse() : list;
+});
+</script>
+<template><XColumn v-for="column in columns" :key="column.key" :field="column.field" :header="column.header" /></template>
+`,
+  "NotAColumn.vue": `<script setup lang="ts">defineOptions({ inheritAttrs: false });</script>
+<template><span v-if="false"></span></template>
+`,
+  "LastColumn.vue": `<script setup lang="ts">
+import XColumn from "./XColumn.vue";
+import XBadge from "./XBadge.vue";
+</script>
+<template>
+  <XColumn header="Last">
+    <template #cell="{ row }"><XBadge :text="row.name" /></template>
+    <template #note><i>kept</i></template>
+  </XColumn>
+</template>
+`,
+  "NoteColumn.vue": `<script setup lang="ts">
+import XColumn from "./XColumn.vue";
+defineProps<{ count: number }>();
+</script>
+<template><XColumn header="H"><template #note><b>N{{ count }}</b></template></XColumn></template>
+`,
+  "First.vue": `<script setup lang="ts">
+import { ref } from "vue";
+import XFirst from "./XFirst.vue";
+import XColumn from "./XColumn.vue";
+import NoteColumn from "./NoteColumn.vue";
+const count = ref(0);
+</script>
+<template>
+  <main>
+    <button type="button" class="count" @click="count++">Count</button>
+    <XFirst><XColumn header="D" /><NoteColumn :count="count" /></XFirst>
+  </main>
+</template>
+`,
+  "OwnState.vue": `<script setup lang="ts">
+import { ref } from "vue";
+import XDatatable from "./XDatatable.vue";
+import XColumn from "./XColumn.vue";
+import PairColumns from "./PairColumns.vue";
+import NotAColumn from "./NotAColumn.vue";
+import LastColumn from "./LastColumn.vue";
+const last = ref(true);
+</script>
+<template>
+  <main>
+    <button type="button" class="last" @click="last = !last">Last</button>
+    <XDatatable :rows="[{ id: 1, name: 'A', price: 2 }]">
+      <XColumn field="name" header="Direct" />
+      <PairColumns />
+      <NotAColumn />
+      <LastColumn v-if="last" />
+    </XDatatable>
+  </main>
+</template>
+`,
+} as const;
+const wrappedSfcConsumer = sfcConsumer
+  .replace(`import XBadge from "./XBadge.vue";`, `import IdColumn from "./IdColumn.vue";
+import PriceColumn from "./PriceColumn.vue";
+import ExtraColumn from "./ExtraColumn.vue";`)
+  .replace(`      <XColumn v-if="showId" field="id" header="Id" />
+      <XColumn field="name" :header="label"><template #note><i>kept</i></template></XColumn>
+      <XColumn class="numeric" :span="2">
+        <template #header><abbr title="Price in US dollars">Price</abbr></template>
+        <template #cell="{ row }"><XBadge :text="row.name" />{{ row.price }}</template>
+      </XColumn>
+      <XColumn v-for="column in extra" :key="column.key" :field="column.key" :header="column.label" />`, `      <IdColumn :show="showId" header="Id" />
+      <XColumn field="name" :header="label"><template #note><i>kept</i></template></XColumn>
+      <PriceColumn />
+      <ExtraColumn v-for="column in extra" :key="column.key" :column="column" />`)
+  .replace(`      <template v-if="showId"><XColumn field="id" header="T" /></template>
+      <template v-for="column in extra" :key="column.key"><XColumn :field="column.key" :header="column.label" /></template>`, `      <IdColumn :show="showId" header="T" />
+      <template v-for="column in extra" :key="column.key"><XColumn :field="column.key" :header="column.label" /></template>`);
+
+/** The same app with every column of its first table in a render-function wrapper. */
+const wrappedRenderConsumer = renderConsumer
+  .replace(`export default defineComponent({ setup() {`, `const IdColumn = defineComponent({ props: ["show", "header"], render() { return this.show ? h(XColumn, { field: "id", header: this.header }) : null; } });
+const NameColumn = defineComponent({ props: ["header"], render() { return h(XColumn, { field: "name", header: this.header }, { note: () => h("i", "kept") }); } });
+const PriceColumn = defineComponent({ render: () => h(XColumn, { class: "numeric", span: 2 }, {
+  header: () => h("abbr", { title: "Price in US dollars" }, "Price"),
+  cell: ({ row }: { row: { name: string; price: number } }) => [h(XBadge, { text: row.name }), String(row.price)],
+}) });
+const ExtraColumn = defineComponent({ props: ["column"], render() { return h(XColumn, { field: this.column.key, header: this.column.label }); } });
+export default defineComponent({ setup() {`)
+  .replace(`const columns = extra.value.map((column) => h(XColumn, { key: column.key, field: column.key, header: column.label }));`, `const columns = extra.value.map((column) => h(ExtraColumn, { key: column.key, column }));`)
+  .replace(`        showId.value ? h(XColumn, { field: "id", header: "Id" }) : null,
+        h(XColumn, { field: "name", header }, { note: () => h("i", "kept") }),
+        h(XColumn, { class: "numeric", span: 2 }, {
+          header: () => h("abbr", { title: "Price in US dollars" }, "Price"),
+          cell: ({ row }: { row: { name: string; price: number } }) => [h(XBadge, { text: row.name }), String(row.price)],
+        }),
+        ...columns,`, `        h(IdColumn, { show: showId.value, header: "Id" }),
+        h(NameColumn, { header }),
+        h(PriceColumn),
+        ...columns,`)
+  .replace(`        showId.value ? [h(XColumn, { field: "id", header: "T" })] : [],`, `        h(IdColumn, { show: showId.value, header: "T" }),`);
+
 /** Each table without marks, comments or runtime attributes, and the list its controller wrote. */
 const READ = `Array.from(document.querySelectorAll("table"), (table) => {
   const read = (node) => {
@@ -175,7 +313,7 @@ const READ = `Array.from(document.querySelectorAll("table"), (table) => {
 const mark = `Array.from(document.querySelectorAll("table")[0].querySelectorAll("tbody tr:first-child td"), (cell, index) => { cell.dataset.was = String(index); }).length`;
 const marks = `Array.from(document.querySelectorAll("table")[0].querySelectorAll("tbody tr:first-child td"), (cell) => cell.dataset.was ?? null)`;
 
-const consumers = ["compiled", "sfc", "render"] as const;
+const consumers = ["compiled", "sfc", "render", "wrappedSfc", "wrappedRender"] as const;
 type Consumer = typeof consumers[number];
 
 const sfc = (suffix: string) => ({ name: `compiled-vue-sfc${suffix}`, setup(pluginBuild: { onResolve: (options: { filter: RegExp }, callback: (args: { path: string; resolveDir: string }) => { path: string }) => void }) {
@@ -206,7 +344,7 @@ describe.skipIf(!enabled)("columns from hand-written Vue consumers", () => {
   let directory = "";
   let fresh = "";
   let hydrate = "";
-  let server: Record<Consumer, string> = { compiled: "", sfc: "", render: "" };
+  let server: Record<Consumer | "ownState" | "first", string> = { compiled: "", sfc: "", render: "", wrappedSfc: "", wrappedRender: "", ownState: "", first: "" };
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-vue-columns-consumers-"));
@@ -222,13 +360,21 @@ describe.skipIf(!enabled)("columns from hand-written Vue consumers", () => {
     await writeFile(join(out, "Consumer.vue"), sfcConsumer);
     await compileSfc(join(out, "Consumer.vue"), "consumer");
     await writeFile(join(out, "render.ts"), renderConsumer);
+    await writeFile(join(out, "WrappedConsumer.vue"), wrappedSfcConsumer);
+    await compileSfc(join(out, "WrappedConsumer.vue"), "wrapped-consumer");
+    await writeFile(join(out, "wrappedRender.ts"), wrappedRenderConsumer);
+    for (const [name, content] of Object.entries(wrappers)) {
+      await writeFile(join(out, name), content);
+      await compileSfc(join(out, name), name.toLowerCase());
+    }
     // vue-tsc checks the hand-written consumers against the converted components, as an application's build does.
     await writeFile(join(out, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler",
-      strict: true, skipLibCheck: true, noEmit: true, allowImportingTsExtensions: true, lib: ["ES2022", "DOM", "DOM.Iterable"] }, files: ["Consumer.vue", "render.ts"] }));
+      strict: true, skipLibCheck: true, noEmit: true, allowImportingTsExtensions: true, lib: ["ES2022", "DOM", "DOM.Iterable"] }, files: ["Consumer.vue", "render.ts", "WrappedConsumer.vue", "wrappedRender.ts", "OwnState.vue", "First.vue"] }));
     await new Promise<void>((done, fail) => execFile(join(nodeModules, ".bin/vue-tsc"), ["-p", join(out, "tsconfig.json")], { cwd: out },
       (error, stdout) => error === null ? done() : fail(new Error(stdout || String(error)))));
     const imports = `import Compiled from "./XApp.vue"; import Sfc from "./Consumer.vue"; import Render from "./render.ts";
-const apps = { compiled: Compiled, sfc: Sfc, render: Render } as const;`;
+import WrappedSfc from "./WrappedConsumer.vue"; import WrappedRender from "./wrappedRender.ts"; import OwnState from "./OwnState.vue"; import First from "./First.vue";
+const apps = { compiled: Compiled, sfc: Sfc, render: Render, wrappedSfc: WrappedSfc, wrappedRender: WrappedRender, ownState: OwnState, first: First } as const;`;
     const options: BuildOptions = { bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModules], plugins: [sfc("")] };
     await writeFile(join(out, "entry.ts"), `import { createApp, h } from "vue"; ${imports}
 createApp({ render: () => h(apps[(window as any).consumer as keyof typeof apps]) }).mount("#mount");`);
@@ -239,8 +385,8 @@ createSSRApp({ render: () => h(apps[(window as any).consumer as keyof typeof app
     await writeFile(join(out, "server.ts"), `import { createSSRApp, h } from "vue"; import { renderToString } from "@vue/server-renderer"; ${imports}
 export const render = (name: keyof typeof apps) => renderToString(createSSRApp({ render: () => h(apps[name]) }));`);
     const serverBuild = await build({ entryPoints: [join(out, "server.ts")], bundle: true, format: "esm", platform: "node", write: false, nodePaths: [serverModules, nodeModules], plugins: [sfc(".ssr")] });
-    const module = await import(`data:text/javascript;base64,${Buffer.from(serverBuild.outputFiles[0]!.text).toString("base64")}`) as { render(name: Consumer): Promise<string> };
-    server = { compiled: await module.render("compiled"), sfc: await module.render("sfc"), render: await module.render("render") };
+    const module = await import(`data:text/javascript;base64,${Buffer.from(serverBuild.outputFiles[0]!.text).toString("base64")}`) as { render(name: keyof typeof server): Promise<string> };
+    for (const name of Object.keys(server) as (keyof typeof server)[]) server[name] = await module.render(name);
   }, 180_000);
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
 
@@ -253,6 +399,18 @@ export const render = (name: keyof typeof apps) => renderToString(createSSRApp({
     assert.match(bare(server.compiled), /<b[^>]*>Desk lamp:quiet:compact<\/b>49<\/td>/);
     assert.equal(bare(server.sfc), bare(server.compiled));
     assert.equal(bare(server.render), bare(server.compiled));
+    // A wrapper's column reaches the list as the outlet renders it, so the caption before the outlet counts
+    // the direct ones, and everything after the outlet reads them all, in document order.
+    const uncounted = (html: string) => html.replace(/<caption>\d+ columns<\/caption>/g, "<caption></caption>");
+    for (const [wrapped, direct] of [[server.wrappedSfc, "1 columns"], [server.wrappedRender, "0 columns"]] as const) {
+      assert.equal(uncounted(bare(wrapped)), uncounted(bare(server.compiled)));
+      assert.match(bare(wrapped), new RegExp(`^<table[^>]*><caption>${direct}</caption>`));
+    }
+    const own = bare(server.ownState);
+    assert.match(own, /<caption>1 columns<\/caption>/);
+    assert.match(server.first.replace(/<!--[\s\S]*?-->/g, "").replace(/>\s+</g, "><"), /<section[^>]*><p[^>]*>D<\/p><table/);
+    assert.match(own, /<thead><tr><th[^>]*>Direct<\/th><th[^>]*>B<\/th><th[^>]*>C<\/th><th[^>]*>Last<\/th><\/tr>/);
+    assert.match(own, /<tbody><tr><td[^>]*>A<\/td><td[^>]*>2<\/td><td[^>]*>1<\/td><td[^>]*><b[^>]*>A:quiet:compact<\/b><\/td><\/tr><\/tbody>/);
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
@@ -326,5 +484,81 @@ export const render = (name: keyof typeof apps) => renderToString(createSSRApp({
         await browser.close();
       }
     });
+
+    for (const mode of ["fresh", "hydrated"] as const) {
+      it(`${engine} ${mode}: a read before the outlet holds the direct columns in server output, then every column and its latest slot content`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const problems: string[] = [];
+          page.on("pageerror", (error) => problems.push(error.message));
+          page.on("console", (message) => {
+            if (message.type() === "error" || message.type() === "warning" && !message.text().startsWith("Feature flags ") && /hydration|mismatch/i.test(message.text())) problems.push(message.text());
+          });
+          await page.setContent(`<div id="mount">${mode === "fresh" ? "" : server.first}</div>`);
+          await page.evaluate(`window.consumer = "first"`);
+          await page.addScriptTag({ path: mode === "fresh" ? fresh : hydrate });
+          const notes = async (expected: string[]) => {
+            const read = `JSON.stringify(Array.from(document.querySelectorAll("section p"), (note) => note.textContent))`;
+            await page.waitForFunction(`${read} === ${JSON.stringify(JSON.stringify(expected))}`, undefined, { timeout: 3_000 }).catch(() => {});
+            assert.deepEqual(JSON.parse(await page.evaluate(read) as string), expected);
+          };
+          await notes(["D", "N0"]);
+          await page.locator("button.count").click();
+          await notes(["D", "N1"]);
+          assert.deepEqual(problems, []);
+        } finally {
+          await browser.close();
+        }
+      });
+
+      it(`${engine} ${mode}: a wrapper's own state adds, removes, reorders and renames its columns among direct ones`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const problems: string[] = [];
+          page.on("pageerror", (error) => problems.push(error.message));
+          page.on("console", (message) => {
+            if (message.type() === "error" || message.type() === "warning" && !message.text().startsWith("Feature flags ") && /hydration|mismatch|left out/i.test(message.text())) problems.push(message.text());
+          });
+          await page.setContent(`<div id="mount">${mode === "fresh" ? "" : server.ownState}</div>`);
+          if (mode === "hydrated") await page.evaluate(`window.serverCells = Array.from(document.querySelectorAll("td"))`);
+          await page.evaluate(`window.consumer = "ownState"`);
+          await page.addScriptTag({ path: mode === "fresh" ? fresh : hydrate });
+          const shape = () => page.evaluate(`(() => { const table = document.querySelector("table"); const texts = (selector) => Array.from(table.querySelectorAll(selector), (cell) => cell.textContent.trim());
+            return { caption: table.caption.textContent, head: texts("thead th"), row: texts("tbody tr:first-child td"), foot: texts("tfoot td"), columns: table.getAttribute("data-columns") }; })()`);
+          const until = async (head: string[], row: string[], label: string) => {
+            const expected = { caption: head.length + " columns", head, row, foot: head.map((header) => header === "Last" ? "kept" : "-"), columns: head.map((header) => header + ":1").join(",") };
+            const deadline = Date.now() + 3_000;
+            let actual = await shape();
+            while (JSON.stringify(actual) !== JSON.stringify(expected) && Date.now() < deadline) { await page.waitForTimeout(16); actual = await shape(); }
+            assert.deepEqual(actual, expected, label);
+          };
+          const last = "A:quiet:compact";
+          await until(["Direct", "B", "C", "Last"], ["A", "2", "1", last], "first");
+          if (mode === "hydrated") assert.equal(await page.evaluate(`window.serverCells.every((cell) => cell.isConnected)`), true);
+          await page.evaluate(`window.pair({ label: "Z" })`);
+          await until(["Direct", "Z", "C", "Last"], ["A", "2", "1", last], "a prop in a wrapper reaches the entry");
+          await page.evaluate(`window.pair({ field: "name" })`);
+          await until(["Direct", "Z", "C", "Last"], ["A", "A", "1", last], "a prop in a wrapper reaches the cells");
+          await page.evaluate(`Array.from(document.querySelectorAll("tbody td"), (cell) => { cell.dataset.was = cell.textContent.trim(); })`);
+          await page.evaluate(`window.pair({ flip: true })`);
+          await until(["Direct", "C", "Z", "Last"], ["A", "1", "A", last], "a keyed move in a wrapper");
+          assert.deepEqual(await page.evaluate(`Array.from(document.querySelectorAll("tbody td"), (cell) => cell.dataset.was)`), ["A", "1", "A", last], "cells move with their column");
+          await page.evaluate(`window.pair({ more: true })`);
+          await until(["Direct", "C", "M", "Z", "Last"], ["A", "1", "A", "A", last], "a column added in a wrapper");
+          await page.evaluate(`window.pair({ off: true })`);
+          await until(["Direct", "Last"], ["A", last], "a wrapper's columns removed");
+          await page.locator("button.last").click();
+          await until(["Direct"], ["A"], "the consumer removes a wrapper");
+          await page.locator("button.last").click();
+          await page.evaluate(`window.pair({ off: false, more: false, flip: false })`);
+          await until(["Direct", "Z", "C", "Last"], ["A", "A", "1", last], "all back in document order");
+          assert.deepEqual(problems, []);
+        } finally {
+          await browser.close();
+        }
+      });
+    }
   }
 });

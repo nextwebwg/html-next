@@ -46,6 +46,8 @@ const source = `<template component="x-column" status="early" summary="One colum
   <context name="tone" from="x-column"></context><context name="density" from="x-datatable"></context></defs>
   <b>{$text}:{$tone}:{$density}</b></template>
 <template component="x-column-preset" status="early" summary="A preset."><x-column field="name"></x-column></template>
+<template component="x-first" status="early" summary="Reads its list before its outlet."><defs><slot accepts="x-column" as="columns"></slot></defs>
+  <section><p $each="column of $columns" $key="$column"><slot of="$column" name="note">{$column.header}</slot></p><table><thead><tr><template $slot></template></tr></thead></table></section></template>
 <template component="x-products" status="early" summary="Products."><defs>
   <state name="products" type="list(object({ id: number, name: string, price: number }))"
     value="[{ id: 1, name: 'Desk lamp', price: 49 }, { id: 2, name: 'Notebook', price: 6.5 }]"></state>
@@ -86,8 +88,8 @@ const controller = `export default function initialize(host) {
  * render props and plain content, and a column whose props change in place.
  */
 const hand = (target: Target, entry: string): string => `${target === "preact" ? `/** @jsxImportSource preact */
-import { useState } from "preact/hooks";` : `import { useState } from "react";`}
-import { XBadge, XColumn, XColumnPreset, XDatatable } from "./${entry}";
+import { useLayoutEffect, useState } from "preact/hooks";` : `import { StrictMode, startTransition, Suspense, use, useLayoutEffect, useState } from "react";`}
+import { XBadge, XColumn, XColumnPreset, XDatatable, XFirst } from "./${entry}";
 export function HandProducts() {
   const [products, setProducts] = useState([{ id: 1, name: "Desk lamp", price: 49 }, { id: 2, name: "Notebook", price: 6.5 }]);
   const [showId, setShowId] = useState(false);
@@ -119,8 +121,94 @@ export function HandWarned() {
     <XColumn field="name" /><span>no</span>stray<XColumnPreset />
     <XColumn slots={{ cell: <span>plain</span> as any }} /></XDatatable></main>;
 }
+function IdColumn({ show }: { show: boolean }) { return show ? <XColumn field="id" header="Id" /> : null; }
+function PriceColumn() {
+  return <XColumn className="numeric" slots={{ header: <abbr title="Price in US dollars">Price</abbr>,
+    cell: ({ row }: { row: any }) => <><span><XBadge text={row.name} /></span>{row.price}</> }} />;
+}
+function ExtraColumn({ column }: { column: { key: string; label: string } }) { return <XColumn field={column.key} header={column.label} />; }
+export function WrappedProducts() {
+  const [products, setProducts] = useState([{ id: 1, name: "Desk lamp", price: 49 }, { id: 2, name: "Notebook", price: 6.5 }]);
+  const [showId, setShowId] = useState(false);
+  const [extra, setExtra] = useState([{ key: "name", label: "N" }, { key: "price", label: "P" }]);
+  return <main><button type="button" className="toggle" onClick={() => setShowId(!showId)}>Id</button>
+    <button type="button" className="swap" onClick={() => setExtra([{ key: "price", label: "P" }, { key: "name", label: "N" }])}>Swap</button>
+    <button type="button" className="rename" onClick={() => setProducts([{ id: 2, name: "Notebook", price: 6.5 }, { id: 1, name: "Lamp", price: 49 }, { id: 3, name: "Pen", price: 2 }])}>Rename</button>
+    <XDatatable rows={products}>
+      <IdColumn show={showId} />
+      <XColumn field="name" header="Name" slots={{ note: <i>kept</i> }} />
+      <PriceColumn />
+      {extra.map((column) => <ExtraColumn key={column.key} column={column} />)}
+    </XDatatable></main>;
+}
+function MatchColumn({ wide }: { wide: boolean }) {
+  return wide ? <XColumn field="price" header="Wide" /> : <XColumn field="name" header="Narrow" slots={{ note: () => <u>n</u> }} />;
+}
+function TagColumn({ tag }: { tag: string }) {
+  return <XColumn header={tag} slots={{ cell: () => <XBadge text={tag} />, tag: ({ size, unit }: { size: number; unit: string }) => <em>{size + 1}{unit}</em> }} />;
+}
+export function WrappedMore() {
+  const [wide, setWide] = useState(false);
+  const [tags, setTags] = useState(["p", "q"]);
+  return <main><button type="button" className="widen" onClick={() => setWide(!wide)}>Widen</button>
+    <button type="button" className="retag" onClick={() => setTags(["q", "r"])}>Retag</button>
+    <XDatatable rows={[{ id: 1, name: "A", price: 1 }]}>
+      <MatchColumn wide={wide} />
+      {tags.map((tag) => <TagColumn key={tag} tag={tag} />)}
+    </XDatatable></main>;
+}
+/** A wrapper whose own state changes its columns: the table re-renders only because the columns tell it to. */
+function PairColumns() {
+  const [state, setState] = useState({ label: "B", field: "price", flip: false, more: false, off: false });
+  useLayoutEffect(() => { (window as any).pair = (next: object) => setState({ ...state, ...next }); });
+  const columns = [<XColumn key="b" field={state.field} header={state.label} />, <XColumn key="c" field="id" header="C" />];
+  if (state.more) columns.splice(1, 0, <XColumn key="m" field="name" header="M" />);
+  if (state.flip) columns.reverse();
+  return <>{state.off ? null : columns}</>;
+}
+function NotAColumn() { return null; }
+function LastColumn() {
+  return <XColumn header="Last" slots={{ cell: ({ row }: { row: any }) => <XBadge text={row.name} />, note: <i>kept</i> }} />;
+}
+export function WrappedOwnState() {
+  const [last, setLast] = useState(true);
+  const [note, setNote] = useState(true);
+  return <main><button type="button" className="last" onClick={() => setLast(!last)}>Last</button>
+    <button type="button" className="note" onClick={() => setNote(!note)}>Note</button>
+    <XDatatable rows={[{ id: 1, name: "A", price: 2 }]}>
+      <XColumn field="name" header="Direct" slots={note ? { note: <i>direct</i> } : {}} />
+      <NotAColumn />
+      <PairColumns />
+      {last && <LastColumn />}
+    </XDatatable></main>;
+}
+function NoteColumn({ count }: { count: number }) { return <XColumn header="H" slots={{ note: <b>{"N" + count}</b> }} />; }
+export function WrappedFirst() {
+  const [count, setCount] = useState(0);
+  return <main><button type="button" className="count" onClick={() => setCount(count + 1)}>Count</button>
+    <XFirst><XColumn header="D" /><NoteColumn count={count} /></XFirst></main>;
+}
+${target === "preact" ? `export const StrictProducts = WrappedProducts;
+export const Discarded = WrappedOwnState;` : `export function StrictProducts() { return <StrictMode><WrappedProducts /></StrictMode>; }
+const never = new Promise<never>(() => {});
+function Never(): null { return use(never); }
+/** A transition that renders new wrapped columns and suspends, so React discards that render. */
+export function Discarded() {
+  const [pending, setPending] = useState(false);
+  const [rows, setRows] = useState([{ id: 1, name: "A", price: 2 }]);
+  return <main><button type="button" className="pending" onClick={() => startTransition(() => setPending(true))}>Pending</button>
+    <button type="button" className="urgent" onClick={() => setRows([{ id: 2, name: "B", price: 3 }])}>Urgent</button>
+    <Suspense fallback={<p>fallback</p>}>
+      <XDatatable rows={rows}>
+        <XColumn field="name" header="Direct" />
+        <ExtraColumn column={{ key: "price", label: "Price" }} />
+        {pending && <><ExtraColumn column={{ key: "id", label: "Lost" }} /><Never /></>}
+      </XDatatable>
+    </Suspense></main>;
+}`}
 `;
-const PAGES = { XProducts: "", XWarned: "#warned", XMore: "#more", HandProducts: "#hand-products", HandWarned: "#hand-warned", HandMore: "#hand-more" } as const;
+const PAGES = { XProducts: "", XWarned: "#warned", XMore: "#more", HandProducts: "#hand-products", HandWarned: "#hand-warned", HandMore: "#hand-more",
+  WrappedProducts: "#wrapped-products", WrappedMore: "#wrapped-more", WrappedOwnState: "#wrapped-own-state", WrappedFirst: "#wrapped-first", StrictProducts: "#strict-products", Discarded: "#discarded" } as const;
 type PageName = keyof typeof PAGES;
 
 /** The rendered tables without marks, carriers or runtime attributes. */
@@ -224,7 +312,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
   };
   const settle = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   // A hand-written consumer gives slot content as `slots`, so its elements carry no `slot` attribute.
-  const tables = async (page: Page, expected?: string, hand = false): Promise<string> => {
+  const tables = async (page: Page, expected?: string, hand: boolean | "wrapped" = false): Promise<string> => {
     const read = hand ? `(${READ}).replace(/ slot="[a-z]+"/g, "")` : READ;
     if (expected !== undefined) await page.waitForFunction(`${read} === ${JSON.stringify(expected)}`, undefined, { timeout: 5_000 }).catch(() => {});
     await settle(page);
@@ -232,8 +320,8 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
   };
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-    for (const target of ["react", "preact"] as const) for (const hand of [false, true]) {
-      const consumer = hand ? `${target} hand-written` : target;
+    for (const target of ["react", "preact"] as const) for (const hand of [false, true, "wrapped"] as const) {
+      const consumer = hand === "wrapped" ? `${target} wrapped` : hand ? `${target} hand-written` : target;
       for (const mode of ["mount", "hydrate"] as const) {
         it(`${consumer} ${mode} matches live in ${engine}: entries, $if and keyed $each columns, cells, notes and contexts`, async () => {
           const browser = await browserType.launch({ headless: true });
@@ -244,7 +332,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
             for (const page of [live, converted]) page.on("pageerror", (error) => errors.push(error.message));
             converted.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
             await openLive(live, "x-products");
-            await openTarget(converted, target, mode, hand ? "HandProducts" : "XProducts");
+            await openTarget(converted, target, mode, hand === "wrapped" ? "WrappedProducts" : hand ? "HandProducts" : "XProducts");
             assert.equal(await tables(live), `<table><caption>4 columns</caption><thead><tr><th scope="col">Name</th><th class="numeric" scope="col"><abbr title="Price in US dollars" slot="header">Price</abbr></th><th scope="col">N</th><th scope="col">P</th></tr></thead><tbody>` +
               `<tr><td>Desk lamp</td><td><span><b>Desk lamp:quiet:compact</b></span>49</td><td>Desk lamp</td><td>49</td></tr>` +
               `<tr><td>Notebook</td><td><span><b>Notebook:quiet:compact</b></span>6.5</td><td>Notebook</td><td>6.5</td></tr></tbody>` +
@@ -267,7 +355,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
         });
       }
 
-      it(`${consumer} warns like live for children a slot does not accept, presets and plain content for a slot with props in ${engine}`, async () => {
+      if (hand !== "wrapped") it(`${consumer} warns like live for children a slot does not accept, presets and plain content for a slot with props in ${engine}`, async () => {
         const browser = await browserType.launch({ headless: true });
         try {
           const live = await browser.newPage();
@@ -292,7 +380,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
             const converted = await browser.newPage();
             const errors: string[] = [];
             for (const page of [live, converted]) page.on("pageerror", (error) => errors.push(error.message));
-            const warned = [await openLive(live, "x-more"), await openTarget(converted, target, mode, hand ? "HandMore" : "XMore")];
+            const warned = [await openLive(live, "x-more"), await openTarget(converted, target, mode, hand === "wrapped" ? "WrappedMore" : hand ? "HandMore" : "XMore")];
             const initial = await tables(live);
             assert.equal(initial, `<table><caption>3 columns</caption><thead><tr><th scope="col">Narrow</th><th scope="col">p</th><th scope="col">q</th></tr></thead>` +
               `<tbody><tr><td>A</td><td><b>p:quiet:compact</b></td><td><b>q:quiet:compact</b></td></tr></tbody>` +
@@ -312,5 +400,124 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
         });
       }
     }
+
+    for (const target of ["react", "preact"] as const) for (const mode of ["mount", "hydrate"] as const) {
+      /** What the table shows: its caption, header, first row's cells, footer and its controller's list. */
+      const shape = (page: Page) => page.evaluate(`(() => { const table = document.querySelector("table"); const texts = (selector) => Array.from(table.querySelectorAll(selector), (cell) => cell.textContent.trim());
+        return { caption: table.caption.textContent, head: texts("thead th"), row: texts("tbody tr:first-child td"), foot: texts("tfoot td"), columns: table.getAttribute("data-columns") }; })()`) as Promise<Record<string, unknown>>;
+      const until = async (page: Page, expected: Record<string, unknown>, label: string) => {
+        const deadline = Date.now() + 3_000;
+        let actual = await shape(page);
+        while (JSON.stringify(actual) !== JSON.stringify(expected) && Date.now() < deadline) { await settle(page); actual = await shape(page); }
+        assert.deepEqual(actual, expected, label);
+      };
+
+      it(`${target} ${mode} in ${engine}: a wrapper's own state adds, removes, reorders and renames its columns among direct ones`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", (error) => errors.push(error.message));
+          page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+          const warnings = await openTarget(page, target, mode, "WrappedOwnState");
+          const expected = (head: string[], row: string[], note = "direct"): Record<string, unknown> => ({ caption: head.length + " columns", head, row,
+            foot: head.map((header) => header === "Direct" ? note : header === "Last" ? "kept" : "-"), columns: head.join(",") });
+          const last = "A:quiet:compact";
+          await until(page, expected(["Direct", "B", "C", "Last"], ["A", "2", "1", last]), "first");
+          if (mode === "hydrate") assert.equal(await page.evaluate(`window.serverCells.every((cell) => cell.isConnected)`), true);
+          await page.evaluate(`window.pair({ label: "Z" })`);
+          await until(page, expected(["Direct", "Z", "C", "Last"], ["A", "2", "1", last]), "a prop in a wrapper reaches the entry");
+          await page.evaluate(`window.pair({ field: "name" })`);
+          await until(page, expected(["Direct", "Z", "C", "Last"], ["A", "A", "1", last]), "a prop in a wrapper reaches the cells");
+          await page.evaluate(`Array.from(document.querySelectorAll("tbody td"), (cell) => { cell.dataset.was = cell.textContent.trim(); })`);
+          await page.evaluate(`window.pair({ flip: true })`);
+          await until(page, expected(["Direct", "C", "Z", "Last"], ["A", "1", "A", last]), "a keyed move in a wrapper");
+          assert.deepEqual(await page.evaluate(`Array.from(document.querySelectorAll("tbody td"), (cell) => cell.dataset.was)`), ["A", "1", "A", last], "cells move with their column");
+          await page.evaluate(`window.pair({ more: true })`);
+          await until(page, expected(["Direct", "C", "M", "Z", "Last"], ["A", "1", "A", "A", last]), "a column added in a wrapper");
+          await page.evaluate(`window.pair({ off: true })`);
+          await until(page, expected(["Direct", "Last"], ["A", last]), "a wrapper's columns removed");
+          await page.locator("button.note").click();
+          await until(page, expected(["Direct", "Last"], ["A", last], "-"), "a consumer's update");
+          await page.locator("button.last").click();
+          await until(page, { caption: "1 columns", head: ["Direct"], row: ["A"], foot: ["-"], columns: "Direct" }, "the consumer removes a wrapper");
+          await page.locator("button.last").click();
+          await page.evaluate(`window.pair({ off: false, more: false, flip: false })`);
+          await until(page, expected(["Direct", "Z", "C", "Last"], ["A", "A", "1", last], "-"), "all back in document order");
+          assert.deepEqual(errors, []);
+          assert.deepEqual(warnings.filter((message) => message.includes("left out")), [], "an unaccepted component renders with no warning");
+        } finally { await browser.close(); }
+      });
+
+      it(`${target} ${mode} in ${engine}: a read before the outlet holds the direct columns in server output, then every column and its latest slot content`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", (error) => errors.push(error.message));
+          page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+          await openTarget(page, target, mode, "WrappedFirst");
+          const notes = async (expected: string[]) => {
+            const read = `JSON.stringify(Array.from(document.querySelectorAll("section p"), (note) => note.textContent))`;
+            await page.waitForFunction(`${read} === ${JSON.stringify(JSON.stringify(expected))}`, undefined, { timeout: 3_000 }).catch(() => {});
+            assert.deepEqual(JSON.parse(await page.evaluate(read) as string), expected);
+          };
+          await notes(["D", "N0"]);
+          await page.locator("button.count").click();
+          await notes(["D", "N1"]);
+          assert.deepEqual(errors, []);
+        } finally { await browser.close(); }
+      });
+
+      if (target === "react") {
+        it(`react ${mode} in ${engine}: StrictMode keeps one entry per wrapped column`, async () => {
+          const browser = await browserType.launch({ headless: true });
+          try {
+            const live = await browser.newPage();
+            const page = await browser.newPage();
+            const errors: string[] = [];
+            page.on("pageerror", (error) => errors.push(error.message));
+            page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+            await openLive(live, "x-products");
+            await openTarget(page, target, mode, "StrictProducts");
+            const initial = await tables(live, undefined, true);
+            assert.equal(await tables(page, initial, true), initial);
+            for (const button of ["toggle", "swap", "rename", "toggle"]) {
+              await Promise.all([live, page].map((each) => each.locator(`button.${button}`).click()));
+              const expected = await tables(live, undefined, true);
+              assert.equal(await tables(page, expected, true), expected, `after ${button}`);
+            }
+            assert.deepEqual(errors, []);
+          } finally { await browser.close(); }
+        });
+
+        if (mode === "hydrate") it(`react in ${engine}: a discarded concurrent render leaves no entry`, async () => {
+          const browser = await browserType.launch({ headless: true });
+          try {
+            const page = await browser.newPage();
+            await openTarget(page, target, mode, "Discarded");
+            const expected = { caption: "2 columns", head: ["Direct", "Price"], row: ["A", "2"], foot: ["-", "-"], columns: "Direct,Price" };
+            await until(page, expected, "first");
+            await page.locator("button.pending").click();
+            await settle(page);
+            await until(page, expected, "the suspended transition commits nothing");
+            await page.locator("button.urgent").click();
+            await until(page, { ...expected, row: ["B", "3"] }, "an update while the transition waits holds the committed columns");
+          } finally { await browser.close(); }
+        });
+      }
+    }
   }
+
+  it("serves wrapped columns in document order: content after the outlet reads them all, and a read before it reads the direct ones", () => {
+    for (const target of ["react", "preact"] as const) {
+      const html = servers.get(`${target}:WrappedOwnState`)!;
+      const cells = (part: string) => [...html.match(new RegExp(`<${part}[ >][\\s\\S]*?</${part}>`))![0].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((cell) => cell[1]!.replace(/<[^>]+>/g, ""));
+      assert.deepEqual(cells("thead"), ["Direct", "B", "C", "Last"], target);
+      assert.deepEqual(cells("tbody"), ["A", "2", "1", "A:quiet:compact"], target);
+      assert.deepEqual(cells("tfoot"), ["direct", "-", "-", "kept"], target);
+      assert.match(html.replace(/<!--[\s\S]*?-->/g, ""), /<caption>1 columns<\/caption>/, target);
+      assert.match(servers.get(`${target}:WrappedFirst`)!.replace(/<!--[\s\S]*?-->/g, ""), /<section[^>]*><p[^>]*>D<\/p><table/, target);
+    }
+  });
 });
