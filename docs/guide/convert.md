@@ -116,12 +116,41 @@ The current converter reports errors for component two-way bindings, multiple tw
 
 ## Columns as markup {#columns}
 
-A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/declarative-components/components#slot-accepts-as) converts to every target. Its list holds every accepted child before the component renders, on the server too, and `<slot of>` outlets render each child's slot content in the target's own idiom: a render prop in React and Preact, a scoped slot in Vue, a snippet in Svelte, and a template outlet in Angular.
+A component whose slot declares [`accepts` and `as`](https://nextwebwg.org/declarative-components/components#slot-accepts-as) converts to every target. Its list holds the accepted children written directly in the slot before the component renders, on the server too, and `<slot of>` outlets render each child's slot content in the target's own idiom: a render prop in React and Preact, a scoped slot in Vue, a snippet in Svelte, and a template outlet in Angular.
 
 - Convert an accepted component together with every component that accepts it. Vue reports an error when the accepting component's conversion lacks it, and Angular gives the child its list entry only in that conversion.
 - Content a `<slot of>` outlet places reads the child's context, then the parent's, when the parent renders its children's roots before those outlets, as a header row before the body does.
 - A preset whose root is an accepted component is left out of the list, with a warning.
+- A hand-written React or Preact consumer writes accepted children as JSX in the accepting slot's content, directly or through arrays, fragments, conditions and loops, and gives their slot content with `slots`. A `key` gives a child's entry its identity; without one, its place in the content does.
+- In Vue, an SFC template and a render function give a table its columns as a converted consumer does. The table reads the vnodes of its slot, so a direct column is a vnode of the accepted component itself, inside `v-if`, `v-for`, a `<template>` or a nested array too.
+- In React, Preact and Vue, a column inside a component of your own joins the nearest ancestor that accepts it as the slot's outlet renders it: `<UiColumn field="a" /><NameColumn /><UiColumn field="c" />` lists a, name, c. A wrapped column's props, `slots` or scoped slots, context, `host.state` and takeover work as a direct column's do, a condition or a state change inside the wrapper updates the list and the cells, and a wrapped column that goes leaves the list. Any accepted child rendered under the accepting component joins, including one in content a `<slot of>` outlet places.
+- Content after the slot's outlet reads the whole list, in document order, on the server and through hydration. Content before the outlet reads the direct columns on the server and in hydration's first render, and the whole list from the next render, before the browser paints, so read the list after the outlet, as a body after a header row does.
+- A React or Preact wrapper that moves its columns without rendering them, such as memoized elements in a new order, updates the list at the table's next render. A column inside a React `<Suspense>` boundary joins when that boundary renders, so server content after the outlet that streams before the boundary reads the list without it. In Vue, once mounted, the list follows the document order of the columns' roots.
+- A component that the slot accepts nothing of renders at the outlet with no warning, since what it renders is known only once it renders. Plain elements and text the slot doesn't accept warn, as a preset written directly in the slot does. A preset inside a component of your own joins the list through its root.
+- A column rendered inside another column's cell content joins the same list, as any column under the table does, in React, Preact and Vue. Give a nested column its own accepting table.
+- In Vue, a slot that declares props, written `<template #cell="{ row }">` or as a render function's `cell`, renders at every outlet. Any other named slot, such as `<template #note>`, is plain content.
+- A compiled factory that adopts a server-rendered root, `create<Name>(options, html, root)`, projects the content `options.children` and `options.slots` give a slot, and the server's content for every other slot. A renderer that moves the server's column roots into regions of its own passes those regions as `children`; the table's list holds the columns they render.
 - Angular reports an error for an accepting component whose root is a `<template $match>` or another component.
+- A hand-written Angular template gives columns as the table's content: `<table ui-data-table [rows]="rows"><th ui-column field="name" header="Name"></th></table>`, with `@if` and `@for` around them. A slot with props takes `<ng-template ui-column-cell let-row="row">`, and plain content is an element with a `slot` attribute. A column's plain content renders at the first outlet, and the next outlet takes it over.
+- An Angular child that another template renders into the table's content, through `ngTemplateOutlet` or a wrapper component, joins the list of its nearest ancestor that accepts its tag, in document order. It joins once the table's slot outlet has placed it, so the table's first view pass lists it empty and the same change detection run repeats that pass with the full list. Server output and hydration hold the full list. The table reads those children's order again each time the view holding the table is checked.
+- An Angular consumer's template content that the slot does not accept renders where the slot places it, without a warning, and a wrapper component's accepted children join the list. Plain content for a slot with props warns and shows the outlet's fallback.
+
+A `.svelte` consumer writes the accepted children as components, directly or under `{#if}` and `{#each}`, and passes their slots as snippets:
+
+```svelte
+{#snippet cell({ row })}<b>{row.name}</b>{/snippet}
+<UiDataTable {rows}>
+  <UiColumn field="total" header="Total" />
+  {#if showStatus}<UiColumn header="Status" slots={{ cell }} />{/if}
+</UiDataTable>
+```
+
+- A child joins the list when the slot's outlet renders it, and leaves when it goes. The list holds the children that outlet renders, in the order their roots appear in the document.
+- On the server and during hydration, content after the outlet reads the whole list. Content before the outlet renders with an empty list on the server and updates once hydration has rendered the outlet, so read the list after the outlet, as a body after a header row does.
+- A snippet renders at every outlet that places it, as a `<template slot>` does. A snippet for a slot without props that the child renders itself stays with the child, and a `<slot of>` for that slot shows its fallback.
+- Any accepted child the outlet renders joins, including one inside the consumer's own wrapper component or a preset.
+- Other content in the outlet renders where it is written, with no warning.
+- A child's `host.slots` lists what its own template places. A snippet's elements that a `<slot of>` outlet renders are in the DOM and absent from it.
 
 ## Converter validation
 

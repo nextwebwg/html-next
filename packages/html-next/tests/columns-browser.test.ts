@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { renderComponents } from "../src/server.js";
 import { parseComponent } from "../src/source-parser.js";
+import { compiledFixtures } from "./hydration-fixtures.js";
 
 // Columns as markup (components#columns-as-markup) in the live runtime. The column template starts
 // with its root: a template whose first start tag is <defs> parses in body mode and drops the <th>.
@@ -344,5 +345,89 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
         await browser.close();
       }
     });
+  }
+});
+
+// A table and its columns written directly in a page, rendered by the server and hydrated: by the live
+// runtime, and through compiled factories called as a script calls them, with the server's column roots
+// as the table's children where the server put them, or moved into the caller's own region first.
+describe.skipIf(!enabled)("columns as markup, hydrated from server output", () => {
+  let directory = "";
+  let runtimePath = "";
+  let compiledPath = "";
+  const definitions = [column, table].map((source) => parseComponent(source));
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-columns-hydration-"));
+    runtimePath = join(directory, "runtime.js");
+    compiledPath = join(directory, "compiled.js");
+    await build({ entryPoints: [runtimeUrl.pathname], bundle: true, format: "iife", globalName: "HtmlRuntime", outfile: runtimePath, platform: "browser", target: ["es2022"] });
+    await writeFile(compiledPath, await compiledFixtures("iife", 'export { serverProjection, slotRegion } from "@nextwebwg/html-next/generated-runtime"; export { getComponentHost } from "@nextwebwg/html-next/runtime";', definitions));
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  const markup = `<x-datatable id="subject" rows="[{ id: 1, name: 'Desk lamp', price: 49 }, { id: 2, name: 'Notebook', price: 6.5 }]">` +
+    `<x-column field="name" header="Name"></x-column><x-column field="price"><abbr slot="header" title="Price in US dollars">Price</abbr></x-column></x-datatable>`;
+
+  /** Each mode hydrates `#subject`; `factories` are the compiled ones. */
+  const modes = {
+    live: `window.HtmlRuntime.registerComponentDefinitions(definitions); window.HtmlRuntime.lowerDocument();`,
+    // A script adopts each server column root, then the table with those roots as its children.
+    "compiled, in place": `const columns = Array.from(root.querySelectorAll("th"));
+      for (const th of columns) factories["x-column"]({}, undefined, th);
+      factories["x-datatable"]({ children: columns }, undefined, root);`,
+    // A script takes the server's projections, moves each into a region of its own, adopts the column
+    // roots it holds, and gives the table and columns those regions, as a framework renderer does.
+    "compiled, regions": `const region = (nodes, slot) => {
+        const start = document.createComment("html-next:start"), end = document.createComment("html-next:end");
+        document.createDocumentFragment().append(start, ...nodes, end);
+        compiled.slotRegion(start, end, slot);
+        return [start, ...nodes, end];
+      };
+      const [children] = compiled.serverProjection(root, "x-datatable");
+      for (const th of children.filter((node) => node.nodeType === 1)) {
+        const [, slots] = compiled.serverProjection(th, "x-column");
+        factories["x-column"]({ slots: Object.fromEntries(Object.entries(slots).map(([name, nodes]) => [name, region(nodes, name)])) }, undefined, th);
+      }
+      factories["x-datatable"]({ children: region(children, "") }, undefined, root);`,
+  } as const;
+
+  for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const [mode, hydrate] of Object.entries(modes)) {
+      it(`${engine} keeps the server's header and body cells, hydrated ${mode}`, async () => {
+        const rendered = await renderComponents(markup, { definitions });
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", (error) => errors.push(error.message));
+          await page.setContent(rendered.html);
+          await page.addScriptTag({ path: runtimePath });
+          if (mode !== "live") await page.addScriptTag({ path: compiledPath });
+          const result = await page.evaluate(`(async () => {
+            const definitions = JSON.parse(${JSON.stringify(JSON.stringify(definitions))});
+            const compiled = window.HtmlCompiled, factories = compiled?.factories;
+            const root = document.querySelector("#subject");
+            const read = () => ({
+              header: Array.from(root.querySelectorAll("thead th"), (cell) => cell.textContent.trim()),
+              rows: Array.from(root.querySelectorAll("tbody tr"), (row) => Array.from(row.cells, (cell) => cell.textContent.trim())),
+            });
+            const server = read();
+            const kept = Array.from(root.querySelectorAll("th, td, abbr"));
+            ${hydrate}
+            await ${tick};
+            return { server, hydrated: read(), kept: kept.every((node) => root.contains(node)), columns: (compiled ?? window.HtmlRuntime).getComponentHost(root)?.state.columns?.length };
+          })()`);
+          const expected = { header: ["Name", "Price"], rows: [["Desk lamp", "49"], ["Notebook", "6.5"]] };
+          assert.deepEqual(result, { server: expected, hydrated: expected, kept: true, columns: 2 });
+          assert.deepEqual(errors, []);
+        } finally {
+          await browser.close();
+        }
+      });
+    }
   }
 });

@@ -30,7 +30,7 @@ async function loadReactiveHost() {
 async function loadHost(incoming?: Record<string, unknown>) {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
   const instance = incoming === undefined ? "null" : JSON.stringify({ vnode: { props: incoming } });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createCommentVNode=()=>{},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},inject=()=>undefined,camelize=(s)=>s,Comment={},isVNode=()=>false,renderSlot=()=>{},Text={}';`);
+  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createCommentVNode=()=>{},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},provide=()=>{},inject=()=>undefined,camelize=(s)=>s,Comment={},isVNode=()=>false,renderSlot=()=>{},Text={}';`);
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
     useReflectedProp: () => (name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean) => string | undefined;
     createDispatch: (

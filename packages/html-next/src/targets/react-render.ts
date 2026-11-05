@@ -336,56 +336,228 @@ type ChildDescriptor = { readonly key: string; readonly tag: string; readonly pr
   | { readonly leftOut: string; readonly message: string };
 type ChildLink = {
   readonly tag: string; props: Readonly<Record<string, unknown>>; slots: Readonly<Record<string, unknown>> | undefined;
-  wrap?: (content: ReactNode) => ReactNode; claims: Map<string, object>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
+  wrap?: (content: ReactNode) => ReactNode;
+  /** Replaced when the child gives new contexts or slots, which an outlet rendered before it reads again. */
+  stamp?: object;
+  claims: Map<string, object>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
 };
 const childLinks = new WeakMap<object, ChildLink>();
-/** A parent's entries by key, which its accepted children find theirs in. */
-export const ChildEntries = React.createContext<ReadonlyMap<string, object> | undefined>(undefined);
+/** A new stable entry for one accepted child: its props' names are fixed, and reads go through its link. */
+function childEntry(tag: string, props: Readonly<Record<string, unknown>>): object {
+  const listeners = new Set<() => void>();
+  const link: ChildLink = { tag, props, slots: undefined, claims: new Map(), listeners,
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
+  const entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(props).map((prop) =>
+    [prop, { get: () => link.props[prop], enumerable: true }]))) as object);
+  childLinks.set(entry, link);
+  return entry;
+}
+/**
+ * What an accepting component's accepted children find in context. A compiled consumer gives every entry
+ * up front, so its owner stays one object and holds no \`lists\`. Otherwise each render makes a new owner,
+ * so every accepted child renders with it, in document order, and the wrapped ones (\`useChildEntry\`) take
+ * their places in its lists. \`mounted\` and \`changed\` outlive the render; a render only commits through them.
+ */
+type ChildOwner = {
+  readonly entries: ReadonlyMap<string, object>; readonly accepts: ChildListSlots; readonly parent: ChildOwner | undefined;
+  readonly lists?: Readonly<Record<string, object[]>>; readonly at: Record<string, number>;
+  readonly mounted: Set<object>; readonly changed: () => void;
+  open: boolean; moved: boolean;
+};
+export const ChildEntries = React.createContext<ChildOwner | undefined>(undefined);
 const noSubscribe = (): (() => void) => () => {};
 
-/** A component's \`as\` lists, by name, from the descriptors its consumer gave; each entry keeps its identity by key. */
-export function useChildLists(given: unknown, names: readonly string[], file: string): { readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ReadonlyMap<string, object> } {
+/** An accepting component's lists: by \`as\` name, the slot it reads and the tags that slot accepts. */
+type ChildListSlots = Readonly<Record<string, readonly [string, readonly string[]]>>;
+/** A converted component's static mark: its tag, then its root component's tags for a preset, and its declared props' defaults. */
+type ChildMark = { readonly tags: readonly string[]; readonly props: Readonly<Record<string, unknown>> };
+const markedProps = (mark: ChildMark, given: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(mark.props).map(([prop, absent]) => [prop, given[prop] ?? absent]));
+
+/**
+ * A component's \`as\` lists, by name, with each entry keeping its identity by key, and each accepting
+ * slot's content to render. A compiled consumer gives the descriptors; otherwise they come from the
+ * slot's own content, whose accepted elements render with their entry's key. Those direct children are
+ * in the list before the component renders. A list starts with them, and the wrapped children that were
+ * mounted at the last commit in their places, and takes new wrapped children in place as the outlet
+ * renders them, so content after the outlet reads it complete.
+ */
+export function useChildLists(given: unknown, lists: ChildListSlots, tag: string, file: string,
+  props: { readonly children?: ReactNode; readonly slots?: Readonly<Record<string, unknown>> }): {
+  readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ChildOwner; readonly content: Readonly<Record<string, ReactNode>>;
+} {
+  const parent = React.useContext(ChildEntries);
   const kept = React.useRef(new Map<string, object>()).current;
-  const descriptors = (given ?? {}) as Readonly<Record<string, readonly ChildDescriptor[] | undefined>>;
+  const mounted = React.useRef(new Set<object>()).current;
+  const committed = React.useRef<Readonly<Record<string, readonly object[]>>>({});
+  const compiled = React.useRef<ChildOwner | undefined>(undefined);
+  const rereading = React.useRef(false);
+  const [, setRevision] = React.useState(0);
+  const changed = React.useRef(() => { setRevision((revision) => revision + 1); }).current;
+  const content: Record<string, ReactNode> = {};
+  let descriptors = given as Readonly<Record<string, readonly ChildDescriptor[] | undefined>> | undefined;
+  if (descriptors === undefined) {
+    const derived: Record<string, ChildDescriptor[]> = {};
+    for (const [name, [slot, accepts]] of Object.entries(lists)) {
+      const supplied = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
+      content[slot] = typeof supplied === "function" ? supplied : childDescriptors(supplied, tag, slot, accepts, name, derived[name] = []);
+    }
+    descriptors = derived;
+  } else for (const [slot] of Object.values(lists)) content[slot] = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
   const current = new Map<string, object>();
-  const lists: Record<string, readonly object[]> = {};
-  for (const name of names) lists[name] = Object.freeze((descriptors[name] ?? []).flatMap((descriptor) => {
-    if ("leftOut" in descriptor) {
-      warnUnless(false, file + "#" + descriptor.leftOut, (file === "" ? "" : file + ": ") + "HR007: " + descriptor.message);
-      return [];
-    }
-    let entry = kept.get(descriptor.key);
-    let link = entry === undefined ? undefined : childLinks.get(entry);
-    if (link === undefined || link.tag !== descriptor.tag) {
-      const listeners = new Set<() => void>();
-      const made: ChildLink = { tag: descriptor.tag, props: descriptor.props, slots: descriptor.slots, claims: new Map(), listeners,
-        subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
-      link = made;
-      entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(descriptor.props).map((prop) =>
-        [prop, { get: () => made.props[prop], enumerable: true }]))) as object);
-      childLinks.set(entry, made);
-    }
-    // Plain content is claimed afresh each render by the first outlet that places it.
-    link.props = descriptor.props; link.slots = descriptor.slots; link.claims = new Map();
-    current.set(descriptor.key, entry!);
-    return entry!;
-  }));
+  const result: Record<string, object[]> = {};
+  for (const name of Object.keys(lists)) {
+    const direct = (descriptors[name] ?? []).flatMap((descriptor) => {
+      if ("leftOut" in descriptor) {
+        warnUnless(false, file + "#" + descriptor.leftOut, (file === "" ? "" : file + ": ") + "HR007: " + descriptor.message);
+        return [];
+      }
+      let entry = kept.get(descriptor.key);
+      if (entry === undefined || childLinks.get(entry)!.tag !== descriptor.tag) entry = childEntry(descriptor.tag, descriptor.props);
+      const link = childLinks.get(entry)!;
+      // Plain content is claimed afresh each render by the first outlet that places it.
+      link.props = descriptor.props; link.slots = descriptor.slots; link.claims = new Map();
+      current.set(descriptor.key, entry);
+      return entry;
+    });
+    result[name] = given === undefined && mounted.size > 0 ? withMounted(direct, committed.current[name], mounted) : direct;
+  }
+  for (const entry of mounted) childLinks.get(entry)!.claims = new Map();
   kept.clear();
   for (const [key, entry] of current) kept.set(key, entry);
-  return { lists, entries: kept };
+  if (given !== undefined) for (const name of Object.keys(result)) Object.freeze(result[name]);
+  const owner: ChildOwner = given !== undefined
+    ? compiled.current ??= { entries: kept, accepts: lists, parent, at: {}, mounted, changed, open: false, moved: false }
+    : { entries: kept, accepts: lists, parent, lists: result, at: {}, mounted, changed, open: true, moved: false };
+  React.useLayoutEffect(() => {
+    if (owner.lists === undefined) return;
+    owner.open = false;
+    committed.current = owner.lists;
+    for (const list of Object.values(owner.lists)) Object.freeze(list);
+    // Content before the outlet read the list before these children took their places: it reads again,
+    // once, since a wrapped child's prop can be a new value at every render.
+    rereading.current = owner.moved && !rereading.current;
+    owner.moved = false;
+    if (rereading.current) changed();
+  });
+  return { lists: result, entries: owner, content };
+}
+
+/** Direct children, with the wrapped ones still mounted after the entry they last followed. */
+function withMounted(direct: object[], last: readonly object[] | undefined, mounted: ReadonlySet<object>): object[] {
+  let at = 0;
+  for (const entry of last ?? []) {
+    const index = direct.indexOf(entry);
+    if (index >= 0) at = index + 1;
+    else if (mounted.has(entry)) direct.splice(at++, 0, entry);
+  }
+  return direct;
 }
 
 /**
- * An accepted child gives its entry its context providers, so content its parent places through
- * \`<slot of>\` reads the child's contexts, then the parent's. Limit: an outlet that renders before the
- * child's own root reads the child's contexts only after the child commits, and not in server output.
+ * The descriptors a slot's own content gives, as a compiled consumer's would: one per accepted element
+ * in content order, through arrays and fragments, keyed by its place and React key, with its declared
+ * props resolved and its \`slots\`. Plain elements, text and presets are left out with a warning, and a
+ * preset's root does not join the list. Any other component is the consumer's to render, and what it
+ * renders joins through \`useChildEntry\`. The content returns with each accepted element given its
+ * entry's key, so it finds its entry when it renders.
  */
-export function useEntryProviders(key: unknown, wrap: (content: ReactNode) => ReactNode): void {
-  const entries = React.useContext(ChildEntries);
-  const entry = typeof key === "string" ? entries?.get(key) : undefined;
+function childDescriptors(content: ReactNode, tag: string, slot: string, accepts: readonly string[], as: string, descriptors: ChildDescriptor[]): ReactNode {
+  const named = "\`" + tag + "\`'s " + (slot === "" ? "default slot" : "\`" + slot + "\` slot");
+  const quoted = accepts.map((name) => "\`" + name + "\`");
+  const listed = named + " accepts " + (quoted.length < 2 ? quoted.join("") : quoted.slice(0, -1).join(", ") + " and " + quoted.at(-1));
+  const leftOut = (name: string, message: string): void => { descriptors.push({ leftOut: tag + ":accepts:" + slot + ":" + name, message }); };
+  const walk = (node: ReactNode, key: string): ReactNode => {
+    if (Array.isArray(node)) return node.map((item: ReactNode, index) => walk(item, key + "." + (isElement(item) && item.key != null ? "$" + item.key : index)));
+    if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
+      if (!/^[\\t\\n\\f\\r ]*$/.test(String(node))) leftOut("#text", listed + "; this text is left out.");
+      return node;
+    }
+    if (!isElement(node)) return node;
+    if (node.type === React.Fragment) {
+      const children = walk(node.props.children as ReactNode, key);
+      return Array.isArray(children) ? React.cloneElement(node, {}, ...children) : React.cloneElement(node, {}, children);
+    }
+    const mark = (node.type as unknown as { readonly htmlNextChild?: ChildMark }).htmlNextChild;
+    if (mark !== undefined && accepts.includes(mark.tags[0]!)) {
+      descriptors.push({ key, tag: mark.tags[0]!, props: markedProps(mark, node.props), slots: node.props.slots as Readonly<Record<string, unknown>> | undefined });
+      return React.cloneElement(node, { htmlNextEntry: key });
+    }
+    const preset = mark?.tags.find((candidate) => accepts.includes(candidate));
+    if (preset !== undefined) {
+      leftOut(mark!.tags[0]!, "\`<" + mark!.tags[0]! + ">\` is a preset of \`" + preset + "\`, which " + named + " accepts; a preset among accepted children is not supported yet, so it is left out.");
+      return React.createElement(ChildEntries, { key: node.key, value: undefined }, markProjected(node));
+    }
+    if (typeof node.type === "string") leftOut(node.type, listed + "; this \`<" + node.type + ">\` is left out.");
+    return node;
+  };
+  return walk(content, as + ":");
+}
+
+/**
+ * An accepted child's place in its accepting parent's list. A direct child marks its place, and gives
+ * its entry its context providers. Any other child, such as one inside the consumer's own wrapper
+ * component, is wrapped: its stable entry joins the nearest ancestor that accepts its tag as the outlet
+ * renders it, after the children rendered before it, and it counts as mounted only once it commits, so a
+ * render React repeats or discards leaves nothing behind. A wrapped child that renders without its parent
+ * tells the parent to render again, which reads every child's place and props afresh.
+ * Limit: an outlet that renders before the child's own root reads the child's contexts only after the
+ * child commits, and not in server output.
+ */
+export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<Record<string, unknown>>, wrap?: (content: ReactNode) => ReactNode): void {
+  const nearest = React.useContext(ChildEntries);
+  const own = React.useRef<{ entry?: object; owner?: ChildOwner }>({}).current;
+  const tag = mark.tags[0]!;
+  let entry = typeof given === "string" ? nearest?.entries.get(given) : undefined;
+  let owner: ChildOwner | undefined;
+  let name: string | undefined;
+  if (entry !== undefined) {
+    if (nearest!.open) {
+      name = (given as string).slice(0, (given as string).indexOf(":"));
+      nearest!.at[name] = nearest!.lists![name]!.indexOf(entry) + 1;
+    }
+  } else {
+    for (owner = nearest; owner !== undefined; owner = owner.parent) {
+      name = Object.keys(owner.accepts).find((list) => owner!.accepts[list]![1].includes(tag));
+      if (name !== undefined) break;
+    }
+    if (owner?.lists === undefined) owner = undefined;
+    else {
+      const next = markedProps(mark, props);
+      const slots = props.slots as Readonly<Record<string, unknown>> | undefined;
+      entry = own.entry ??= childEntry(tag, next);
+      const link = childLinks.get(entry)!;
+      const same = Object.keys(next).every((prop) => Object.is(link.props[prop], next[prop]));
+      if (link.slots !== slots) link.stamp = {};
+      link.props = next; link.slots = slots;
+      if (owner.open) {
+        const list = owner.lists[name!]!;
+        let at = owner.at[name!] ?? 0;
+        const index = list.indexOf(entry);
+        if (index >= 0) { list.splice(index, 1); if (index < at) at--; }
+        list.splice(at, 0, entry);
+        if (index !== at || !same) owner.moved = true;
+        owner.at[name!] = at + 1;
+      }
+    }
+  }
   const link = entry === undefined ? undefined : childLinks.get(entry);
-  if (link !== undefined) link.wrap = wrap;
-  React.useLayoutEffect(() => { for (const listener of link?.listeners ?? []) listener(); });
+  if (link !== undefined && wrap !== undefined) { link.wrap = wrap; link.stamp = {}; }
+  const inRender = owner?.open === true;
+  const list = owner?.lists?.[name!];
+  React.useLayoutEffect(() => {
+    if (wrap !== undefined || owner !== undefined) for (const listener of link?.listeners ?? []) listener();
+    if (owner === undefined) return;
+    if (!inRender && own.owner === owner) owner.changed();
+    own.owner = owner;
+  });
+  const mounted = owner?.mounted;
+  React.useLayoutEffect(() => {
+    if (mounted === undefined) return undefined;
+    mounted.add(entry!);
+    if (!list!.includes(entry!)) owner!.changed();
+    return () => { mounted.delete(entry!); owner!.changed(); };
+  }, [mounted]);
 }
 
 /** Each accepted tag's slots: those its own template places, those with props, all it declares, and those names as text. */
@@ -404,7 +576,7 @@ export function ChildSlot(props: {
   const { entry, name, values, slots, file, fallback, shapes } = props;
   const prefix = file === "" ? "HR007: " : file + ": HR007: ";
   const link = entry !== null && typeof entry === "object" ? childLinks.get(entry) : undefined;
-  const wrap = React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.wrap, () => link?.wrap);
+  React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.stamp, () => link?.stamp);
   const claim = React.useRef({}).current;
   if (link === undefined) return fallback;
   const known = slots[link.tag];
@@ -428,7 +600,7 @@ export function ChildSlot(props: {
     content = slot as ReactNode;
   }
   const placed = markProjected(content);
-  return wrap === undefined ? placed : wrap(placed);
+  return link.wrap === undefined ? placed : link.wrap(placed);
 }
 
 /** Projected elements carry \`data-slotted\`, which the component's \`:slotted()\` rules select. */
