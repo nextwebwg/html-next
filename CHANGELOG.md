@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.90
+
+- Repeated native property bindings generate a ref callback type that compiles in both React and Preact. This fixes Preact type errors for controls inside keyed lists, including segmented controls.
+
 ## 1.0.0-alpha.88
 
 - Columns as markup. A `<slot>` declaration in `<defs>` takes `accepts`, one or more component tags, and `as`, the name of a read-only list of the accepted children's resolved props in content order. `<slot of="$entry" name="x">`, or `<template $slot of>` in table parts, places that child's slot with slot props and a fallback. The live runtime, compiled output, React, Preact, Vue, Svelte and Angular support it, with server rendering and hydration. A preset of an accepted component is left out of the list with a warning.

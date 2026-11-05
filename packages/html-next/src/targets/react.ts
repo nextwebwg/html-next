@@ -1821,7 +1821,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "function ScopedAttachment({ attach, paths, properties, control, render }: {",
       "  readonly attach: (element: Element | null, paths?: readonly ScopedPath[], scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }) => void | (() => void);",
       "  readonly paths: readonly ScopedPath[]; readonly properties: readonly ScopedProperty[]; readonly control?: ScopedControl;",
-      "  readonly render: (ref: React.RefCallback<Element>) => ReactNode;",
+      "  readonly render: (ref: (element: Element | null) => void) => ReactNode;",
       "}): ReactNode {",
       "  const element = React.useRef<Element | null>(null);",
       "  const currentPaths = React.useRef(paths);",
