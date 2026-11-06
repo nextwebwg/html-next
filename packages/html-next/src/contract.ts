@@ -1,6 +1,7 @@
 import { fail } from "./diagnostics.js";
 import { deepFreeze } from "./freeze.js";
-import { componentName } from "./names.js";
+import { asciiLowerCase, componentName } from "./names.js";
+import { isIdentifier } from "./identifiers.js";
 import {
   formatType,
   isAttributeType,
@@ -140,7 +141,7 @@ function parseTarget(value: unknown, source?: string): PropTarget {
     ) {
       fail("HC017", "An attribute target must be a valid HTML attribute name.", source);
     }
-    return { attribute: object.attribute.toLowerCase() };
+    return { attribute: asciiLowerCase(object.attribute) };
   }
 
   if (
@@ -318,10 +319,10 @@ export function defineContractWithNativeCheck(
   const rawProps = record(object.props, "HC009", "`props` must be an object.", source);
   const normalizedKeys = new Map<string, string>();
   for (const propName of Object.keys(rawProps)) {
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(propName)) {
+    if (!isIdentifier(propName)) {
       fail("HC010", `Invalid prop name \`${propName}\`.`, source);
     }
-    const key = propName.toLowerCase();
+    const key = asciiLowerCase(propName);
     const prior = normalizedKeys.get(key);
     if (prior !== undefined) {
       fail("HC011", `Props \`${prior}\` and \`${propName}\` collide after lowercase normalization.`, source);

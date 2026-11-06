@@ -91,6 +91,12 @@ describe("parseComponent", () => {
     expectDiagnostic("HC011", `<template component="x-names"><defs>
       <prop name="Name" type="string">Name.</prop><prop name="name" type="string">Name.</prop>
       </defs><p from:title="$Name">$name</p></template>`);
+    const distinct = parseComponent(`<template component="x-names"><defs>
+      <prop name="é" type="string">Lower.</prop><prop name="É" type="string">Upper.</prop>
+      </defs><p from:data-é="$é" from:data-É="$É">{$é}:{$É}</p></template>`);
+    assert.deepEqual(Object.keys(distinct.contract.props).sort(), ["É", "é"]);
+    assert.deepEqual(distinct.contract.props["É"]!.target, { attribute: "data-É" });
+    assert.deepEqual(distinct.contract.props["é"]!.target, { attribute: "data-é" });
     expectDiagnostic("HT016", `<template component="x-names"><p $each="😀of [1]">Hi</p></template>`);
   });
 

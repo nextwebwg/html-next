@@ -142,5 +142,25 @@
     "name": "delegated-bracketed-list-converts-html",
     "source": "<template component=\"x-leaf\"><defs><prop name=\"items\" type=\"list(integer)\">Items.</prop></defs><b>{$items.length}:{$items[0]}</b></template><template component=\"x-wrap\"><x-leaf></x-leaf></template><template component=\"x-page\"><main><x-wrap items=\"[7, 8]\"></x-wrap></main></template>",
     "expected": "<main><b>2:7</b></main>"
+  },
+  {
+    "name": "unicode-literal-props",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-page\"><main><x-leaf é=\"lower\" É=\"UPPER\"></x-leaf></main></template>",
+    "expected": "<main><b data-é=\"lower\" data-É=\"UPPER\">lower:UPPER</b></main>"
+  },
+  {
+    "name": "unicode-bound-props",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-page\"><defs><state name=\"lower\" type=\"string\" value=\"lower\"></state><state name=\"upper\" type=\"string\" value=\"UPPER\"></state></defs><main><x-leaf from:é=\"$lower\" from:É=\"$upper\"></x-leaf></main></template>",
+    "expected": "<main><b data-é=\"lower\" data-É=\"UPPER\">lower:UPPER</b></main>"
+  },
+  {
+    "name": "unicode-delegated-props",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-wrap\"><x-leaf></x-leaf></template><template component=\"x-page\"><main><x-wrap é=\"lower\" É=\"UPPER\"></x-wrap></main></template>",
+    "expected": "<main><b data-é=\"lower\" data-É=\"UPPER\">lower:UPPER</b></main>"
+  },
+  {
+    "name": "unicode-undeclared-other-case",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b>{$É}</b></template><template component=\"x-page\"><main><x-leaf é=\"caller\"></x-leaf></main></template>",
+    "expected": "<main><b é=\"caller\">Upper</b></main>"
   }
 ]

@@ -5,11 +5,24 @@ import { describe, it } from "vitest";
 
 import { normalizeConversionStyleIdentities, compileComponentGraphStyleAssetsForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
 import { loadNodeComponents } from "../src/node-loader.js";
-import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
+import { componentStyleNameResolver, guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
+
+it("preserves non-ASCII names when resolving CSSOM attribute casing", () => {
+  const definition = parseComponent('<template component="x-case"><defs><prop name="é" type="string">Lower.</prop><prop name="É" type="string">Upper.</prop><state name="à" type="boolean" value="true"></state><state name="À" type="boolean" value="false"></state></defs><p></p></template>');
+  const resolve = componentStyleNameResolver(definition, undefined, true);
+  for (const name of ["é", "É"]) assert.equal(resolve(name, "prop"), name);
+  for (const name of ["à", "À"]) assert.equal(resolve(name, "state"), name);
+  for (const compile of compilers) {
+    const result = compile(':host([é="one"]) { color: red; } :host([É="TWO"]:state(À)) { color: blue; }', definition);
+    assert.deepEqual(result.stateNames, ["é", "É", "À"]);
+    assert.match(result.css, /é=one/);
+    assert.match(result.css, /É=TWO/);
+  }
+});
 
 it("keeps Svelte ownership separate in mixed own and slotted selector lists", () => {
   const definition = parseComponent('<template component="x-image"><figure><div class="frame"><img><slot></slot></div></figure></template>');

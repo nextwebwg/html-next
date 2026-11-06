@@ -9,7 +9,7 @@ import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { compilePath, isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
-import { componentName, kebabCase, propAttribute } from "../names.js";
+import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
@@ -64,6 +64,11 @@ const REACT_LOCAL_RESERVED = new Set([...REACT_RENDER_EXPORTS, "dispatchDeclared
 
 /** A generated name the component builds from an index, such as `attachEvents2`, or a private `__` name. */
 const GENERATED_NAME = /^(?:__|_|attachEvents\d|controlRef|controlValue|previousProperty|propertyRef|genericCleanup|HtmlNextContext_)/;
+
+function componentPropAttribute(name: string, value: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) && name !== "__proto__"
+    ? `${name}={${value}}` : `{...{ ${objectKey(name)}: ${value} }}`;
+}
 
 /** The component tags a template invokes, whose imported names the component's scope holds. */
 function componentTagsIn(node: TemplateNode, tags = new Set<string>()): Set<string> {
@@ -588,7 +593,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   if (component) imports.add(node.name);
   const componentContracts = component ? state.propContractsByTag?.get(node.name) : undefined;
   const findComponentPropName = (attributeName: string): string | undefined => componentContracts === undefined ? undefined
-    : Object.keys(componentContracts).find((name) => name.toLowerCase() === attributeName || kebabCase(name) === attributeName);
+    : Object.keys(componentContracts).find((name) => asciiLowerCase(name) === attributeName || kebabCase(name) === attributeName);
   const boundPropAliases = new Map<string, string>();
   const boundPropSnapshots = new Set<string>();
   if (componentContracts !== undefined) for (const attribute of node.attributes) {
@@ -650,7 +655,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     }
     if (attribute.kind === "literal") {
       const componentProp = component ? Object.entries(componentContracts ?? {})
-        .find(([name]) => name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+        .find(([name]) => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       if (projected && attribute.name === "data-slotted") continue;
       if (attribute.name === "class") classes.push(quote(attribute.value));
       else if (attribute.name === "style") literalStyles.push(...literalStyle(attribute.value, importantStyles));
@@ -660,7 +665,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const [name, contract] = componentProp;
         const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
         const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
-        literals.push(`${propKey(name)}={${accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`}}`);
+        literals.push(componentPropAttribute(name, accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`));
       }
       else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) literals.push(attributeBinding(attribute.name, quote(attribute.value)));
       else if (isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
@@ -727,7 +732,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else if (attribute.kind === "attribute" && attribute.twoWay !== true && attribute.target === undefined) {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
       const componentPropName = component ? [...state.propsByTag?.get(node.name) ?? []]
-        .find((name) => name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+        .find((name) => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       const componentPropContract = componentPropName === undefined ? undefined : componentContracts?.[componentPropName];
       const value = component && (componentPropName !== undefined || state.propsByTag?.get(node.name) === undefined)
         ? lowering.value(attribute.expressionPlan.ast, scope)
@@ -768,7 +773,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
             accepts: `(snapshot) => { const ${input} = snapshot as ReturnType<typeof evaluateInput>; return !${input}.status.ready || (${accepts})(${input}.value); }`, propName: componentPropName! });
           inputBindings.push(`${quote(componentPropName!)}: () => ${alias}`);
         } else retainedBindings.push({ alias, value, accepts, propName: componentPropName! });
-        bindings.push(`${componentPropName}={${alias}${snapshot ? "?.value" : ""}}`);
+        bindings.push(componentPropAttribute(componentPropName!, `${alias}${snapshot ? "?.value" : ""}`));
         const expression = attribute.expressionPlan.ast;
         if (expression.kind === "id") {
           const read = scope.code.get(expression.name);
@@ -1109,7 +1114,7 @@ function childDescriptors(
       const declared = state.componentGraph?.get(body.name)?.contract.props ?? {};
       const props = Object.entries(declared).map(([name, contract]) => {
         const attribute = body.attributes.find((candidate) => (candidate.kind === "literal" || candidate.kind === "attribute" && candidate.target === undefined && candidate.twoWay !== true) &&
-          (candidate.name === name.toLowerCase() || candidate.name === kebabCase(name)));
+          (candidate.name === asciiLowerCase(name) || candidate.name === kebabCase(name)));
         const absent = "default" in contract ? JSON.stringify(contract.default) : "null";
         if (attribute?.kind === "literal") {
           const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
@@ -1219,7 +1224,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const lists = Object.entries(definition.contract.slots ?? {}).flatMap(([slot, declared]) => declared.as === undefined ? [] : [{ slot, as: declared.as, accepts: declared.accepts ?? [] }]);
   const listNames = new Map(lists.map((list) => [list.as, allocate(identifierFor(list.as), "List")] as const));
   const acceptedTags = new Set([...options.componentGraph?.values() ?? []].flatMap((other) => Object.values(other.contract.slots ?? {}).flatMap((declared) => declared.accepts ?? [])));
-  const acceptedBy = acceptedTags.has(definition.contract.tag);
+  const acceptedBy = [...options.componentGraph?.values() ?? []].some(other =>
+    Object.values(other.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(definition.contract.tag)));
   // A hand-written consumer's accepting parent finds this component among its children by its tag, and a preset by its root's.
   const childTags = [definition.contract.tag];
   for (let root = definition.root; root?.kind === "component" && !childTags.includes(root.tag); root = options.componentGraph?.get(root.tag)?.root) childTags.push(root.tag);
@@ -1480,7 +1486,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  }",
     ]),
     `  const { children: _children, slots: _slots, ${lists.length === 0 ? "" : "htmlNextAs: _htmlNextAs, "}${acceptedBy ? "htmlNextEntry: _htmlNextEntry, " : ""}${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
-      .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
+      .map((prop) => `${propKey(prop)}: ${allocate(`_${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`)}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     '  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];',
     '  delete nativeAttrs["component"];',
     '  delete nativeAttrs["data-component"];',

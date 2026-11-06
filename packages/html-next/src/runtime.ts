@@ -34,7 +34,7 @@ import {
   type Scope,
   type Value,
 } from "./expression.js";
-import { kebabCase, propAttribute } from "./names.js";
+import { asciiLowerCase, kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
   awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, writeMark, regionChanged, slotRegions, switchFallback, withRegionContent,
@@ -1057,7 +1057,7 @@ function readInvocation(
   const incoming = Object.create(null) as Record<string, IncomingProp>;
   const passThrough: Attr[] = [];
   for (const attribute of Array.from(invocation.attributes)) {
-    const propName = restored === undefined ? names[attribute.name.toLowerCase()] : undefined;
+    const propName = restored === undefined ? names[asciiLowerCase(attribute.name)] : undefined;
     if (propName === undefined) {
       if (!hydration) passThrough.push(attribute);
       continue;
@@ -2311,7 +2311,7 @@ function bindElementAttributes(
         const definition = invocation === undefined ? undefined
           : child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
         const propName = definition === undefined || attribute.target !== undefined
-          ? undefined : propAttributeNames(definition, false)[attribute.name.toLowerCase()];
+          ? undefined : propAttributeNames(definition, false)[asciiLowerCase(attribute.name)];
         const expression = attribute.expressionPlan ?? compileExpression(attribute.expression);
         const evaluated = propName !== undefined && expression.ast.kind !== "id" && expression.dependencies.length > 0
           ? evaluateInput(() => evalConforming(expression, scope, context.definition), READY_INPUT, NONCONFORMING) : undefined;
@@ -2484,8 +2484,8 @@ function nativeTemplatePlan(
         !cloneableNativeElements.has(candidate.name)) return false;
     if (candidate.attributes.some((attribute) =>
       attribute.kind === "property" ||
-      attribute.kind === "attribute" && (attribute.twoWay === true || attribute.name.toLowerCase() === "is") ||
-      attribute.kind === "literal" && (attribute.name.toLowerCase() === "is" || /^on/i.test(attribute.name))
+      attribute.kind === "attribute" && (attribute.twoWay === true || asciiLowerCase(attribute.name) === "is") ||
+      attribute.kind === "literal" && (asciiLowerCase(attribute.name) === "is" || /^on/i.test(attribute.name))
     )) return false;
     const directive = candidate.attributes.find((attribute): attribute is DirectiveAttribute => attribute.kind === "directive");
     // Content directives ignore authored descendants in the ordinary renderer too.
@@ -3984,7 +3984,7 @@ function carriedAttributes(instance: RuntimeInstance, previous: Element): RootAt
     } else if (attribute.kind === "property") {
       // A reflecting property writes its attribute: `.disabled` writes `disabled`.
       // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
-      written.add(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
+      written.add(attribute.name === "htmlFor" ? "for" : asciiLowerCase(attribute.name));
     }
   }
   const ownStyles = new Set(Array.from(ownStyle));

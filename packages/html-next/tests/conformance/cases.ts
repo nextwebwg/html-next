@@ -930,6 +930,21 @@ const successes: ConformanceCase[] = [
       ],
     },
   },
+  {
+    name: "preserves non-ASCII case in public props and bound attributes",
+    source: scene({
+      defs: `<prop name="é" type="string" default="Lower">Lower.</prop><prop name="É" type="string" default="Upper">Upper.</prop>
+        <state name="label" type="string" value="First"></state><handler name="next"><set name="label" value="Next"></set></handler>`,
+      root: `<section><output id="unicode-props" from:data-é="$é" from:data-É="$É">{$é}:{$É}:{$label}</output><button id="unicode-next" type="button" on:click="next">Next</button></section>`,
+      style: `:host([é="one"]) { --lower-case: lower; } :host([É="TWO"]) { --upper-case: UPPER; }`,
+      use: `<x-t é="one" É="TWO"></x-t>`,
+    }),
+    expect: {
+      probe: `const output = q('#unicode-props'); const style = getComputedStyle(output); return [output.textContent, output.getAttribute('data-é'), output.getAttribute('data-É'), style.getPropertyValue('--lower-case').trim(), style.getPropertyValue('--upper-case').trim()];`,
+      result: ["one:TWO:First", "one", "TWO", "lower", "UPPER"],
+      after: [{ action: `document.querySelector('#unicode-next').click();`, result: ["one:TWO:Next", "one", "TWO", "lower", "UPPER"] }],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

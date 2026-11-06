@@ -41,7 +41,7 @@ import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
 import { hasBounds } from "../validate.js";
 import { invocationValue } from "../prop-values.js";
-import { kebabCase, propAttribute } from "../names.js";
+import { asciiLowerCase, kebabCase, propAttribute } from "../names.js";
 import { conformingStates, declaredStateLiteral, literalInitial, NotLiteral } from "./state-roots.js";
 import type { Invoked } from "../generate.js";
 
@@ -1245,7 +1245,7 @@ class Planner {
     const site = this.site(block, path);
     const contract = invoked.definition.contract;
     const propOf = (name: string): string | undefined =>
-      Object.keys(contract.props).find((prop) => kebabCase(prop) === name.toLowerCase());
+      Object.keys(contract.props).find((prop) => kebabCase(prop) === asciiLowerCase(name));
     const html: [string, string][] = [];
     const attributes: [string, string][] = [];
     const props: { name: string; attribute: string; expression: Lowered; record: string; type: string; availability?: string; snapshot?: boolean }[] = [];
@@ -2912,7 +2912,7 @@ function armRoot(node: ElementNode, definition: ComponentDefinition): ArmRoot {
     else if (attribute.kind === "attribute" && attribute.target === "style") styles.push(attribute.name);
     else if (attribute.kind === "attribute") written.push(attribute.name);
     // A reflecting property writes its attribute: `.disabled` writes `disabled`.
-    else if (attribute.kind === "property") written.push(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
+    else if (attribute.kind === "property") written.push(attribute.name === "htmlFor" ? "for" : asciiLowerCase(attribute.name));
   }
   return [node.name, literals, classes, style, styles, written];
 }

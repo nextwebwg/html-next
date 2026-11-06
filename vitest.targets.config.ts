@@ -64,6 +64,7 @@ config.test!.include = [
   "packages/html-next-converter/tests/consumer-projected-style-parity.test.ts",
   "packages/html-next-converter/tests/null-writes-parity.test.ts",
   "packages/html-next-converter/tests/class-binding-order-parity.test.ts",
+  "packages/html-next-converter/tests/unicode-props-parity.test.ts",
   "packages/html-next-converter/tests/prop-input-parity.test.ts",
   "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts",
   "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts",

@@ -199,7 +199,7 @@ internal sealed partial record Prop(string Name, ValueType Type, bool Required, 
 {
     [GeneratedRegex("([a-z0-9])([A-Z])", RegexOptions.CultureInvariant)]
     private static partial Regex AttributeWords();
-    public string AttributeName { get; } = AttributeWords().Replace(Name, "$1-$2").ToLowerInvariant();
+    public string AttributeName { get; } = HtmlNextCompiler.AsciiLowerCase(AttributeWords().Replace(Name, "$1-$2"));
 
     public void ValidateValue(object? value, string source, List<HtmlNextValidationError> errors)
     {

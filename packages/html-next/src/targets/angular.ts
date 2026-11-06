@@ -4,7 +4,7 @@ import { namespacedAttributeSource } from "./shared.js";
 import { referenceContext, referenceType, withReferenceTypes } from "./reference-types.js";
 import { TypeScriptLowering } from "./typed-lowering.js";
 /** Standalone Angular components on their declared native hosts. Root delegation is composed at build time. */
-import { kebabCase, propAttribute, componentName as pascalCase } from "../names.js";
+import { asciiLowerCase, kebabCase, propAttribute, componentName as pascalCase } from "../names.js";
 import { parseDuration } from "../duration.js";
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
@@ -198,7 +198,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     helper("events");
     return `{ type: ${quote(event.name)}, modifiers: ${sourceValue(event.modifiers)}, handler: (event: Event) => this.${handler}(event) }`;
   });
-  const receivingProp = (child: ComponentDefinition, key: string): string | undefined => [...Object.keys(child.contract.props), ...targetComponent(child).requests.flatMap(request => [request.propName, request.callbackName])].find(name => name === key || name.toLowerCase() === key.toLowerCase() || kebabCase(name) === key);
+  const receivingProp = (child: ComponentDefinition, key: string): string | undefined => [...Object.keys(child.contract.props), ...targetComponent(child).requests.flatMap(request => [request.propName, request.callbackName])].find(name => name === key || asciiLowerCase(name) === asciiLowerCase(key) || kebabCase(name) === key);
   const bindings = (node: ElementNode, names: Names, root: boolean, child?: ComponentDefinition): string[] => {
     const attributes: string[] = root ? [] : [`data-hn-owner="${names.definition.contract.tag}"`];
     const controls: string[] = [];

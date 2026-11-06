@@ -60,6 +60,25 @@ async function targets(): Promise<Map<string, string>> {
   );
 }
 
+describe("child list selection", () => {
+  it("enrolls a component only when a parent reads its children as a list", async () => {
+    const child = parseComponent('<template component="x-child"><article><slot></slot></article></template>');
+    for (const listed of [false, true]) {
+      const parent = parseComponent(`<template component="x-parent"><defs><slot accepts="x-child"${listed ? ' as="items"' : ""}></slot></defs><section><slot></slot></section></template>`);
+      const graph = new Map([["x-parent", parent], ["x-child", child]]);
+      const react = generateReactComponent(child, { componentGraph: graph });
+      const svelte = generateSvelteOutput(child, "test", { componentGraph: graph }).component;
+      assert.equal(react.includes("useChildEntry("), listed, "React child enrollment");
+      assert.equal(svelte.includes("ownChild("), listed, "Svelte child enrollment");
+      assert.doesNotMatch(react, /useChildLists\(|<ChildEntries|<ChildSlot/);
+      assert.match(react, /props.children/);
+      await transform(react, { loader: "tsx", format: "esm" });
+      compileSvelte(svelte, { filename: "XChild.svelte", generate: "client" });
+      compileSvelte(svelte, { filename: "XChild.svelte", generate: "server" });
+    }
+  });
+});
+
 /** Compiles a generated SFC with Vue's own compiler, failing on any parse or template error. */
 function compileVue(source: string, filename: string): string {
   const parsed = parseVue(source, { filename });

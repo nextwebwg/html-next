@@ -21,6 +21,7 @@ const baseStyle = "<style>html { color-scheme: light; } body { margin: 8px; font
 
 // Keep every successful public case accounted for as support lands.
 const selected = new Set([
+  "preserves non-ASCII case in public props and bound attributes",
   "class bindings preserve scoped styles through replacements and toggles",
   "HTML parser recovery keeps the first duplicate attribute",
   "keeps whitespace-only text between elements and rows inside pre",
@@ -811,7 +812,7 @@ function consumer(invocation: string, tag: string, name: string, props: Readonly
     if (node.tagName === undefined) return "";
     const component = node.tagName === tag;
     const attributes = (node.attrs ?? []).map(({ name: attribute, value }) => {
-      const prop = component ? Object.keys(props).find((key) => key.toLowerCase() === attribute) : undefined;
+      const prop = component ? Object.keys(props).find((key) => key.replace(/[A-Z]/g, letter => letter.toLowerCase()) === attribute) : undefined;
       const type = prop === undefined ? undefined : props[prop]?.type;
       const typed = type === "number" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value)
         : type === "boolean" ? value !== "false" : value;

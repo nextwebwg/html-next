@@ -369,7 +369,8 @@ function nativeBindingRoots(graph: ComponentGraph): Map<string, Set<string>> {
         const id = graph.tags.get(template.name);
         const props = id === undefined ? undefined : graph.nodes.get(id)?.definition.contract.props;
         if (props !== undefined) for (const attribute of template.attributes) {
-          if (attribute.kind === "attribute" && attribute.twoWay === true && !Object.keys(props).some((name) => name.toLowerCase() === attribute.name || name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() === attribute.name)) add(template.name, attribute.name);
+          if (attribute.kind === "attribute" && attribute.twoWay === true && !Object.keys(props).some((name) =>
+            [name, name.replace(/([a-z0-9])([A-Z])/g, "$1-$2")].some(alias => alias.replace(/[A-Z]/g, letter => letter.toLowerCase()) === attribute.name))) add(template.name, attribute.name);
         }
         for (const child of template.children) visit(child);
       }

@@ -12,7 +12,7 @@ import { isScriptIdentifier, propValueIsNullable } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
 import { type CompiledExpression, type ExpressionNode } from "../expression.js";
-import { componentName, kebabCase, propAttribute } from "../names.js";
+import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import type {
@@ -136,7 +136,7 @@ function bound(code: string): string {
  * boolean attribute is `true`, and `count="3"` is the number. A string value stays a plain attribute.
  */
 function literalPropBinding(name: string, value: string, props: Readonly<Record<string, PropContract>> | undefined): string | undefined {
-  const contract = Object.entries(props ?? {}).find(([prop]) => prop.toLowerCase() === name || kebabCase(prop) === name)?.[1];
+  const contract = Object.entries(props ?? {}).find(([prop]) => asciiLowerCase(prop) === name || kebabCase(prop) === name)?.[1];
   if (contract === undefined || contract.select !== undefined) return undefined;
   const parsed = parseTypedValue(value, contract.type, "$", "html");
   if (parsed.ok && typeof parsed.value === "string") return undefined;
@@ -761,7 +761,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
           ? `${lowering.condition(value, scope)} ? true : undefined`
           : lowering.attribute(value, scope, attribute.name);
       const propName = component ? Object.keys(context.propContractsByTag?.get(node.name) ?? {}).find(name =>
-        name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+        asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       const observed = context.observe(names.template);
       if (propName !== undefined && plan !== undefined && value.kind !== "id" && plan.dependencies.some(path => {
         const root = path.split(".")[0]!;

@@ -803,6 +803,17 @@ public static partial class HtmlNextCompiler
         return true;
     }
 
+    internal static string AsciiLowerCase(string value)
+    {
+        foreach (var character in value)
+            if (character is >= 'A' and <= 'Z') return string.Create(value.Length, value, static (span, source) =>
+            {
+                for (var index = 0; index < source.Length; index++)
+                    span[index] = source[index] is >= 'A' and <= 'Z' ? (char)(source[index] + 32) : source[index];
+            });
+        return value;
+    }
+
     internal static object? AttributeInput(string text, ValueType type, string source, CancellationToken cancellation = default)
     {
         object? value;

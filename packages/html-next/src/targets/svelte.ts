@@ -6,7 +6,7 @@ import { bindingRevertSource, controllerInitials, revertSource, withRevert } fro
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
 import { compileComponentStylesForSvelte, componentStateNames, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
-import { kebabCase, componentName, propAttribute } from "../names.js";
+import { asciiLowerCase, kebabCase, componentName, propAttribute } from "../names.js";
 import { invocationValue } from "../prop-values.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
@@ -93,6 +93,16 @@ function literalValueSource(value: unknown): string {
 
 function componentPropAttribute(name: string, value: string): string {
   return name === "__proto__" ? `{...{ __proto__: null, ...{ ${objectKey(name)}: ${value} } }}` : `${name}={${value}}`;
+}
+
+function caseSensitiveAttribute(name: string): boolean {
+  return name.toLowerCase() !== asciiLowerCase(name);
+}
+
+function nativeAttribute(name: string, value: string, context: RenderContext): string {
+  if (!caseSensitiveAttribute(name)) return `${name}={${value}}`;
+  context.usesAttributeBinding = true;
+  return `{...(typeof document === 'undefined' ? { ${objectKey(name)}: ${value} } : {})} {@attach ${context.bindingHelperName}(${quote(name)}, () => ${value})}`;
 }
 
 /** Match native projection marking so controllers can act on rendered slot content. */
@@ -497,7 +507,7 @@ function childListSource(node: ElementNode, scope: Scope, lowering: Lowering, co
       // bound value passes the child's check (`checkPropInput`), and null, absent and rejected input take the
       // default, or null. Once the child renders, its entry reads the child's own props (`ownChild`).
       const props = Object.entries(definition.contract.props).map(([prop, contract]) => {
-        const given = child.attributes.filter((attribute) => prop.toLowerCase() === attribute.name || kebabCase(prop) === attribute.name);
+        const given = child.attributes.filter((attribute) => asciiLowerCase(prop) === attribute.name || kebabCase(prop) === attribute.name);
         const bound = given.find((attribute) => attribute.kind === "attribute" && attribute.target === undefined);
         const literal = given.find((attribute) => attribute.kind === "literal");
         const fallback = "default" in contract ? literalValueSource(contract.default) : "null";
@@ -781,7 +791,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const name = component ? componentName(node.name) : node.name;
   const childProps = component ? context.propContractsByTag?.get(node.name) : undefined;
   const childProp = (attributeName: string): readonly [string, PropContract] | undefined =>
-    Object.entries(childProps ?? {}).find(([prop]) => prop.toLowerCase() === attributeName || kebabCase(prop) === attributeName);
+    Object.entries(childProps ?? {}).find(([prop]) => asciiLowerCase(prop) === attributeName || kebabCase(prop) === attributeName);
   let snippetDeclarations = "";
   let componentChildren = node.children;
   const slotBindings: string[] = [];
@@ -1006,7 +1016,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       // content, which may be conditional or repeated, spreads it.
       if (declared === undefined && attribute.name === "slot" && !component &&
         node.attributes.some((entry) => entry.kind === "literal" && entry.name === "data-slotted")) literals.push(`{...{ slot: ${quote(attribute.value)} }}`);
-      else if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
+      else if (declared === undefined) literals.push(!component && caseSensitiveAttribute(attribute.name)
+        ? nativeAttribute(attribute.name, quote(attribute.value), context)
+        : !component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
         literals.push(componentPropAttribute(prop, literalPropValue(attribute.value, contract)));
@@ -1131,7 +1143,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source}, undefined, true)}`);
         } else bindings.push(component
           ? componentPropAttribute(declared?.[0] ?? attribute.name, value)
-          : `${svgAttributeName(attribute.name)}={${value}}`);
+          : nativeAttribute(svgAttributeName(attribute.name), value, context));
       }
     }
     if (attribute.kind === "property") {
@@ -1153,7 +1165,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
             if (read.invalid) {
               const candidate = context.freshIdentifier("htmlNextPropertyValue");
               const serialized = boolean ? `Boolean(${candidate})` : `String(${candidate})`;
-              const name = attribute.name.toLowerCase();
+              const name = asciiLowerCase(attribute.name);
               const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
               const initialValue = literal?.kind === "literal" ? quote(literal.value) : "undefined";
               const initialAttribute = context.freshIdentifier("htmlNextPropertyAttribute");
@@ -1163,10 +1175,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
               rendered = retained(context, `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })()`, initial);
             }
             if (node.name === "option" && attribute.name === "value") optionPropertyValue = rendered;
-            bindings.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name.toLowerCase())}: ${rendered} } : {})}`);
+            bindings.push(`{...(typeof document === 'undefined' ? { ${objectKey(asciiLowerCase(attribute.name))}: ${rendered} } : {})}`);
           }
         }
-        if (root) { context.rootAttributeBindings.add(attribute.name); context.rootAttributeBindings.add(attribute.name.toLowerCase()); }
+        if (root) { context.rootAttributeBindings.add(attribute.name); context.rootAttributeBindings.add(asciiLowerCase(attribute.name)); }
       }
     }
   }
@@ -1246,6 +1258,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     literals.push(`class={${quote(scopeClasses.join(" "))}}`);
   }
   const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
+  if (!component && (node.attributes.some(attribute => caseSensitiveAttribute(attribute.name)) ||
+    root && rootScope!.props.some(prop => caseSensitiveAttribute(propAttribute(rootScope!.tag, prop)))) &&
+    !node.attributes.some(attribute => attribute.name === "is")) {
+    // Svelte preserves spread attribute case on elements with `is`. Undefined emits no attribute
+    // and leaves the native element intact; quoted spread keys keep non-ASCII names distinct.
+    attributes.push("is={undefined}");
+  }
   if (root) {
     // Every converted root bounds the styles of the components around it, as Vue's does: a slot's
     // `:slotted()` rules stop at a projected component, its root included. A delegated root's is its child's.
@@ -1283,7 +1302,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const serialized = separator === undefined
         ? `${context.reflectedPropName}(${quote(prop)}, ${value})`
         : `Array.isArray(${value}) ? ${value}.join(${separator}) : String(${value})`;
-      attributes.push(`${name}={${!bound ? `${context.inputNames.get(prop)} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})}`);
+      attributes.push(nativeAttribute(name, `${!bound ? `${context.inputNames.get(prop)} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})`, context));
     }
   }
   if (hasDecorations) {
@@ -1466,7 +1485,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   });
   // A component another accepts gives its list entry its contexts, which content placed for it reads.
   const accepted = [...options.componentGraph?.values() ?? []].some((other) =>
-    Object.values(other.contract.slots ?? {}).some((slot) => slot.accepts?.includes(definition.contract.tag) === true));
+    Object.values(other.contract.slots ?? {}).some((slot) => slot.as !== undefined && slot.accepts?.includes(definition.contract.tag) === true));
   const handlerNames = new Map(handlers.map((handler) => [handler.name, declarationName(handler.name)]));
   for (const declaration of data) {
     const name = freshIdentifier(`htmlNextData${dataNames.size}`);

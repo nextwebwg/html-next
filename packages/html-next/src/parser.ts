@@ -12,7 +12,7 @@ import {
   validateLiteralAttributeName,
   validateMvpDomProperty,
 } from "./language.js";
-import { componentName, requestPropName } from "./names.js";
+import { asciiLowerCase, componentName, requestPropName } from "./names.js";
 import { IDENTIFIER, isIdentifier } from "./identifiers.js";
 import { HEAD_ATTRIBUTES, HEAD_LINK_RELS, SCRIPT_STANDARD_ATTRIBUTES } from "./head-rules.js";
 import { hasExecutableUrl } from "./sanitize.js";
@@ -492,11 +492,11 @@ function collectTargetsAtSource(
       const name = attribute.value.slice(1);
       if (!attribute.value.startsWith("$") || !isIdentifier(name)) continue;
       if (attribute.name.startsWith("from:")) {
-        record(name, { attribute: attribute.name.slice("from:".length).toLowerCase() });
+        record(name, { attribute: asciiLowerCase(attribute.name.slice("from:".length)) });
       } else if (attribute.name.startsWith(".")) {
-        const key = attribute.name.slice(1).toLowerCase();
+        const key = asciiLowerCase(attribute.name.slice(1));
         const property = platform.resolveDomProperty(sourceTag(element), key) ??
-          (name.toLowerCase() === key ? name : key);
+          (asciiLowerCase(name) === key ? name : key);
         record(name, { property });
       }
     }
@@ -671,7 +671,7 @@ function readProps(
       if ((typeAttribute === undefined || typeAttribute === "") && inline.length === 0) {
         fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
       }
-      const normalizedName = name.toLowerCase();
+      const normalizedName = asciiLowerCase(name);
       const priorName = normalizedNames[normalizedName];
       if (priorName !== undefined) {
         fail("HC011", `Props \`${priorName}\` and \`${name}\` collide after lowercase normalization.`, source);
@@ -681,7 +681,7 @@ function readProps(
       if (target === undefined && requireBinding) {
         fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
       }
-      target ??= { attribute: name.toLowerCase() };
+      target ??= { attribute: asciiLowerCase(name) };
       const selected = inline[0] ?? namedTypes.get(typeAttribute ?? "");
       if (inline[0] !== undefined && attr(inline[0], "name") !== undefined) {
         fail("HC013", "An inline <type> has no name; put named types directly under <defs>.", source);
@@ -1480,7 +1480,7 @@ function parseAttributes(
   const parsed: TemplateAttribute[] = [];
   for (const attribute of sourceAttributes) {
     if (attribute.name.startsWith("bind:")) {
-      const name = attribute.name.slice("bind:".length).toLowerCase();
+      const name = asciiLowerCase(attribute.name.slice("bind:".length));
       if (name === "" || !tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
         fail("HT007", `Two-way binding cannot target \`${name || attribute.name}\`.`, source);
       }
@@ -1524,7 +1524,7 @@ function parseAttributes(
     }
 
     if (attribute.name.startsWith("$")) {
-      const name = attribute.name.slice(1).toLowerCase();
+      const name = asciiLowerCase(attribute.name.slice(1));
       if (name !== "value" && name !== "html") {
         fail("HT012", `\`$${name}\` is not a known content directive.`, source);
       }
@@ -1538,7 +1538,7 @@ function parseAttributes(
     }
 
     if (attribute.name.startsWith("from:")) {
-      const name = attribute.name.slice("from:".length).toLowerCase();
+      const name = asciiLowerCase(attribute.name.slice("from:".length));
       if (!tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
         fail("HT007", `\`from:${name}\` cannot bind executable or raw content.`, source);
       }
@@ -1548,7 +1548,7 @@ function parseAttributes(
     }
 
     if (attribute.name.startsWith(".")) {
-      const key = attribute.name.slice(1).toLowerCase();
+      const key = asciiLowerCase(attribute.name.slice(1));
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
       // Property bindings reach native DOM properties only; component inputs are attributes.
       const name = platform.resolveDomProperty(tagName, key);
@@ -2204,7 +2204,7 @@ function slotOutletProps(name: string | undefined, declaration: SlotDeclaration 
     fail("HT008", `${outlet} gives props to ${slot}, which declares none; declare them in <defs>: ${suggest(given)}.`, source);
   }
   // Attribute names reach the parser lowercased, as an invocation's do; each matches its declared spelling.
-  const declaredName = (prop: string): string | undefined => Object.keys(declaration.props).find((candidate) => candidate.toLowerCase() === prop.toLowerCase());
+  const declaredName = (prop: string): string | undefined => Object.keys(declaration.props).find((candidate) => asciiLowerCase(candidate) === asciiLowerCase(prop));
   const resolve = (prop: string): string => {
     const declared = declaredName(prop);
     if (declared === undefined) fail("HT008", `${outlet} gives prop \`${prop}\`, which ${slot} does not declare; add ${suggest([prop])} to <defs>.`, source);

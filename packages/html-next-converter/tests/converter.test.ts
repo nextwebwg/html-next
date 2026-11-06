@@ -236,7 +236,7 @@ describe("framework converter", () => {
 
   for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) it(`converts every successful shared conformance definition to ${target} in both graph modes`, async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 48, "review new successful conformance cases for converter coverage");
+    assert.equal(successful.length, 49, "review new successful conformance cases for converter coverage");
     const root = await mkdtemp(join(tmpdir(), `html-next-${target}-conformance-`));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {

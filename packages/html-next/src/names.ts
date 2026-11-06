@@ -18,8 +18,12 @@ export function requestPropName(name: string): string {
   return name.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
 }
 
+export function asciiLowerCase(value: string): string {
+  return value.replace(/[A-Z]/g, letter => letter.toLowerCase());
+}
+
 export function kebabCase(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+  return asciiLowerCase(value.replace(/([a-z0-9])([A-Z])/g, "$1-$2"));
 }
 
 /**
