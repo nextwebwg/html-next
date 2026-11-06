@@ -21,6 +21,7 @@ const baseStyle = "<style>html { color-scheme: light; } body { margin: 8px; font
 
 // Keep every successful public case accounted for as support lands.
 const selected = new Set([
+  "class bindings preserve scoped styles through replacements and toggles",
   "HTML parser recovery keeps the first duplicate attribute",
   "keeps whitespace-only text between elements and rows inside pre",
   "renders whitespace between inline content as one space, as a hand-written page does",
@@ -862,44 +863,44 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
   let liveBundle = "";
   const artifacts = new Map<string, { readonly bundle: string; readonly css: string; readonly server: string; readonly serverError?: string }>();
 
+  const prepare = async (index: number, testCase: ConverterCase, mode: "application" | "library") => {
+    if (artifacts.has(`${index}:${mode}`)) return;
+    const { definition, invocation } = scene(testCase.source);
+    const parsed = parseComponent(definition, testCase.name);
+    const caseDirectory = join(directory, String(index), mode);
+    await mkdir(caseDirectory, { recursive: true });
+    const links = Object.keys(testCase.dependencies ?? {}).map((file) => `<link rel="component" href="./${file}">`).join("");
+    for (const [file, source] of Object.entries(testCase.dependencies ?? {})) await writeFile(join(caseDirectory, file), source);
+    await writeFile(join(caseDirectory, "component.html"), links + definition);
+    const outDirectory = join(caseDirectory, "out");
+    const manifest = await convertComponents({ mode, target: "svelte", entries: ["component.html"], root: caseDirectory, outDirectory });
+    assert.equal(manifest.components.length, 1 + Object.keys(testCase.dependencies ?? {}).length);
+    const component = manifest.components.find((entry) => entry.tag === parsed.contract.tag)!;
+    const wrapper = join(outDirectory, "App.svelte");
+    await writeFile(wrapper, `<script>import ${component.name} from "./${component.artifact}";</script>\n${consumer(invocation, parsed.contract.tag, component.name, parsed.contract.props, testCase.passthrough)}`);
+    const browserEntry = join(outDirectory, "browser.ts");
+    const bundle = join(outDirectory, "svelte.js");
+    await writeFile(browserEntry, `import { mount, hydrate } from "svelte";\nimport App from "./App.svelte";\nconst target = document.querySelector("main")!;\nif (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });`);
+    await build({ entryPoints: [browserEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
+      target: ["es2022"], loader: { ".css": "empty" }, nodePaths: [nodeModules], plugins: [sveltePlugin("client")] });
+    const serverEntry = join(outDirectory, "server.ts");
+    const serverBundle = join(outDirectory, "server.mjs");
+    await writeFile(serverEntry, `import { render } from "svelte/server";\nimport App from "./App.svelte";\nexport const html = render(App).body;`);
+    await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
+      packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
+    let server = "";
+    let serverError: string | undefined;
+    try { server = (await import(pathToFileURL(serverBundle).href) as { html: string }).html; }
+    catch (error) { serverError = String(error); }
+    artifacts.set(`${index}:${mode}`, { bundle, css: svelteStyles(outDirectory), server, ...(serverError === undefined ? {} : { serverError }) });
+  };
+
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-svelte-public-conformance-"));
     await symlink(nodeModules, join(directory, "node_modules"), "dir");
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [livePath], outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime",
       platform: "browser", target: ["es2022"] });
-    for (const [index, testCase] of successful.entries()) {
-      const { definition, invocation } = scene(testCase.source);
-      const parsed = parseComponent(definition, testCase.name);
-      for (const mode of ["application", "library"] as const) {
-        const caseDirectory = join(directory, String(index), mode);
-        await mkdir(caseDirectory, { recursive: true });
-        const links = Object.keys(testCase.dependencies ?? {}).map((file) => `<link rel="component" href="./${file}">`).join("");
-        for (const [file, source] of Object.entries(testCase.dependencies ?? {})) await writeFile(join(caseDirectory, file), source);
-        await writeFile(join(caseDirectory, "component.html"), links + definition);
-        const outDirectory = join(caseDirectory, "out");
-        const manifest = await convertComponents({ mode, target: "svelte", entries: ["component.html"], root: caseDirectory, outDirectory });
-        assert.equal(manifest.components.length, 1 + Object.keys(testCase.dependencies ?? {}).length);
-        const component = manifest.components.find((entry) => entry.tag === parsed.contract.tag)!;
-        const wrapper = join(outDirectory, "App.svelte");
-        await writeFile(wrapper, `<script>import ${component.name} from "./${component.artifact}";</script>\n${consumer(invocation, parsed.contract.tag, component.name, parsed.contract.props, testCase.passthrough)}`);
-        const browserEntry = join(outDirectory, "browser.ts");
-        const bundle = join(outDirectory, "svelte.js");
-        await writeFile(browserEntry, `import { mount, hydrate } from "svelte";\nimport App from "./App.svelte";\nconst target = document.querySelector("main")!;\nif (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });`);
-        await build({ entryPoints: [browserEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
-          target: ["es2022"], loader: { ".css": "empty" }, nodePaths: [nodeModules], plugins: [sveltePlugin("client")] });
-        const serverEntry = join(outDirectory, "server.ts");
-        const serverBundle = join(outDirectory, "server.mjs");
-        await writeFile(serverEntry, `import { render } from "svelte/server";\nimport App from "./App.svelte";\nexport const html = render(App).body;`);
-        await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
-          packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
-        let server = "";
-        let serverError: string | undefined;
-        try { server = (await import(pathToFileURL(serverBundle).href) as { html: string }).html; }
-        catch (error) { serverError = String(error); }
-        artifacts.set(`${index}:${mode}`, { bundle, css: svelteStyles(outDirectory), server, ...(serverError === undefined ? {} : { serverError }) });
-      }
-    }
   }, 120_000);
 
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
@@ -913,6 +914,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
 
         for (const [index, testCase] of successful.entries()) {
           it(testCase.name, async () => {
+            await prepare(index, testCase, mode);
             const [live, svelte, hydrated] = await Promise.all([browser.newPage({ viewport: { width: 800, height: 600 } }),
               browser.newPage({ viewport: { width: 800, height: 600 } }), browser.newPage({ viewport: { width: 800, height: 600 } })]);
             const errors: string[] = [];

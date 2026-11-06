@@ -69,7 +69,7 @@ const RESERVED = new Set([
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "classText", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
-  "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
+  "vClassBindings", "classBindingsState", "classBindingText", "ClassBindingInput", "initializeClassBindings", "applyClassBindings", "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
@@ -659,7 +659,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     }
   }
   const classes: string[] = [];
-  const keyedClasses = node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "class");
+  const keyedClasses = node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || !component && attribute.target === undefined && attribute.name === "class" && !attribute.twoWay));
   const literalClass = node.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "class");
   const styles: string[] = [];
   const bindingInputs: string[] = [];
@@ -675,6 +675,11 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const reflectedNames = new Set(reflected.map(({ attributeName }) => attributeName));
   let content: string | undefined;
   for (const attribute of node.attributes) {
+    if (!component && attribute.kind === "attribute" && !attribute.twoWay && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class")) {
+      const value = attribute.expressionPlan!.ast;
+      classes.push(`[${attribute.target === "class" ? quote(attribute.name) : "null"}, ${attribute.target === "class" ? lowering.condition(value, names.template) : lowering.attribute(value, names.template, "class")}]`);
+      continue;
+    }
     if (attribute.kind === "literal") {
       if (keyedClasses && attribute.name === "class") continue;
       if (!component && attributeNamespace(attribute.name) !== undefined) {
@@ -790,7 +795,12 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const inputs = bindingInputs.length === 0 ? undefined : `[BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} }`;
   // A delegated root's inputs join its consumer's attributes: Vue rejects a second object `v-bind`.
   if (inputs !== undefined && !isRoot) attributes.push(`v-bind=${bound(`{ ${inputs} }`)}`);
-  if (classes.length > 0) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
+  if (classes.length > 0) {
+    if (component) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
+    else {
+      attributes.push(`v-class-bindings=${bound(`{ base: ${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
+    }
+  }
   if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
   for (const event of node.events ?? []) {
     const handler = context.handlers.get(event.handler);
@@ -849,7 +859,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     ...(isRoot && context.hostClass ? [context.definition.contract.tag] : []),
     ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
   ];
-  if (styled.length > 0) {
+  if (styled.length > 0 && !(classes.length > 0 && !component)) {
     const index = literals.findIndex((literal) => literal.startsWith("class="));
     if (index < 0) literals.unshift(`class=${attributeValue(styled.join(" "))}`);
     else literals[index] = `class="${styled.join(" ")} ${literals[index]!.slice('class="'.length)}`;
@@ -1500,6 +1510,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ...(rootMarkup.includes("v-bind-control=") ? ["vBindControl"] : []),
       ...(rootMarkup.includes("<SelectedOptions ") ? ["SelectedOptions"] : []),
     ].join(", ")} } from ${quote(options.helperSpecifier?.("control") ?? VUE_CONTROL_SPECIFIER)};`] : []),
+    ...(!rootMarkup.includes("v-class-bindings=") ? [] : [`import { classBindingText, initializeClassBindings, applyClassBindings, type ClassBindingInput } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.vue`)};`),
     "",
     ...(!rootMarkup.includes("v-namespaced-attributes=") ? [] : [
@@ -1507,6 +1518,14 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       '  getSSRProps: (binding: { value: readonly NamespacedAttribute[] }) => namespacedAttributeProps(binding.value),',
       '  mounted: (element: Element, binding: { value: readonly NamespacedAttribute[] }) => applyNamespacedAttributes(element, binding.value),',
       '  updated: (element: Element, binding: { value: readonly NamespacedAttribute[]; oldValue: readonly NamespacedAttribute[] }) => applyNamespacedAttributes(element, binding.value, binding.oldValue),',
+      '};',
+    ]),
+    ...(!rootMarkup.includes("v-class-bindings=") ? [] : [
+      'const classBindingsState = new WeakMap<Element, unknown[]>();',
+      'const vClassBindings = {',
+      '  getSSRProps: (binding: { value: ClassBindingInput }) => ({ className: classBindingText(binding.value) }),',
+      '  mounted: (element: Element, binding: { value: ClassBindingInput }) => { const input = binding.value; const previous = initializeClassBindings(element, input); classBindingsState.set(element, previous); applyClassBindings(element, input, previous); },',
+      '  updated: (element: Element, binding: { value: ClassBindingInput }) => applyClassBindings(element, binding.value, classBindingsState.get(element)!),',
       '};',
     ]),
     "defineOptions({ inheritAttrs: false });",

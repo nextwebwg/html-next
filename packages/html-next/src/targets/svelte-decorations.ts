@@ -2,7 +2,7 @@ import { CLASS_TEXT_SOURCE } from "./class-text.js";
 import type { GeneratedArtifact } from "../generate.js";
 
 const SOURCE = `export interface Decoration {
-  readonly kind: 'class' | 'style';
+  readonly kind: 'class' | 'style' | 'attribute';
   readonly name: string;
   readonly read: () => unknown;
 }

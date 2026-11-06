@@ -2054,25 +2054,35 @@ export const isBoolean = (value: unknown): value is boolean => typeof value === 
 export function classText(
   base: string | undefined,
   decorations: readonly {
-    readonly kind: 'class' | 'style'
+    readonly kind: 'class' | 'style' | 'attribute'
     readonly name: string
     readonly read: () => unknown
   }[],
+  scope = '',
 ): string | undefined {
-  const tokens = new Set((base ?? '').split(/[ \t\r\n\f]+/).filter(Boolean))
+  let tokens = new Set((base ?? '').split(/[ \t\r\n\f]+/).filter(Boolean))
   let value = base
   for (const decoration of decorations) {
-    if (decoration.kind !== 'class') continue
+    if (decoration.kind === 'style') continue
     const candidate = decoration.read()
-    if (
-      candidate === Symbol.for('html-next.invalid-result')
-      || Boolean(candidate) === tokens.has(decoration.name)
-    ) continue
+    if (candidate === Symbol.for('html-next.invalid-result')) continue
+    if (decoration.kind === 'attribute') {
+      value = candidate == null ? undefined : String(candidate)
+      tokens = new Set((value ?? '').split(/[ \t\r\n\f]+/).filter(Boolean))
+      continue
+    }
+    if (Boolean(candidate) === tokens.has(decoration.name)) continue
     if (candidate) tokens.add(decoration.name)
     else tokens.delete(decoration.name)
     value = [...tokens].join(' ')
   }
-  return value
+  if (scope === '') return value
+  const missing = scope.split(/[ \t\r\n\f]+/).filter(token => token !== '' && !tokens.has(token))
+  return missing.length === 0
+    ? value
+    : value == null
+    ? missing.join(' ')
+    : value + ' ' + missing.join(' ')
 }
 
 export function acceptsBindingResult(

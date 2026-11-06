@@ -837,8 +837,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       slotBindings.push(`${objectKey(slot)}: ${present === undefined ? snippet : `${present} ? ${snippet} : undefined`}`);
     }
   }
-  const decorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style"));
-  const ownsClasses = decorations.some((entry) => entry.kind === "attribute" && entry.target === "class");
+  const decorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style" || !component && entry.target === undefined && entry.name === "class" && !entry.twoWay));
+  const ownsClasses = decorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined));
   const ownsStyles = decorations.some((entry) => entry.kind === "attribute" && entry.target === "style");
   const decoratesClasses = ownsClasses || root && context.rootDecorations?.classes === true;
   const decoratesStyles = ownsStyles || root && context.rootDecorations?.styles === true;
@@ -847,8 +847,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (entry.kind !== "attribute" || entry.expressionPlan === undefined) fail("HT030", "An uncompiled decoration cannot be converted.");
     const plan = entry.expressionPlan;
     const guard = declaredReadGuard(plan, scope, context);
-    const source = entry.target === "class" ? lowering.condition(plan.ast, scope) : lowering.text(plan.ast, scope);
-    return `{ kind: ${quote(entry.target!)} as const, name: ${quote(entry.name)}, read: () => (${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}) }`;
+    const source = entry.target === "class" ? lowering.condition(plan.ast, scope) : entry.target === undefined ? lowering.attribute(plan.ast, scope, "class") : lowering.text(plan.ast, scope);
+    return `{ kind: ${quote(entry.target ?? "attribute")} as const, name: ${quote(entry.name)}, read: () => (${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}) }`;
   });
   if (root && context.rootDecorations !== undefined) ownedRules.push(`...((rest[${quote(DECORATIONS_PROP)}] as readonly Decoration[] | undefined) ?? [])`);
   const rules = `[${ownedRules.join(", ")}]`;
@@ -1018,6 +1018,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     if (attribute.kind === "attribute") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
+      if (!component && attribute.name === "class" && attribute.target === undefined && !attribute.twoWay) continue;
       if (root && reflectedNames.has(attribute.name) && attribute.twoWay !== true) continue;
       const statusProp = component ? childProp(attribute.name)?.[0] : undefined;
       const statusExpression = attribute.expressionPlan.ast;
@@ -1299,7 +1300,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const base = classBaseSource(node, root, scopeClasses);
         context.usesAttributeBinding = true;
         if (root) context.rootAttributeBindings.add("class");
-        attributes.push(`{...(typeof document === 'undefined' ? { class: classText(${base}, ${rules}) } : {})}`);
+        attributes.push(`{...(typeof document === 'undefined' ? { class: classText(${base}, ${rules}, ${quote(scopeClasses.join(" "))}) } : {})}`);
         attributes.push(`{@attach ${context.bindingHelperName}("class", () => ${base})}`);
       }
       if (decoratesStyles) {
@@ -1308,7 +1309,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.style == null || rest.style === false ? undefined : ${quote("")})` : "undefined";
         attributes.push(`style={(typeof document === 'undefined' ? styleText(${base}, ${rules}) : ${base}) || ${empty}}`);
       }
-      attributes.push(`{@attach decorate(${rules})}`);
+      attributes.push(`{@attach decorate(${rules}, { scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
     }
   }
   attributes.push(...bindings);

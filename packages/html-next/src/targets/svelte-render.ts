@@ -384,18 +384,22 @@ export function setProperty(name: string, read: () => unknown) {
 }
 
 /** An attachment that toggles classes and sets style properties from their values, writing only a result that differs from its last. */
-export function decorate(decorations: readonly { readonly kind: "class" | "style"; readonly name: string; readonly read: () => unknown }[]) {
+export function decorate(decorations: readonly { readonly kind: "class" | "style" | "attribute"; readonly name: string; readonly read: () => unknown }[], options: { scope?: string; hashed?: boolean } = {}) {
   return (element: Element) => {
+    const scope = [options.scope, options.hashed ? element.getAttribute("class") : null].filter(Boolean).join(" ");
     for (const decoration of decorations) {
       let last: unknown;
       $effect(() => {
         const value = decoration.read();
         if (value === Symbol.for("html-next.invalid-result")) return;
-        const output = decoration.kind === "class" ? Boolean(value) : value == null ? "" : String(value);
+        const output = decoration.kind === "class" ? Boolean(value) : value == null ? decoration.kind === "attribute" ? null : "" : String(value);
         if (output === last) return;
         last = output;
         if (decoration.kind === "class") element.classList.toggle(decoration.name, output as boolean);
-        else (element as HTMLElement).style.setProperty(decoration.name, output as string);
+        else if (decoration.kind === "attribute") {
+          const written = scope === "" ? output : output == null ? scope : String(output) + " " + scope;
+          if (written == null) element.removeAttribute("class"); else element.setAttribute("class", String(written));
+        } else (element as HTMLElement).style.setProperty(decoration.name, output as string);
       });
     }
   };
