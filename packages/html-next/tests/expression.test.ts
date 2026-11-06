@@ -275,6 +275,29 @@ describe("expression: truthiness — the empty value of each type is false", () 
 
 describe("expression: typed equality and no coercion", () => {
   const s = scope({});
+  for (const [expression, expected] of [
+    ["$draft.count = null", ABSENT], ["$draft.count != null", ABSENT],
+    ["$draft.count = $draft.count", ABSENT], ["$draft.count != $draft.count", ABSENT],
+    ["not ($draft.count = $draft.count)", true], ["default($draft.count = null, true)", true],
+    ["($draft.count = null) = false", ABSENT],
+  ] as const) {
+    it(`propagates missing operands through ${expression}`, () => {
+      assert.equal(evaluate(expression, scope({ draft: {} })), expected);
+    });
+  }
+  it("keeps present null and numeric equality distinct from missing data", () => {
+    assert.equal(evaluate("$draft.count = null", scope({ draft: { count: null } })), true);
+    assert.equal(evaluate("$draft.count != null", scope({ draft: { count: null } })), false);
+    assert.equal(evaluate("$draft.count = 1", scope({ draft: { count: 1 } })), true);
+    assert.equal(evaluate("$draft.count = 2", scope({ draft: { count: 1 } })), false);
+  });
+  for (const [source, expectedReads] of [["(1 / 0) + $draft.count", 1], ["($draft.count / 0) = $draft.count", 2]] as const) {
+    it(`evaluates ordinary binary operands before propagating invalidity in ${source}`, () => {
+      let reads = 0;
+      assert.equal(evaluateCompiled(compileExpression(source), scope({ draft: { get count() { return ++reads; } } })), NONCONFORMING);
+      assert.equal(reads, expectedReads);
+    });
+  }
   it("equality is typed: 1 = \"1\" is false", () => {
     assert.equal(evaluate('1 = "1"', s), false);
     assert.equal(evaluate("1 = 1", s), true);
@@ -296,6 +319,17 @@ describe("expression: typed equality and no coercion", () => {
     ] as const) {
       assert.equal(evaluate(expression, scope({ level: 0.2 })), expected, expression);
     }
+  });
+  it("rejects non-finite arithmetic results and propagates invalidity through enclosing expressions", () => {
+    const values = scope({ huge: Number.MAX_VALUE, zero: 0 });
+    for (const expression of ["1 / 0", "0 / 0", "1 % 0", "$huge + $huge", "-$huge - $huge", "$huge * 2",
+      "default(1 / 0, 7)", "concat('value:', 1 / 0)", "not (1 / 0)", "(1 / 0) = 1",
+      "(1 / 0) ? 1 : 2", "(1 / 0) + 2", "true and (1 / 0)", "false or (1 / 0)"]) {
+      assert.equal(evaluateCompiled(compileExpression(expression), values), NONCONFORMING, expression);
+    }
+    assert.equal(evaluate("false and (1 / 0)", values), false);
+    assert.equal(evaluate("true or (1 / 0)", values), true);
+    assert.equal(evaluate("1 / 3", values), 1 / 3);
   });
   it("arithmetic with an absent operand propagates absent", () => {
     const s2 = scope({ cart: { total: 10 } });

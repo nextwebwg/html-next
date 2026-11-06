@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HtmlNext/HtmlNext.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HtmlNext.Tests/HtmlNext.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/HtmlNext.Benchmarks.csproj" />
+  </Folder>
+</Solution>

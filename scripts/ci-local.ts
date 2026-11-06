@@ -25,6 +25,7 @@ try {
     pnpm("exec", "vitest", "run", "tests/ci.test.ts", "tests/ci-reuse.test.ts", "--maxWorkers", "1");
     pnpm("--filter", "@nextwebwg/html-next", "check:release");
     if (values.generated === "true") pnpm("check:generated");
+    if (values.dotnet === "true") pnpm("test:dotnet");
     for (const kind of ["node", "browser"]) for (const job of JSON.parse(values[kind]!).include as TestJob[]) {
       run(process.execPath, [join(root, "scripts/ci-run.ts")], { ...process.env, CI_JOB: JSON.stringify(job) });
     }

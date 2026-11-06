@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { preactArtifact } from "./preact.js";
 
 import {
+  attributeHelperArtifact,
   addControllerGraph,
   normalizeConversionStyleIdentities,
   getDiagnosticLocation,
@@ -610,6 +611,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           importSpecifier,
           propContractsByTag,
           propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
+          attributesSpecifier: relativeImport(componentPath, "svelte/attributes.ts").replace(/\.ts$/, ""),
           htmlSpecifier: relativeImport(componentPath, "svelte/html.ts").replace(/\.ts$/, ""),
           eventsSpecifier: relativeImport(componentPath, "svelte/events.ts").replace(/\.ts$/, ""),
           controlSpecifier: relativeImport(componentPath, "svelte/control.ts").replace(/\.ts$/, ""),
@@ -628,6 +630,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           guardNestedDepth,
           importSpecifier,
           propsSpecifier: reactHelperSpecifier("props"),
+          attributesSpecifier: reactHelperSpecifier("attributes"),
           eventsSpecifier: reactHelperSpecifier("events"),
           controlSpecifier: reactHelperSpecifier("control"),
           dataSpecifier: reactHelperSpecifier("data"),
@@ -697,6 +700,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...unsupported, ...diagnostics]);
 
+  if (neededHelpers.has("attributes")) claim(attributeHelperArtifact(reactTarget ? "react" : options.target, GENERATOR_VERSION), "helper");
   if (options.target === "angular") for (const artifact of angularArtifacts(GENERATOR_VERSION, neededHelpers)) claim(artifact, "helper");
   if (reactTarget && neededHelpers.has("bindings")) claim(reactBindingsArtifact(GENERATOR_VERSION), "helper");
   if (options.target === "svelte" && neededHelpers.has("bindings")) claim(svelteBindingsArtifact(GENERATOR_VERSION), "helper");

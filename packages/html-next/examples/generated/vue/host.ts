@@ -1509,11 +1509,7 @@ export function inlineTextSegment(
   accepted: boolean,
   text: (value: any) => string,
 ): InlineTextSegment {
-  return {
-    value,
-    accepted,
-    text: accepted && value !== Symbol.for('html-next.invalid-result') ? text(value) ?? '' : '',
-  }
+  return { value, accepted, text: accepted && acceptsBindingResult(value) ? text(value) ?? '' : '' }
 }
 
 export const RetainedInlineText = /* @__PURE__ */ defineComponent({
@@ -1522,13 +1518,40 @@ export const RetainedInlineText = /* @__PURE__ */ defineComponent({
     const previous: string[] = []
     return () => {
       const text = props.segments.map((segment, index) => {
-        if (segment.accepted && segment.value !== Symbol.for('html-next.invalid-result')) {
-          previous[index] = segment.text
-        }
+        if (segment.accepted && acceptsBindingResult(segment.value)) previous[index] = segment.text
         return previous[index] ?? ''
       }).join('')
       // Empty text has no serialized SSR node; a comment preserves this component's hydration position.
       return text === '' ? createCommentVNode() : createTextVNode(text)
+    }
+  },
+})
+
+/** Each outlet keeps its own accepted values, including inside repeated template scopes. */
+// Vue's compiled <slot v-bind> merges into an ordinary object, dropping __proto__ keys.
+export const ScopedSlotOutlet = /* @__PURE__ */ defineComponent({
+  props: {
+    content: { type: Object as PropType<Slots>, required: true },
+    name: { type: String, required: true },
+    values: { type: Object as PropType<Record<string, unknown>>, required: true },
+  },
+  setup(props, { slots }) {
+    return () => renderSlot(props.content, props.name, props.values, slots.default)
+  },
+})
+
+export const RetainedSlotValues = /* @__PURE__ */ defineComponent({
+  props: {
+    values: { type: Object as PropType<Record<string, unknown>>, required: true },
+    defaults: { type: Object as PropType<Record<string, unknown>>, required: true },
+  },
+  setup(props, { slots }) {
+    const previous = { ...props.defaults }
+    return () => {
+      for (const [name, value] of Object.entries(props.values)) {
+        if (acceptsBindingResult(value)) previous[name] = value
+      }
+      return slots.default?.(previous)
     }
   },
 })
@@ -2028,6 +2051,67 @@ export const isNumber = (value: unknown): value is number =>
 export const isInteger = (value: unknown): value is number => Number.isInteger(value)
 export const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
 
+export function acceptsBindingResult(
+  value: unknown,
+  accepts?: (value: unknown) => boolean,
+): boolean {
+  return value !== Symbol.for('html-next.invalid-result') && (accepts?.(value) ?? true)
+}
+
+export function separatedKeywordItem(value: unknown): boolean {
+  return typeof value === 'string' && keywordFormat(value)
+}
+export function separatedKeywords(value: unknown, space: boolean): boolean {
+  const items = typeof value === 'string' ? value.split(space ? /\s+/ : /\s*,\s*/) : value
+  return Array.isArray(items) && items.length > 0 && items.every(separatedKeywordItem)
+}
+
+export function referenceMember(object: any, key: string): any {
+  if (object === Symbol.for('html-next.invalid-result')) return object
+  if (key === 'length' && (Array.isArray(object) || typeof object === 'string')) {
+    return object.length
+  }
+  return object !== null && typeof object === 'object' && !Array.isArray(object)
+    ? object[key]
+    : undefined
+}
+
+export function referenceIndex(object: any, key: any): any {
+  if (
+    object === Symbol.for('html-next.invalid-result')
+    || key === Symbol.for('html-next.invalid-result')
+  ) return Symbol.for('html-next.invalid-result')
+  if (object == null || key == null) return undefined
+  return typeof object === 'object' && (typeof key === 'string' || typeof key === 'number')
+    ? object[key]
+    : undefined
+}
+
+const referenceNumericKey = /^\d+$/
+export function referenceSchemaAt(schema: any, key: unknown): any {
+  if (schema === 0 || typeof key !== 'string' && typeof key !== 'number') return 0
+  if (schema[2] !== undefined && Object.hasOwn(schema[2], key)) return schema[2][key]
+  return (typeof key === 'number' || referenceNumericKey.test(key) ? schema[3] : schema[4]) ?? 0
+}
+
+export function referenceValue(
+  value: any,
+  schema: any,
+  location: string,
+  name: string,
+  file: string,
+): any {
+  if (schema === 0 || value == null || !acceptsBindingResult(value) || schema[0](value)) {
+    return value
+  }
+  warnUnless(
+    false,
+    location,
+    file + ': HR007: Reference `' + name + '` must satisfy ' + schema[1] + '.',
+  )
+  return Symbol.for('html-next.invalid-result')
+}
+
 export function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0
   if (value instanceof Error) return true
@@ -2061,7 +2145,11 @@ export function list(value: unknown): any[] {
 }
 
 export function number(value: unknown): number | undefined {
-  return typeof value === 'number' && !Number.isNaN(value) ? value : undefined
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+export function finite(value: number): number | symbol {
+  return Number.isFinite(value) ? value : Symbol.for('html-next.invalid-result')
 }
 
 // A nonempty scalar call cannot produce the invalid-result sentinel.
@@ -2303,6 +2391,344 @@ export function uniqueKeys<T>(
   }
   return items
 }
+
+export function createEmailFormat(pattern: any): any {
+  const __name = (fn: any, ..._names: any[]): any => fn
+  return __name(function emailFormat2(value: any) {
+    return pattern.test(value)
+  }, 'emailFormat')
+}
+
+export const emailFormat = /* @__PURE__ */ createEmailFormat(
+  /^[a-zA-Z0-9.!#$%&'*+/?=^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/,
+)
+
+export function createReferenceEvent(
+  eventType: any = typeof Event === 'undefined'
+    ? void 0
+    : Object.getOwnPropertyDescriptor(Event.prototype, 'type')?.get,
+  eventBrands: any = new WeakMap(),
+): any {
+  return (value: any) => {
+    if (typeof value !== 'object' || value === null || eventType === void 0 || !('type' in value)) {
+      return false
+    }
+    let accepted = eventBrands.get(value)
+    if (accepted === void 0) {
+      try {
+        eventType.call(value)
+        accepted = true
+      } catch {
+        accepted = false
+      }
+      eventBrands.set(value, accepted)
+    }
+    return accepted
+  }
+}
+
+export const referenceEvent = /* @__PURE__ */ createReferenceEvent()
+
+export function referenceTrusted(value: any, type: any): any {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  if (value.kind === type && 'value' in value) {
+    return true
+  }
+  const expected = type === 'trusted-html' ? 'TrustedHTML' : 'TrustedScript'
+  return value.constructor?.name === expected
+    || Object.prototype.toString.call(value) === `[object ${expected}]`
+}
+
+export function functionalColor(value: any): any {
+  const match = /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\((.*)\)$/i.exec(value)
+  if (match === null) {
+    return false
+  }
+  const body = match[2].trim()
+  const parts = body.replaceAll(',', ' ').replaceAll('/', ' ').split(/\s+/)
+  const colorSpace = match[1].toLowerCase() === 'color'
+  if (
+    colorSpace
+    && !/^(?:srgb|srgb-linear|display-p3|a98-rgb|prophoto-rgb|rec2020|xyz|xyz-d50|xyz-d65)$/.test(
+      parts.shift() ?? '',
+    )
+  ) {
+    return false
+  }
+  if (parts.length < 3 || parts.length > 4) {
+    return false
+  }
+  if (parts.length === 4 && !body.includes('/') && !body.includes(',')) {
+    return false
+  }
+  return parts.every((part: any) =>
+    part === 'none' || /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|deg|rad|grad|turn)?$/.test(part)
+  )
+}
+
+export const keywordFormat = (value: any) => /^[A-Za-z0-9_-]+$/.test(value)
+
+export function urlFormat(value: any): any {
+  try {
+    return new URL(value).protocol !== ''
+  } catch {
+    return false
+  }
+}
+
+export function dateFormat(value: any): any {
+  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value)
+  if (match === null || match[1] === '0000') {
+    return false
+  }
+  const year = Number(match[1])
+  const date = new Date(0)
+  date.setUTCFullYear(year, Number(match[2]) - 1, Number(match[3]))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === Number(match[2]) - 1
+    && date.getUTCDate() === Number(match[3])
+}
+
+export const monthFormat = (value: any) => /^(?!0000)\d{4,}-(?:0[1-9]|1[0-2])$/.test(value)
+
+export function weekFormat(value: any): any {
+  const match = /^(\d{4,})-W(\d{2})$/.exec(value)
+  if (match === null || match[1] === '0000') {
+    return false
+  }
+  const year = Number(match[1])
+  const week = Number(match[2])
+  const jan1 = new Date(0)
+  jan1.setUTCFullYear(year, 0, 1)
+  const jan1Day = jan1.getUTCDay()
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  return week >= 1 && (week < 53 || week === 53 && (jan1Day === 4 || jan1Day === 3 && leap))
+}
+
+export function timeFormat(value: any): any {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value)
+  return match !== null && Number(match[1]) < 24 && Number(match[2]) < 60
+    && Number(match[3] ?? 0) < 60
+}
+
+export const colorHexFormat = (value: any) =>
+  /^#[\da-fA-F]{3}(?:[\da-fA-F]{1}|[\da-fA-F]{3}(?:[\da-fA-F]{2})?)?$/.test(value)
+
+export const lengthFormat = (value: any) =>
+  /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|vw|vh|vmin|vmax|ch|ex|cm|mm|in|pt|pc|q)$/.test(value)
+  || value === '0'
+
+export const percentageFormat = (value: any) => /^-?(?:\d+(?:\.\d+)?|\.\d+)%$/.test(value)
+
+export const durationFormat = (value: any) => /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:ms|s)$/.test(value)
+
+export function createColorFormat(keywords: any, hex: any, functional: any): any {
+  const __name = (fn: any, ..._names: any[]): any => fn
+  let namedColors
+  return __name(function colorFormat2(value: any) {
+    return hex(value) || (namedColors ??= new Set(keywords)).has(value.toLowerCase())
+      || functional(value)
+  }, 'colorFormat')
+}
+
+export const colorFormat = /* @__PURE__ */ createColorFormat(
+  [
+    'accentcolor',
+    'accentcolortext',
+    'activetext',
+    'aliceblue',
+    'antiquewhite',
+    'aqua',
+    'aquamarine',
+    'azure',
+    'beige',
+    'bisque',
+    'black',
+    'blanchedalmond',
+    'blue',
+    'blueviolet',
+    'brown',
+    'burlywood',
+    'buttonborder',
+    'buttonface',
+    'buttontext',
+    'cadetblue',
+    'canvas',
+    'canvastext',
+    'chartreuse',
+    'chocolate',
+    'coral',
+    'cornflowerblue',
+    'cornsilk',
+    'crimson',
+    'currentcolor',
+    'cyan',
+    'darkblue',
+    'darkcyan',
+    'darkgoldenrod',
+    'darkgray',
+    'darkgreen',
+    'darkgrey',
+    'darkkhaki',
+    'darkmagenta',
+    'darkolivegreen',
+    'darkorange',
+    'darkorchid',
+    'darkred',
+    'darksalmon',
+    'darkseagreen',
+    'darkslateblue',
+    'darkslategray',
+    'darkslategrey',
+    'darkturquoise',
+    'darkviolet',
+    'deeppink',
+    'deepskyblue',
+    'dimgray',
+    'dimgrey',
+    'dodgerblue',
+    'field',
+    'fieldtext',
+    'firebrick',
+    'floralwhite',
+    'forestgreen',
+    'fuchsia',
+    'gainsboro',
+    'ghostwhite',
+    'gold',
+    'goldenrod',
+    'gray',
+    'graytext',
+    'green',
+    'greenyellow',
+    'grey',
+    'highlight',
+    'highlighttext',
+    'honeydew',
+    'hotpink',
+    'indianred',
+    'indigo',
+    'ivory',
+    'khaki',
+    'lavender',
+    'lavenderblush',
+    'lawngreen',
+    'lemonchiffon',
+    'lightblue',
+    'lightcoral',
+    'lightcyan',
+    'lightgoldenrodyellow',
+    'lightgray',
+    'lightgreen',
+    'lightgrey',
+    'lightpink',
+    'lightsalmon',
+    'lightseagreen',
+    'lightskyblue',
+    'lightslategray',
+    'lightslategrey',
+    'lightsteelblue',
+    'lightyellow',
+    'lime',
+    'limegreen',
+    'linen',
+    'linktext',
+    'magenta',
+    'mark',
+    'marktext',
+    'maroon',
+    'mediumaquamarine',
+    'mediumblue',
+    'mediumorchid',
+    'mediumpurple',
+    'mediumseagreen',
+    'mediumslateblue',
+    'mediumspringgreen',
+    'mediumturquoise',
+    'mediumvioletred',
+    'midnightblue',
+    'mintcream',
+    'mistyrose',
+    'moccasin',
+    'navajowhite',
+    'navy',
+    'oldlace',
+    'olive',
+    'olivedrab',
+    'orange',
+    'orangered',
+    'orchid',
+    'palegoldenrod',
+    'palegreen',
+    'paleturquoise',
+    'palevioletred',
+    'papayawhip',
+    'peachpuff',
+    'peru',
+    'pink',
+    'plum',
+    'powderblue',
+    'purple',
+    'rebeccapurple',
+    'red',
+    'rosybrown',
+    'royalblue',
+    'saddlebrown',
+    'salmon',
+    'sandybrown',
+    'seagreen',
+    'seashell',
+    'selecteditem',
+    'selecteditemtext',
+    'sienna',
+    'silver',
+    'skyblue',
+    'slateblue',
+    'slategray',
+    'slategrey',
+    'snow',
+    'springgreen',
+    'steelblue',
+    'tan',
+    'teal',
+    'thistle',
+    'tomato',
+    'transparent',
+    'turquoise',
+    'violet',
+    'visitedtext',
+    'wheat',
+    'white',
+    'whitesmoke',
+    'yellow',
+    'yellowgreen',
+  ],
+  colorHexFormat,
+  functionalColor,
+)
+
+export function createDatetimeFormat(date: any, time: any): any {
+  const __name = (fn: any, ..._names: any[]): any => fn
+  return __name(function datetimeFormat2(value: any) {
+    const match =
+      /^(\d{4,}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)(Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/
+        .exec(value)
+    return match !== null && date(match[1]) && time(match[2])
+  }, 'datetimeFormat')
+}
+
+export const datetimeFormat = /* @__PURE__ */ createDatetimeFormat(dateFormat, timeFormat)
+
+export function createDatetimeLocalFormat(date: any, time: any): any {
+  const __name = (fn: any, ..._names: any[]): any => fn
+  return __name(function datetimeLocalFormat2(value: any) {
+    const match = /^(\d{4,}-\d{2}-\d{2})[T ](.+)$/.exec(value)
+    return match !== null && date(match[1]) && time(match[2])
+  }, 'datetimeLocalFormat')
+}
+
+export const datetimeLocalFormat = /* @__PURE__ */ createDatetimeLocalFormat(dateFormat, timeFormat)
 
 /**
  * Digits after the point in `value`'s shortest round-trip text, as `Number#toString` writes it:

@@ -1081,7 +1081,7 @@ export function manageProps(instance: GeneratedInstance): void {
  * replaces it), 1 is a `$if` anchor pair, 2 is a `$each` anchor pair, 3 is an `$html` range and 4 is
  * a slot's placeholder pair.
  */
-export type TemplateSpec = readonly [tag: string, attributes: readonly string[], ...children: readonly unknown[]];
+export type TemplateSpec = readonly [tag: string, attributes: readonly (string | readonly [namespace: string, name: string])[], ...children: readonly unknown[]];
 type TemplateChild = string | 0 | 1 | 2 | 3 | 4 | TemplateSpec;
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -1096,7 +1096,9 @@ export function buildTemplate(spec: TemplateSpec, doc: Document = document, svg?
   const node = spec[0] === "" ? doc.createDocumentFragment() : inSvg ? doc.createElementNS(SVG, spec[0]) : doc.createElement(spec[0]);
   const attributes = spec[1];
   for (let index = 0; index < attributes.length; index += 2) {
-    (node as Element).setAttribute(attributes[index]!, attributes[index + 1]!);
+    const name = attributes[index]!;
+    if (typeof name === "string") (node as Element).setAttribute(name, attributes[index + 1] as string);
+    else (node as Element).setAttributeNS(name[0], name[1], attributes[index + 1] as string);
   }
   for (let index = 2; index < spec.length; index += 1) {
     const child = spec[index] as TemplateChild;
@@ -1135,6 +1137,10 @@ export const readFailing = (object: unknown, key: string): unknown =>
 /** `not`, truthiness, `and`/`or`, `? :` and `default` over evaluated operands that may be nonconforming. */
 export const notValue = (value: unknown): unknown => value === NONCONFORMING ? value : !truthy(value as Value);
 export const truthyValue = (value: unknown): unknown => value === NONCONFORMING ? value : truthy(value as Value);
+/** Equality propagates refused reads without importing numeric and dimensional arithmetic. */
+export const equalValue = (left: unknown, right: unknown, unequal = false): unknown =>
+  left === NONCONFORMING || right === NONCONFORMING ? NONCONFORMING
+    : left === ABSENT || right === ABSENT ? ABSENT : (left === right) !== unequal;
 export const logicValue = (and: boolean, left: unknown, right: unknown): unknown =>
   left === NONCONFORMING ? left : truthy(left as Value) !== and ? !and
     : right === NONCONFORMING ? right : truthy(right as Value);
@@ -1209,6 +1215,8 @@ export function writeUrlAttribute(element: Element, name: string, value: string 
   if (value === null || hasExecutableUrl(value)) element.removeAttribute(name);
   else element.setAttribute(name, value);
 }
+
+export { applyNamespacedAttributes, namespacedAttributeProps, writeNamespacedAttribute, writeNamespacedUrlAttribute, type NamespacedAttribute } from "./dom-attributes.js";
 
 /** A two-way binding's value into its control; an element that is not one gets the attribute. */
 export function writeControl(element: Element, name: string, value: unknown): void {
@@ -2309,6 +2317,29 @@ export function checkReference(spec: GeneratedStateSpec, value: unknown, type: C
   if (referenceConforms(value, type)) return true;
   warnOnce(spec, key, message);
   return false;
+}
+
+/** Build-time reference metadata. Child choices are finite, shared and independent of input keys. */
+export type ReferenceSchema = 0 | readonly [
+  type: CompactType, label: string, fields?: Readonly<Record<string, ReferenceSchema>>,
+  numeric?: ReferenceSchema, other?: ReferenceSchema,
+];
+
+const referenceIndex = /^\d+$/;
+
+/** Advances a computed reference's declared schema without allocating a path or union. */
+export function referenceSchemaAt(schema: ReferenceSchema, key: unknown): ReferenceSchema {
+  if (schema === 0 || typeof key !== "string" && typeof key !== "number") return 0;
+  const fields = schema[2];
+  if (fields !== undefined && Object.hasOwn(fields, key)) return fields[key]!;
+  return (typeof key === "number" || referenceIndex.test(key) ? schema[3] : schema[4]) ?? 0;
+}
+
+/** Validates the value already read, so accessors and computed keys execute exactly once. */
+export function checkedReferenceValue(spec: GeneratedStateSpec, value: unknown, schema: ReferenceSchema, key: string, name: string): unknown {
+  if (schema === 0 || value === NONCONFORMING || referenceConforms(value, schema[0])) return value;
+  warnOnce(spec, key, `Reference \`${name}\` must satisfy ${schema[1]}.`);
+  return NONCONFORMING;
 }
 
 /**

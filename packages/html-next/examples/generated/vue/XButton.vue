@@ -66,16 +66,16 @@ const propInputs = inputTracking.inputs
 const checkedProps = computed(() => {
   void inputTracking.version.value
   return ({
-    size: propInputs.value<'sm' | 'md' | 'lg' | null>(
+    size: propInputs.value<NonNullable<'sm' | 'md' | 'lg'>>(
       'size',
       props['size'],
       props[BINDING_INPUTS_PROP],
-    ) as 'sm' | 'md' | 'lg',
-    variant: propInputs.value<'outline' | 'solid' | 'destructive' | 'ghost' | null>(
+    ),
+    variant: propInputs.value<NonNullable<'outline' | 'solid' | 'destructive' | 'ghost'>>(
       'variant',
       props['variant'],
       props[BINDING_INPUTS_PROP],
-    ) as 'outline' | 'solid' | 'destructive' | 'ghost',
+    ),
   })
 })
 const inputStatus = (name: string, handlesError: boolean) => {
@@ -95,10 +95,9 @@ checkHydratedRoot('button', 'x-button')
 const hostState = computed(() =>
   [
     checkedProps.value.size && 'size',
-    checkedProps.value.size != null && `size=${encodeURIComponent(checkedProps.value.size)}`,
+    `size=${encodeURIComponent(checkedProps.value.size)}`,
     checkedProps.value.variant && 'variant',
-    checkedProps.value.variant != null
-    && `variant=${encodeURIComponent(checkedProps.value.variant)}`,
+    `variant=${encodeURIComponent(checkedProps.value.variant)}`,
   ].filter(Boolean).join(' ')
 )
 </script>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <None Include="../fixtures/scoped-slots.json" Link="fixtures/scoped-slots.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/element-references.json" Link="fixtures/element-references.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../../src/HtmlNext/HtmlNext.csproj" />
+    <None Include="../fixtures/attribute-bindings.json" Link="fixtures/attribute-bindings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/interface-declarations.json" Link="fixtures/interface-declarations.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/slot-rendering.json" Link="fixtures/slot-rendering.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

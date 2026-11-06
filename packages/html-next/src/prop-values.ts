@@ -35,6 +35,16 @@ export function assignedPropValue(prop: PropContract, input: unknown, type: Prop
 export function conformsAtReference(value: Value, type: TypeNode): boolean {
   if (value === null) return true;
   switch (type.kind) {
+    case "terminal":
+      // These read checks need only a boolean; parsing would allocate accepted-value/issue records
+      // for each row and dependency. Other terminal formats still use the shared typed parser.
+      switch (type.name) {
+        case "string": return typeof value === "string";
+        case "boolean": return typeof value === "boolean";
+        case "number": return typeof value === "number" && Number.isFinite(value);
+        case "integer": return typeof value === "number" && Number.isInteger(value);
+        default: return parseTypedValue(value, type, "$", "value").ok;
+      }
     case "list":
       return Array.isArray(value);
     case "record":

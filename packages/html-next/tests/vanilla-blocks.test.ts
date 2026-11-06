@@ -88,7 +88,7 @@ describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
     const module = vanilla(benchmarkShape);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
-    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, visitSelected, writeAttribute, writeText, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(module, /^import \{ attachGeneratedController, checkedReferenceValue, equalValue, buildTemplate, clearRegion, KeyedList, NONCONFORMING, readMember, toAttribute, toText, trackContainer, truthy, visitSelected, writeAttribute, writeText, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
     const { inputs } = await bundle(module, true);
     const forbidden = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
@@ -440,6 +440,24 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.selected = null; host.state.other = 2; },
       (host) => { host.state.rows = []; host.state.selected = 4; },
     ]);
+  });
+
+  it("checks each loop alias's declared type and recovers without discarding valid siblings", async () => {
+    const result = await same(component(`
+      <state name="strings" type="list(object({ label: string, note: string }))" value="[{ label: 'A', note: 'safe' }]"></state>
+      <state name="numbers" type="list(object({ label: number, note: string }))" value="[{ label: 7, note: 'safe' }]"></state>`, `
+      <section><p class="strings"><b $each="row of $strings">[{$row.label}|{$row.note}]</b></p>
+      <p class="numbers"><b $each="row of $numbers">[{$row.label}|{$row.note}]</b></p></section>`), [
+      (host) => { host.state.strings = [{ label: 7, note: "changed" }]; host.state.numbers = [{ label: 8, note: "changed" }]; },
+      (host) => { host.state.strings = [{ label: "B", note: "restored" }]; host.state.numbers = [{ label: 9, note: "restored" }]; },
+    ]);
+    const text = result.snapshots.map(html => {
+      const dom = new JSDOM(html);
+      try { return ["strings", "numbers"].map(name => dom.window.document.querySelector(`.${name}`)?.textContent); }
+      finally { dom.window.close(); }
+    });
+    assert.deepEqual(text, [["[A|safe]", "[7|safe]"], ["[A|changed]", "[8|changed]"],
+      ["[B|restored]", "[9|restored]"], ["[B|restored]", "[9|restored]"]]);
   });
 
   it("re-renders container conversions written through any path, not only through the row's item", async () => {

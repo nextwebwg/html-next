@@ -23,13 +23,16 @@ export function declaredStateValue(declaration: { readonly expression?: Compiled
 }
 
 const declaredPathTypes = new WeakMap<ComponentDefinition, Map<string, TypeNode | undefined>>();
+type DeclaredTypeResolver = NonNullable<Scope["typeOfDeclaredPath"]>;
+const declaredTypeResolvers = new WeakMap<ComponentDefinition, DeclaredTypeResolver>();
+const layerTypeResolvers = new WeakMap<object, { parent: Scope["typeOfDeclaredPath"]; resolve: DeclaredTypeResolver }>();
 
 /**
  * The type a reference must satisfy, or undefined when nothing declares one.
  *
  * Only a declaration carrying a type constrains a reference: a prop, a typed `<state>`/`<computed>`,
- * or a `<data>` read (whose declared type describes `.value`). A loop alias or an untyped
- * declaration says nothing, so references through it are unconstrained.
+ * or a `<data>` read (whose declared type describes `.value`). Lexical aliases resolve through
+ * their layer's type resolver; an untyped declaration imposes no constraint.
  */
 export function declaredTypeAt(definition: ComponentDefinition, path: string | readonly (string | number)[], scope?: Scope): TypeNode | undefined {
   let cache = declaredPathTypes.get(definition);
@@ -39,7 +42,7 @@ export function declaredTypeAt(definition: ComponentDefinition, path: string | r
   }
   const segments = typeof path === "string" ? path.split(".") : path.map(String);
   const cacheKey = JSON.stringify(segments);
-  const selected = definition.contract.props[segments[0]!]?.select !== undefined && scope !== undefined;
+  const selected = Object.hasOwn(definition.contract.props, segments[0]!) && definition.contract.props[segments[0]!]!.select !== undefined && scope !== undefined;
   if (!selected && cache.has(cacheKey)) return cache.get(cacheKey);
 
   const [root, ...steps] = segments;
@@ -59,7 +62,7 @@ function rootDeclaredType(
   steps: string[],
   scope?: Scope,
 ): TypeNode | undefined {
-  const prop = definition.contract.props[root];
+  const prop = Object.hasOwn(definition.contract.props, root) ? definition.contract.props[root] : undefined;
   if (prop !== undefined) {
     const type = prop.select === undefined || scope === undefined
       ? prop.type : selectedPropType(definition.contract, prop, { [prop.select.from]: scope.get(prop.select.from) });
@@ -74,8 +77,11 @@ function rootDeclaredType(
     // `<data type>` describes the resolved value, reached through `.value`; the rest of the state
     // surface has its own types.
     const first = steps.shift();
-    if (first === undefined) return undefined;
-    if (first !== "value") return DATA_STATE_FIELDS[first];
+    if (first === undefined) return { kind: "object", open: true, fields: [
+      { name: "value", optional: false, type: declaration.type === undefined ? { kind: "terminal", name: "unknown" } : parseTypeExpression(declaration.type) },
+      ...Object.entries(DATA_STATE_FIELDS).map(([name, type]) => ({ name, type: type!, optional: false })),
+    ] };
+    if (first !== "value") return Object.hasOwn(DATA_STATE_FIELDS, first) ? DATA_STATE_FIELDS[first] : undefined;
     return declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
   }
   return undefined;
@@ -91,7 +97,14 @@ function dimensionOf(type: TypeNode | undefined): "length" | "percentage" | "dur
 /** Gives a component scope its declared types; a computed carries its expression's dimension. */
 export function declareTypes(scope: Scope, definition: ComponentDefinition): void {
   const resolvingDimensions = new Set<string>();
-  scope.typeOfDeclaredPath = (path) => declaredTypeAt(definition, path);
+  // Root type metadata has no request values. Share its identity so expression checks remain
+  // reusable across instances, while each lexical alias retains its own resolver/cache.
+  let resolver = declaredTypeResolvers.get(definition);
+  if (resolver === undefined) {
+    resolver = (path, values) => declaredTypeAt(definition, path, values);
+    declaredTypeResolvers.set(definition, resolver);
+  }
+  scope.typeOfDeclaredPath = resolver;
   scope.typeOfPath = (path) => {
     const dimension = dimensionOf(scope.typeOfDeclaredPath?.(path));
     if (dimension !== undefined) return dimension;
@@ -106,16 +119,25 @@ export function declareTypes(scope: Scope, definition: ComponentDefinition): voi
 
 /** Gives a local layer (a loop item, a `$with` alias) its types over its parent's. */
 export function declareLayerTypes(child: Scope, parent: Scope, types: Readonly<Record<string, TypeNode | undefined>>): void {
-  child.typeOfDeclaredPath = (path) => {
-    const [root, ...keys] = path.split(".");
-    if (!Object.hasOwn(types, root!)) return parent.typeOfDeclaredPath?.(path);
-    let type = types[root!];
-    for (const key of keys) {
-      if (type === undefined) break;
-      type = typeAtKey(type, key);
-    }
-    return type;
-  };
+  const parentResolver = parent.typeOfDeclaredPath;
+  let resolver = layerTypeResolvers.get(types);
+  if (resolver === undefined || resolver.parent !== parentResolver) {
+    // Rows share immutable type metadata, not their values or reactive scope. Capturing only the
+    // parent resolver also keeps these cached checks independent of request/instance state.
+    const resolve: DeclaredTypeResolver = (path, values) => {
+      const [root, ...keys] = path.split(".");
+      if (!Object.hasOwn(types, root!)) return parentResolver?.(path, values);
+      let type = types[root!];
+      for (const key of keys) {
+        if (type === undefined) break;
+        type = typeAtKey(type, key);
+      }
+      return type;
+    };
+    resolver = { parent: parentResolver, resolve };
+    layerTypeResolvers.set(types, resolver);
+  }
+  child.typeOfDeclaredPath = resolver.resolve;
   child.typeOfPath = (path) => dimensionOf(child.typeOfDeclaredPath?.(path)) ?? parent.typeOfPath?.(path);
 }
 

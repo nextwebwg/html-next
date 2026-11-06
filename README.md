@@ -39,6 +39,8 @@ The command supports native, Vue, React, Preact, Svelte, and Angular targets and
 
 Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
 
+An experimental [native .NET renderer](./packages/html-next-dotnet) compiles and reuses inert template plans with C# data. It has its own .NET tests and validated Fluid/Node benchmarks; full component support and shared client-runtime selection are planned separately.
+
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and
 [HTML Forms](https://nextwebwg.org/html-forms/). A component is authored once as inert,

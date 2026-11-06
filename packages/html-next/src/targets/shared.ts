@@ -1,4 +1,6 @@
-import { parseFragment } from "parse5";
+import { foreignContent } from "parse5";
+import { attributeNamespace } from "../dom-attributes.js";
+import { isUrlAttribute } from "../sanitize.js";
 
 import type { ComponentDefinition, ElementNode, TemplateAttribute, TemplateNode } from "../template.js";
 import type { PropContract, PropType, PropValue } from "../types.js";
@@ -26,16 +28,16 @@ export function isVoidElement(name: string): boolean {
 }
 
 // Bound names are lowercased by the HTML parser. Recover SVG's adjusted attribute spelling.
-const adjustedSvgAttributes = new Map<string, string>();
 export function svgAttributeName(name: string): string {
-  let adjusted = adjustedSvgAttributes.get(name);
-  if (adjusted === undefined) {
-    const fragment = parseFragment(`<svg ${name}></svg>`);
-    const svg = fragment.childNodes[0] as { attrs?: readonly { name: string }[] } | undefined;
-    adjusted = svg?.attrs?.[0]?.name ?? name;
-    adjustedSvgAttributes.set(name, adjusted);
-  }
-  return adjusted;
+  const token = { attrs: [{ name, value: "" }] };
+  foreignContent.adjustTokenSVGAttrs(token as Parameters<typeof foreignContent.adjustTokenSVGAttrs>[0]);
+  return token.attrs[0]!.name;
+}
+
+export function namespacedAttributeSource(name: string, value: string, outputName = name): string {
+  const namespace = attributeNamespace(name);
+  if (namespace === undefined) throw new Error(`No namespace for attribute ${name}.`);
+  return `[${JSON.stringify(namespace)}, ${JSON.stringify(outputName)}, ${JSON.stringify(name.slice(name.indexOf(":") + 1))}, ${value}${isUrlAttribute(name) ? ", true" : ""}]`;
 }
 
 const NATIVE_BOOLEAN_ATTRIBUTES = new Set([
@@ -78,6 +80,11 @@ export function propKey(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : quote(name);
 }
 
+/** An object literal's authored keys must define own properties, including `__proto__`. */
+export function objectKey(name: string): string {
+  return name === "__proto__" ? `[${quote(name)}]` : quote(name);
+}
+
 export function typeSource(type: PropType): string {
   return typeScriptType(type);
 }
@@ -88,11 +95,24 @@ function includesNull(type: PropType): boolean {
   return type.kind === "union" && type.members.some(includesNull);
 }
 
-/** Optional component inputs accept an explicit null unless their declared type already does. */
-export function propTypeSource(prop: PropContract): string {
-  const source = prop.values === undefined ? typeSource(prop.type)
+function declaredPropTypeSource(prop: PropContract): string {
+  return prop.values === undefined ? typeSource(prop.type)
     : prop.values.map((value) => JSON.stringify(value)).join(" | ");
-  return prop.required || includesNull(prop.type) ? source : `${source} | null`;
+}
+
+/** A caller can clear any prop with null; required controls its validity. */
+export function propTypeSource(prop: PropContract): string {
+  const source = declaredPropTypeSource(prop);
+  return includesNull(prop.type) ? source : `${source} | null`;
+}
+
+/** Accepted reads stay non-null only when the declaration supplies a non-null default. */
+export function propValueTypeSource(prop: PropContract): string {
+  return propValueIsNullable(prop) ? propTypeSource(prop) : declaredPropTypeSource(prop);
+}
+
+export function propValueIsNullable(prop: PropContract): boolean {
+  return prop.default === undefined || prop.default === null;
 }
 
 /**
@@ -101,8 +121,7 @@ export function propTypeSource(prop: PropContract): string {
  */
 export function slotPropsType(declared: Readonly<Record<string, PropContract>>): string {
   return `{ ${Object.entries(declared).map(([name, prop]) => {
-    const type = prop.values === undefined ? typeSource(prop.type) : prop.values.map((value) => JSON.stringify(value)).join(" | ");
-    return `readonly ${propKey(name)}${prop.required || prop.default !== undefined ? "" : "?"}: ${type};`;
+    return `readonly ${propKey(name)}${prop.required || prop.default !== undefined ? "" : "?"}: ${propValueTypeSource(prop)};`;
   }).join(" ")} }`;
 }
 
@@ -120,16 +139,19 @@ export function slotPropCheckSource(definition: { readonly source: { readonly fi
   return `(value: any): boolean => value != null && typeof value !== "symbol" && warnUnless(acceptsSlotProp(value, ${JSON.stringify(normalized)}), ${quote(`${file}#${definition.contract.tag}:slot:${slot ?? ""}:${prop}`)}, ${quote(message)})`;
 }
 
+export function slotPropDefaultSource(prop: { readonly default?: PropValue }): string {
+  return prop.default === undefined ? "null" : JSON.stringify(prop.default);
+}
+
 /**
- * What a bound slot prop gives its consumer, as a one-argument function's source, or undefined when it
- * gives its value as it is: a null value, and one its declared type rejects (which warns HR007), take the
- * declared default, or null without one. `keepSymbols` passes an invalid result through for the caller to retain.
+ * A bound slot prop's conversion function: a null value, and one its declared type rejects (which warns HR007), take the
+ * declared default, or null without one. `keepInvalid` passes an invalid result through for the caller to retain.
  */
 export function slotPropValueSource(definition: { readonly source: { readonly file: string }; readonly contract: { readonly tag: string } },
-  slot: string | undefined, prop: { readonly name: string; readonly type?: PropType; readonly default?: PropValue }, keepSymbols = false): string | undefined {
-  const fallback = prop.default === undefined ? "null" : JSON.stringify(prop.default);
-  if (prop.type === undefined) return prop.default === undefined ? undefined : `(value: any): any => value == null ? ${fallback} : value`;
-  return `(value: any): any => ${keepSymbols ? `typeof value === "symbol" || ` : ""}(${slotPropCheckSource(definition, slot, prop.name, prop.type)})(value) ? value : ${fallback}`;
+  slot: string | undefined, prop: { readonly name: string; readonly type?: PropType; readonly default?: PropValue }, keepInvalid = false): string {
+  const fallback = slotPropDefaultSource(prop);
+  if (prop.type === undefined) return `(value: any): any => value == null ? ${fallback} : value`;
+  return `(value: any): any => ${keepInvalid ? `value === Symbol.for("html-next.invalid-result") || ` : ""}(${slotPropCheckSource(definition, slot, prop.name, prop.type)})(value) ? value : ${fallback}`;
 }
 
 /** The props module's full value check, imported under the name slot prop checks call it by. */
@@ -161,11 +183,11 @@ export function dependentPropTypeSource(
   if (parameter === undefined) return propTypeSource(prop);
   const cases = prop.select.options.map((option) => ({
     value: JSON.stringify(option.value),
-    type: `${typeScriptType(option.type)}${prop.required ? "" : " | null"}`,
+    type: `${typeScriptType(option.type)} | null`,
   }));
   return cases.reduceRight((otherwise, item) =>
     `${parameter} extends ${item.value} ? ${item.type} : ${otherwise}`,
-  prop.required ? "never" : "null");
+  "null");
 }
 
 export function generatedPropDescriptor(

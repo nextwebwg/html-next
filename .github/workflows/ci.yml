@@ -29,6 +29,7 @@ jobs:
       has_packages: ${{ steps.plan.outputs.has_packages }}
       playwright: ${{ steps.plan.outputs.playwright }}
       generated: ${{ steps.plan.outputs.generated }}
+      dotnet: ${{ steps.plan.outputs.dotnet }}
       converters: ${{ steps.plan.outputs.converters }}
       browser_reused: ${{ steps.reuse.outputs.reused }}
       browser_image: ${{ steps.reuse.outputs.image }}
@@ -75,6 +76,22 @@ jobs:
       - run: pnpm --filter @nextwebwg/html-next check:release
       - if: needs.changes.outputs.generated == 'true'
         run: pnpm check:generated
+
+  dotnet:
+    name: Native .NET renderer
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore packages/html-next-dotnet/tests/HtmlNext.Tests --locked-mode
+      - run: dotnet test packages/html-next-dotnet/tests/HtmlNext.Tests -c Release --no-restore --nologo
+      - run: dotnet restore packages/html-next-dotnet/benchmarks --locked-mode
+      - run: dotnet run --project packages/html-next-dotnet/benchmarks -c Release --no-restore -- --validate
 
   verify:
     name: Test ${{ matrix.name }}
@@ -200,7 +217,7 @@ jobs:
   required:
     name: Required
     if: always()
-    needs: [changes, repository, verify, browser, packages, runtimes, converters]
+    needs: [changes, repository, dotnet, verify, browser, packages, runtimes, converters]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -222,6 +239,8 @@ jobs:
           if (results.converters.result !== converters) process.exit(1);
           const runtimes = JSON.parse(results.changes.outputs.packages).includes('htmlkit') ? 'success' : 'skipped';
           if (results.runtimes.result !== runtimes) process.exit(1);
+          const dotnet = results.changes.outputs.dotnet === 'true' ? 'success' : 'skipped';
+          if (results.dotnet.result !== dotnet) process.exit(1);
           JS
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: receipt

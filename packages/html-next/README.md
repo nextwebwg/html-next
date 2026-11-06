@@ -86,6 +86,8 @@ npm install @nextwebwg/html-next
 
 `@nextwebwg/html-next` also exports `add`, `subtract`, `multiply`, and `divide`, the number arithmetic expressions use: `add(0.1, 0.2)` is `0.3`, as `$a + $b` would be, where JavaScript gives `0.30000000000000004`. A controller that calculates a value an expression also calculates gets the same result from them. Each is a separate function, so a bundle keeps only the ones it calls. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects.
 
+Generated controller declarations distinguish inputs from accepted values. A caller can clear any prop with `null`. Its accepted value returns to the declared default, or to `null` when no default exists. The generated read type reflects that default; `required` affects validity and does not make a missing value non-null. State with a non-null `value` likewise returns to it when cleared. These APIs follow the [public null and missing value rules](https://nextwebwg.org/declarative-components/types#null-and-missing-values).
+
 Importing `forms` pulls in no component runtime. Generated native components import the helpers their features need; generated Vue, React, and Svelte components use their target framework without an HTML Next runtime dependency.
 
 ## Built in the open

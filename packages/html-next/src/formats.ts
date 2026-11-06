@@ -23,7 +23,7 @@ export function timeFormat(value: string): boolean {
   return match !== null && Number(match[1]) < 24 && Number(match[2]) < 60 && Number(match[3] ?? 0) < 60;
 }
 
-function functionalColor(value: string): boolean {
+export function functionalColor(value: string): boolean {
   const match = /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\((.*)\)$/i.exec(value);
   if (match === null) return false;
   const body = match[2]!.trim();
@@ -41,7 +41,10 @@ export function urlFormat(value: string): boolean {
   try { return new URL(value).protocol !== ""; } catch { return false; }
 }
 
-export const emailFormat = (value: string): boolean => HTML_EMAIL_PATTERN.test(value);
+export function createEmailFormat(pattern: RegExp): (value: string) => boolean {
+  return function emailFormat(value: string): boolean { return pattern.test(value); };
+}
+export const emailFormat = /* @__PURE__ */ createEmailFormat(HTML_EMAIL_PATTERN);
 
 export const monthFormat = (value: string): boolean => /^(?!0000)\d{4,}-(?:0[1-9]|1[0-2])$/.test(value);
 
@@ -57,21 +60,31 @@ export function weekFormat(value: string): boolean {
   return week >= 1 && (week < 53 || (week === 53 && (jan1Day === 4 || (jan1Day === 3 && leap))));
 }
 
-export function datetimeLocalFormat(value: string): boolean {
-  const match = /^(\d{4,}-\d{2}-\d{2})[T ](.+)$/.exec(value);
-  return match !== null && dateFormat(match[1]!) && timeFormat(match[2]!);
+export function createDatetimeLocalFormat(date: (value: string) => boolean, time: (value: string) => boolean): (value: string) => boolean {
+  return function datetimeLocalFormat(value: string): boolean {
+    const match = /^(\d{4,}-\d{2}-\d{2})[T ](.+)$/.exec(value);
+    return match !== null && date(match[1]!) && time(match[2]!);
+  };
 }
+export const datetimeLocalFormat = /* @__PURE__ */ createDatetimeLocalFormat(dateFormat, timeFormat);
 
-export function datetimeFormat(value: string): boolean {
-  const match = /^(\d{4,}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)(Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/.exec(value);
-  return match !== null && dateFormat(match[1]!) && timeFormat(match[2]!);
+export function createDatetimeFormat(date: (value: string) => boolean, time: (value: string) => boolean): (value: string) => boolean {
+  return function datetimeFormat(value: string): boolean {
+    const match = /^(\d{4,}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)(Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/.exec(value);
+    return match !== null && date(match[1]!) && time(match[2]!);
+  };
 }
+export const datetimeFormat = /* @__PURE__ */ createDatetimeFormat(dateFormat, timeFormat);
 
 export const colorHexFormat = (value: string): boolean => /^#[\da-fA-F]{3}(?:[\da-fA-F]{1}|[\da-fA-F]{3}(?:[\da-fA-F]{2})?)?$/.test(value);
 
-let namedColors: Set<string> | undefined;
-export const colorFormat = (value: string): boolean => colorHexFormat(value) ||
-  (namedColors ??= new Set<string>(CSS_COLOR_KEYWORDS)).has(value.toLowerCase()) || functionalColor(value);
+export function createColorFormat(keywords: readonly string[], hex: (value: string) => boolean, functional: (value: string) => boolean): (value: string) => boolean {
+  let namedColors: Set<string> | undefined;
+  return function colorFormat(value: string): boolean {
+    return hex(value) || (namedColors ??= new Set<string>(keywords)).has(value.toLowerCase()) || functional(value);
+  };
+}
+export const colorFormat = /* @__PURE__ */ createColorFormat(CSS_COLOR_KEYWORDS, colorHexFormat, functionalColor);
 
 export const lengthFormat = (value: string): boolean =>
   /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|vw|vh|vmin|vmax|ch|ex|cm|mm|in|pt|pc|q)$/.test(value) || value === "0";

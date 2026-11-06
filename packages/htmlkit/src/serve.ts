@@ -97,7 +97,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const assets = (page: RenderedPage): PageAssets => {
     const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
     const id = `virtual:htmlkit/${graphId}`;
-    for (const [module, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch }, id, css)) sources.set(module, source);
+    for (const [module, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch }, id, css, page.layers.map(layer => layer.component))) sources.set(module, source);
     const styles = stylesheetSources(page.components);
     for (const [id, css] of styles) sources.set(id, css);
     // Vite's HTML transformer applies its base to root-relative assets a second time.

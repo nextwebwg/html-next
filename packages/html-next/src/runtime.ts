@@ -28,7 +28,8 @@ import {
   evaluateCompiled,
   toAttribute,
   toText,
-  typeCheckedDependencies,
+  type ReferenceChecks,
+  type ReferencePath,
   truthy,
   type Scope,
   type Value,
@@ -47,7 +48,6 @@ import {
   createSignal,
   ReactiveScope,
   readItems,
-  readKey,
   registerReactiveAlias,
   untracked,
   type ReactiveEffect,
@@ -55,6 +55,7 @@ import {
   type ReactiveSignal,
 } from "./reactivity.js";
 import { hasExecutableUrl, isContentOnly, isUrlAttribute, markContentOnly, sanitizeFragment } from "./sanitize.js";
+import { attributeNamespace, writeNamespacedAttribute } from "./dom-attributes.js";
 import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
@@ -73,6 +74,7 @@ import {
   formatType,
   normalizeType,
   parseTypedValue,
+  typeAtKey,
   typeCheck,
   type TypeNode,
 } from "./type-system.js";
@@ -604,7 +606,7 @@ function replaceInstances(root: Document, registry: DocumentRegistry, tag: strin
     const definition = registry.definitions.get(previous.definition.contract.tag)!.definition;
     const invocation = root.createElement(definition.contract.tag);
     for (const { name, value } of carriedAttributes(previous, element)) {
-      if (name !== COMPONENT_ATTRIBUTE && name !== "data-component") invocation.setAttribute(name, value);
+      if (name !== COMPONENT_ATTRIBUTE && name !== "data-component") setLiteralAttribute(invocation, name, value);
     }
     const props: Record<string, unknown> = {};
     for (const name of Object.keys(definition.contract.props)) {
@@ -1203,70 +1205,9 @@ function evalValue(expression: string, scope: Scope): Value {
   }
 }
 
-/** A path an expression reads that a declaration constrains, and its type. */
-type ConstrainedReference = readonly [path: string, type: TypeNode];
+/** Each immutable type layer shares metadata checks without retaining instance values. */
+const referenceChecks = new WeakMap<object, WeakMap<CompiledExpression, ReferenceChecks>>();
 
-/** Paths an expression reads that a declaration constrains, resolved once per definition. */
-const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly ConstrainedReference[]>>();
-
-/**
- * The value at a dependency path. A path names both a list index and a record key as a segment
- * (`items.0`, `byId.42`), so each segment is read the way the value in hand reads it.
- */
-function readPath(path: string, scope: ReactiveScope): Value {
-  const [root, ...keys] = path.split(".");
-  let value = scope.read(root!);
-  for (const key of keys) {
-    if (Array.isArray(value)) {
-      value = key === "length" || /^\d+$/.test(key) ? readKey(value, key === "length" ? key : Number(key)) : undefined;
-    } else if (typeof value === "string" && key === "length") {
-      value = value.length;
-    } else if (typeof value === "object" && value !== null) {
-      value = readKey(value, key);
-    } else {
-      return ABSENT;
-    }
-  }
-  return value ?? ABSENT;
-}
-
-function constrainedReferences(
-  definition: ComponentDefinition,
-  expression: string,
-): readonly ConstrainedReference[] {
-  let cache = constrainedPaths.get(definition);
-  if (cache === undefined) {
-    cache = new Map();
-    constrainedPaths.set(definition, cache);
-  }
-  const known = cache.get(expression);
-  if (known !== undefined) return known;
-  let paths: readonly ConstrainedReference[] = [];
-  try {
-    paths = typeCheckedDependencies(expression).flatMap((path) => {
-      const type = declaredTypeAt(definition, path);
-      return type === undefined ? [] : [[path, type] as const];
-    });
-  } catch { /* an unreadable expression fails where it is evaluated, not here */ }
-  cache.set(expression, paths);
-  return paths;
-}
-
-/**
- * Whether a value satisfies the type declared for the reference that read it.
- *
- * A reference is checked against its own type, not its subtree: a list reference needs a list, and
- * whether an item's field satisfies its own type is that field reference's business. That keeps the
- * check constant-time on a hot path, and keeps one bad row from silencing a reference to the list.
- */
-/**
- * Evaluates a binding expression, or leaves it inert when a reference fails its declared type.
- *
- * A reference is checked where it is read, not where its value arrived, so a payload stays exactly
- * as it came back and only the references into its offending part go inert. Callers keep whatever
- * they last had: a binding does not write, and a computed does not recompute, so nothing downstream
- * of a broken contract moves.
- */
 const reportedAuthoredWarnings = new WeakMap<ComponentDefinition, Set<string>>();
 
 function warnAuthored(definition: ComponentDefinition, location: string, message: string): void {
@@ -1277,18 +1218,50 @@ function warnAuthored(definition: ComponentDefinition, location: string, message
   console.warn(`${definition.source.file}: HR007: ${message}`);
 }
 
-function conformingReferences(source: string, scope: ReactiveScope, definition: ComponentDefinition): boolean {
-  for (const [path, type] of constrainedReferences(definition, source)) {
-    const value = readPath(path, scope);
-    // Absence is not a violation: a value that is not there yet has nothing to conform to.
-    if (value === ABSENT || value === undefined) continue;
-    const selectedType = definition.contract.props[path.split(".")[0]!]?.select === undefined
-      ? type : declaredTypeAt(definition, path, scope);
-    if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
-    warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` must satisfy ${formatType(selectedType)}.`);
-    return false;
-  }
-  return true;
+function checksFor(expression: CompiledExpression, scope: ReactiveScope, definition: ComponentDefinition): ReferenceChecks {
+  const resolver = scope.typeOfDeclaredPath;
+  const key = resolver ?? definition;
+  let cache = referenceChecks.get(key);
+  if (cache === undefined) referenceChecks.set(key, cache = new WeakMap());
+  const known = cache.get(expression);
+  if (known !== undefined) return known;
+  const types = new WeakMap<ReferencePath, { type: TypeNode | undefined; selected: boolean }>();
+  const checks: ReferenceChecks = {
+    typeOf(reference, values) {
+      let known = types.get(reference);
+      if (known === undefined) {
+        const selected = definition.contract.props[reference.root]?.select !== undefined;
+        let type = selected ? undefined : resolver === undefined
+          ? declaredTypeAt(definition, reference.root) : resolver(reference.root);
+        if (!selected) for (const step of reference.staticKeys ?? []) {
+          if (type === undefined) break;
+          type = typeAtKey(type, step);
+        }
+        known = { type, selected };
+        types.set(reference, known);
+      }
+      if (!known.selected) return known.type;
+      const selected = (): TypeNode | undefined => {
+        let type = resolver === undefined ? declaredTypeAt(definition, reference.root, values) : resolver(reference.root, values);
+        for (const step of reference.staticKeys ?? []) {
+          if (type === undefined) break;
+          type = typeAtKey(type, step);
+        }
+        return type;
+      };
+      return observingInputs() ? withoutInputObservation(selected) : selected();
+    },
+    atKey: typeAtKey,
+    accepts(reference, value, type) {
+      if (value === NONCONFORMING) return false;
+      if (value === ABSENT || value === null || type === undefined || conformsAtReference(value, type)) return true;
+      warnAuthored(definition, `expression:${expression.source}:${reference.name}`,
+        `Reference \`${reference.name}\` must satisfy ${formatType(type)}.`);
+      return false;
+    },
+  };
+  cache.set(expression, checks);
+  return checks;
 }
 
 function evalConforming(
@@ -1296,13 +1269,9 @@ function evalConforming(
   scope: ReactiveScope,
   definition: ComponentDefinition,
 ): Value | typeof NONCONFORMING {
-  const source = typeof expression === "string" ? expression : expression.source;
-  const conforms = observingInputs()
-    ? withoutInputObservation(() => conformingReferences(source, scope, definition))
-    : conformingReferences(source, scope, definition);
-  if (!conforms) return NONCONFORMING;
   try {
-    return evaluateCompiled(typeof expression === "string" ? compileExpression(expression) : expression, scope);
+    const compiled = typeof expression === "string" ? compileExpression(expression) : expression;
+    return evaluateCompiled(compiled, scope, compiled.dependencies.length === 0 ? undefined : checksFor(compiled, scope, definition));
   } catch (error) {
     if (error instanceof UndeclaredName) fail("HB001", error.message);
     throw error;
@@ -1414,7 +1383,7 @@ interface RuntimeRenderContext {
 }
 
 interface ProjectedTemplate {
-  readonly children: readonly TemplateNode[];
+  readonly node: ElementNode;
   readonly scope: ReactiveScope;
   readonly context: RuntimeRenderContext;
 }
@@ -1671,10 +1640,21 @@ function bindEvents(
 
 function setAttribute(element: Element, name: string, value: string | null): void {
   name = attributeNameFor(element, name);
+  const namespace = attributeNamespace(name);
+  if (namespace !== undefined) {
+    writeNamespacedAttribute(element, namespace, name, name.slice(name.indexOf(":") + 1), value !== null && isUrlAttribute(name) && hasExecutableUrl(value) ? null : value);
+    return;
+  }
   if (value === null || (isUrlAttribute(name) && hasExecutableUrl(value))) {
     element.removeAttribute(name);
   }
   else element.setAttribute(name, value);
+}
+
+function setLiteralAttribute(element: Element, name: string, value: string): void {
+  const namespace = attributeNamespace(name);
+  if (namespace === undefined) element.setAttribute(name, value);
+  else element.setAttributeNS(namespace, name, value);
 }
 
 /**
@@ -2004,6 +1984,7 @@ function renderEachRegion(
   const flow = node.flow as Extract<Flow, { kind: "each" }>;
   const listType = declaredExpressionType(flow.listPlan ?? flow.list, scope);
   const itemType = listType?.kind === "list" ? listType.item : undefined;
+  const itemTypes = { [flow.item]: itemType };
   const existing = context.committed ? existingEachRange(candidate, "each") : undefined;
   const start = existing?.[0] ?? document.createComment("html-next:each-start");
   const end = existing?.[1] ?? document.createComment("html-next:each-end");
@@ -2067,13 +2048,13 @@ function renderEachRegion(
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = typedLayer(scope, locals, { [flow.item]: itemType });
+        local = typedLayer(scope, locals, itemTypes);
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
+        local ??= typedLayer(scope, locals, itemTypes);
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(rowContext, owned);
         const adopted = adopting[adoptionIndex++];
@@ -2532,7 +2513,7 @@ function nativeTemplatePlan(
     const elementNode = candidate as ElementNode;
     const element = createTemplateElement(document, elementNode.name, context);
     for (const attribute of elementNode.attributes) {
-      if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+      if (attribute.kind === "literal") setLiteralAttribute(element, attribute.name, attribute.value);
     }
     if (elementNode.attributes.some((attribute) => attribute.kind === "attribute")) {
       actions.push({ kind: "attributes", path, node: elementNode });
@@ -2573,7 +2554,7 @@ function instantiateNativeTemplate(
   if (node === context.rootNode) context.root = element;
   for (const attribute of passThrough) {
     const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
-    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
+    setLiteralAttribute(element, attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
   }
   for (let index = 0; index < plan.actions.length; index += 1) {
     const action = plan.actions[index]!;
@@ -2608,7 +2589,8 @@ function renderInstance(
       const carrier = candidate instanceof HTMLTemplateElement && candidate.getAttribute("slot") === slot.value
         ? candidate : document.createElement("template");
       carrier.setAttribute("slot", slot.value);
-      projectedTemplates.set(carrier, { children: node.children, scope, context });
+      if (carrier !== candidate && node.slotContent !== undefined) carrier.innerHTML = node.slotContent;
+      projectedTemplates.set(carrier, { node, scope, context });
       return [carrier];
     }
     if (contentDirective !== undefined) {
@@ -2725,7 +2707,7 @@ function renderInstance(
     (name === "value" || name === "checked");
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal" && !(adoptedRoot && element.hasAttribute(attribute.name) && !resetDefault(attribute.name))) {
-      element.setAttribute(attribute.name, attribute.value);
+      setLiteralAttribute(element, attribute.name, attribute.value);
     }
   }
   // Serialized live control values use HTML's default-value attributes until hydration. Once
@@ -2750,7 +2732,7 @@ function renderInstance(
   // attributes, applied next, are the component's own output.
   for (const attribute of passThrough) {
     const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
-    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
+    setLiteralAttribute(element, attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
   }
   // A component may lower onto any custom-element name. Lowering replaces a registered component's
   // invocation, so nothing attaches to it; an unregistered one keeps its bindings until claimed.
@@ -2893,7 +2875,7 @@ function renderScopedTemplate(
   if (authored === undefined && projectedSlotParser === undefined) {
     fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
   }
-  const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
+  const content = authored?.node.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
   const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
   // A `<slot>` in the template is the consumer's outlet, so it reads the consumer's projection and
   // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
@@ -2905,14 +2887,15 @@ function renderScopedTemplate(
     hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
   }) as RuntimeRenderContext;
   for (const prop of props) {
+    projectedScope.set(prop.name, (prop.default ?? null) as Value);
     ownEffect(context, scope, () => {
       const value = evalConforming(prop.expression, scope, context.definition);
       if (value === NONCONFORMING) return;
       // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
       // accept warns once (HR007). It, and absent input, take the prop's default, or null.
       const absent = value == null || value === ABSENT;
-      if (absent && prop.type === undefined && prop.default !== undefined) {
-        projectedScope.set(prop.name, prop.default as Value);
+      if (absent && prop.type === undefined) {
+        projectedScope.set(prop.name, (prop.default ?? null) as Value);
         return;
       }
       if (prop.type !== undefined && (absent || !parseTypedValue(value, prop.type, "$", "value").ok)) {
@@ -3439,6 +3422,14 @@ export function serializeRenderedForm(container: Element): string {
     const others = [...carriedBy].flatMap(([node, owner]) => owner === index ? [] : [node]);
     // ponytail: scans the other carried nodes per copied subtree; a page holds few unrendered nodes.
     const copyOwn = (node: Node): Node => {
+      if (node instanceof HTMLTemplateElement) {
+        const source = projectedTemplates.get(node)?.node.slotContent;
+        if (source !== undefined) {
+          const copy = node.cloneNode(false) as HTMLTemplateElement;
+          copy.innerHTML = source;
+          return copy;
+        }
+      }
       if (!others.some((other) => node.contains(other))) return node.cloneNode(true);
       const copy = node.cloneNode(false);
       for (const child of node.childNodes) if (!others.includes(child)) copy.appendChild(copyOwn(child));

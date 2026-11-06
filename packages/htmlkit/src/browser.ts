@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { normalizePath, type Plugin } from "vite";
 import type { ClientOptions } from "./client.js";
 import type { BrowserDefinition } from "./types.js";
-import { collectSharedStylesheets, compileComponentGraphStylesForBuild, generateComponent, type ComponentDefinition } from "@nextwebwg/html-next";
+import { analyzeClientPlan, collectSharedStylesheets, compileComponentGraphStylesForBuild, generateComponent, type ComponentDefinition } from "@nextwebwg/html-next";
 
 const packagedRuntime = fileURLToPath(import.meta.resolve("@nextwebwg/html-next/generated-runtime"));
 const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]generated-runtime\.js$/, "/src/generated-runtime.ts");
@@ -53,9 +53,17 @@ function componentId(definition: ComponentDefinition): string {
  * ships only the generated-runtime helpers its components use; controllers and declared reads are
  * imported by the components that own them, and the page's stylesheets by its entry.
  */
-export function browserSources(components: readonly BrowserDefinition[], options: ClientOptions, entry: string, css: readonly string[] = []): ReadonlyMap<string, string> {
+export function browserSources(components: readonly BrowserDefinition[], options: ClientOptions, entry: string, css: readonly string[] = [], roots?: readonly string[]): ReadonlyMap<string, string> {
   const { base } = options;
   const sources = new Map<string, string>();
+  // Navigation creates layers and updates kept hosts. Preserve those public roots and everything
+  // their templates can invoke, while omitting unused linked definitions from the page entry.
+  const clientPlan = analyzeClientPlan(components.map(component => ({ ...component.definition,
+    ...component.controller === undefined ? {} : { controller: component.controller },
+    ...component.module === undefined && component.client === undefined ? {} : { module: component.module ?? component.client! },
+  })), { ...roots === undefined ? {} : { entries: roots }, creationRoots: roots ?? "all", publicRoots: roots ?? "all" });
+  const retained = new Set(clientPlan.creation);
+  const registeredComponents = components.filter(component => retained.has(component.definition.contract.tag));
   const invocations = new Map(components.map(({ definition }) => [definition.contract.tag, { module: componentId(definition), definition }]));
   for (const component of components) {
     const reads: string[] = [];
@@ -131,15 +139,15 @@ export async function adoption() {
   }
   // Each component's factory and the invocation attribute each prop is written as (application.ts),
   // which client navigation renders a payload's layers with.
-  const registered = components.map(({ definition, binding }, index) => `${JSON.stringify(definition.contract.tag)}: [c${index}, ${JSON.stringify(Object.fromEntries(
+  const registered = registeredComponents.map(({ definition, binding }, index) => `${JSON.stringify(definition.contract.tag)}: [c${index}, ${JSON.stringify(Object.fromEntries(
     Object.keys(definition.contract.props).map((name) => [name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase(), name])))}${binding === undefined ? "" : `, b${index}`}]`);
   const functions = "adoptRenderedProps, replaceProjectedNode, generatedHost, flushComponent";
   sources.set(entry, `import { ${functions} } from ${JSON.stringify(runtime)};
 import { page } from ${JSON.stringify(client)};
 ${css.map(file => `import ${JSON.stringify(normalizePath(file))};`).join("\n")}
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
-${components.map(({ definition }, index) => `import { create${definition.contract.name} as c${index} } from ${JSON.stringify(componentId(definition))};`).join("\n")}
-${components.flatMap(({ definition, binding }, index) => binding === undefined ? [] : [`
+${registeredComponents.map(({ definition }, index) => `import { create${definition.contract.name} as c${index} } from ${JSON.stringify(componentId(definition))};`).join("\n")}
+${registeredComponents.flatMap(({ definition, binding }, index) => binding === undefined ? [] : [`
 const b${index} = () => import(${JSON.stringify(componentId(definition) + ".module.js")}).then(module => module.adoption());`]).join("\n")}
 page({ ${functions} }, ${JSON.stringify(options)}, { ${registered.join(", ")} });
 `);

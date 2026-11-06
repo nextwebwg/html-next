@@ -151,7 +151,9 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   const latest = React.useRef(options);
   const [, requestCommit] = React.useReducer((revision: number, _action: undefined) => revision + 1, 0);
   const committing = React.useRef(false);
-  React.useLayoutEffect(() => { latest.current = options; });
+  const revisions = React.useRef({ written: 0, committed: -1 });
+  const renderedWrite = revisions.current.written;
+  React.useLayoutEffect(() => { latest.current = options; revisions.current.committed = renderedWrite; });
   const retainedRefs = React.useRef<ReadonlyMap<string, ReadonlySet<Element>> | undefined>(undefined);
   React.useLayoutEffect(() => {
     retainedRefs.current = undefined;
@@ -186,7 +188,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       queueMicrotask(() => {
         queuedCommit = false;
         if (connected) {
-          flushSync(() => requestCommit(undefined));
+          // A framework commit that rendered this write has already updated the DOM. Keep the
+          // explicit commit for nested writes, suspended renders and first-time host reactions.
+          if (revisions.current.written === 0 || revisions.current.committed < revisions.current.written) {
+            flushSync(() => requestCommit(undefined));
+          }
           // Suspense can retain the DOM without a commit; data providers must still notify readers.
           if (pendingEffects.size > 0) runtime.current!.flushEffects();
         }
@@ -267,6 +273,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     };
     // A write changes the value at its path and every path below it, never the containers above it.
     const changedPath = (path: readonly string[]): void => {
+      if (!committing.current) revisions.current.written += 1;
       scheduleCommit();
       if (path.length === 1) notify(dependency("state:" + path[0]));
       for (const entry of [...statePaths.values()]) {

@@ -804,6 +804,8 @@ export interface PropInputOptions {
   readonly check: (name: string, value: unknown, source: boolean, values: Readonly<Record<string, unknown>>) => InputAcceptance;
   readonly invalidate: () => void;
 }
+const NULL_ACCEPTANCE: InputAcceptance = { ok: true, value: null };
+
 interface PropInputRecord {
   caller: unknown;
   input: unknown;
@@ -883,6 +885,10 @@ export class PropInputs {
     return this.#records[name] ??= { caller: undefined, input: null, provided: false, source: false, refused: false, accepted: true, status: undefined, revision: 0 };
   }
   #fallback(name: string): unknown { return Object.hasOwn(this.#options.defaults, name) ? this.#options.defaults[name] : null; }
+  #accept(name: string, input: unknown, source: boolean): InputAcceptance {
+    const value = input == null ? this.#fallback(name) : input;
+    return value === null ? NULL_ACCEPTANCE : this.#options.check(name, value, source, this.#options.values);
+  }
   #status(record: PropInputRecord, status: InputStatus): void {
     const old = record.status;
     if (sameInputStatus(old, status)) return;
@@ -902,7 +908,7 @@ export class PropInputs {
         record.provided = true; record.source = false; record.refused = false; record.accepted = true;
         this.#status(record, upstream.status);
       } else {
-        const result = this.#options.check(name, upstream.value === null ? this.#fallback(name) : upstream.value, false, this.#options.values);
+        const result = this.#accept(name, upstream.value, false);
         record.accepted = result.ok;
         if (result.ok) {
           record.revision += 1;
@@ -917,9 +923,8 @@ export class PropInputs {
       // A producer result is not a new caller input and survives ordinary component rerenders.
       record.accepted = true;
     } else {
-      const candidate = input === undefined || input === null ? this.#fallback(name) : input;
       const result = input === undefined && !Object.hasOwn(this.#options.defaults, name)
-        ? { ok: true as const, value: null } : this.#options.check(name, candidate, false, this.#options.values);
+        ? NULL_ACCEPTANCE : this.#accept(name, input, false);
       record.input = input === undefined ? null : input;
       record.accepted = result.ok;
       record.refused = !result.ok && input !== undefined;
@@ -947,7 +952,7 @@ export class PropInputs {
     if (record.provided) return false;
     let value = this.#fallback(name);
     if (snapshot.status.ready) {
-      const result = this.#options.check(name, snapshot.value === null ? this.#fallback(name) : snapshot.value, true, this.#options.values);
+      const result = this.#accept(name, snapshot.value, true);
       if (!result.ok) return false;
       value = result.value;
     }

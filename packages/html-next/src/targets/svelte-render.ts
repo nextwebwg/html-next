@@ -105,7 +105,7 @@ function prototypeAttributes(rest: () => Record<string, unknown>) {
 export function retainedValue<T>(initial: T): (candidate: unknown) => T {
   let previous = initial;
   return (candidate: unknown) => {
-    if (candidate === Symbol.for("html-next.invalid-result")) return previous;
+    if (!acceptsBindingResult(candidate)) return previous;
     previous = candidate as T;
     return previous;
   };
@@ -116,7 +116,7 @@ export function retainedStructuralValue(): <T>(candidate: T | symbol) => { ready
   let ready = false;
   let previous: unknown;
   return function <T>(candidate: T | symbol) {
-    if (candidate !== Symbol.for("html-next.invalid-result")) { ready = true; previous = candidate; }
+    if (acceptsBindingResult(candidate)) { ready = true; previous = candidate; }
     return { ready, value: previous as T };
   };
 }

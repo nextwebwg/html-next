@@ -10,12 +10,14 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { renderComponents } from "../src/server.js";
 import { parseComponent } from "../src/source-parser.js";
 import { cases, compiledFixtures, definitions } from "./hydration-fixtures.js";
+import { numericDefinitions } from "./numeric-fixture.js";
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to browser hydration", () => {
   let directory: string;
   let bundle: string;
   let compiledBundle: string;
   let datesBundle: string;
+  let numericBundle: string;
   const dates = parseComponent(`<template component="ssr-native-dates"><defs><state name="value" type="string" value="'2026-10-30'"></state><prop name="min" type="string" default="">Earliest date.</prop></defs><section><input id="bound" type="date" from:min="$min" bind:value="value"><input id="property" type="date" from:min="$min" .value="$value"></section></template>`, "native-dates.html");
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-server-hydration-"));
@@ -24,12 +26,46 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
     await build({ entryPoints: [new URL("../src/live.ts", import.meta.url).pathname], outfile: bundle,
       bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
     await writeFile(compiledBundle, await compiledFixtures("iife"));
+    numericBundle = join(directory, "numeric.js");
+    await writeFile(numericBundle, await compiledFixtures("iife", "", numericDefinitions));
     datesBundle = join(directory, "dates.js");
     await writeFile(datesBundle, await compiledFixtures("iife", "", [dates]));
   });
   afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    for (const mode of ["live", "compiled"] as const) {
+      it(`${engine} retains finite destinations across invalid numeric results and recovery (${mode})`, async () => {
+        const rendered = await renderComponents('<ssr-finite-results id="subject"></ssr-finite-results>', { definitions: numericDefinitions });
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.setContent(rendered.html);
+          const read = () => page.evaluate(() => ({ computed: document.querySelector("#computed")!.textContent,
+            direct: document.querySelector("#direct")!.textContent, attribute: document.querySelector("#attribute")!.getAttribute("data-value"), child: document.querySelector("#child")!.textContent, scoped: document.querySelector("#scoped")!.textContent, scopedMissing: document.querySelector("#scoped-missing")!.textContent }));
+          assert.deepEqual(await read(), { computed: "", direct: "", attribute: "authored", child: "5", scoped: "5", scopedMissing: "true" });
+          await page.addScriptTag({ path: mode === "compiled" ? numericBundle : bundle });
+          if (mode === "compiled") await page.evaluate(() => {
+            (window as any).HtmlCompiled.factories["ssr-finite-results"]({}, undefined, document.querySelector("#subject"));
+          });
+          else await page.evaluate(definitionJSON => {
+            const runtime = (window as any).HtmlRuntime;
+            runtime.registerComponentDefinitions(JSON.parse(definitionJSON));
+            runtime.lowerDocument();
+          }, JSON.stringify(numericDefinitions));
+          assert.deepEqual(await read(), { computed: "", direct: "", attribute: "authored", child: "5", scoped: "5", scopedMissing: "true" });
+          for (const [button, expected] of [["valid", "0.5"], ["invalid", "0.5"], ["recover", "0.25"]] as const) {
+            await page.locator(`#${button}`).click();
+            await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+            assert.deepEqual(await read(), { computed: expected, direct: expected, attribute: expected, child: expected, scoped: expected, scopedMissing: "true" });
+          }
+          assert.deepEqual(errors, []);
+        } finally { await browser.close(); }
+      });
+    }
+
     it(`${engine} preserves incomplete native date segments through compiled hydration`, async () => {
       const rendered = await renderComponents('<ssr-native-dates id="dates"></ssr-native-dates>', { definitions: [dates] });
       const browser = await browserType.launch({ headless: true });
@@ -187,9 +223,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
     it(`${engine} keeps a closed slot's <template slot> lazy from Node output through hydration`, async () => {
       const rendered = await renderComponents('<ssr-lazy-page id="subject"></ssr-lazy-page>',
         { definitions, state: { "#subject": { label: "server" } } });
-      // The closed slot's template is serialized as it was, in the carrier: nothing rendered, nothing to fetch.
-      assert.ok(rendered.html.includes('<template carrier="ssr-lazy-toggle"><template slot="details"></template></template>'), rendered.html);
-      assert.doesNotMatch(rendered.html, /lazy\.png|<b>/);
+      // The source is inert inside the carrier; no element exists in the rendered document yet.
+      assert.ok(rendered.html.includes('<template carrier="ssr-lazy-toggle"><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="$label"></b></template></template>'), rendered.html);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -199,6 +234,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
           await route.fulfill({ status: 200, contentType: "image/png", body: "" });
         });
         await page.setContent(`<main>${rendered.html}</main>`);
+        assert.equal(await page.locator("img, b").count(), 0);
+        assert.deepEqual(requests, []);
         await page.addScriptTag({ path: bundle });
         const read = (): Promise<unknown> => page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {

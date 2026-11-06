@@ -153,7 +153,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
       }
       pages.push(page);
       for (const [id, source] of browserSources(page.components, { base: config.base, prefetch: config.prefetch,
-        manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length - 1}`, globalStylesheets(options, config.root))) sources.set(id, source);
+        manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length - 1}`, globalStylesheets(options, config.root), page.layers.map(layer => layer.component))) sources.set(id, source);
       for (const [id, css] of stylesheetSources(page.components)) sources.set(id, css);
     }
     // A server-rendered route's browser bundle follows the pages', one per route rather than per URL.
@@ -163,7 +163,7 @@ export async function buildApplication(input: ApplicationOptions = {}): Promise<
     for (const route of renders && application.error !== undefined ? [...serverRoutes, application.error] : serverRoutes) {
       const graph = await internals.graph(route);
       for (const [id, source] of browserSources(graph.components, { base: config.base, prefetch: config.prefetch,
-        manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length + serverGraphs.length}`, globalStylesheets(options, config.root))) sources.set(id, source);
+        manifest: config.base + "_htmlkit/manifest.json" }, `virtual:htmlkit/page-${pages.length + serverGraphs.length}`, globalStylesheets(options, config.root), graph.layers.map(layer => layer.definition.contract.tag))) sources.set(id, source);
       for (const [id, css] of stylesheetSources(graph.components)) sources.set(id, css);
       serverGraphs.push({ route, graph });
     }

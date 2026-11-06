@@ -2,7 +2,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
+import { checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, NONCONFORMING, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
@@ -50,6 +50,7 @@ const recoveredElements = new WeakSet<ElementNode>();
 export type ComponentSourceNode = ChildNode;
 
 export interface ComponentParserPlatform {
+  readonly slotContent?: (element: ComponentSourceNode) => string;
   readonly isNativeElement: (name: string) => boolean;
   readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
   readonly onDiagnostic?: (diagnostic: HtmlDiagnostic) => void;
@@ -119,7 +120,10 @@ function sourceTag(element: Element): string {
 }
 
 function sourceAttributes(element: Element): Iterable<SourceAttribute> {
-  return "attrs" in element ? element.attrs : element.attributes;
+  if (!("attrs" in element)) return element.attributes;
+  return element.attrs.some(attribute => attribute.prefix)
+    ? element.attrs.map(attribute => attribute.prefix ? { name: `${attribute.prefix}:${attribute.name}`, value: attribute.value } : attribute)
+    : element.attrs;
 }
 
 function sourceChildren(element: Element): Iterable<ChildNode> {
@@ -515,12 +519,7 @@ function readDeclaredTypeAtSource(
   nested = false,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
 ): PropContract["type"] {
-  // Null means not present, so no declaration opts into it (types#null-and-missing-values).
-  if (attr(element, "nullable") !== undefined) {
-    const message = "`nullable` is not a declaration attribute; remove it. A value without a default or `value` reads null, and null clears one with a default back to it.";
-    if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
-    warnInvalidDeclaration(message, source);
-  }
+  checkNullableAttribute(element, source, warnInvalidDeclaration);
   const written = attr(element, "type");
   if (written === undefined || written === "") fail("HC013", "A typed declaration requires a `type` attribute.", source);
   if (attr(element, "open") !== undefined && written !== "object") {
@@ -572,6 +571,19 @@ function readDeclaredTypeAtSource(
     type = { kind: "constrained", base: normalizeType(type), ...(values === undefined ? {} : { values }), ...bounds };
   }
   return type;
+}
+
+function checkNullableAttribute(element: Element, source: string, warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"]): void {
+  if (attr(element, "nullable") !== undefined) {
+    const message = "`nullable` is not a declaration attribute; remove it. A value without a default or `value` reads null, and null clears one with a default back to it.";
+    if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+    warnInvalidDeclaration(message, source);
+  }
+}
+
+function needsInterfaceShape(element: Element): boolean {
+  return directElements(element, "prop").length > 0 ||
+    ["open", "values", "min", "max", "minlength", "maxlength", "pattern"].some(name => attr(element, name) !== undefined);
 }
 
 function readProps(
@@ -1058,19 +1070,23 @@ function readDeclarations(
       if (kind === "request") {
         if (!EVENT_PART_RE.test(name)) fail("HC010", `Request name \`${name}\` must be lowercase kebab case.`, source);
         if (requestElements.has(name)) fail("HC020", `Request \`${name}\` is declared more than once.`, source);
+        if (!needsInterfaceShape(element)) checkNullableAttribute(element, source, warnInvalidDeclaration);
         requestElements.set(name, element);
         continue;
       }
       if (kind === "event") {
+        if (!EVENT_PART_RE.test(name)) fail("HC010", `Event name \`${name}\` must be lowercase kebab case.`, source);
         if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
         eventNames.add(name);
+        if (!needsInterfaceShape(element)) checkNullableAttribute(element, source, warnInvalidDeclaration);
         const eventType = attr(element, "type") ?? "object";
-        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined
+        const shape = needsInterfaceShape(element)
           ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
           : normalizeType(parseTypeAttribute(eventType));
         eventTypes.set(name, shape);
         continue;
       }
+      if (kind === "computed" || kind === "state" && attr(element, "type") === undefined) checkNullableAttribute(element, source, warnInvalidDeclaration);
       const localName = kind === "context" ? attr(element, "as") ?? name : name;
       if (kind === "context" && !isIdentifier(localName)) {
         fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
@@ -1138,7 +1154,7 @@ function readDeclarations(
         }
         const description = textContent(element).trim();
         requests[name] = {
-          type: requestType(element, attr(element, "type"), directElements(element, "prop").length > 0, NULL_TYPE, source, warnInvalidDeclaration),
+          type: requestType(element, attr(element, "type"), needsInterfaceShape(element), NULL_TYPE, source, warnInvalidDeclaration),
           returns: returns[0] === undefined ? requestType(element, written, false, UNKNOWN_TYPE, source, warnInvalidDeclaration)
             : requestType(returns[0], undefined, true, UNKNOWN_TYPE, source, warnInvalidDeclaration),
           ...(description === "" ? {} : { description }),
@@ -1273,9 +1289,7 @@ function readDeclarations(
       }
       if (kind === "event") {
         const eventType = attr(element, "type") ?? "object";
-        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
-          ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration)) : undefined;
-        if (shape === undefined) parseTypeAttribute(eventType);
+        const shape = needsInterfaceShape(element) ? eventTypes.get(name) : undefined;
         declarations.push({
           kind,
           name,
@@ -1468,7 +1482,7 @@ function parseAttributes(
   for (const attribute of sourceAttributes) {
     if (attribute.name.startsWith("bind:")) {
       const name = attribute.name.slice("bind:".length).toLowerCase();
-      if (name === "" || RAW_SINK_RE.test(name)) {
+      if (name === "" || !tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
         fail("HT007", `Two-way binding cannot target \`${name || attribute.name}\`.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source, true);
@@ -1526,8 +1540,8 @@ function parseAttributes(
 
     if (attribute.name.startsWith("from:")) {
       const name = attribute.name.slice("from:".length).toLowerCase();
-      if (RAW_SINK_RE.test(name)) {
-        fail("HT007", `\`from:${name}\` cannot bind a raw content sink.`, source);
+      if (!tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
+        fail("HT007", `\`from:${name}\` cannot bind executable or raw content.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
       parsed.push({ kind: "attribute", name, expression: attribute.value, expressionPlan });
@@ -1996,7 +2010,7 @@ function parseElementAtSource(
         if (prop.type === undefined || prop.expressionPlan.dependencies.length > 0) continue;
         let value: unknown;
         try { value = evaluateCompiled(prop.expressionPlan, { get: () => undefined }); } catch { continue; }
-        if (value != null && !parseTypedValue(value, prop.type, "$", "value").ok) {
+        if (value !== NONCONFORMING && value != null && !parseTypedValue(value, prop.type, "$", "value").ok) {
           fail("HT008", `${name === undefined ? "<slot>" : `<slot name="${name}">`} gives prop \`${prop.name}\` a value that does not satisfy its declared type \`${formatType(prop.type)}\`.`, source);
         }
       }
@@ -2156,12 +2170,14 @@ function parseElementAtSource(
     events?: EventBinding[];
     ref?: string;
     transition?: ElementTransition;
+    slotContent?: string;
   } = {
     kind: "element",
     name: tagName,
     attributes,
     children,
   };
+  if (tagName === "template" && attributes.some(attribute => attribute.kind === "literal" && attribute.name === "slot") && platform.slotContent !== undefined) parsed.slotContent = platform.slotContent(element);
   if (flow !== undefined) parsed.flow = flow;
   if (events !== undefined) parsed.events = events;
   if (ref !== undefined) parsed.ref = ref;

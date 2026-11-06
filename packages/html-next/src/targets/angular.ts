@@ -1,3 +1,6 @@
+import { attributeNamespace } from "../dom-attributes.js";
+import { namespacedAttributeSource } from "./shared.js";
+import { referenceContext, referenceType, withReferenceTypes } from "./reference-types.js";
 import { TypeScriptLowering } from "./typed-lowering.js";
 /** Standalone Angular components on their declared native hosts. Root delegation is composed at build time. */
 import { kebabCase, propAttribute, componentName as pascalCase } from "../names.js";
@@ -26,7 +29,7 @@ import { angularControlArtifact } from "./angular-control.js";
 import { invocationValue } from "../prop-values.js";
 import { declaredStateLiteral, literalInitial, revertSource, withRevert, publishedStates } from "./state-roots.js";
 import { expressionHelpersSource, AUTHORED_CHECK_SOURCE, inputScope, present, typeOf, UNKNOWN, type Scope } from "./vue-lowering.js";
-import { escapeHtml, isVoidElement, isNativeBooleanAttribute, quote, propTypeSource, selectorGenerics, dependentPropTypeSource, slotPropsType, slotPropValueSource, svgAttributeName } from "./shared.js";
+import { escapeHtml, isVoidElement, isNativeBooleanAttribute, objectKey as propertyKey, quote, propTypeSource, propValueIsNullable, selectorGenerics, dependentPropTypeSource, slotPropsType, slotPropValueSource, slotPropDefaultSource, svgAttributeName } from "./shared.js";
 import type { GeneratedArtifact } from "../generate.js";
 import { typedPropsModule } from "./vue-props.js";
 import { NATIVE_PATH_WRITE_SOURCE } from "./react-control.js";
@@ -37,7 +40,6 @@ import { DECLARED_EVENT_TYPE_SOURCE } from "./shared-generated.js";
 function sourceValue(value: unknown, space?: number): string {
   return JSON.stringify(value, null, space)?.replaceAll('"__proto__":', '["__proto__"]:') ?? "undefined";
 }
-const propertyKey = (name: string): string => name === "__proto__" ? `[${quote(name)}]` : quote(name);
 
 function angularPropContract(definition: ComponentDefinition) {
   return { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { type: prop.select === undefined ? normalizeType(prop.type) : { kind: "union", members: prop.select.options.map(item => item.type) }, ...(prop.select === undefined ? {} : { select: prop.select }), required: prop.required, ...Object.fromEntries(["values", "pattern", "min", "max", "minLength", "maxLength"].flatMap(key => prop[key as keyof typeof prop] === undefined ? [] : [[key, prop[key as keyof typeof prop]]])) }])) };
@@ -134,7 +136,6 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   }
   const headModels: string[] = [];
   const contexts = new Map<string, string>();
-  const requiredReadiness: string[] = [];
   helpers.add("state");
   fields.push('readonly hnInputStates = input<Record<string, InputStatus>>({});');
   let serial = 0;
@@ -144,7 +145,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const name = field();
     if (hostExpression) {
       const kept = field(); fields.push(`private ${kept}: any;`);
-      methods.push(`${name}(): any { const value: unknown = ${code}; if (value !== Symbol.for("html-next.invalid-result") && (typeof value !== "number" || Number.isFinite(value))) this.${kept} = value; return this.${kept}; }`);
+      fields.push(`readonly ${name} = computed(() => { const value: unknown = ${code}; if (${lowering.use("acceptsBindingResult")}(value) && (typeof value !== "number" || Number.isFinite(value))) this.${kept} = value; return this.${kept}; });`);
     } else methods.push(`${name}(${names.locals.map(local => `${local}: any`).join(", ")}): any { return ${code}; }`);
     const call = `${nativeView && !hostExpression ? "hnController." : ""}${name}(${names.locals.join(", ")})`;
     if (hostExpression || tracking) return call;
@@ -155,11 +156,11 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     if (plan === undefined) return unsupported("a parsed expression is required.");
     return lowering.value(plan.ast, names);
   };
-  const localScope = (names: Names, values: readonly (readonly [string, string, TypeNode | undefined])[]): Names => ({
+  const localScope = (names: Names, values: readonly (readonly [string, string, TypeNode | undefined])[]): Names => withReferenceTypes({
     ...names, locals: [...names.locals, ...values.map(([name]) => name)],
     code: new Map([...names.code, ...values.map(([name, code]) => [name, code] as const)]),
     types: new Map([...names.types, ...values.map(([name, , type]) => [name, type === undefined ? UNKNOWN : present(type)] as const)]),
-  });
+  }, values.map(([name, , type]) => [name, type]));
   const pathWrite = (path: readonly import("../expression.js").WritablePathSegment[], code: string, names: Names, ast?: import("../expression.js").ExpressionNode): string => {
     const target = names.writes.get(String(path[0]));
     if (target === undefined) return unsupported(`write to ${String(path[0])} is not mutable state.`);
@@ -202,6 +203,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const controls: string[] = [];
     const inputStatuses: string[] = [];
     const nativeAttributes: string[] = [];
+    const namespacedAttributes: string[] = [];
     const childView = child !== undefined && angularHostTag(child, graph) === "ng-template";
     if (childView) nativeAttributes.push(`${quote("data-hn-owner")}: ${quote(names.definition.contract.tag)}`);
     if (node.attributes.filter(attribute => attribute.kind === "attribute" && attribute.twoWay).length > 1) return unsupported("multiple two-way control bindings on one element require independent native control ownership.");
@@ -210,6 +212,12 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       host[key] = previous !== undefined && (key === "class" || key === "style") ? `${source}${key === "class" ? " " : ";"}${previous}` : source;
     } else attributes.push(`${key}="${escapeHtml(source)}"`); };
     for (const attribute of node.attributes) {
+      if (!root && child === undefined && (attribute.kind === "literal" || attribute.kind === "attribute" && attribute.target === undefined && !attribute.twoWay) && attributeNamespace(attribute.name) !== undefined) {
+        helper("attributes");
+        const code = attribute.kind === "literal" ? quote(attribute.value) : lowering.attribute(attribute.expressionPlan!.ast, names, attribute.name);
+        namespacedAttributes.push(namespacedAttributeSource(attribute.name, code));
+        continue;
+      }
       if (attribute.kind === "directive") continue;
       if (attribute.kind === "literal") {
         const inputName = child === undefined ? undefined : receivingProp(child, attribute.name);
@@ -277,6 +285,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         else put(`[${destination}]`, expression(lowered, names, root));
       }
     }
+    if (namespacedAttributes.length > 0) attributes.push(`[hnNextNamespaces]="${expression(`[${namespacedAttributes.join(", ")}]`, names)}"`);
     if (inputStatuses.length > 0) attributes.push(`[hnInputStates]="${expression(`{ ${inputStatuses.join(", ")} }`, names)}"`);
     if (nativeAttributes.length > 0) attributes.push(`[hnAttributes]="${expression(`{ ${nativeAttributes.join(", ")} }`, names)}"`);
     if (controls.length > 0) attributes.push(`[hnNextControl]="${expression(`[${controls.join(", ")}]`, names)}"`);
@@ -334,7 +343,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         const flow = node.flow;
         const alias = `local${serial++}`;
         const local = flow.alias === undefined ? names : localScope(names, [[alias, alias, undefined]]);
-        const matchNames = flow.alias === undefined ? local : { ...local, code: new Map([...local.code, [flow.alias, alias]]) };
+        const matchNames = flow.alias === undefined ? local : withReferenceTypes({ ...local, code: new Map([...local.code, [flow.alias, alias]]) }, [[flow.alias, flow.expressionPlan === undefined ? undefined : referenceType(flow.expressionPlan.ast, names)]]);
         const region = `hnRegion${serial++}`;
         if (flow.alias !== undefined) { helper("region"); helper("value"); }
         const prefix = flow.alias === undefined ? "" : `@let ${region} = ${expression(value(flow.expressionPlan, names), names, false, true)} | hnNextRegion;@if (${region}.ready) {@let ${alias} = ${region}.value;`;
@@ -419,13 +428,15 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
             const locals = values.map(([name, source, type]) => ({ name, source, type, id: `local${serial++}` }));
             const scopedNames = localScope(projection.names, locals.map(item => [item.id, item.id, item.type === undefined ? undefined : normalizeType(item.type)]));
             const code = new Map(scopedNames.code); locals.forEach(item => code.set(item.name, item.id));
-            return locals.map(item => `@let ${item.id} = ${expression(item.source, names)};`).join("") + renderChildren(carrier.children, { ...scopedNames, code }, projection.parent);
+            return locals.map(item => `@let ${item.id} = ${expression(item.source, names)};`).join("") + renderChildren(carrier.children, withReferenceTypes({ ...scopedNames, code }, locals.map(item => [item.name, undefined])), projection.parent);
           }
         }
       }
       if (scoped) {
         const selected = outlet(slot, names.definition); helper("slots"); helper("state"); helper("value");
-        const context = `${expression(`{ ${values.map(([name, source]) => `${propertyKey(name)}: ${source}`).join(", ")} }`, names, false, true)} | hnNextSlotValues`;
+        const defaults = field();
+        fields.push(`readonly ${defaults} = { ${(node.props ?? []).map(prop => `${propertyKey(prop.name)}: ${slotPropDefaultSource(prop)}`).join(", ")} };`);
+        const context = `${expression(`{ ${values.map(([name, source]) => `${propertyKey(name)}: ${source}`).join(", ")} }`, names, false, true)} | hnNextSlotValues: ${nativeView ? "hnController." : ""}${defaults}`;
         return `@if (${nativeView ? "hnController." : ""}${selected.query}(); as supplied) {<ng-container [ngTemplateOutlet]="supplied.template" [ngTemplateOutletContext]="${context}"></ng-container>} @else {${renderChildren(node.fallback ?? [], names, projection)}}`;
       }
       if (nativeView) {
@@ -446,22 +457,24 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         const scoped = localScope(names, [[id, id, flow.aliasType]]);
         const code = new Map(scoped.code); code.set(flow.alias, id);
         const types = new Map(scoped.types); types.set(flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan!.ast, names) : present(flow.aliasType));
-        return `@let ${region} = ${expression(flow.binding === undefined ? value(flow.expressionPlan, names) : `requireInputStatus(${names.statuses.get(flow.binding.name) ?? "UNRESOLVED_INPUT"}, ${flow.binding.handlesError})`, names, false, true)} | hnNextRegion;@if (${region}.ready) {@let ${id} = ${region}.value;${render(plain, { ...scoped, code, types }, projection, rootView)}}`;
+        return `@let ${region} = ${expression(flow.binding === undefined ? value(flow.expressionPlan, names) : `requireInputStatus(${names.statuses.get(flow.binding.name) ?? "UNRESOLVED_INPUT"}, ${flow.binding.handlesError})`, names, false, true)} | hnNextRegion;@if (${region}.ready) {@let ${id} = ${region}.value;${render(plain, withReferenceTypes({ ...scoped, code, types }, [[flow.alias, flow.binding === undefined ? referenceType(flow.expressionPlan!.ast, names) : undefined]]), projection, rootView)}}`;
       }
       if (flow.kind === "each") {
         const id = `row${serial++}`;
         const retained = `hnList${serial++}`;
         const retainedNames = localScope(names, [[retained, retained, undefined]]);
         const itemType = typeOf(flow.listPlan!.ast, names).type;
-        const itemNames = { ...names, code: new Map([...names.code, [flow.item, "item"]]), types: new Map([...names.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN]]) };
+        const itemReference = referenceType(flow.listPlan!.ast, names);
+        const itemContract = itemReference?.kind === "list" ? itemReference.item : undefined;
+        const itemNames = withReferenceTypes({ ...names, code: new Map([...names.code, [flow.item, "item"]]), types: new Map([...names.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN]]) }, [[flow.item, itemContract]]);
         const list = lowering.list(flow.listPlan!.ast, names, "item", { itemScope: itemNames,
           ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
           sort: flow.sortKeys?.map(key => `${key.descending ? "-" : ""}${key.path.join(".")}`) ?? [], ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }) }, `((${retained} ?? []) as any[])`);
         const scoped = localScope(names, [[id, id, undefined]]);
         const code = new Map(scoped.code); code.set(flow.item, `${id}.item`); code.set("loop", `${id}.loop`);
         if (flow.index !== undefined) code.set(flow.index, `${id}.index`);
-        const loopNames = { ...scoped, code, types: new Map([...scoped.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN]]) };
-        const keyScope = { ...itemNames, code: new Map([...itemNames.code, ["loop", "loop"], ...(flow.index === undefined ? [] : [[flow.index, "index"] as const])]) };
+        const loopNames = withReferenceTypes({ ...scoped, code, types: new Map([...scoped.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN]]) }, [[flow.item, itemContract], ["loop", undefined], ...(flow.index === undefined ? [] : [[flow.index, undefined] as const])]);
+        const keyScope = withReferenceTypes({ ...itemNames, code: new Map([...itemNames.code, ["loop", "loop"], ...(flow.index === undefined ? [] : [[flow.index, "index"] as const])]) }, [["loop", undefined], ...(flow.index === undefined ? [] : [[flow.index, undefined] as const])]);
         const unique = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(item: any, index: number, loop: any) => ${value(flow.keyPlan, keyScope)}`);
         const rows = lowering.eachRows(unique);
         const keyedRows = flow.keyPlan === undefined ? rows : `${rows}.map((${id}: any) => ({ ...${id}, hnKey: ${value(flow.keyPlan, loopNames)} }))`;
@@ -531,12 +544,15 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           return "";
         }
         if (projected.name !== "template") return render(projected, names, projection);
-        if (contract === undefined || Object.keys(contract.props).length === 0) return `<ng-container ngProjectAs="[slot='${slot.value}']">${renderChildren(projected.children, names, projection)}</ng-container>`;
+        const rendered = (child.slots ?? []).find(outlet => (outlet.name ?? "") === slot.value);
+        const exposed = contract === undefined ? {} : rendered === undefined ? contract.props
+          : Object.fromEntries((rendered.props ?? []).map(name => [name, contract.props[name]!]));
+        if (Object.keys(exposed).length === 0) return `<ng-container ngProjectAs="[slot='${slot.value}']">${renderChildren(projected.children, names, projection)}</ng-container>`;
         slotDirective(slot.value);
-        const locals = Object.entries(contract.props).map(([name, prop]) => ({ name, type: normalizeType(prop.type), id: `local${serial++}` }));
+        const locals = Object.entries(exposed).map(([name, prop]) => ({ name, type: normalizeType(prop.type), id: `local${serial++}` }));
         const scoped = localScope(names, locals.map(item => [item.id, item.id, item.type]));
         const code = new Map(scoped.code); locals.forEach(item => code.set(item.name, item.id));
-        return `<ng-template ${child.contract.tag}-${slot.value || "default"} ${locals.map(item => `let-${item.id}="${item.name}"`).join(" ")}>${renderChildren(projected.children, { ...scoped, code }, projection)}</ng-template>`;
+        return `<ng-template ${child.contract.tag}-${slot.value || "default"} ${locals.map(item => `let-${item.id}="${item.name}"`).join(" ")}>${renderChildren(projected.children, withReferenceTypes({ ...scoped, code }, locals.map(item => [item.name, undefined])), projection)}</ng-template>`;
       }).join("");
       for (const [name, ref] of slots) {
         const props = child.contract.slots?.[name]?.props ?? {};
@@ -548,7 +564,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         if (locals.length) {
           const imported = slotImports.get(child.contract.tag) ?? new Set(); imported.add(directive); slotImports.set(child.contract.tag, imported);
         }
-        templates += `<ng-template #${ref}${locals.length ? ` ${child.contract.tag}-${name || "default"}` : ""} ${locals.map(item => `let-${item.id}="${item.name}"`).join(" ")}>${selected.map(projected => projected.kind === "element" && projected.name === "template" ? renderChildren(projected.children, { ...scoped, code }, projection) : render(projected, { ...scoped, code }, projection)).join("")}</ng-template>`;
+        templates += `<ng-template #${ref}${locals.length ? ` ${child.contract.tag}-${name || "default"}` : ""} ${locals.map(item => `let-${item.id}="${item.name}"`).join(" ")}>${selected.map(projected => projected.kind === "element" && projected.name === "template" ? renderChildren(projected.children, withReferenceTypes({ ...scoped, code }, locals.map(item => [item.name, undefined])), projection) : render(projected, { ...scoped, code }, projection)).join("")}</ng-template>`;
       }
       if (slots.size) attributes.push(`[slots]="${escapeHtml(`{ ${[...slots].map(([name, ref]) => `${quote(name)}: ${ref}`).join(", ")} }`)}"`);
       return content;
@@ -570,7 +586,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const writes = new Map<string, string>();
     const handlers = new Map<string, string>();
     const statuses = new Map<string, string>();
-    const names: Names = { code, types, writes, handlers, statuses, locals: [], definition: current };
+    const names: Names = { ...referenceContext(current, options.publicState), code, types, writes, handlers, statuses, locals: [], definition: current };
     if (current === definition) ownNames = names;
     const declarationIds = new Map<string, string>();
     for (const declaration of current.declarations ?? []) {
@@ -586,14 +602,13 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     for (const [name, prop] of Object.entries(current.contract.props)) {
       const { input: id, accepted, checked } = propFields.get(name)!;
       const type = supplied !== undefined ? propTypeSource(prop) : parameters.get(name) ?? (prop.select === undefined ? propTypeSource(prop) : `NoInfer<${dependentPropTypeSource(prop, parameters)}>`);
+      const valueType = propValueIsNullable(prop) ? type : `NonNullable<${type}>`;
       const constraints = Object.fromEntries(["values", "pattern", "min", "max", "minLength", "maxLength"].flatMap(key => prop[key as keyof typeof prop] === undefined ? [] : [[key, prop[key as keyof typeof prop]]]));
       const runtimeType = Object.keys(constraints).length === 0 ? normalizeType(prop.type) : { kind: "constrained", base: normalizeType(prop.type), ...constraints };
       const initial = prop.default === undefined ? "undefined" : sourceValue(prop.default);
       propTypes.set(name, prop.select === undefined ? runtimeType : { kind: "union", members: prop.select.options.map(item => item.type) });
       const runtimeSource = prop.select === undefined ? sourceValue(runtimeType) : `selectedPropNode(${code.get(prop.select.from) ?? "undefined"}, ${sourceValue(prop.select.options)})`;
-      if (supplied === undefined) fields.push(prop.required && prop.default === undefined
-        ? `readonly ${id} = input.required<${type}>({ alias: ${quote(name)} });`
-        : `readonly ${id} = input<${type} | undefined>(undefined, { alias: ${quote(name)} });`);
+      if (supplied === undefined) fields.push(`readonly ${id} = input<${type} | undefined>(undefined, { alias: ${quote(name)} });`);
       else fields.push(`readonly ${id} = computed<any>(() => ${supplied.get(name) ?? "undefined"});`);
       helper("state");
       fields.push(`readonly ${accepted}: Record<string, unknown> = ${prop.default === undefined ? "{}" : `{ ${propertyKey(name)}: ${initial} }`};`);
@@ -601,13 +616,13 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       const inheritedStatus = supplied === undefined ? `this.hnInputStates()[${quote(name)}]` : suppliedStatuses?.get(name);
       const ownStatus = `(this.${id}() !== undefined ? READY_INPUT : ${source === undefined ? "" : `this.${source}()[${quote(name)}]?.status ?? `}${initial === "undefined" ? "UNRESOLVED_INPUT" : "READY_INPUT"})`;
       const status = inheritedStatus === undefined ? ownStatus : `(${inheritedStatus} ?? ${ownStatus})`;
-      if (prop.required) requiredReadiness.push(`checkPropInput(this.${checked}(), ${runtimeSource}, false, false).ok`);
-      const incoming = `this.${id}() !== undefined ? this.${id}() : ${source === undefined ? initial : `this.${source}()[${quote(name)}] === undefined ? ${initial} : this.${source}()[${quote(name)}]!.value`}`;
+      const candidate = `this.${id}() !== undefined ? this.${id}() : ${source === undefined ? initial : `this.${source}()[${quote(name)}] === undefined ? ${initial} : this.${source}()[${quote(name)}]!.value`}`;
+      const incoming = `(${candidate}) ?? ${initial === "undefined" ? "null" : initial}`;
       inputs.set(name, incoming);
-      fields.push(`readonly ${checked} = computed<${type}>(() => ${status}.ready ? checkedInput<${type}>(${incoming}, ${runtimeSource}, ${prop.required}, ${quote(name)}, this.${accepted}) as ${type} : ${prop.required ? `(this.${accepted}[${quote(name)}] ?? ${initial === "undefined" ? "null" : initial})` : initial === "undefined" ? "null" : initial} as ${type});`);
+      fields.push(`readonly ${checked} = computed<${valueType}>(() => ${status}.ready ? checkedInput<${type}>(${incoming}, ${runtimeSource}, ${prop.required}, ${quote(name)}, this.${accepted}) as ${valueType} : ${prop.required ? `(this.${accepted}[${quote(name)}] ?? ${initial === "undefined" ? "null" : initial})` : initial === "undefined" ? "null" : initial} as ${valueType});`);
       statuses.set(name, status);
       contexts.set(`${current.contract.tag}:${name}`, `this.${checked}`);
-      code.set(name, `this.${checked}()`); types.set(name, { ...present(normalizeType(prop.type)), nullable: !prop.required });
+      code.set(name, `this.${checked}()`); types.set(name, { ...present(normalizeType(prop.type)), nullable: propValueIsNullable(prop), null: propValueIsNullable(prop) });
     }
     // A slot's `as` list: the accepted children a content query finds, in the consumer's content order,
     // complete before this template first renders (and on the server), and those another template renders here.
@@ -691,7 +706,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           statuses.set(declaration.name, "READY_INPUT");
         }
         helper("state");
-        methods.push(`${setter}(value: unknown): void { if (value === Symbol.for("html-next.invalid-result") || typeof value === "number" && !Number.isFinite(value)) return; const result = checkPropInput(value, ${sourceValue(type ?? UNKNOWN.type)}, false); if (result.ok) this.${id}.set(result.value as any); }`);
+        methods.push(`${setter}(value: unknown): void { if (value === Symbol.for("html-next.invalid-result") || typeof value === "number" && !Number.isFinite(value)) return; if (acceptsControllerWrite(value, ${sourceValue(type ?? UNKNOWN.type)}, [])) this.${id}.set(value as any); }`);
       } else {
         helper("state");
         fields.push(`readonly ${id}: TrackedSignal = retainedComputed(() => evaluateInput(() => ${value(declaration.expression, inputScope(names, name => statuses.get(name)))}), ${sourceValue(type ?? UNKNOWN.type)});`);
@@ -815,11 +830,6 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     childProviders.push(`{ provide: ACCEPTED_CHILD, useFactory: () => inject(${definition.contract.name}).${entry} }`);
   }
   if (helpers.has("html-fragment")) template += angularHtmlFragmentTemplate();
-  if (requiredReadiness.length > 0) {
-    fields.push("private hnWasReady = false;");
-    methods.push(`hnInputsReady(): boolean { if (${requiredReadiness.join(" && ")}) this.hnWasReady = true; return this.hnWasReady; }`);
-    template = `@if (${nativeView ? "hnController." : ""}hnInputsReady()) {${template}}`;
-  }
   const hostModels = models.map(model => {
     helper("host"); helper("state"); helper("events");
     const { definition: current, names } = model;
@@ -909,15 +919,15 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   if (usesEvents) helpers.add("state");
   const hasContext = providers.length > 0 || helpers.has("context");
   if (hasContext) helper("context");
-  if (lowering.helpers().some(name => name.startsWith("decimal"))) helper("expressions");
+  if (usesValue || helpers.has("state") || lowering.helpers().some(name => name.startsWith("decimal"))) helper("expressions");
   const rootBindings = rootControls.length === 0 && rootHtml === undefined && rootProperties.length === 0 ? "" : `hnRootBindings(): string { ${rootProperties.join(" ")} ${rootControls.length === 0 ? "" : `this.hnControl.bindings = [${rootControls.join(", ")}];`} ${rootHtml === undefined ? "" : `this.hnHtml.binding = ${rootHtml};`} return ""; }`;
   if (rootBindings !== "") host[`[attr.${VUE_ROOT_ATTRIBUTE}]`] = "hnRootBindings()";
   const helperPath = (name: string) => quote(options.helperSpecifier?.(name) ?? `./${name}`);
-  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}${helpers.has("children") ? `\nimport { contentChildren } from "@angular/core";\nimport { ACCEPTED_CHILD, acceptedChild, acceptedChildren, connectChild, childSlot, childTag, HtmlNextCapture, HtmlNextChildSlot, HtmlNextPlain } from ${helperPath("children")};` : ""}\n${helpers.has("expressions") ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
+  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${helpers.has("attributes") ? `import { HtmlNextNamespacedAttributes } from ${helperPath("attributes")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}${helpers.has("children") ? `\nimport { contentChildren } from "@angular/core";\nimport { ACCEPTED_CHILD, acceptedChild, acceptedChildren, connectChild, childSlot, childTag, HtmlNextCapture, HtmlNextChildSlot, HtmlNextPlain } from ${helperPath("children")};` : ""}\n${lowering.helpers().some(name => name.startsWith("decimal")) ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.referenceDeclarations().join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
 export class ${slot.name} {
   readonly template = inject<TemplateRef<${slot.type}>>(TemplateRef);
   static ngTemplateContextGuard(_directive: ${slot.name}, _context: unknown): _context is ${slot.type} { return true; }
-}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext || childProviders.length > 0 ? `providers: [${[...providers, ...childProviders].join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
+}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : []), ...(helpers.has("attributes") ? ["HtmlNextNamespacedAttributes"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext || childProviders.length > 0 ? `providers: [${[...providers, ...childProviders].join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
   if (nativeView) {
     helper("view");
     helper("events");
@@ -930,7 +940,7 @@ export class ${slot.name} {
       arguments: generics.length === 0 ? "" : `<${generics.map(() => "any").join(", ")}>`,
       template, host, fields, methods: [...methods, rootBindings], styles,
       slotQueries: [...slotDirectives].map(([name, slot]) => `readonly ${slot.query} = () => { const template = this.hnSlotTemplates()[${quote(name)}]; return template ? { template } : undefined; };`),
-      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : [])],
+      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : []), ...(helpers.has("attributes") ? ["HtmlNextNamespacedAttributes"] : [])],
       providers: [...providers, ...childProviders],
       injections: [...(usesValidity ? [{ name: "hnValidity", type: "HtmlNextValidity" }] : []), ...(rootEvents.length > 0 ? [{ name: "hnEvents", type: "HtmlNextEvents" }] : []), ...(usesProjection ? [{ name: "hnProjection", type: "HtmlNextProjection" }] : []), ...(usesHost ? [{ name: "hnHost", type: "HtmlNextHost" }] : []), ...(usesHead ? [{ name: "hnHead", type: "HtmlNextHead" }] : [])],
       initialize: `${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""}`,
@@ -964,12 +974,12 @@ export function checkNestedDepth(depth: number, limit: number): number {
     angularValidityArtifact(version),
     headHelperArtifact("angular", version),
     requestsArtifact("angular", version),
-    { path: "angular/value.ts", content: `import { Pipe } from "@angular/core";
+    { path: "angular/value.ts", content: `import { acceptsBindingResult } from "./expressions";\nimport { Pipe } from "@angular/core";
 @Pipe({ name: "hnNextValue", standalone: true, pure: false })
 export class HtmlNextValue {
   private accepted: any;
   transform(value: any): any {
-    if (value !== Symbol.for("html-next.invalid-result") && (typeof value !== "number" || Number.isFinite(value))) this.accepted = value;
+    if (acceptsBindingResult(value) && (typeof value !== "number" || Number.isFinite(value))) this.accepted = value;
     return this.accepted;
   }
 }
@@ -977,7 +987,7 @@ export class HtmlNextValue {
 export class HtmlNextRegion {
   private accepted: { ready: boolean; value?: unknown } = { ready: false };
   transform(value: unknown): { ready: boolean; value?: unknown } {
-    if (value !== Symbol.for("html-next.invalid-result") && (typeof value !== "number" || Number.isFinite(value))) this.accepted = { ready: true, value };
+    if (acceptsBindingResult(value) && (typeof value !== "number" || Number.isFinite(value))) this.accepted = { ready: true, value };
     return this.accepted;
   }
 }
@@ -985,11 +995,12 @@ export class HtmlNextRegion {
 @Pipe({ name: "hnNextSlotValues", standalone: true, pure: false })
 export class HtmlNextSlotValues {
   private accepted: Record<string, unknown> = Object.create(null);
-  transform(values: Record<string, unknown>): any {
+  transform(values: Record<string, unknown>, defaults: Record<string, unknown> = {}): any {
     let next = this.accepted;
-    for (const [name, value] of Object.entries(values)) {
-      if (value === Symbol.for("html-next.invalid-result") || typeof value === "number" && !Number.isFinite(value)) continue;
-      if (!Object.is(this.accepted[name], value)) {
+    for (const [name, candidate] of Object.entries(values)) {
+      const value = candidate === Symbol.for("html-next.invalid-result") || typeof candidate === "number" && !Number.isFinite(candidate)
+        ? Object.hasOwn(this.accepted, name) ? this.accepted[name] : defaults[name] ?? null : candidate;
+      if (!Object.hasOwn(this.accepted, name) || !Object.is(this.accepted[name], value)) {
         if (next === this.accepted) next = { ...this.accepted };
         Object.defineProperty(next, name, { value, configurable: true, enumerable: true, writable: true });
       }
@@ -997,7 +1008,7 @@ export class HtmlNextSlotValues {
     return this.accepted = next;
   }
 }\n` },
-    { path: "angular/state.ts", content: `import { computed, signal, type Signal } from "@angular/core";\n${typedPropsModule(version)}\n${DECLARED_EVENT_TYPE_SOURCE}
+    { path: "angular/state.ts", content: `import { acceptsBindingResult } from "./expressions";\nimport { computed, signal, type Signal } from "@angular/core";\n${typedPropsModule(version)}\n${DECLARED_EVENT_TYPE_SOURCE}
 ${AUTHORED_CHECK_SOURCE}
 /** Angular attribute bindings stringify false; native boolean attributes must be absent instead. */
 export function nativeBooleanAttribute(value: unknown): unknown { return value === false || value == null ? undefined : value === true ? "" : value; }
@@ -1012,9 +1023,8 @@ export function reflectedInputs() {
     return text;
   };
 }
-/** Required unavailable inputs retain the previous accepted value before creating their views. */
+/** Prop type refusal preserves the accepted value; null has already resolved its default. */
 export function checkedInput<T>(value: unknown, type: Parameters<typeof checkPropInput>[1], required: boolean, name: string, accepted: Record<string, unknown>): T | null {
-  if (required && !checkPropInput(value, type, true, false).ok) return (accepted[name] ?? null) as T | null;
   return required ? checkedProp<T>(value, type, true, name, accepted) : checkedProp<T>(value, type, false, name, accepted);
 }
 export function finiteResult(value: unknown): unknown { return typeof value === "number" && !Number.isFinite(value) ? Symbol.for("html-next.invalid-result") : value; }
@@ -1023,7 +1033,7 @@ export function retainedComputed(evaluate: () => { value: unknown; status: Input
   let accepted: unknown = null;
   const evaluated = computed(() => {
     const next = evaluate();
-    if (next.status.ready && next.value !== undefined && next.value !== Symbol.for("html-next.invalid-result")) {
+    if (next.status.ready && next.value !== undefined && acceptsBindingResult(next.value)) {
       const checked = checkPropInput(next.value, type, false);
       if (checked.ok) accepted = checked.value;
     }
@@ -1040,8 +1050,8 @@ export function initializedState(evaluate: () => { value: unknown; status: Input
     version();
     if (!initialized) {
       const next = evaluate();
-      const accepted = next.status.ready && next.value !== undefined ? checkPropInput(next.value, type, false) : undefined;
-      if (accepted?.ok) { initialized = true; value = copyStateSeed(accepted.value); }
+      const accepted = next.status.ready && next.value !== undefined && acceptsBindingResult(next.value) && acceptsControllerWrite(next.value, type, []);
+      if (accepted) { initialized = true; value = copyStateSeed(next.value); }
       else return { value: undefined, status: next.status };
     }
     return { value, status: READY_INPUT };

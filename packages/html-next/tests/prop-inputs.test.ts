@@ -236,7 +236,7 @@ describe("framework prop input bookkeeping", () => {
     assert.equal(source.publish({ status: pending }), false);
   });
 
-  it("distinguishes an omitted required input from a refused null", () => {
+  it("accepts null clears for a required input and keeps absence separate from ownership", () => {
     const type = parseTypeExpression("number");
     const values = { amount: null as unknown };
     const inputs = new PropInputs({ names: ["amount"], values, defaults: {},
@@ -244,12 +244,22 @@ describe("framework prop input bookkeeping", () => {
     inputs.value("amount", undefined);
     assert.equal(inputs.status("amount").ready, false);
     inputs.value("amount", null);
-    assert.equal(inputs.supplied("amount"), false);
+    assert.equal(inputs.supplied("amount"), true);
+    assert.equal(inputs.read("amount"), null);
     inputs.value("amount", 3);
     inputs.value("amount", null);
-    assert.equal(inputs.read("amount"), 3);
-    assert.equal(inputs.supplied("amount"), true, "a refused attempt preserves the previous caller input");
+    assert.equal(inputs.read("amount"), null);
+    assert.equal(inputs.supplied("amount"), true, "a valid null clear preserves caller ownership");
     inputs.value("amount", undefined);
     assert.equal(inputs.supplied("amount"), false, "omission releases even a required input");
+    assert.equal(inputs.publish("amount", { value: 3, status: READY_INPUT }), true);
+    assert.equal(inputs.publish("amount", { value: null, status: READY_INPUT }), true);
+    assert.equal(inputs.read("amount"), null);
+    assert.equal(inputs.publish("amount", { value: undefined, status: READY_INPUT }), true);
+    assert.equal(inputs.read("amount"), null);
+    inputs.value("amount", undefined, { amount: () => ({ value: 4, status: READY_INPUT }) });
+    assert.equal(inputs.read("amount"), 4);
+    inputs.value("amount", undefined, { amount: () => ({ value: null, status: READY_INPUT }) });
+    assert.equal(inputs.read("amount"), null);
   });
 });

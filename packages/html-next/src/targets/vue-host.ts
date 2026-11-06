@@ -732,7 +732,7 @@ export function useScopedSlotName() {
 export type InlineTextSegment = { readonly value: unknown; readonly text: string; readonly accepted: boolean };
 
 export function inlineTextSegment(value: unknown, accepted: boolean, text: (value: any) => string): InlineTextSegment {
-  return { value, accepted, text: accepted && value !== Symbol.for("html-next.invalid-result") ? text(value) ?? "" : "" };
+  return { value, accepted, text: accepted && acceptsBindingResult(value) ? text(value) ?? "" : "" };
 }
 
 export const RetainedInlineText = /* @__PURE__ */ defineComponent({
@@ -741,11 +741,38 @@ export const RetainedInlineText = /* @__PURE__ */ defineComponent({
     const previous: string[] = [];
     return () => {
       const text = props.segments.map((segment, index) => {
-        if (segment.accepted && segment.value !== Symbol.for("html-next.invalid-result")) previous[index] = segment.text;
+        if (segment.accepted && acceptsBindingResult(segment.value)) previous[index] = segment.text;
         return previous[index] ?? "";
       }).join("");
       // Empty text has no serialized SSR node; a comment preserves this component's hydration position.
       return text === "" ? createCommentVNode() : createTextVNode(text);
+    };
+  },
+});
+
+/** Each outlet keeps its own accepted values, including inside repeated template scopes. */
+// Vue's compiled <slot v-bind> merges into an ordinary object, dropping __proto__ keys.
+export const ScopedSlotOutlet = /* @__PURE__ */ defineComponent({
+  props: {
+    content: { type: Object as PropType<Slots>, required: true },
+    name: { type: String, required: true },
+    values: { type: Object as PropType<Record<string, unknown>>, required: true },
+  },
+  setup(props, { slots }) {
+    return () => renderSlot(props.content, props.name, props.values, slots.default);
+  },
+});
+
+export const RetainedSlotValues = /* @__PURE__ */ defineComponent({
+  props: {
+    values: { type: Object as PropType<Record<string, unknown>>, required: true },
+    defaults: { type: Object as PropType<Record<string, unknown>>, required: true },
+  },
+  setup(props, { slots }) {
+    const previous = { ...props.defaults };
+    return () => {
+      for (const [name, value] of Object.entries(props.values)) if (acceptsBindingResult(value)) previous[name] = value;
+      return slots.default?.(previous);
     };
   },
 });

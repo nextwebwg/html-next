@@ -212,7 +212,7 @@ describe("official target compilers", () => {
     </defs><output $value="$items.0.name"></output></template>`);
     const vue = outputs.get("vue/XIndexed.vue")!;
     const vanilla = outputs.get("vanilla/XIndexed.js")!;
-    assert.match(vue, /\[0\]/);
+    assert.match(vue, /referenceIndex\(items, 0\)/);
     compileVue(vue, "XIndexed.vue");
     await transform(vanilla, { loader: "js", format: "esm" });
   });
@@ -223,7 +223,7 @@ describe("official target compilers", () => {
         <prop name="count" type="number" required>How many.</prop><prop name="tone" type="keyword" values="quiet, loud">Tone.</prop></slot>
     </defs><div><slot name="summary" label="Open" from:count="$items.length">Details</slot></div></template>`);
     const vanilla = outputs.get("vanilla/XDisclosure.d.ts")!;
-    assert.match(vanilla, /export interface XDisclosureSlots \{\n  readonly summary: \{ readonly count: number; readonly label: string; readonly tone\?: "quiet" \| "loud"; \};\n\}/);
+    assert.match(vanilla, /export interface XDisclosureSlots \{\n  readonly summary: \{ readonly count: number \| null; readonly label: string; readonly tone\?: "quiet" \| "loud" \| null; \};\n\}/);
     assert.match(vanilla, /"x-disclosure": \{ element: XDisclosureElement; props: [^;]*; slots: XDisclosureSlots \}/);
     const docs = outputs.get("docs/x-disclosure.md")!;
     assert.match(docs, /- `summary`: optional; its `<template slot>` reads these props\.\n  - `count` \(`number`, required\): How many\./);
@@ -421,11 +421,11 @@ describe("official target compilers", () => {
         '<prop name="count" type="number" required>Count.</prop>',
       '<p from:data-label="$label" from:data-size="$size" from:data-count="$count"></p>',
     )).get("vue/XOptional.vue")!;
-    // The input boundary applies defaults so omission remains distinct from a supplied null.
+    // Inputs can clear a prop with null; the accepted read resolves its declared default.
     assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null> \}/);
     assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null> \}/);
     assert.match(vue, /vuePropInputs\([\s\S]*?size: 'md'/);
-    assert.match(vue, /count: \{ type: null as unknown as PropType<number> \}/);
+    assert.match(vue, /count: \{ type: null as unknown as PropType<number \| null> \}/);
 
     // A consumer under exactOptionalPropertyTypes can omit optional inputs and supply typed values.
     const directory = await mkdtemp(join(packageRoot, ".vue-types-"));
@@ -437,6 +437,7 @@ describe("official target compilers", () => {
         'import XOptional from "./XOptional";',
         'type Props = InstanceType<typeof XOptional>["$props"];',
         "export const unset: Props = { count: 1 };",
+        "export const cleared: Props = { count: null, label: null, size: null };",
         "export const set: Props = { count: 1, label: \"Name\", size: \"sm\" };",
         "// @ts-expect-error outside the declared type",
         "export const outside: Props = { count: 1, size: \"lg\" };",
@@ -531,8 +532,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       .get("vue/XRowList.vue")!;
     compileVue(vue, "XRowList.vue");
     assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
-    assert.match(vue, /<slot :name="scopedSlotName\('row'\)" :item="row" :index="loop\.index">/);
-    assert.match(vue, /<li>\s*\{\{ row\.name \}\}\s*<\/li>/);
+    assert.match(vue, /<RetainedSlotValues[\s\S]*?:values="\{[\s\S]*?item: slotProp\([\s\S]*?referenceValue\([\s\S]*?row,[\s\S]*?index: referenceMember\(loop, 'index'\)/);
+    assert.match(vue, /:defaults="\{ item: null, index: null \}"\s+v-slot="slotValues"/);
+    assert.match(vue, /<slot\s+:name="scopedSlotName\('row'\)"\s+:item="slotValues\['item'\]"\s+:index="slotValues\['index'\]"/);
+    assert.match(vue, /<li>\s*<RetainedInlineText[\s\S]*?referenceMember\(row, 'name'\)/);
   });
 
   it("converts a consumer's scoped-slot template with its lexical state", () => {
@@ -541,7 +544,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       .get("vue/XConsumer.vue")!;
     compileVue(vue, "XConsumer.vue");
     assert.match(vue, /<template #row="\{ item \}">/);
-    assert.match(vue, /\{\{ text\(item\?\.name\) \}\}/);
+    assert.match(vue, /\{\{ text\(referenceMember\(item, 'name'\)\) \}\}/);
     // A conforming state's own value needs no read check, so the consumer's text reads it directly.
     assert.match(vue, /<i>\{\{ heading \}\}<\/i>/);
   });
@@ -566,8 +569,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
     // Vue writes a boolean on an ARIA attribute as "true" or "false", and removes a false boolean attribute.
-    assert.match(vue, /:aria-expanded="checkedProps\.open \?\? undefined"/);
-    assert.match(vue, /:hidden="checkedProps\.gone \?\? undefined"/);
+    assert.match(vue, /:aria-expanded="checkedProps\.open"/);
+    assert.match(vue, /:hidden="checkedProps\.gone"/);
     // Vanilla writes them as the live runtime does (tests/vanilla-blocks.test.ts compares the DOM).
     assert.match(outputs.get("vanilla/XAria.js")!, /toAttribute\(x\d+, "aria-expanded"\)/);
   });
@@ -592,7 +595,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /const open = ref\(false\)\n/);
     assert.match(vue, /const query = ref\(''\)\n/);
     assert.match(vue, /const count: ReturnType<typeof inputComputed<number \| null>> = inputComputed/);
-    assert.match(vue, /inputRead\(checkedProps\.value\.items, propInputs\.status\('items'\)\)\?\.length/);
+    assert.match(vue, /referenceMember\(\s*inputRead\(checkedProps\.value\.items, propInputs\.status\('items'\)\),\s*'length'/);
     assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('searchElement'\)\n/);
     assert.match(vue, /const hostState = computed\(\(\) =>/);
     assert.match(vue, /checkedProps\.value\.size && 'size'/);
@@ -602,16 +605,16 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /  open\.value = !open\.value\n/);
     assert.match(vue, /<ul\s+v-if="open"\s*>/);
     assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
-    assert.match(vue, /sortBy\(\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)/);
-    assert.match(vue, /\(item, index, loop\) => item\.id/);
-    assert.match(vue, /:key="item\.id"/);
-    assert.match(vue, /<span>\{\{ item\.name \}\}<\/span>/);
-    assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: query, defaultValue: '' \}"/);
+    assert.match(vue, /sortBy\(\s*\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) =>\s*referenceValue\(\s*referenceMember\(item, 'done'\)/);
+    assert.match(vue, /\(item, index, loop\) =>\s*referenceValue\(\s*referenceMember\(item, 'id'\)/);
+    assert.match(vue, /:key="referenceValue\(\s*referenceMember\(item, 'id'\)/);
+    assert.match(vue, /<span>\s*<RetainedInlineText[\s\S]*?referenceMember\(item, 'name'\)/);
+    assert.match(vue, /v-bind-control="\{\s*tag: 'input',\s*name: 'value',\s*value: referenceValue\(\s*query,[\s\S]*?\),\s*defaultValue: '',?\s*\}"/);
     // An emptied control reverts query to its declared value without echoing it.
     assert.match(vue, /@input="query = revertBoundControl\(/);
     assert.match(vue, /@click="flip"/);
     assert.match(vue, /:class="\{ compact: checkedProps\.size === 'sm' \}"/);
-    assert.match(vue, /:style="\{ '--gap': checkedProps\.size \?\? undefined \}"/);
+    assert.match(vue, /:style="\{ '--gap': checkedProps\.size \}"/);
     assert.match(vue, /<XBadge\s+class="x-badge"\s+:tone="checkedProps\.size"\s*><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.doesNotMatch(vue, /defineExpose|installMethods/);
@@ -626,8 +629,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
-    assert.match(vue, /v-for="tab in uniqueKeys\(tabs, \(tab, index, loop\) => tab\.id\)"/);
-    assert.match(vue, /:id="tab\.id"\n\s+:aria-selected="tab\.active"\n\s+:class="\{ active: tab\.active \}"\n\s+>\n?\s*\{\{ tab\.label \}\}/);
+    assert.match(vue, /v-for="tab in uniqueKeys\(tabs, \(tab, index, loop\) => referenceMember\(tab, 'id'\)\)"/);
+    assert.match(vue, /:id="referenceMember\(tab, 'id'\)"\n\s+:aria-selected="referenceMember\(tab, 'active'\)"\n\s+:class="\{ active: referenceMember\(tab, 'active'\) \}"\n\s+>\n?\s*\{\{ referenceMember\(tab, 'label'\) \}\}/);
     assert.doesNotMatch(vue, /function (truthy|attribute)\(/);
   });
 
@@ -639,9 +642,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
-    assert.match(vue, /hovered\.value\?\.\['label'\] == null \|\| typeof hovered\.value\?\.\['label'\] === 'string'/);
-    assert.match(vue, /<span v-if="hovered" :title="guarded"/);
-    assert.match(vue, /<p v-if="!issues\.length">Valid<\/p>/);
+    assert.match(vue, /<span v-if="truthy\(hovered\)" :title="referenceMember\(hovered, 'label'\)"/);
+    assert.match(vue, /<p v-if="!referenceMember\(issues, 'length'\)">Valid<\/p>/);
     assert.doesNotMatch(vue, /function truthy\(/);
   });
 
@@ -829,12 +831,12 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const react = generateReactComponent(definition);
     await transform(react, { loader: "tsx", format: "esm" });
     assert.match(vue, /draft\.owner\.name = revertBoundControl\([\s\S]*?'Ada',?\s*\) as any/);
-    assert.match(vue, /rows\[loop\.index\]\.label = readBoundControl\(/);
+    assert.match(vue, /rows\[referenceMember\(loop, 'index'\)\]\.label = readBoundControl\(/);
     assert.match(react, /\["owner", "name"\]/);
-    assert.match(react, /\[loop\.index, "label"\]/);
+    assert.match(react, /\[referenceMember\(loop, "index"\), "label"\]/);
     const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
     assert.match(svelte, /writePath\(draft, \["owner", "name"\]/);
-    assert.match(svelte, /writePath\(rows, \[loop\.index, "label"\]/);
+    assert.match(svelte, /writePath\(rows, \[referenceMember\(loop, "index"\), "label"\]/);
   });
 
   it("compiles numeric two-way controls directly through the shared control writer", () => {

@@ -938,12 +938,12 @@ const diagnostics: ConformanceCase[] = [
     name: "an absent required prop lowers with valueMissing validity",
     source: scene({
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<div from:data-l="$label"></div>`,
+      root: `<div from:data-l="$label">Ready:{default($label, 'missing')}</div>`,
       use: `<x-t></x-t>`,
     }),
     expect: {
-      probe: `const el = q('div'); return { missing: el.validity.valueMissing, valid: el.validity.valid };`,
-      result: { missing: true, valid: false },
+      probe: `const el = q('div'); return { text: el.textContent, missing: el.validity.valueMissing, valid: el.validity.valid };`,
+      result: { text: "Ready:missing", missing: true, valid: false },
     },
   },
   {

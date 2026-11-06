@@ -208,25 +208,27 @@ export function HtmlNextSelect({ htmlNextDefault, htmlNextAuthored, htmlNextInit
 ` : ""}
 
 /** Text that keeps its last accepted value while an expression is invalid. */
-export function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {
-  const accepted = value !== Symbol.for("html-next.invalid-result") && (accepts?.() ?? true);
-  const last = React.useRef(accepted ? text : "");
-  React.useLayoutEffect(() => { if (accepted) last.current = text; }, [accepted, text]);
-  return accepted ? text : last.current;
+export function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string | ((value: unknown) => string); readonly accepts?: () => boolean }): ReactNode {
+  const accepted = acceptsBindingResult(value, accepts);
+  const shown = accepted ? typeof text === "function" ? text(value) : text : "";
+  const last = React.useRef(shown);
+  React.useLayoutEffect(() => { if (accepted) last.current = shown; }, [accepted, shown]);
+  return accepted ? shown : last.current;
 }
 
 /** A value that keeps its last accepted value while an expression is invalid, rendered through \`render\`. */
 export function RetainedValue({ value, accepts, render }: { readonly value: unknown; readonly accepts?: (value: unknown) => boolean; readonly render: (value: any, hasValue: boolean) => ReactNode }): ReactNode {
-  const accepted = value !== Symbol.for("html-next.invalid-result") && (accepts === undefined ? value !== undefined : accepts(value));
+  const accepted = acceptsBindingResult(value, accepts);
   const last = React.useRef<{ value: unknown; hasValue: boolean }>({ value: undefined, hasValue: false });
   React.useLayoutEffect(() => { if (accepted) last.current = { value, hasValue: true }; }, [accepted, value]);
   return render(accepted ? value : last.current.value, accepted || last.current.hasValue);
 }
 
 /** An \`<output>\` whose text React and the form's own resets both write, kept in step. */
-export function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlNextAccepts = true, ref, ...attrs }: React.OutputHTMLAttributes<HTMLOutputElement> & { readonly htmlNextValue: unknown; readonly htmlNextText: string; readonly htmlNextRetain: boolean; readonly htmlNextAccepts?: boolean; readonly ref?: React.Ref<HTMLOutputElement> }): ReactNode {
-  const accepted = !htmlNextRetain || (htmlNextValue !== undefined && htmlNextValue !== Symbol.for("html-next.invalid-result") && htmlNextAccepts);
-  const last = React.useRef(accepted ? htmlNextText : "");
+export function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlNextAccepts = true, ref, ...attrs }: React.OutputHTMLAttributes<HTMLOutputElement> & { readonly htmlNextValue: unknown; readonly htmlNextText: string | ((value: unknown) => string); readonly htmlNextRetain: boolean; readonly htmlNextAccepts?: boolean; readonly ref?: React.Ref<HTMLOutputElement> }): ReactNode {
+  const accepted = !htmlNextRetain || (acceptsBindingResult(htmlNextValue) && htmlNextAccepts);
+  const next = accepted ? typeof htmlNextText === "function" ? htmlNextText(htmlNextValue) : htmlNextText : "";
+  const last = React.useRef(next);
   const output = React.useRef<HTMLOutputElement | null>(null);
   const attach = React.useCallback((element: HTMLOutputElement | null) => {
     output.current = element;
@@ -237,9 +239,9 @@ export function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlN
     if (ref != null) (ref as { current: HTMLOutputElement | null }).current = element;
     return () => { output.current = null; if (ref != null) (ref as { current: HTMLOutputElement | null }).current = null; };
   }, [ref]);
-  const shown = accepted ? htmlNextText : last.current;
+  const shown = accepted ? next : last.current;
   React.useLayoutEffect(() => {
-    if (accepted) last.current = htmlNextText;
+    if (accepted) last.current = next;
     if (output.current !== null && output.current.textContent !== shown) output.current.textContent = shown;
   });
   return <output {...attrs} ref={attach}>{shown}</output>;

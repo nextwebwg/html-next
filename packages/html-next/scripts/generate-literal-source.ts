@@ -65,3 +65,15 @@ for (const [name, constant] of [["inputs", "INPUTS_SOURCE"], ["prop-inputs", "PR
     if (await readFile(output, "utf8").catch(() => "") !== content) throw new Error(`${name} source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.`);
   } else await writeFile(output, content);
 }
+
+const attributeOwner = (await readFile(new URL("../src/dom-attributes.ts", import.meta.url), "utf8"))
+  .replace(/^import[^\n]*\n/gm, "").replace(/\bNONCONFORMING\b/g, "Symbol.for(\"html-next.invalid-result\")");
+const sanitizer = await readFile(new URL("../src/sanitize.ts", import.meta.url), "utf8");
+const urlCheck = sanitizer.match(/export function hasExecutableUrl\(value: string\): boolean \{[\s\S]*?\n\}/)?.[0];
+if (urlCheck === undefined) throw new Error("Cannot find executable URL detection in sanitize.ts.");
+const attributesOutput = new URL("../src/generated/dom-attributes-source.ts", import.meta.url);
+const attributesContent = "/** Generated from src/dom-attributes.ts and src/sanitize.ts. */\nexport const DOM_ATTRIBUTES_SOURCE = "
+  + JSON.stringify(urlCheck + "\n" + attributeOwner) + ";\n";
+if (process.argv.includes("--check")) {
+  if (await readFile(attributesOutput, "utf8").catch(() => "") !== attributesContent) throw new Error("DOM attribute source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
+} else await writeFile(attributesOutput, attributesContent);

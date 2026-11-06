@@ -23,6 +23,7 @@ import { addControllerGraph } from "./controller-files.js";
 import { writeHostDeclarations } from "./host-declarations.js";
 import type { TemplateNode } from "./template.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
+import { attributeHelperArtifact } from "./targets/attribute-helper.js";
 import { compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 
 export type BuildTarget = "docs" | "styles" | "vanilla" | "vue";
@@ -177,6 +178,10 @@ export async function buildComponents(
   if ([...artifacts.values()].some((artifact) => importsVueProps(artifact.content))) {
     const props = vuePropsArtifact();
     artifacts.set(props.path, props);
+  }
+  if ([...artifacts.values()].some(artifact => artifact.path.startsWith("vue/") && /\bfrom\s+["']\.\/attributes["']/.test(artifact.content))) {
+    const attributes = attributeHelperArtifact("vue", GENERATOR_VERSION);
+    artifacts.set(attributes.path, attributes);
   }
 
   await mkdir(outputRoot, { recursive: true });

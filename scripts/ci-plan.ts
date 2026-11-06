@@ -51,6 +51,7 @@ export function affectedPackages(paths: readonly string[]): string[] {
     if ((path.startsWith("docs/") && !path.startsWith("docs/guide/")) || /(?:^|\/)(?:README|CHANGELOG|AGENTS|CLAUDE)\.md$/.test(path)
       || /^packages\/[^/]+\/docs\//.test(path)) continue;
     const directory = /^packages\/([^/]+)\//.exec(path)?.[1];
+    if (directory === "html-next-dotnet") continue; // Native projects have their own build/test job.
     if (directory && directories.includes(directory)) changed.add(directory);
     // Shared toolchain changes, unknown paths and deleted files fail open to the full graph.
     else for (const name of directories) changed.add(name);
@@ -117,7 +118,9 @@ export function createPlan(paths: readonly string[]) {
       files: unitFiles.slice(index, index + 20), seconds: 0,
     });
   }
-  return { packages, node, browser, corpus };
+  const dotnet = packages.length === directories.length || paths.some((path) =>
+    path.startsWith("packages/html-next-dotnet/") && !path.endsWith(".md"));
+  return { packages, node, browser, corpus, dotnet };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -144,6 +147,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   // Every changed package version still gets an installed-consumer check before publication.
   const packed = directories.filter((name) => plan.packages.includes(name) || metadataOnly.has(`packages/${name}/package.json`));
   const outputs = {
+    dotnet: String(plan.dotnet),
     node: JSON.stringify({ include: plan.node }), browser: JSON.stringify({ include: plan.browser }),
     corpus: JSON.stringify({ include: plan.corpus }),
     // The plugin's installed-consumer test also covers the converter; run it once.

@@ -110,19 +110,49 @@ export function definitionGraph(definitions: Iterable<ComponentDefinition>): Com
   return new Map([...definitions].map((definition) => [definition.contract.tag, definition] as const));
 }
 
+/** Build-time CSS and the declared values its selectors require on each component root. */
+export interface CompiledGraphStyleAssets {
+  readonly css: string;
+  readonly stateNames: Readonly<Record<string, readonly string[]>>;
+}
+
 /** Delivers a closed graph in definition order, interleaving imports and local overrides. */
 export function compileComponentGraphStylesForBuild(definitions: readonly ComponentDefinition[],
   graph: ComponentStyleGraph = definitionGraph(definitions)): string {
+  return compileComponentGraphStyleAssetsForBuild(definitions, graph).css;
+}
+
+/** Compile selectors once and retain their root requirements for server implementations. */
+export function compileComponentGraphStyleAssetsForBuild(definitions: readonly ComponentDefinition[],
+  graph: ComponentStyleGraph = definitionGraph(definitions)): CompiledGraphStyleAssets {
   const groups = collectSharedStylesheets(definitions);
   const css: string[] = [];
+  const states = new Map(definitions.map(definition => [definition.contract.tag, new Set<string>()]));
+  const add = (tag: string, names: readonly string[]): void => {
+    let target = states.get(tag);
+    if (target === undefined) states.set(tag, target = new Set());
+    for (const name of names) target.add(name);
+  };
+  const record = (compiled: CompiledComponentStyles, tags: readonly string[]): void => {
+    for (const tag of tags) add(tag, compiled.stateNamesByTag?.[tag] ?? compiled.stateNames);
+    for (const [tag, names] of Object.entries(compiled.testedStates ?? {})) add(tag, names);
+  };
   for (const definition of definitions) {
     for (const group of groups.filter(group => group.adopters[0] === definition)) {
-      css.push(wrapStylesheetConditions(compileSharedComponentStylesForBuild(group.stylesheet.css, group.adopters, group.stylesheet.url, false, graph).css, group.stylesheet.conditions));
+      const compiled = compileSharedComponentStylesForBuild(group.stylesheet.css, group.adopters, group.stylesheet.url, false, graph);
+      record(compiled, group.adopters.map(adopter => adopter.contract.tag));
+      css.push(wrapStylesheetConditions(compiled.css, group.stylesheet.conditions));
     }
-    css.push(compileComponentStylesForBuild(definition.css, definition, undefined, undefined, false, graph).css);
+    // Shared imports already supplied their metadata above; compile the local sheet once.
+    const compiled = compileStyles(definition.css, definition, undefined, undefined, false, graph);
+    record(compiled, [definition.contract.tag]);
+    css.push(compiled.css);
   }
   const body = css.filter(part => part !== "").join("\n");
-  return hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body);
+  return Object.freeze({
+    css: hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body),
+    stateNames: Object.freeze(Object.fromEntries([...states].map(([tag, names]) => [tag, Object.freeze([...names])]))),
+  });
 }
 
 interface ConversionStyleOptions { readonly includeNative?: boolean; readonly nativeValueMetadata?: boolean }

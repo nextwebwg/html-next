@@ -617,7 +617,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       assert.match(slots.get("#prefix")!, /^<i slot="prefix" class="icon">&gt;<\/i>$/);
       assert.match(slots.get("#meta")!, /^<span v-if="open" slot="meta">Opened<\/span>$/);
       // A slot's elements share one Vue slot, in authored order; its `<template slot>` replaces them.
-      assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in tags"[\s\S]*slot="leading"/);
+      assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in guarded"[\s\S]*slot="leading"/);
       assert.equal(slots.get("#trailing"), "<b>!</b>");
       assert.match(invocation, /<template #action="(\w+)"><button type="button" class="act">\s*\{\{ Object\.hasOwn\(\1, 'value'\)/);
       // Only default content stays outside a named slot.
@@ -1628,10 +1628,12 @@ void [named, functionSlot, undeclared];`);
     const consumer = join(outDirectory, "scoped-slot-consumer.tsx");
     await writeFile(consumer, `import React from "react";
 import XRows from "./react/components/XRows.tsx";
-const scoped = <XRows slots={{ row: ({ item, index }) => <li>{item.name}{index}</li> }} />;
+const scoped = <XRows slots={{ row: ({ item, index }) => <li>{item?.name}{index}</li> }} />;
 // @ts-expect-error A declared scoped slot requires a render function.
 const staticNode = <XRows slots={{ row: <li>Invalid</li> }} />;
-void [scoped, staticNode];`);
+// @ts-expect-error A required slot input without a default can still read as null.
+const unsafe = <XRows slots={{ row: ({ item }) => <li>{item.name}</li> }} />;
+void [scoped, staticNode, unsafe];`);
     await typecheckReact(root, [...files, consumer]);
     const bundle = await build({
       entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,

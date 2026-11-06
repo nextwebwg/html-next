@@ -109,7 +109,7 @@ describe("compiled transitions", () => {
     assert.match(module, /^import \{[^}]*\bholdTransitions\b[^}]*\btransitionStyles\b[^}]*\} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     assert.match(module, /^transitionStyles\(".*@keyframes hn-fly .*"\);$/m);
     assert.match(module, /style\.setProperty\("view-transition-class"/);
-    assert.match(module, /transitionName\(readMember\(o, "id"\)\)/);
+    assert.match(module, /transitionName\(checkedReferenceValue\(S, readMember\(o, "id"\), RC\d+, "[^"]+", "photo.id"\)\)/);
     // Only a flip builds or tears down the body, so only a flip marks the transition.
     assert.match(module, /if \(c & 1 && !\(v\[0\]\) !== !r\.b0\) \{\n(?:.*\n){2} *transitionChanged\(\);\n *\} else if \(r\.b0 !== undefined\) p1\(r\.b0, c, d\);/);
     assert.match(module, /transitionRows\(r\.L1\)/);

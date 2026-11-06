@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,31 @@ import { describe, expect, it } from "vitest";
 import { affectedPackages, createPlan, isReleaseMetadataChange } from "../scripts/ci-plan.js";
 
 describe("affected CI", () => {
+  it("selects native checks without trying to pack .NET as an npm package", () => {
+    const plan = createPlan(["packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs"]);
+    expect(plan.dotnet).toBe(true);
+    expect(plan.packages).toEqual([]);
+    expect(plan.node).toEqual([]);
+    expect(plan.browser).toEqual([]);
+    expect(createPlan(["packages/html-next-dotnet/README.md"]).dotnet).toBe(false);
+    expect(createPlan(["packages/htmlkit/src/routes.ts"]).dotnet).toBe(false);
+    expect(createPlan(["scripts/ci-plan.ts"]).dotnet).toBe(true);
+  });
+  it("requires selected native checks to succeed and permits only unselected native checks to skip", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const guard = /node --input-type=module <<'JS'\n([\s\S]*?)\n\s+JS/.exec(workflow)?.[1];
+    expect(guard).toBeDefined();
+    for (const [selected, result, status] of [[true, "success", 0], [true, "failure", 1], [true, "skipped", 1], [false, "skipped", 0]] as const) {
+      const results = {
+        changes: { result: "success", outputs: { dotnet: String(selected), packages: "[]", has_node: "false", has_browser: "false", has_packages: "false", converters: "false" } },
+        repository: { result: "success" }, dotnet: { result },
+        ...Object.fromEntries(["verify", "browser", "packages", "converters", "runtimes"].map(name => [name, { result: "skipped" }])),
+      };
+      expect(spawnSync(process.execPath, ["--input-type=module", "-e", guard!], {
+        env: { ...process.env, RESULTS: JSON.stringify(results) },
+      }).status).toBe(status);
+    }
+  });
   it("builds a packed consumer together with its workspace dependencies", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     const selector = /pnpm --filter '([^']+)' build/.exec(workflow)?.[1];

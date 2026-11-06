@@ -345,8 +345,8 @@ export function typeAtKey(node: TypeNode, key: string | number): TypeNode | unde
     case "record":
       return node.value;
     case "object": {
-      const field = node.fields.find((candidate) => candidate.name === String(key));
-      if (field !== undefined) return field.type;
+      const name = String(key);
+      for (const field of node.fields) if (field.name === name) return field.type;
       // A closed shape says the field does not exist; an open one says nothing about it.
       return node.open ? undefined : ABSENT_TYPE;
     }

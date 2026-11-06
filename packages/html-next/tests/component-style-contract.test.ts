@@ -3,7 +3,7 @@ import { compileStyle } from "@vue/compiler-sfc";
 import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
-import { normalizeConversionStyleIdentities, compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
+import { normalizeConversionStyleIdentities, compileComponentGraphStyleAssetsForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
 import { loadNodeComponents } from "../src/node-loader.js";
 import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -316,4 +316,22 @@ it("preserves native value reads in nested rules and animated content", () => {
   assert.match(normalized, /:where\(\[data-html-next-native-value\]:not\(\[value\]\)\)::after/);
   assert.match(normalized, /content: attr\(data-html-next-native-value\); content: "last" !important/);
   assert.equal(normalizeConversionStyleIdentities(normalized, "component", options), normalized);
+});
+
+
+it("collects the root values required by local, foreign, and shared imported styles in one graph artifact", () => {
+  const provider = parseComponent(`<template component="x-style-provider"><defs><state name="open" type="boolean" value="true"></state></defs><section></section></template>`);
+  const reader = parseComponent(`<template component="x-style-reader"><defs><prop name="size" type="keyword" default="sm">Size.</prop></defs><div><x-style-provider></x-style-provider></div>
+    <style>:host([size=sm]) { color: red; } x-style-provider:state(open of x-style-provider) { color: blue; }</style></template>`);
+  const shared = { url: "https://example.test/shared.css", css: ":host([size=sm]) { padding: 1rem; }", conditions: [{ layer: "controls" }] };
+  const other = parseComponent(`<template component="x-style-other"><defs><prop name="size" type="keyword" default="sm">Size.</prop></defs><aside></aside></template>`);
+  const definitions = [provider, { ...reader, stylesheets: [shared] }, { ...other, stylesheets: [shared] }];
+  const compiled = compileComponentGraphStyleAssetsForBuild(definitions);
+  assert.equal(compiled.css, compileComponentGraphStylesForBuild(definitions));
+  assert.deepEqual(compiled.stateNames, { "x-style-provider": ["open"], "x-style-reader": ["size"], "x-style-other": ["size"] });
+  assert.match(compiled.css, /@layer controls/);
+  assert.match(compiled.css, /data-x-style-provider-state/);
+  assert.ok(Object.isFrozen(compiled) && Object.isFrozen(compiled.stateNames) && Object.isFrozen(compiled.stateNames["x-style-reader"]));
+  const partial = compileComponentGraphStyleAssetsForBuild([reader], definitionGraph(definitions));
+  assert.deepEqual(partial.stateNames, { "x-style-reader": ["size"], "x-style-provider": ["open"] });
 });

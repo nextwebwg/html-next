@@ -8,6 +8,9 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 import { renderComponents } from "../src/server.js";
 import { parseComponent } from "../src/source-parser.js";
+import { checkedReferenceInitial, checkedReferenceSource } from "./checked-reference-fixture.js";
+import { compiledFixtures } from "./hydration-fixtures.js";
+import { namespaceInitial, namespaceSnapshot, namespaceSource } from "./namespace-fixture.js";
 
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
@@ -59,6 +62,93 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const mode of ["live", "compiled"] as const) it(`${engine} preserves namespaced attributes during fresh creation and updates (${mode})`, async () => {
+      const definition = parseComponent(namespaceSource, "namespaces.html");
+      const compiled = mode === "compiled" ? await compiledFixtures("iife", "", [definition]) : undefined;
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<!doctype html><body></body>");
+        if (mode === "compiled") {
+          await page.addScriptTag({ content: compiled! });
+          await page.evaluate(() => document.body.append((window as any).HtmlCompiled.factories["x-namespaces"]({})));
+        } else {
+          await page.addScriptTag({ path: bundlePath });
+          await page.evaluate(definitionJSON => {
+            const definition = JSON.parse(definitionJSON);
+            const api = (window as any).HtmlRuntime;
+            api.registerComponentDefinitions([definition]);
+            document.body.innerHTML = "<x-namespaces></x-namespaces>";
+            api.lowerDocument();
+          }, JSON.stringify(definition));
+        }
+        const read = () => page.evaluate(namespaceSnapshot);
+        assert.deepEqual(await read(), namespaceInitial);
+        for (const [button, bound] of [["change", { href: "#second", value: "#second", language: "fr" }],
+          ["unsafe", { href: "", value: null, language: "fr" }], ["change", { href: "#second", value: "#second", language: "fr" }]] as const) {
+          await page.locator(`#${button}`).click();
+          await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+          assert.deepEqual(await read(), { ...namespaceInitial, bound });
+        }
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} compiled output checks executed references and reads computed keys once`, async () => {
+      const definition = parseComponent(checkedReferenceSource.replace('component="x-checked-reads"', 'component="x-checked-reads" controller="./reference-controller.js"'));
+      const once = parseComponent(`<template component="x-read-once" controller="./reference-controller.js"><defs>
+        <state name="record" type="object({ name: string, count: number })" value="{ name: 'Initial', count: 0 }"></state>
+        <state name="selector" type="object({ key: string })" value="{ key: 'name' }"></state>
+        </defs><output>{$record[$selector.key]}</output></template>`);
+      const compiled = await compiledFixtures("iife", "", [definition, once], {
+        "./reference-controller.js": "export default function(host) { globalThis['draft' in host.state ? 'checkedHost' : 'onceHost'] = host; }",
+      });
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent('<!doctype html><body></body>');
+        await page.addScriptTag({ content: compiled });
+        await page.evaluate(() => {
+          const factories = (window as any).HtmlCompiled.factories;
+          document.body.append(factories["x-checked-reads"]({}), factories["x-read-once"]({}));
+        });
+        await page.waitForFunction(() => (window as any).checkedHost && (window as any).onceHost);
+        const read = () => page.evaluate(ids => Object.fromEntries(ids.map(id => [id, document.getElementById(id)?.textContent])), Object.keys(checkedReferenceInitial));
+        assert.deepEqual(await read(), checkedReferenceInitial);
+        await page.evaluate(() => {
+          const { state } = (window as any).checkedHost;
+          state.choose = true; state.draft.name = "A"; state.draft["odd.key"] = "Quoted"; state.rows[0].name = "Row";
+        });
+        await page.waitForFunction(() => document.getElementById("computed-key")?.textContent === "A");
+        const accepted = { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row", "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" };
+        assert.deepEqual(await read(), accepted);
+        await page.evaluate(() => {
+          const { state } = (window as any).checkedHost;
+          state.draft.name = 17; state.rows[0].name = 17;
+        });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.deepEqual(await read(), accepted);
+        const reads = await page.evaluate(async () => {
+          const { state } = (window as any).onceHost;
+          let names = 0, keys = 0;
+          state.record = { get name() { names += 1; return "Once"; }, count: 2 };
+          state.selector = { get key() { keys += 1; return "name"; } };
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          return { names, keys, text: document.querySelector("body > output")?.textContent };
+        });
+        assert.deepEqual(reads, { names: 1, keys: 1, text: "Once" });
+        await page.evaluate(() => { (window as any).onceHost.state.selector = { key: "count" }; });
+        await page.waitForFunction(() => document.querySelector("body > output")?.textContent === "2");
+        await page.evaluate(() => { (window as any).onceHost.state.record = { name: "Another", count: "wrong" }; });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.equal(await page.locator("body > output").textContent(), "2");
+        await page.evaluate(() => { (window as any).onceHost.state.record = { name: "Another", count: 3 }; });
+        await page.waitForFunction(() => document.querySelector("body > output")?.textContent === "3");
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} releases removed row owners and stops descendants created by later branches`, async () => {
       const definition = parseComponent(`<template component="row-owner-release"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }]"></state>
@@ -3830,9 +3920,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
             ` value="[{ name: 'Apple', 'odd key': 'x' }]"></state>` +
             `<state name="byId" type="object({ '42': object({ name: string }) })" value="{ '42': { name: 'Ann' } }"></state>` +
             `<handler name="swap"><set name="items" expr:value="[{ name: 7, 'odd key': 'y' }]"></set>` +
-            `<set name="byId" expr:value="{ '42': { name: 7 } }"></set></handler></defs>` +
+            `<set name="byId" expr:value="{ '42': { name: 7 } }"></set></handler>` +
+            `<handler name="restore"><set name="items" expr:value="[{ name: 'Pear', 'odd key': 'z' }]"></set></handler></defs>` +
             `<main><output $value="$items.0.name"></output><b $value="$items.0['odd key']"></b><i $value="$byId.42.name"></i>` +
-            `<button type="button" on:click="swap"></button></main>` +
+            `<p $each="item of $items"><span>{$item.name}</span><em>{$item['odd key']}</em></p>` +
+            `<button type="button" on:click="swap"></button><button class="restore" type="button" on:click="restore"></button></main>` +
             `</template><x-first id="first"></x-first>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3840,6 +3932,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           document.querySelector("#first output")?.textContent,
           document.querySelector("#first b")?.textContent,
           document.querySelector("#first i")?.textContent,
+          document.querySelector("#first p span")?.textContent,
+          document.querySelector("#first p em")?.textContent,
         ]);
         await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
@@ -3850,12 +3944,83 @@ describe.skipIf(!enabled)("browser runtime", () => {
         // A dependency path names a list index and an object key alike (items.0.name, byId.42.name);
         // reading it must not fail, and a value that breaks its declared type leaves only that
         // reference inert, whether a list or an object holds it.
-        assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann"], swapped: ["Apple", "y", "Ann"] });
+        assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann", "Apple", "x"], swapped: ["Apple", "y", "Ann", "Apple", "y"] });
+        await page.click("#first button.restore");
+        await page.waitForFunction(() => document.querySelector("#first p span")?.textContent === "Pear");
+        assert.deepEqual(await read(), ["Pear", "z", "Ann", "Pear", "z"]);
         assert.deepEqual(messages.filter((text) => /SyntaxError/.test(text)), []);
         assert.deepEqual(messages.filter((text) => text.includes("declared type")), []);
       } finally {
         await browser.close();
       }
+    });
+
+    it(`${name} checks only evaluated typed references and recovers computed field reads`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent(checkedReferenceSource + '<x-checked-reads id="subject"></x-checked-reads>' +
+          `<template component="x-read-once"><defs>
+          <state name="record" type="object({ name: string, count: number })" value="{ name: 'Initial', count: 0 }"></state>
+          <state name="selector" type="object({ key: string })" value="{ key: 'name' }"></state>
+          </defs><output>{$record[$selector.key]}</output></template><x-read-once id="once"></x-read-once>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as any).HtmlRuntime.lowerDocument());
+        const read = () => page.evaluate(ids => Object.fromEntries(ids.map(id =>
+          [id, document.getElementById(id)?.textContent])), Object.keys(checkedReferenceInitial));
+        assert.deepEqual(await read(), checkedReferenceInitial);
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("subject"));
+          host.state.choose = true;
+          host.state.draft.name = "A";
+          host.state.draft["odd.key"] = "Quoted";
+          host.state.rows[0].name = "Row";
+        });
+        await page.waitForFunction(() => document.getElementById("computed-key")?.textContent === "A");
+        assert.deepEqual(await read(), { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row",
+          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" });
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("subject"));
+          host.state.draft.name = 17;
+          host.state.rows[0].name = 17;
+        });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.deepEqual(await read(), { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row",
+          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" });
+        const getters = await page.evaluate(async () => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          let names = 0; let keys = 0;
+          host.state.record = { get name() { names += 1; return "Once"; }, count: 2 };
+          host.state.selector = { get key() { keys += 1; return "name"; } };
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          return { names, keys, text: document.getElementById("once")?.textContent };
+        });
+        assert.deepEqual(getters, { names: 1, keys: 1, text: "Once" });
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.selector = { key: "count" };
+        });
+        await page.waitForFunction(() => document.getElementById("once")?.textContent === "2");
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.record = { name: "Another", count: "wrong" };
+        });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.equal(await page.locator("#once").textContent(), "2");
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.record = { name: "Another", count: 3 };
+        });
+        await page.waitForFunction(() => document.getElementById("once")?.textContent === "3");
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.selector.key = "name";
+        });
+        await page.waitForFunction(() => document.getElementById("once")?.textContent === "Another");
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
     });
 
     it(`${name} leaves a reference inert when its value breaks its declared type`, async () => {

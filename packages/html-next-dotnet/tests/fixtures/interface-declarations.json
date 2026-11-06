@@ -1,0 +1,256 @@
+{
+  "valid": [
+    {
+      "name": "default-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"ready\">Ready.</event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "scalar-events",
+      "source": "<template component=\"x-interface\"><defs><event name=\"changed\" type=\"number\"></event><event name=\"active\" type=\"boolean\" bubbles=\"false\" composed=\"false\" cancelable=\"true\"></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "event-value",
+      "source": "<template component=\"x-interface\"><defs><event name=\"activate\" type=\"event\"></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "unknown-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"validate\" type=\"unknown\"></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "compact-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object({ id: integer, name?: string })\"></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "expanded-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"id\" type=\"integer\" required></prop><prop name=\"trigger\" type=\"keyword\" values=\"keyboard, pointer\" required></prop><prop name=\"source\" type=\"event\"></prop></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "list-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"list\"><prop type=\"object\"><prop name=\"id\" type=\"string\" required></prop></prop></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "open-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\" open><prop name=\"id\" type=\"string\"></prop></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "bare-object-field",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"record\" type=\"object\"></prop></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "default-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\">Find.</request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "unknown-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"extensions\" returns=\"list(unknown)\">Extensions.</request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "event-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"trigger\" type=\"event\" returns=\"event\"></request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "compact-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\" type=\"object({ query: string, limit: integer })\" returns=\"list(object({ id: string }))\"></request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "expanded-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"upload\" type=\"object\"><prop name=\"file\" type=\"unknown\" required>File.</prop><returns type=\"object\"><prop name=\"src\" type=\"string\" required></prop><prop name=\"size\" type=\"number\" min=\"0\"></prop></returns>Upload.</request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "expanded-list-answer",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\"><returns type=\"list\"><prop type=\"object\" open><prop name=\"id\" type=\"integer\" required></prop></prop></returns></request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "independent-event-scope",
+      "source": "<template component=\"x-interface\"><defs><event name=\"label\" type=\"number\"></event><prop name=\"label\" type=\"string\" default=\"Ready\">Label.</prop></defs><output>{$label}</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "constrained-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"integer\" values=\"1, 2\" min=\"0\"></event></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "constrained-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\" type=\"string\" minlength=\"2\" returns=\"boolean\"></request></defs><output>Ready</output></template>",
+      "expected": "<output>Ready</output>"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-event-name",
+      "source": "<template component=\"x-interface\"><defs><event type=\"number\"></event></defs><output>Ready</output></template>",
+      "reason": "name"
+    },
+    {
+      "name": "duplicate-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\"></event><event name=\"picked\"></event></defs><output>Ready</output></template>",
+      "reason": "more than once|duplicate"
+    },
+    {
+      "name": "duplicate-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\"></request><request name=\"find\"></request></defs><output>Ready</output></template>",
+      "reason": "more than once|duplicate"
+    },
+    {
+      "name": "reserved-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"responder\"></event></defs><output>Ready</output></template>",
+      "reason": "responder"
+    },
+    {
+      "name": "reserved-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"responder\"></request></defs><output>Ready</output></template>",
+      "reason": "responder"
+    },
+    {
+      "name": "event-request-collision",
+      "source": "<template component=\"x-interface\"><defs><event name=\"find\"></event><request name=\"find\"></request></defs><output>Ready</output></template>",
+      "reason": "share a name"
+    },
+    {
+      "name": "request-event-collision",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\"></request><event name=\"find\"></event></defs><output>Ready</output></template>",
+      "reason": "share a name"
+    },
+    {
+      "name": "request-prop-collision",
+      "source": "<template component=\"x-interface\"><defs><request name=\"mention-query\"></request><prop name=\"mentionQuery\" type=\"string\">Query.</prop></defs><output>Ready</output></template>",
+      "reason": "collid"
+    },
+    {
+      "name": "malformed-event-name",
+      "source": "<template component=\"x-interface\"><defs><event name=\"Bad Name\" type=\"number\"></event></defs><output>Ready</output></template>",
+      "reason": "lowercase"
+    },
+    {
+      "name": "malformed-request-name",
+      "source": "<template component=\"x-interface\"><defs><request name=\"Bad Name\"></request></defs><output>Ready</output></template>",
+      "reason": "lowercase"
+    },
+    {
+      "name": "duplicate-field",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"id\" type=\"string\"></prop><prop name=\"id\" type=\"string\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "distinct"
+    },
+    {
+      "name": "scalar-fields",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"string\"><prop name=\"id\" type=\"string\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "object.*list"
+    },
+    {
+      "name": "missing-list-item",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"list\"></event></defs><output>Ready</output></template>",
+      "reason": "list"
+    },
+    {
+      "name": "named-list-item",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"list\"><prop name=\"row\" type=\"string\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "unnamed"
+    },
+    {
+      "name": "missing-field-type",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"id\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "type"
+    },
+    {
+      "name": "invalid-choice",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"id\" type=\"number\" values=\"wrong\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "values|conform"
+    },
+    {
+      "name": "empty-string-choice",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"id\" type=\"string\" values=\"one,,two\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "values"
+    },
+    {
+      "name": "invalid-bound",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"object\"><prop name=\"id\" type=\"string\" min=\"1\"></prop></event></defs><output>Ready</output></template>",
+      "reason": "min"
+    },
+    {
+      "name": "request-two-answer-forms",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\" returns=\"string\"><returns type=\"string\"></returns></request></defs><output>Ready</output></template>",
+      "reason": "answer.*once"
+    },
+    {
+      "name": "request-two-answers",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\"><returns type=\"string\"></returns><returns type=\"number\"></returns></request></defs><output>Ready</output></template>",
+      "reason": "answer.*once"
+    },
+    {
+      "name": "request-answer-without-type",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\"><returns></returns></request></defs><output>Ready</output></template>",
+      "reason": "type"
+    },
+    {
+      "name": "request-invalid-answer-field",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\"><returns type=\"object\"><prop name=\"count\" type=\"number\" values=\"wrong\"></prop></returns></request></defs><output>Ready</output></template>",
+      "reason": "values|conform"
+    },
+    {
+      "name": "nullable-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"number\" nullable></event></defs><output>Ready</output></template>",
+      "reason": "nullable"
+    },
+    {
+      "name": "nullable-request",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\" nullable></request></defs><output>Ready</output></template>",
+      "reason": "nullable"
+    },
+    {
+      "name": "nullable-state",
+      "source": "<template component=\"x-interface\"><defs><state name=\"draft\" nullable></state></defs><output>Ready</output></template>",
+      "reason": "nullable"
+    },
+    {
+      "name": "nullable-computed",
+      "source": "<template component=\"x-interface\"><defs><computed name=\"draft\" from=\"1\" nullable></computed></defs><output>Ready</output></template>",
+      "reason": "nullable"
+    },
+    {
+      "name": "event-not-a-value",
+      "source": "<template component=\"x-interface\"><defs><event name=\"ready\"></event></defs><output>{$ready}</output></template>",
+      "reason": "ready"
+    },
+    {
+      "name": "invalid-event-bound",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" type=\"number\" min=\"wrong\"></event></defs><output>Ready</output></template>",
+      "reason": "min"
+    },
+    {
+      "name": "invalid-request-bound",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\" type=\"number\" max=\"wrong\"></request></defs><output>Ready</output></template>",
+      "reason": "max"
+    },
+    {
+      "name": "invalid-request-choice",
+      "source": "<template component=\"x-interface\"><defs><request name=\"find\" type=\"string\" values=\"one,,two\"></request></defs><output>Ready</output></template>",
+      "reason": "values"
+    },
+    {
+      "name": "empty-prop-choice",
+      "source": "<template component=\"x-interface\"><defs><prop name=\"label\" type=\"string\" values=\"one,,two\">Label.</prop></defs><output>Ready</output></template>",
+      "reason": "values"
+    },
+    {
+      "name": "nullable-untyped-event",
+      "source": "<template component=\"x-interface\"><defs><event name=\"picked\" nullable></event></defs><output>Ready</output></template>",
+      "reason": "nullable"
+    }
+  ]
+}

@@ -17,6 +17,6 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["scripts/**/*.ts", "tests/**/*.ts", "vitest*.config.ts"],
+  "include": ["scripts/**/*.ts", "tests/**/*.ts", "vitest*.config.ts", "packages/html-next-dotnet/benchmarks/**/*.ts"],
   "exclude": ["**/dist", "coverage", "node_modules"]
 }

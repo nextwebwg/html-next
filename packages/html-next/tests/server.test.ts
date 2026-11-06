@@ -10,6 +10,7 @@ import { describe, it } from "vitest";
 import { JSDOM } from "jsdom";
 
 import { renderedInstanceRecord } from "../src/rendered-form.js";
+import { checkedReferenceInitial, checkedReferenceSource } from "./checked-reference-fixture.js";
 import { parseComponent } from "../src/source-parser.js";
 import { closeRenderWorkers, createRenderer, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
 
@@ -21,6 +22,37 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("checks only evaluated typed references, including computed and quoted field keys", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const result = await renderer.render('<x-checked-reads></x-checked-reads>', { definitions: [parseComponent(checkedReferenceSource)] });
+      const dom = new JSDOM(result.html);
+      try {
+        assert.deepEqual(Object.fromEntries(Object.keys(checkedReferenceInitial).map(id =>
+          [id, dom.window.document.getElementById(id)?.textContent])), checkedReferenceInitial);
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
+  });
+  it("checks typed loop aliases in their own lexical layer while preserving valid siblings", async () => {
+    const definition = parseComponent(`<template component="x-typed-aliases"><defs>
+      <state name="strings" type="list(object({ label: string, note: string }))" from="[{ label: 7, note: 'safe' }]"></state>
+      <state name="numbers" type="list(object({ label: number, note: string }))" from="[{ label: 7, note: 'safe' }]"></state>
+      <state name="untyped" type="unknown" from="[{ label: false, note: 'safe' }]"></state>
+      </defs><section>
+      <output id="strings"><b $each="row of $strings">[{$row.label}|{$row.note}]</b></output>
+      <output id="numbers"><b $each="row of $numbers">[{$row.label}|{$row.note}]</b></output>
+      <output id="untyped"><b $each="row of $untyped">[{$row.label}|{$row.note}]</b></output>
+      </section></template>`);
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const result = await renderer.render('<x-typed-aliases></x-typed-aliases>', { definitions: [definition] });
+      const dom = new JSDOM(result.html);
+      try {
+        assert.deepEqual(["strings", "numbers", "untyped"].map(id => dom.window.document.getElementById(id)?.textContent),
+          ["[|safe]", "[7|safe]", "[false|safe]"]);
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
+  });
   it("addresses each component host by tag when definitions share a native root", async () => {
     const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf><span>{$ownerText}</span></named-leaf></template>');
     const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article><b>{$leafText}</b><slot></slot></article></template>');

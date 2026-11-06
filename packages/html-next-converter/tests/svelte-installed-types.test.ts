@@ -43,8 +43,9 @@ it("checks an independently installed Svelte library with native consumers", asy
       ['pair-slot-negative', '<script lang="ts">import { XPair } from "@example/svelte-types-probe";</script>{#snippet row(props: {wrong: unknown})}{props.wrong}{/snippet}<XPair slots={{row}} />'],
       ['declared-event-capture-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script><XTyped onchangecapture={(event) => { const detail: boolean = event.detail; }} />'],
       ['slot-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {wrong: unknown})}{props.wrong}{/snippet}<XTyped slots={{row}} />'],
-      // A declared slot prop has its declared type.
-      ['declared-slot-prop-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: string})}{props.item.toUpperCase()}{/snippet}<XTyped slots={{row}} />'],
+      // A required slot prop without a default can read as null.
+      ['declared-slot-prop-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: string | null})}{props.item?.toUpperCase()}{/snippet}<XTyped slots={{row}} />'],
+      ['nullable-slot-prop-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: string | null})}{props.item.toUpperCase()}{/snippet}<XTyped slots={{row}} />'],
       ['declared-slot-prop-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: number})}{props.item.toFixed(1)}{/snippet}<XTyped slots={{row}} />'],
     ];
     const expectedErrors: Record<string, RegExp> = {
@@ -53,6 +54,7 @@ it("checks an independently installed Svelte library with native consumers", asy
       "declared-event-negative": /string.*boolean|CustomEvent<string>/,
       "slot-negative": /wrong|item/,
       "pair-slot-negative": /wrong|item|index/,
+      "nullable-slot-prop-negative": /null/,
       "declared-slot-prop-negative": /number.*string|string.*number/,
     };
     const config = join(consumer, "tsconfig.json");

@@ -1,18 +1,19 @@
-// The native getter checks Event's internal brand and accepts events from another window.
-const eventType = typeof Event === "undefined" ? undefined
-  : Object.getOwnPropertyDescriptor(Event.prototype, "type")?.get;
-
-const eventBrands = new WeakMap<object, boolean>();
-
-export function isNativeEvent(value: unknown): value is Event {
-  if (typeof value !== "object" || value === null || eventType === undefined || !("type" in value)) return false;
-  const known = eventBrands.get(value);
-  if (known !== undefined) return known;
-  let accepted = false;
-  try { eventType.call(value); accepted = true; } catch { /* The native brand is immutable. */ }
-  eventBrands.set(value, accepted);
-  return accepted;
+/** Closed factory shared with generated checks, including when the compiler is minified. */
+export function createEventCheck(
+  eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")?.get,
+  eventBrands = new WeakMap<object, boolean>(),
+): (value: unknown) => value is Event {
+  return (value: unknown): value is Event => {
+    if (typeof value !== "object" || value === null || eventType === undefined || !("type" in value)) return false;
+    let accepted = eventBrands.get(value);
+    if (accepted === undefined) {
+      try { eventType.call(value); accepted = true; } catch { accepted = false; }
+      eventBrands.set(value, accepted);
+    }
+    return accepted;
+  };
 }
+export const isNativeEvent = /* @__PURE__ */ createEventCheck();
 
 /**
  * A native event or DOM node. Their native getters check that `this` is the platform object

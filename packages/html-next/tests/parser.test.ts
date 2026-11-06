@@ -1006,6 +1006,15 @@ describe("parseComponent", () => {
     );
   });
 
+  it.each(["onclick", "onload", "onerror"].flatMap(name => ["from", "bind"].map(kind => ({ name, kind }))))("rejects executable $kind:$name bindings", ({ name, kind }) => {
+    const binding = `${kind}:${name}="${kind === "from" ? "$handler" : "handler"}"`;
+    expectDiagnostic("HT007", `<template component="x-events"><defs><state name="handler" type="string" value=""></state></defs><button ${binding}>Value</button></template>`);
+  });
+
+  it("keeps component input names separate from native executable attributes", () => {
+    assert.doesNotThrow(() => parseComponent('<template component="x-parent"><defs><state name="value" type="string" value=""></state></defs><div><x-child from:onclick="$value" bind:onload="value"></x-child></div></template>'));
+  });
+
   it("rejects executable literal attributes and unsafe property sinks", () => {
     for (const attribute of [
       "@click",

@@ -180,6 +180,8 @@ export function definitionMayInvokeComponents(definition: ComponentDefinition): 
 }
 
 export interface ElementNode {
+  /** Inert source children of a consumer <template slot>, retained for serialized carriers. */
+  readonly slotContent?: string;
   readonly kind: "element";
   readonly name: string;
   readonly attributes: readonly TemplateAttribute[];

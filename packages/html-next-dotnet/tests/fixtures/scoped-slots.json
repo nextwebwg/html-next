@@ -1,0 +1,283 @@
+{
+  "valid": [
+    {
+      "name": "written-inputs",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop><prop name=\"count\" type=\"number\" required>Count.</prop></slot></defs><section><slot name=\"summary\" label=\"Open\" count=\"3\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label}:{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Open:3</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Open:3</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}:{$count}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "consumer-scope-and-shadowing",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" label=\"Inner\"></slot></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Outer\"></state><state name=\"owner\" type=\"string\" value=\"Caller\"></state></defs><div><x-card><template slot=\"summary\"><b>{$label}:{$owner}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Inner:Caller</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Inner:Caller</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}:{$owner}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "omitted-default",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Default</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Default</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "omitted-optional-keeps-consumer-binding",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\">Label.</prop></slot></defs><section><slot name=\"summary\"></slot></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Outer\"></state></defs><div><x-card><template slot=\"summary\"><b>{$label}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Outer</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Outer</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "null-input-takes-default",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" from:label=\"null\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Default</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Default</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "wrong-dynamic-type-takes-default",
+      "source": "<template component=\"x-unused\"><b></b></template><template component=\"x-card\"><defs><state name=\"text\" type=\"string\" value=\"bad\"></state><slot name=\"summary\"><prop name=\"count\" type=\"number\" default=\"7\">Count.</prop></slot></defs><section><slot name=\"summary\" from:count=\"$text\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>7</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>7</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$count}</b></template></template></section></div>",
+      "diagnostics": 1
+    },
+    {
+      "name": "missing-input-takes-default",
+      "source": "<template component=\"x-card\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" from:label=\"$record.missing\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Default</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Default</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "repeated-row-inputs",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" $each=\"row of ['A', 'B']\" from:label=\"$row\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>A</b><b>B</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>A</b><?end?><?start slot=\"summary\" scoped=\"\"?><b>B</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "structured-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"item\" type=\"object({ name: string })\" required>Item.</prop></slot></defs><section><slot name=\"summary\" from:item=\"{ name: 'Row' }\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$item.name}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Row</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Row</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$item.name}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "unknown-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"item\" type=\"unknown\" required>Item.</prop></slot></defs><section><slot name=\"summary\" from:item=\"{ name: 'Row' }\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$item.name}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Row</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Row</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$item.name}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "default-slot-input",
+      "source": "<template component=\"x-card\"><defs><slot><prop name=\"count\" type=\"number\" default=\"2\">Count.</prop></slot></defs><section><template $slot></template></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"\"><b>{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>2</b></section></div>",
+      "native": "<div><section><?start slot=\"\" scoped=\"\"?><b>2</b><?end?><template carrier=\"x-card\"><template slot=\"\"><b>{$count}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "fallback-keeps-component-scope",
+      "source": "<template component=\"x-card\"><defs><state name=\"label\" type=\"string\" value=\"Component\"></state><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" label=\"Input\">{$label}</slot></section></template><template component=\"x-page\"><defs></defs><div><x-card></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section>Component</section></div>",
+      "native": "<div><section><?start slot=\"summary\" fallback=\"\" scoped=\"\"?>Component<?end?></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "unknown-written-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"item\" type=\"unknown\" required>Item.</prop></slot></defs><section><slot name=\"summary\" item=\"Text\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$item}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Text</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Text</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$item}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "nonfinite-input-takes-default",
+      "source": "<template component=\"x-card\"><defs><state name=\"denominator\" type=\"number\" value=\"0\"></state><slot name=\"summary\"><prop name=\"count\" type=\"number\" default=\"7\">Count.</prop></slot></defs><section><slot name=\"summary\" from:count=\"1 / $denominator\"></slot></section></template><template component=\"x-page\"><defs><state name=\"count\" type=\"number\" value=\"99\"></state></defs><div><x-card><template slot=\"summary\"><b>{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>7</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>7</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$count}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "nonfinite-input-shadows-consumer",
+      "source": "<template component=\"x-card\"><defs><state name=\"denominator\" type=\"number\" value=\"0\"></state><slot name=\"summary\"><prop name=\"count\" type=\"number\">Count.</prop></slot></defs><section><slot name=\"summary\" from:count=\"1 / $denominator\"></slot></section></template><template component=\"x-page\"><defs><state name=\"count\" type=\"number\" value=\"99\"></state></defs><div><x-card><template slot=\"summary\"><b>{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b></b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b></b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$count}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "consumer-guard-keeps-outer-scope",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"boolean\" default=\"false\">Label.</prop></slot></defs><section><slot name=\"summary\" label=\"false\"></slot></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"boolean\" value=\"true\"></state><state name=\"owner\" type=\"string\" value=\"Caller\"></state></defs><div><x-card><template slot=\"summary\" $if=\"$label\"><b>{$label}:{$owner}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>false:Caller</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>false:Caller</b><?end?><template carrier=\"x-card\"><template slot=\"summary\" $if=\"$label\"><b>{$label}:{$owner}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "constant-nonfinite-input-takes-default",
+      "source": "<template component=\"x-card\"><defs><state name=\"denominator\" type=\"number\" value=\"0\"></state><slot name=\"summary\"><prop name=\"count\" type=\"number\" default=\"7\">Count.</prop></slot></defs><section><slot name=\"summary\" from:count=\"1 / 0\"></slot></section></template><template component=\"x-page\"><defs><state name=\"count\" type=\"number\" value=\"99\"></state></defs><div><x-card><template slot=\"summary\"><b>{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>7</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>7</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$count}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "unknown-missing-input-is-null",
+      "source": "<template component=\"x-card\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><slot name=\"summary\"><prop name=\"label\" type=\"unknown\">Label.</prop></slot></defs><section><slot name=\"summary\" from:label=\"$record.missing\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label = null}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>true</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>true</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label = null}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "unused-other-slot-content",
+      "source": "<template component=\"x-card\"><defs><state name=\"label\" type=\"string\" value=\"Component\"></state><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" label=\"Input\">{$label}</slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><b>Ignored</b></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section>Component</section></div>",
+      "native": "<div><section><?start slot=\"summary\" fallback=\"\" scoped=\"\"?>Component<?end?><template carrier=\"x-card\"><b>Ignored</b></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "nested-component-snapshots",
+      "source": "<template component=\"x-leaf\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><i>{$label}</i></template><template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" $each=\"row of ['A', 'B']\" from:label=\"$row\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><x-leaf from:label=\"$label\"></x-leaf></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><i>A</i><i>B</i></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><i>A</i><?end?><?start slot=\"summary\" scoped=\"\"?><i>B</i><?end?><template carrier=\"x-card\"><template slot=\"summary\"><x-leaf from:label=\"$label\"></x-leaf></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "repeated-rejection-warns-once",
+      "source": "<template component=\"x-unused\"><b></b></template><template component=\"x-card\"><defs><state name=\"text\" type=\"string\" value=\"bad\"></state><slot name=\"summary\"><prop name=\"count\" type=\"number\" default=\"7\">Count.</prop></slot></defs><section><slot name=\"summary\" $each=\"row of [1, 2]\" from:count=\"$text\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>7</b><b>7</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>7</b><?end?><?start slot=\"summary\" scoped=\"\"?><b>7</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$count}</b></template></template></section></div>",
+      "diagnostics": 1
+    },
+    {
+      "name": "required-written-empty-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" required>Label.</prop><prop name=\"count\" type=\"number\" required>Count.</prop></slot></defs><section><slot name=\"summary\" label=\"\" count=\"3\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$label}:{$count}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>:3</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>:3</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$label}:{$count}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "structured-unknown-written-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"item\" type=\"object({ name: unknown })\" required>Item.</prop></slot></defs><section><slot name=\"summary\" item=\"{ name: 'Row' }\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$item.name}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>Row</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>Row</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$item.name}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "event-slot-null-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"event\" type=\"event\" required>Event.</prop></slot></defs><section><slot name=\"summary\" from:event=\"null\"></slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"summary\"><b>{$event = null}</b></template></x-card></div></template>",
+      "entry": "x-page",
+      "expected": "<div><section><b>true</b></section></div>",
+      "native": "<div><section><?start slot=\"summary\" scoped=\"\"?><b>true</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$event = null}</b></template></template></section></div>",
+      "diagnostics": 0
+    },
+    {
+      "name": "prototype-named-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"__proto__\" type=\"number\" default=\"9\">Count.</prop></slot></defs><section><slot name=\"summary\" from:__proto__=\"1 / 0\"></slot></section></template><template component=\"x-page\"><main><x-card><template slot=\"summary\"><b>{$__proto__}</b></template></x-card></main></template>",
+      "entry": "x-page",
+      "expected": "<main><section><b>9</b></section></main>",
+      "native": "<main><section><?start slot=\"summary\" scoped=\"\"?><b>9</b><?end?><template carrier=\"x-card\"><template slot=\"summary\"><b>{$__proto__}</b></template></template></section></main>",
+      "diagnostics": 0
+    }
+  ],
+  "invalid": [
+    {
+      "name": "duplicate-declaration",
+      "source": "<template component=\"x-card\"><defs><slot name=\"row\"></slot><slot name=\"row\"></slot></defs><section></section></template>",
+      "reason": "declared|duplicate"
+    },
+    {
+      "name": "invalid-declaration-name",
+      "source": "<template component=\"x-card\"><defs><slot name=\"bad-name\"></slot></defs><section></section></template>",
+      "reason": "identifier|name"
+    },
+    {
+      "name": "empty-declaration-name",
+      "source": "<template component=\"x-card\"><defs><slot name=\"\"></slot></defs><section></section></template>",
+      "reason": "identifier|name"
+    },
+    {
+      "name": "reserved-prop-name",
+      "source": "<template component=\"x-card\"><defs><slot><prop name=\"name\" type=\"string\">Name.</prop></slot></defs><section></section></template>",
+      "reason": "reserved"
+    },
+    {
+      "name": "reserved-prop-of",
+      "source": "<template component=\"x-card\"><defs><slot><prop name=\"of\" type=\"string\">Of.</prop></slot></defs><section></section></template>",
+      "reason": "reserved"
+    },
+    {
+      "name": "duplicate-slot-prop",
+      "source": "<template component=\"x-card\"><defs><slot><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section></section></template>",
+      "reason": "duplicate|more than once"
+    },
+    {
+      "name": "nullable-slot-prop",
+      "source": "<template component=\"x-card\"><defs><slot><prop name=\"label\" type=\"string\" nullable>Label.</prop></slot></defs><section></section></template>",
+      "reason": "nullable"
+    },
+    {
+      "name": "undeclared-outlet-input",
+      "source": "<template component=\"x-card\"><defs></defs><section><slot name=\"row\" label=\"Input\"></slot></section></template>",
+      "reason": "declare"
+    },
+    {
+      "name": "unknown-outlet-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" other=\"Input\"></slot></section></template>",
+      "reason": "declare"
+    },
+    {
+      "name": "missing-required-outlet-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"count\" type=\"number\" required>Count.</prop></slot></defs><section><slot name=\"summary\"></slot></section></template>",
+      "reason": "required"
+    },
+    {
+      "name": "duplicate-outlet-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" label=\"A\" from:label=\"'B'\"></slot></section></template>",
+      "reason": "more than once|duplicate"
+    },
+    {
+      "name": "wrong-written-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"count\" type=\"number\" required>Count.</prop></slot></defs><section><slot name=\"summary\" count=\"bad\"></slot></section></template>",
+      "reason": "type|value|conform"
+    },
+    {
+      "name": "wrong-constant-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"count\" type=\"number\" required>Count.</prop></slot></defs><section><slot name=\"summary\" from:count=\"'bad'\"></slot></section></template>",
+      "reason": "type|value|conform"
+    },
+    {
+      "name": "nonattribute-written-input",
+      "source": "<template component=\"x-card\"><defs><slot name=\"summary\"><prop name=\"item\" type=\"event\">Item.</prop></slot></defs><section><slot name=\"summary\" item=\"bad\"></slot></section></template>",
+      "reason": "type|value|attribute"
+    }
+  ],
+  "renderInvalid": [
+    {
+      "name": "plain-content-for-scoped-slot",
+      "source": "<template component=\"x-card\"><defs><state name=\"label\" type=\"string\" value=\"Component\"></state><slot name=\"summary\"><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></slot></defs><section><slot name=\"summary\" label=\"Input\">{$label}</slot></section></template><template component=\"x-page\"><defs></defs><div><x-card><b slot=\"summary\">Ignored</b></x-card></div></template>",
+      "reason": "scoped|template"
+    }
+  ]
+}

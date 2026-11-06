@@ -12,19 +12,23 @@ import { propInputOrder } from "./backend.js";
 import {
   compileExpression,
   dimensionType,
+  finiteStep,
   expressionFormattingType,
   mathArity,
-  typeCheckedDependencies,
+  referencePath,
+  type ReferencePath,
   wholeNumber,
   type CompiledExpression,
   type ExpressionNode,
   type Scope as TypeScope,
 } from "../expression.js";
+import { ReferenceSchemas } from "./reference-schema.js";
 import type { ArmRoot, CompactType } from "../generated-runtime.js";
 import { componentStateNames } from "../component-styles-build.js";
 import type { ComponentStyleGraph } from "../component-styles.js";
 import { PROJECTED_ATTRIBUTE, stateAttribute } from "../component-styles.js";
-import { foreignContent } from "parse5";
+import { objectKey, svgAttributeName } from "./shared.js";
+import { attributeNamespace } from "../dom-attributes.js";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
@@ -55,13 +59,6 @@ const rootBit = (index: number): number => index < 29 ? 1 << index : OVERFLOW;
 
 /** Elements whose children the live runtime manages itself (scoped slot and `$match` carriers). */
 const EXCLUDED = new Set(["template"]);
-
-/** A bound attribute's name on an SVG element, case-adjusted as the HTML parser adjusts it. */
-function svgAttributeName(name: string): string {
-  const token = { attrs: [{ name, value: "" }] };
-  foreignContent.adjustTokenSVGAttrs(token as Parameters<typeof foreignContent.adjustTokenSVGAttrs>[0]);
-  return token.attrs[0]!.name;
-}
 
 interface Root {
   readonly prop?: boolean;
@@ -285,6 +282,8 @@ export interface BlockPlan {
   /** Initializer statements, in declaration order. */
   readonly initializers: readonly string[];
   readonly handlers: readonly HandlerPlan[];
+  /** Immutable reference checks emitted once per module. */
+  readonly referenceSchemas: readonly string[];
   /** Each computed root's index and lowered expression. */
   readonly computeds: readonly { readonly index: number; readonly source: string }[];
   readonly seeds: readonly { readonly index: number; readonly source: string }[];
@@ -376,6 +375,17 @@ export function compactType(node: TypeNode): CompactType {
       // A selected type depends on another declaration; a separated list checks its items.
       return ["p", { js: `detailCheck(${checkSource(node)})` } satisfies CompactCheck];
   }
+}
+
+function compactReferenceType(type: TypeNode): CompactType {
+      switch (type.kind) {
+        case "list": return ["l"];
+        case "record": return ["r"];
+        case "object": return ["o"];
+        case "union": return ["u", ...type.members.map(compactReferenceType)];
+        case "constrained": return compactReferenceType(type.base);
+        default: return compactType(type);
+      }
 }
 
 /** JavaScript for a compact type: JSON, with each predicate's check written as code. */
@@ -514,6 +524,7 @@ interface AliasEntry {
 
 interface Scope {
   readonly observesInputs?: boolean;
+  readonly reference?: (node: ExpressionNode, path: ReferencePath, scope: Scope) => Lowered;
   readonly roots: readonly Root[];
   /** Local names, innermost last. */
   readonly aliases: readonly AliasEntry[];
@@ -565,7 +576,13 @@ function none(key: string, source: string): Lowered {
   return { source, bits: 0, nested: false, item: false, boolean: false, deep: false, contents: false, fails: false, key };
 }
 
-function lower(node: ExpressionNode, scope: Scope): Lowered {
+function lower(node: ExpressionNode, scope: Scope, base = false): Lowered {
+  const path = !base && scope.reference !== undefined ? referencePath(node) : undefined;
+  if (path !== undefined) return scope.reference!(node, path, scope);
+  return lowerUnchecked(node, scope);
+}
+
+function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
   // A recorded evaluation is never shared: its reads array is its own.
   const key = `${scope.record ?? ""}${JSON.stringify(node)}`;
   switch (node.kind) {
@@ -612,7 +629,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       };
     }
     case "member": {
-      const { counted, ...object } = lower(node.object, scope);
+      const { counted, ...object } = lower(node.object, scope, true);
       // `loop.index` and `loop.first` follow the row's index only, not the count.
       const indexOnly = node.object.kind === "id" && (node.key === "index" || node.key === "first");
       return {
@@ -623,7 +640,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       };
     }
     case "index": {
-      const object = lower(node.object, scope);
+      const object = lower(node.object, scope, true);
       const index = lower(node.index, scope);
       const both = merge(object, index);
       return {
@@ -650,12 +667,15 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         const a = truthiness(left, scope.record);
         const b = truthiness(right, scope.record);
         return fails
-          ? { ...none(key, `logicValue(${node.op === "and"}, ${a.source}, ${b.source})`), ...merge(a, b), fails: true }
+          ? { ...none(key, `((q) => q === NONCONFORMING ? q : ${node.op === "and" ? `q ? ${b.source} : false` : `q ? true : ${b.source}`})(${a.source})`), ...merge(a, b), fails: true }
           : { ...none(key, `(${a.source} ${node.op === "and" ? "&&" : "||"} ${b.source})`), ...merge(a, b), boolean: true };
       }
-      if ((node.op === "=" || node.op === "!=") && !fails) {
-        // Identity comparison reads no contents, and both sides share the interpreter's ABSENT.
-        return { ...none(key, `(${left.source} ${node.op === "=" ? "===" : "!=="} ${right.source})`), ...merge(left, right), boolean: true };
+      if (node.op === "=" || node.op === "!=") {
+        const present = (node: ExpressionNode, value: Lowered): boolean =>
+          node.kind === "literal" && typeof node.value !== "symbol" || value.boolean && !value.fails;
+        const direct = !fails && present(node.left, left) && present(node.right, right);
+        return { ...none(key, direct ? `(${left.source} ${node.op === "=" ? "===" : "!=="} ${right.source})`
+          : `equalValue(${left.source}, ${right.source}${node.op === "!=" ? ", true" : ""})`), ...merge(left, right), boolean: direct };
       }
       const arithmetic = ARITHMETIC.has(node.op);
       const leftDimension = arithmetic ? dimensionType(node.left, scope.types) : undefined;
@@ -667,7 +687,10 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         : `, ${dimensionSource(leftDimension)}, ${dimensionSource(rightDimension)}`;
       return {
         ...none(key, `binaryValue(${JSON.stringify(node.op)}, ${left.source}, ${right.source}${dimensions}${decimal === undefined ? "" : `, ${decimal}`})`),
-        ...merge(left, right), fails: fails || leftDimension !== undefined || rightDimension !== undefined,
+        ...merge(left, right), fails: fails || arithmetic && !finiteStep(node, operand => {
+          const type = declaredExpressionType({ ast: operand }, scope.types);
+          return type?.kind === "terminal" && (type.name === "number" || type.name === "integer");
+        }),
       };
     }
     case "conditional": {
@@ -677,7 +700,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const both = merge(test, merge(consequent, alternate));
       return {
         ...none(key, test.fails
-          ? `chooseValue(${test.source}, ${consequent.source}, ${alternate.source})`
+          ? `((q) => q === NONCONFORMING ? q : q ? ${consequent.source} : ${alternate.source})(${test.source})`
           : `(${test.source} ? ${consequent.source} : ${alternate.source})`),
         ...both, boolean: consequent.boolean && alternate.boolean, deep: consequent.deep || alternate.deep,
       };
@@ -691,7 +714,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         return {
           ...none(key, scope.observesInputs
             ? `inputDefault(() => ${value.source}, () => ${fallback.source}, ABSENT)`
-            : `defaultValue(${value.source}, ${fallback.source})`), ...reads,
+            : `((q) => q === ABSENT || q == null ? ${fallback.source} : q)(${value.source})`), ...reads,
           boolean: value.boolean && fallback.boolean, deep: value.deep || fallback.deep,
         };
       }
@@ -890,6 +913,8 @@ class Planner {
   private readonly computing = new Set<number>();
   /** Initializer statements, in declaration order. */
   readonly initializers: string[] = [];
+  private readonly referenceMetadata = new ReferenceSchemas(type => compactSource(compactReferenceType(type)), "RC");
+  readonly referenceSchemas = this.referenceMetadata.sources;
   readonly handlers = new Map<string, HandlerPlan>();
   /** The projection being planned, and the component it is projected into, whose slots name its carriers' props. */
   private projecting: { block: Block; readonly definition: ComponentDefinition } | undefined;
@@ -970,70 +995,56 @@ class Planner {
     return plan;
   }
 
-  /**
-   * Lowers an expression the live runtime evaluates with `evalConforming`: a declared path below a
-   * root is checked against its own type first, and a failing one warns once and leaves the
-   * expression nonconforming. A root's own value is checked on every write, so it always passes.
-   */
-  checked(plan: CompiledExpression, scope: Scope): Lowered {
-    const value = lower(plan.ast, scope);
-    let paths: readonly string[] = [];
-    try { paths = typeCheckedDependencies(plan); } catch { /* evaluated as written */ }
-    const checks: string[] = [];
-    let reads: Reads = value;
-    for (const path of paths) {
-      const declared = declaredTypeAt(this.definition, path);
-      if (declared === undefined) continue;
-      const [name, ...steps] = path.split(".");
-      const index = this.roots.findIndex((root) => root.name === name);
-      if (index < 0) unreachable(`declared reference \`${path}\` reads a root`);
-      const root = this.roots[index]!;
-      const key = JSON.stringify(`expression:${plan.source}:${path}`);
-      const select = this.definition.contract.props[name!]?.select;
-      /** The check of a read: a select prop's against the type its selector's current value chooses. */
-      const check = (read: string): string => {
-        if (select === undefined) {
-          const type = compactType(declared);
-                return `checkReference(S, ${read}, ${compactSource(type)}, ${key}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`;
-        }
-        const from = this.roots.findIndex((candidate) => candidate.name === select.from);
-        if (from < 0) unreachable(`a select prop's selector \`${select.from}\` is a root`);
-        reads = merge(reads, { bits: rootBit(from), nested: false, item: false, contents: false, fails: true, ...from >= 29 ? { overflow: [from] } : {} });
-        const choice = (type: TypeNode | undefined): string => {
-          for (const step of steps) type = type === undefined ? undefined : typeAtKey(type, step);
-          if (type === undefined) return "0, \"\"";
-          const compact = compactType(type);
-          return `${compactSource(compact)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(type)}.`)}`;
-        };
-        // The last choice is the one no option matches, or a null selector: the null type.
-        const options = [...select.options.map((option) => `[${JSON.stringify(option.value)}, ${choice(normalizeType(option.type))}]`),
-          `[null, ${choice({ kind: "terminal", name: "null" })}]`];
-        return `checkSelected(S, ${read}, v[${from}], [${options.join(", ")}], ${key})`;
-      };
-      // A local that shadows a root is still checked against the root's declared type, as live does.
-      const shadow = scope.aliases.findLast((candidate) => candidate.name === name);
-      if (shadow !== undefined) {
-        // A scoped slot's prop reads by name, falling back to the consumer's own (see `lower`).
-        const local = shadow.field === undefined ? aliasSource(scope, shadow) : lower({ kind: "id", name: name! }, { ...scope, record: undefined }).source;
-        const localRead = steps.length === 0 ? local : `readDeclared(${local}, ${JSON.stringify(steps)}${scope.record === undefined ? "" : `, ${scope.record}`})`;
-        checks.push(check(scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`));
-        reads = merge(reads, { bits: 0, nested: false, item: true, contents: false, fails: true });
-        continue;
-      }
-      // A state root's own value is checked on every write, unless its initial value may not conform.
-      if (steps.length === 0 && root.checked !== true) continue;
-      const base = root.computed === undefined ? `v[${index}]` : `g(${index})`;
-      const declaredRead = scope.record === undefined
-        ? steps.length === 0 ? base : `readDeclared(${base}, ${JSON.stringify(steps)})`
-        : `rec(${scope.record}, readDeclared(${base}, ${JSON.stringify(steps)}, ${scope.record}))`;
-      checks.push(check(declaredRead));
-      const rootReads: Reads = root.computed === undefined
-        ? { bits: rootBit(index), nested: steps.length > 0, item: false, contents: false, fails: true, ...index >= 29 ? { overflow: [index] } : {} }
-        : this.computedLowered(index);
-      reads = merge(reads, { ...rootReads, item: false, contents: false, fails: true });
+  /** Reuses the compiler's finite, immutable schema encoding. */
+  private schema(type: TypeNode | undefined, depth: number): string {
+    return this.referenceMetadata.reference(type, depth);
+  }
+
+  /** Checks the final reference where it executes, without checking intermediate containers. */
+  private reference(expression: string, node: ExpressionNode, path: ReferencePath, scope: Scope): Lowered {
+    const shadow = scope.aliases.findLast(candidate => candidate.name === path.root);
+    const type = shadow === undefined ? declaredTypeAt(this.definition, [path.root]) : scope.types.typeOfDeclaredPath?.(path.root);
+    const select = shadow === undefined ? this.definition.contract.props[path.root]?.select : undefined;
+    const root = this.roots.findIndex(root => root.name === path.root);
+    if (select === undefined && (type === undefined || shadow === undefined && path.steps.length === 0 && this.roots[root]?.checked !== true)) {
+      return lower(node, scope, true);
     }
-    if (checks.length === 0) return value;
-    return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
+    const dynamic = path.staticKeys === undefined;
+    const schema = (root: TypeNode | undefined): string => {
+      if (!dynamic) for (const key of path.staticKeys!) root = root === undefined ? undefined : typeAtKey(root, key);
+      return this.schema(root, dynamic ? path.steps.length : 0);
+    };
+    let descriptor = select === undefined ? schema(type) : "0";
+    let selector: Reads = NO_READS;
+    if (select !== undefined) {
+      const index = this.roots.findIndex(root => root.name === select.from);
+      if (index < 0) unreachable(`a select prop's selector \`${select.from}\` is a root`);
+      selector = { ...NO_READS, bits: rootBit(index), ...index >= 29 ? { overflow: [index] } : {} };
+      descriptor = `(${select.options.map(option => `v[${index}] === ${JSON.stringify(option.value)} ? ${schema(normalizeType(option.type))} : `).join("")}${schema({ kind: "terminal", name: "null" })})`;
+    }
+    const key = JSON.stringify(`expression:${expression}:${path.name}`);
+    const name = JSON.stringify(path.name);
+    if (descriptor === "0") return lower(node, scope, true);
+    if (!dynamic) {
+      const value = lower(node, scope, true);
+      return { ...value, ...merge(value, selector), fails: true,
+        source: `checkedReferenceValue(S, ${value.source}, ${descriptor}, ${key}, ${name})` };
+    }
+    let value = lower({ kind: "id", name: path.root }, scope, true);
+    const lines = [`let x = ${value.source}, t = ${descriptor}, k;`];
+    for (const step of path.steps) {
+      const key = typeof step.key === "object" ? lower(step.key, scope) : none("", valueSource(step.key));
+      lines.push(`k = ${key.source}; x = ${read(scope, `${step.member ? "readFailing" : "readIndex"}(x, k)`)}; t = referenceSchemaAt(t, k);`);
+      value = { ...value, ...merge(value, key), deep: true, boolean: false,
+        nested: value.nested || !value.item && value.bits !== 0 };
+    }
+    return { ...value, ...merge(value, selector), fails: true,
+      source: `(() => { ${lines.join(" ")} return checkedReferenceValue(S, x, t, ${key}, ${name}); })()` };
+  }
+
+  /** Lowers with actual-read checks; static dependency discovery remains a separate compiler pass. */
+  checked(plan: CompiledExpression, scope: Scope): Lowered {
+    return lower(plan.ast, { ...scope, reference: (node, path, active) => this.reference(plan.source, node, path, active) });
   }
 
   /**
@@ -1208,7 +1219,10 @@ class Planner {
         initial: root ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
       });
     }
-    const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
+    const spec: unknown[] = [node.name, literals.flatMap((attribute) => {
+      const namespace = attributeNamespace(attribute.name);
+      return [namespace === undefined ? attribute.name : [namespace, attribute.name], attribute.value];
+    })];
     if (html !== undefined) {
       // `$html` replaces the element's content with sanitized markup when that markup changes.
       block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html, initial: "undefined" });
@@ -1667,7 +1681,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       return [[tag, [own, declared.flatMap(([name, slot]) => Object.keys(slot.props).length > 0 ? [name] : []), known,
         listed(known.filter((name) => name !== ""))] as const]];
     }));
-    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
+    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, referenceSchemas: planner.referenceSchemas, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
       ...children === undefined ? {} : { children, accepted },
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       seeds: roots.flatMap((item, index) => item.initializer === undefined ? [] : [{ index, source: convertible(planner.checked(item.initializer, { ...planner.scope, observesInputs: true })) }]),
@@ -1853,7 +1867,7 @@ export function emitBlocks(
   // A slot prop's value as live's `renderScopedTemplate` gives it: a typed one is checked in full, as a prop's
   // input is, and one its type does not accept warns once (HR007). It, and absent input, take the default, or null.
   const slotPropGiven = (value: string, slot: string | undefined, prop: string, type: TypeNode | undefined, fallback: string | undefined, check: () => string): string => {
-    if (type === undefined) return fallback === undefined ? value : `(${value} == null || ${value} === ABSENT ? ${fallback} : ${value})`;
+    if (type === undefined) return `(${value} == null || ${value} === ABSENT ? ${fallback ?? "null"} : ${value})`;
     const name = typeof slot === "string" && slot !== "" ? `Slot \`${slot}\`` : "The default slot";
     const message = `${name} prop \`${prop}\` does not satisfy its declared type \`${formatType(type)}\`.`;
     return `(${value} != null && ${value} !== ABSENT && (${check()}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${slot ?? ""}:${prop}`)}, ${JSON.stringify(message)}), false)) ? ${value} : ${fallback ?? "null"})`;
@@ -2115,7 +2129,9 @@ export function emitBlocks(
           case "attribute":
           case "url": {
             // A bound style attribute would drop the transition's own properties, written once.
-            const write = binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
+            const namespace = attributeNamespace(binding.name);
+            const write = namespace !== undefined ? `writeNamespaced${binding.kind === "url" ? "Url" : ""}Attribute(${site}, ${JSON.stringify(namespace)}, ${JSON.stringify(binding.name)}, ${JSON.stringify(binding.name.slice(binding.name.indexOf(":") + 1))}, `
+              : binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
               : binding.name === "style" && transitioned(block, binding.site) ? `writeTransitionStyle(${site}, `
               : `writeAttribute(${site}, ${JSON.stringify(binding.name)}, `;
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
@@ -2204,8 +2220,7 @@ export function emitBlocks(
         lines.push(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
-          // A prop whose expression fails is not given, as live leaves it unset.
-          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = ${given("y", at)}; }`).join(" ")}`,
+          `    const s = { ${props.map((_, at) => `${objectKey(region.propNames![at]!)}: ${region.propDefaults?.[at] ?? "null"}`).join(", ")} }; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = ${given("y", at)}; }`).join(" ")}`,
           `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
           `    else if (at !== undefined) { ${body} = ${make}; ${place} }`,
@@ -2752,7 +2767,7 @@ export function emitBlocks(
       "    return next;",
       "  };",
     ]),
-    ...(plan.seeds.length === 0 ? [] : [`  const E = stateInitializers(S, v, X, { ${plan.seeds.map(seed => `${seed.index}: () => ${seed.source}`).join(", ")} }${hydrate ? ", Z" : ""});`]),
+    ...(plan.seeds.length === 0 ? [] : [`  const E = stateInitializers(S, v, X, { ${plan.seeds.map(seed => `${seed.index}: () => (${seed.source})`).join(", ")} }${hydrate ? ", Z" : ""});`]),
     ...plan.handlers.map((handler) => [`  const ${handler.name} = (e) => {`, ...handler.lines, "  };"].join("\n")),
     ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
     ...plan.arms === undefined ? [] : [
@@ -2806,11 +2821,11 @@ export function emitBlocks(
         : `select: { from: ${JSON.stringify(select.from)}, options: [${select.options.map((option) => `{ value: ${JSON.stringify(option.value)}, ${propChecks(option.type)} }`).join(", ")}] }`;
       return `${JSON.stringify(name)}: { ${data}${data === "" ? "" : ", "}${typed}${hasBounds(prop) ? ", k: boundFailures" : ""} }`;
     }).join(", ")} } };`;
-  const helpers = ["attachGeneratedController", "stateInitializers", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
+  const helpers = ["attachGeneratedController", "checkedReferenceValue", "referenceSchemaAt", "equalValue", "stateInitializers", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
-    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "plainObject", "eventPasses", "listen", "refTargets", "rootValue", "setState",
+    "writeUrlAttribute", "writeNamespacedAttribute", "writeNamespacedUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "plainObject", "eventPasses", "listen", "refTargets", "rootValue", "setState",
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
@@ -2823,7 +2838,7 @@ export function emitBlocks(
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots",
     "transitionStyles", "writeTransitionStyle"]
-    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${outletProps.join("\n")}`));
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${plan.referenceSchemas.join("\n")}\n${outletProps.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && (definition.module ?? definition.controller) !== undefined) helpers.push("scriptHost");
@@ -2854,6 +2869,7 @@ export function emitBlocks(
     ...registration === "" ? [] : [registration],
     ...specs,
     ...slotPropChecks.map((check, at) => `const K${at} = ${check};`),
+    ...plan.referenceSchemas.map((schema, at) => `const RC${at} = ${schema};`),
     ...outletProps.map((shapes, at) => `const OP${at} = ${shapes};`),
     ...plan.children === undefined ? [] : [`const OF = ${JSON.stringify(plan.children)};`],
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),

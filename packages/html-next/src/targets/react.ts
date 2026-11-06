@@ -1,3 +1,6 @@
+import { attributeNamespace } from "../dom-attributes.js";
+import { namespacedAttributeSource } from "./shared.js";
+import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
 import { TypeScriptLowering } from "./typed-lowering.js";
 /** React output is compiled from the same checked component definition as the browser runtime. */
 import { bindingRevertSource, controllerInitials, revertSource, withRevert } from "./state-roots.js";
@@ -17,7 +20,7 @@ import { stateAttribute } from "../component-styles.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, objectKey, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, slotPropDefaultSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, inputScope, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, parseTypedValue, type TypeNode } from "../type-system.js";
@@ -39,7 +42,7 @@ const REACT_RESERVED = new Set([
   "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
-  "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "applyNamespacedAttributes", "namespacedAttributeProps", "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "ownedRootRef", "propValidityContract", "propValidityElement",
   "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
@@ -109,6 +112,7 @@ export interface ReactConversionOptions {
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
+  readonly attributesSpecifier?: string;
   readonly eventsSpecifier?: string;
   readonly controlSpecifier?: string;
   readonly dataSpecifier?: string;
@@ -127,7 +131,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
+  readonly helpers: readonly ("attributes" | "bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
 }
 
 interface RootAttributes {
@@ -148,7 +152,7 @@ interface EventAttachment {
   readonly bindings: readonly EventBinding[];
   readonly forward: boolean;
   readonly ref?: string;
-  readonly properties: readonly { readonly name: string; readonly value: string; readonly accepts?: string }[];
+  readonly properties: readonly { readonly name: string; readonly value: string; readonly accepts?: string; readonly namespace?: string; readonly url?: boolean }[];
   readonly importantStyles: readonly { readonly name: string; readonly value: string }[];
   readonly genericWrites: readonly { readonly state: string; readonly path: string; readonly dynamic: boolean }[];
   readonly control?: {
@@ -313,18 +317,18 @@ function withoutAuthoredSelection(node: TemplateNode): TemplateNode {
   };
 }
 
-function localScope(scope: RenderScope, names: readonly (readonly [string, Static, (string | undefined)?])[]): RenderScope {
+function localScope(scope: RenderScope, names: readonly (readonly [string, Static, (string | undefined)?, (TypeNode | undefined)?])[]): RenderScope {
   const code = new Map(scope.code);
   const types = new Map(scope.types);
   for (const [name, type, alias] of names) {
     code.set(name, alias ?? name);
     types.set(name, type);
   }
-  return { code, types, local: true };
+  return withReferenceTypes({ ...scope, code, types, local: true }, names.map(([name, , , type]) => [name, type]));
 }
 
 function localIdentifier(name: string, scope: RenderScope, state: RenderState): string {
-  if (isScriptIdentifier(name) && !REACT_LOCAL_RESERVED.has(name)) return name;
+  if (isScriptIdentifier(name) && !REACT_LOCAL_RESERVED.has(name) && !GENERATED_NAME.test(name)) return name;
   let alias: string;
   do alias = `__htmlNextLocal${state.nextRetainedAlias++}`;
   while ([...scope.code.values()].includes(alias) || scope.code.has(alias));
@@ -366,7 +370,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const text = nullableText(lowering.text(plan.ast, scope), lowering);
     if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
       state.usesRetainedText = true;
-      return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+      return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
     }
     return `{${text}}`;
   }
@@ -391,7 +395,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const value = flow.binding === undefined ? read : `requireInputStatus(${Object.hasOwn(state.definition.contract.props, flow.binding.name)
         ? `propInputs.status(${quote(flow.binding.name)})` : computedStatus ?? state.status(flow.binding.name, read) ?? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)`}, ${flow.binding.handlesError})`;
       const alias = localIdentifier(flow.alias, scope, state);
-      const scoped = localScope(scope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, scope) : present(flow.aliasType), alias]]);
+      const scoped = localScope(scope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, scope) : present(flow.aliasType), alias, flow.aliasType ?? referenceType(flow.expressionPlan.ast, scope)]]);
       const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
       if (flow.binding !== undefined || !mayProduceInvalidResult(flow.expressionPlan.ast, scope)) return `{(() => { const ${alias} = ${value}; return (${content}); })()}`;
       state.usesRetainedValue = true;
@@ -402,8 +406,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const item = localIdentifier(flow.item, scope, state);
       const index = localIdentifier(flow.index ?? "index", scope, state);
       const itemType = typeOf(flow.listPlan.ast, scope).type;
+      const itemContract = referenceType(flow.listPlan.ast, scope);
       const scoped = localScope(scope, [
-        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item],
+        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item, itemContract?.kind === "list" ? itemContract.item : undefined],
         [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
         ["loop", { type: { kind: "object", open: false, fields: [
           { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
@@ -443,7 +448,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       if (node.name !== "template") return renderNode(elementMatchRoot(node), scope, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
       const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, scope, state);
       const scoped = flow.alias === undefined ? scope : localScope(scope, [[flow.alias,
-        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, scope), alias]]);
+        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, scope), alias, flow.expressionPlan === undefined ? undefined : referenceType(flow.expressionPlan.ast, scope)]]);
       const withAlias = (content: string): string => {
         if (flow.alias === undefined) return content;
         if (flow.expressionPlan === undefined) fail("HT030", `Uncompiled expression ${flow.expr}.`);
@@ -499,7 +504,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     // `<slot of>` places a slot of the accepted child its entry stands for (components#columns-as-markup).
     // A static prop is given as its text; the child's slot declaration converts it (`outletPropsSource`).
     state.usesChildSlots = true;
-    const values = (node.props ?? []).map((prop) => `${quote(prop.name)}: ${prop.raw !== undefined ? quote(prop.raw) : lowering.value(prop.expressionPlan.ast, scope)}`);
+    const values = (node.props ?? []).map((prop) => `${objectKey(prop.name)}: ${prop.raw !== undefined ? quote(prop.raw) : lowering.value(prop.expressionPlan.ast, scope)}`);
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
     const shapes = outletPropsSource(node, state);
     return `<ChildSlot entry={${lowering.value(node.of.expressionPlan.ast, scope)}} name=${quote(node.name ?? "")}${values.length === 0 ? "" : ` values={{ ${values.join(", ")} }}`} slots={htmlNextChildSlots}${shapes === undefined ? "" : ` shapes={${shapes}}`} file=${quote(state.definition.source.file)} fallback={<>${fallback}</>} />`;
@@ -517,15 +522,23 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       // A null value, and one its declared type rejects, takes the prop's default, or null; a value whose
       // static type is the declared one needs no check.
       let checked = false;
+      const retained: { alias: string; value: string }[] = [];
       const values = node.props!.map((prop) => {
         const value = lowering.value(prop.expressionPlan.ast, scope);
         const proven = prop.type !== undefined && provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
-        const source = proven ? undefined : slotPropValueSource(state.definition, node.name, prop);
+        const source = proven ? undefined : slotPropValueSource(state.definition, node.name, prop, true);
         if (source !== undefined) checked = true;
         if (source !== undefined && prop.type !== undefined) state.usesSlotPropChecks = true;
-        return `${quote(prop.name)}: ${source === undefined ? value : `(${source})(${value})`}`;
+        const given = source === undefined ? value : `(${source})(${value})`;
+        if (!mayProduceInvalidResult(prop.expressionPlan.ast, scope)) return `${objectKey(prop.name)}: ${given}`;
+        state.usesRetainedValue = true;
+        const alias = `__retained${state.nextRetainedAlias++}`;
+        retained.push({ alias, value: given });
+        return `${objectKey(prop.name)}: ${alias}Ready ? ${alias} : ${slotPropDefaultSource(prop)}`;
       }).join(", ");
-      return `{renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)}`;
+      let content = `renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)`;
+      for (const part of retained.toReversed()) content = `<RetainedValue value={${part.value}} render={(${part.alias}, ${part.alias}Ready) => ${content}} />`;
+      return retained.length === 0 ? `{${content}}` : content;
     }
     state.usesPlainSlots = true;
     return `{renderPlainSlot(${supplied}, <>${fallback}</>)}`;
@@ -548,7 +561,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const guard = declaredReferenceGuard(value.expressionPlan, scope, state.definition, undefined, lowering);
       if (mayProduceInvalidResult(value.expressionPlan.ast, scope) || guard !== undefined) {
         state.usesRetainedText = true;
-        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
+        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
       }
       return `<>{${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}</>`;
     }
@@ -599,15 +612,13 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const literalStyles: string[] = [];
   const reactiveStyles: string[] = [];
   const importantStyles: Array<{ readonly name: string; readonly value: string }> = [];
-  const properties: Array<{ readonly name: string; readonly value: string; readonly accepts?: string }> = [];
+  const properties: Array<EventAttachment["properties"][number]> = [];
   // HTML attribute names are case-insensitive; uppercase bypasses Preact's case-sensitive
   // DOM-property lookup for attributes whose property has different behavior (output.value, constructor).
   const nativeAttribute = (name: string): boolean => state.preact && !component && !svg &&
-    (name === "constructor" || name === "value");
-  const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string => {
-    const value = lowering.attribute(node, valueScope, name);
-    return state.preact && isEnumeratedBoolean(name) ? `(${value})?.toString()` : value;
-  };
+    (name === "constructor" || name === "value" || name === "draggable");
+  const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string =>
+    lowering.attribute(node, valueScope, name, { enumeratedBooleanTokens: state.preact });
   // Serialized HTML attributes may have values outside JSX's ARIA enums. Keep their
   // DOM string representation without narrowing the public component prop types.
   const attributeBinding = (name: string, value: string): string => nativeAttribute(name)
@@ -620,6 +631,14 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   let control: EventAttachment["control"];
   let content: string | undefined;
   for (const attribute of node.attributes) {
+    const namespace = !component && (attribute.kind === "literal" || attribute.kind === "attribute" && attribute.target === undefined && !attribute.twoWay) ? attributeNamespace(attribute.name) : undefined;
+    if (namespace !== undefined && (attribute.kind === "literal" || attribute.kind === "attribute")) {
+      const value = attribute.kind === "literal" ? quote(attribute.value) : attributeValue(attribute.expressionPlan!.ast, scope, attribute.name);
+      properties.push({ name: attribute.name, value, namespace, url: attribute.name === "xlink:href" });
+      const serverName = attribute.name.replace(/:([a-z])/g, (_, letter: string) => letter.toUpperCase());
+      literals.push(`{...(typeof document === "undefined" ? namespacedAttributeProps([${namespacedAttributeSource(attribute.name, value, serverName)}]) : {})}`);
+      continue;
+    }
     if (attribute.kind === "literal") {
       const componentProp = component ? Object.entries(componentContracts ?? {})
         .find(([name]) => name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
@@ -792,7 +811,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
         if (guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
           state.usesRetainedText = true;
-          content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+          content = `<RetainedText value={${value}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
         } else content = `{${nullableText(value, lowering)}}`;
       }
       else {
@@ -815,17 +834,15 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const retained = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) || guard !== undefined;
       const raw = lowering.value(attribute.expressionPlan.ast, scope);
       const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering);
-      const defined = attribute.expressionPlan.ast.kind === "array" || attribute.expressionPlan.ast.kind === "object"
-        ? undefined : `(${raw}) !== undefined`;
-      const accepts = [defined, guard === undefined ? undefined : `(${guard})`].filter(Boolean).join(" && ");
+      const accepts = guard;
       if (outputValue) {
         // Each output owns its synchronization, including outputs rendered inside $each.
         state.usesOutputValue = true;
-        bindings.push(`htmlNextValue={${raw}}`, `htmlNextText={${text}}`, `htmlNextRetain={${retained}}`);
-        if (accepts !== "") bindings.push(`htmlNextAccepts={${accepts}}`);
+        bindings.push(`htmlNextValue={${raw}}`, `htmlNextText={${lowering.use("text")}}`, `htmlNextRetain={${retained}}`);
+        if (accepts !== undefined) bindings.push(`htmlNextAccepts={${accepts}}`);
       } else if (retained) {
         state.usesRetainedText = true;
-        content = `<RetainedText value={${raw}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+        content = `<RetainedText value={${raw}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
       } else content = `{${text}}`;
     } else if (attribute.kind === "directive" && attribute.name === "html") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled HTML ${attribute.expression}.`);
@@ -857,11 +874,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         ?? (declared === undefined ? undefined : { name, required: false, props: Object.keys(declared.props), declared: declared.props });
       if ((contract?.props?.length ?? 0) > 0) {
         const alias = `__slotProps${state.nextSlotAlias++}`;
-        const projectedScope: RenderScope = {
+        const projectedScope: RenderScope = withReferenceTypes({
+          ...slotScope,
           code: new Map([...slotScope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
           types: new Map([...slotScope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
           local: true,
-        };
+        }, contract!.props!.map(prop => [prop, contract!.declared?.[prop] === undefined ? undefined : normalizeType(contract!.declared[prop]!.type)]));
         if (carrier !== undefined) return `${quote(name)}: (${alias}: Record<string, any>) => <>${carrier.children.map((child) => renderNode(child, projectedScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
       }
       const content = carrier === undefined ? children : carrier.children;
@@ -939,7 +957,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     ? `${opening} />` : `${opening}>${children}</${tag}>`;
   const selectorNames = new Set(Object.values(componentContracts ?? {}).flatMap((contract) => contract.select === undefined ? [] : [contract.select.from]));
   const scopedMarkup = scopedAttachment === undefined ? markup : `<ScopedAttachment attach={${scopedAttachment.attachment.name}} paths={[${scopedAttachment.paths.join(", ")}]} properties={[${scopedAttachment.attachment.properties.map((property) =>
-    `{ name: ${quote(property.name)}, value: ${property.value}, accepted: ${property.accepts ?? "true"} }`).join(", ")}]}${scopedAttachment.attachment.control === undefined ? "" :
+    `{ name: ${quote(property.name)}, value: ${property.value}, accepted: ${property.accepts ?? "true"}${property.namespace === undefined ? "" : `, namespace: ${quote(property.namespace)}, localName: ${quote(property.name.slice(property.name.indexOf(":") + 1))}, url: ${property.url === true}`} }`).join(", ")}]}${scopedAttachment.attachment.control === undefined ? "" :
     ` control={{ name: ${quote(scopedAttachment.attachment.control.name)}, value: ${scopedAttachment.attachment.control.value}, defaults: ${scopedAttachment.attachment.control.defaults}, nativeProperty: ${scopedAttachment.attachment.control.nativeProperty}, accepted: ${scopedAttachment.attachment.control.accepts ?? "true"} }}`} render={(${scopedAttachment.ref}) => ${markup}} />`;
   return retainedBindings.toSorted((a, b) => Number(selectorNames.has(b.propName ?? "")) - Number(selectorNames.has(a.propName ?? ""))).reduceRight((result, retained) =>
     `<RetainedValue value={${retained.value}}${retained.accepts === undefined ? "" : ` accepts={${retained.accepts}}`} render={(${retained.alias}) => ${result}} />`, scopedMarkup);
@@ -1085,15 +1103,16 @@ function childDescriptors(
     if (flow.kind === "if" && flow.testPlan !== undefined) return [`(${lowering.condition(flow.testPlan.ast, itemScope)} ? ${entry(itemScope, segments, rowKeys)} : [])`];
     if (flow.kind === "with" && flow.expressionPlan !== undefined) {
       const alias = localIdentifier(flow.alias, itemScope, state);
-      const aliasScope = localScope(itemScope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, itemScope) : present(flow.aliasType), alias]]);
+      const aliasScope = localScope(itemScope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, itemScope) : present(flow.aliasType), alias, flow.aliasType ?? referenceType(flow.expressionPlan.ast, itemScope)]]);
       return [`(() => { const ${alias} = ${lowering.value(flow.expressionPlan.ast, itemScope)}; return ${entry(aliasScope, segments, rowKeys)}; })()`];
     }
     if (flow.kind === "each" && flow.listPlan !== undefined) {
       const item = localIdentifier(flow.item, itemScope, state);
       const index = localIdentifier(flow.index ?? "index", itemScope, state);
       const itemType = typeOf(flow.listPlan.ast, itemScope).type;
+      const itemContract = referenceType(flow.listPlan.ast, itemScope);
       const rowScope = localScope(itemScope, [
-        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item],
+        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item, itemContract?.kind === "list" ? itemContract.item : undefined],
         [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
         ["loop", UNKNOWN],
       ]);
@@ -1108,7 +1127,7 @@ function childDescriptors(
     if (flow.kind === "match" && body.name === "template") {
       const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, itemScope, state);
       const armScope = flow.alias === undefined ? itemScope : localScope(itemScope, [[flow.alias,
-        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, itemScope), alias]]);
+        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, itemScope), alias, flow.expressionPlan === undefined ? undefined : referenceType(flow.expressionPlan.ast, itemScope)]]);
       const arms = body.children.filter((arm): arm is ElementNode => arm.kind === "element");
       let chosen = "[]";
       for (const [index, arm] of [...arms.entries()].toReversed()) {
@@ -1270,7 +1289,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const imports = new Set<string>();
   const attachments: EventAttachment[] = [];
   const root: ElementNode = template;
-  const scope = { code, types };
+  const scope = { code, types, ...referenceContext(definition) };
   const declarationStatus = (name: string, read: string, canonical = false): string | undefined => {
     if (initializedNames.has(name)) return `${stateOwners.get(name)!}.${canonical ? "readStatus" : "status"}()`;
     const entry = contextEntries.get(name);
@@ -1362,6 +1381,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(checksControllerWrites || initializedStates.length > 0 ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(!renderState.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(!attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? [] : [`import { applyNamespacedAttributes, namespacedAttributeProps } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
     ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
@@ -1488,7 +1508,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     // Handlers read a state's latest write through its getter; rendering reads the value React has.
     ...states.map((state) => {
       // A state without value reads null until written, as in every target (types#null-and-missing-values).
-      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope);
+      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, uncheckedReferences(scope));
       if (state.initializer !== undefined) {
         const canonicalCode = new Map(scope.code);
         for (const prop of target.props) canonicalCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
@@ -1496,7 +1516,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         for (const item of computed) canonicalCode.set(item.name, `${controllerComputedNames.get(item.name)!}.get()`);
         for (const [alias, entry] of contextEntries) canonicalCode.set(alias, `((${entry}.read === undefined ? ${entry}.value : ${entry}.read())${types.get(alias) === UNKNOWN ? " as any" : ""})`);
         const expression = lowering.value(state.initializer.ast, observedScope(scope));
-        const canonical = lowering.value(state.initializer.ast, observedScope({ code: canonicalCode, types: scope.types }, "propInputs.committed"));
+        const canonical = lowering.value(state.initializer.ast, observedScope({ ...scope, code: canonicalCode }, "propInputs.committed"));
         const declared = declarationTypeNode(state.type, state.shape);
         return `  const ${stateOwners.get(state.name)!}: ReturnType<typeof useInitializedState<${stateType(state)}>> = useInitializedState<${stateType(state)}>(() => evaluateInput(() => ${expression}), () => evaluateInput(() => ${canonical}), value => ${declared === undefined ? "true" : `acceptsControllerWrite(value, ${JSON.stringify(declared)}, []) || ${lowering.use("warnUnless")}(false, ${quote(`initializer:${state.name}`)}, ${quote(`State \`${state.name}\` does not satisfy its declared type.`)})`}, cycleCheckedComputed${stateWritesName === "" ? contexts.length === 0 ? "" : ", undefined, undefined" : `, ${stateWritesName}.current, ${quote(state.name)}`}${contexts.length === 0 ? "" : `, [${[...contextEntries.values()].join(", ")}]`});\n  const ${stateSetters.get(state.name)!} = ${stateOwners.get(state.name)!}.set, ${stateGetters.get(state.name)!} = ${stateOwners.get(state.name)!}.read;`;
       }
@@ -1706,7 +1726,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    const previous = previousPropertyValues${attachment.name}.current ?? [];`,
       `    if (element !== null) {`,
       ...attachment.properties.map((property, index) =>
-        `      if ((${property.accepts ?? "true"}) && ${["scrollTop", "scrollLeft"].includes(property.name) ? `previousPropertyValues${attachment.name}.current !== undefined && ` : ""}(element !== previousPropertyElement${attachment.name}.current || !Object.is(values[${index}], previous[${index}]))) (element as unknown as Record<string, unknown>)[${quote(property.name)}] = values[${index}];`),
+        `      if ((${property.accepts ?? "true"}) && ${["scrollTop", "scrollLeft"].includes(property.name) ? `previousPropertyValues${attachment.name}.current !== undefined && ` : ""}(element !== previousPropertyElement${attachment.name}.current || !Object.is(values[${index}], previous[${index}]))) ${property.namespace === undefined ? `(element as unknown as Record<string, unknown>)[${quote(property.name)}] = values[${index}];` : `applyNamespacedAttributes(element, [${namespacedAttributeSource(property.name, `values[${index}]`)}]);`}`),
       ...attachment.properties.map((property, index) => `      if (${property.accepts ?? "true"}) previous[${index}] = values[${index}];`),
       `    }`,
       `    previousPropertyElement${attachment.name}.current = element;`,
@@ -1835,7 +1855,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(usesScopedAttachments ? [
       "",
       "type ScopedPath = (() => readonly (string | number)[]) | undefined;",
-      "type ScopedProperty = { readonly name: string; readonly value: unknown; readonly accepted: boolean };",
+      "type ScopedProperty = { readonly name: string; readonly value: unknown; readonly accepted: boolean; readonly namespace?: string; readonly localName?: string; readonly url?: boolean };",
       "type ScopedControl = { readonly name: 'value' | 'checked'; readonly value: unknown; readonly defaults: { readonly value?: string; readonly checked?: boolean; readonly options?: readonly boolean[] }; readonly nativeProperty: boolean; readonly accepted: boolean };",
       "function ScopedAttachment({ attach, paths, properties, control, render }: {",
       "  readonly attach: (element: Element | null, paths?: readonly ScopedPath[], scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }) => void | (() => void);",
@@ -1865,7 +1885,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "    for (const [index, property] of properties.entries()) {",
       "      if (property.accepted && (!['scrollTop', 'scrollLeft'].includes(property.name) || previousValues.current !== undefined) &&",
       "        (node !== previousElement.current || !Object.is(property.value, previous[index])))",
-      "        (node as unknown as Record<string, unknown>)[property.name] = property.value;",
+      "        {",
+      ...(!attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? [] : [
+        "          if (property.namespace !== undefined) applyNamespacedAttributes(node, [[property.namespace, property.name, property.localName!, property.value, property.url === true]]);",
+        "          else",
+      ]),
+      "          (node as unknown as Record<string, unknown>)[property.name] = property.value;",
+      "        }",
       "      if (property.accepted) previous[index] = property.value;",
       "    }",
       "    previousElement.current = node; previousValues.current = previous;",
@@ -1885,11 +1911,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // and the rendering components and functions its markup and handlers name.
   const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
   const component = formatReact(body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
-    : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`), `${name}.tsx`);
+    : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`) + "\n" + lowering.referenceDeclarations().join("\n"), `${name}.tsx`);
   return {
     component,
     css: styles.css,
     helpers: [
+      ...(attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? ["attributes" as const] : []),
       ...(options.modulePreparation === undefined ? [] : ["bindings" as const]),
       ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
