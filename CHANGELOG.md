@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.92
+
+- MarkupKit ([threadlabs-studio/markupkit](https://github.com/threadlabs-studio/markupkit), `@threadlabs/markupkit`) continues HTMLKit with its own releases, tests and documentation. This repository holds three packages that share one version, and `@nextwebwg/htmlkit` stays at 1.0.0-alpha.91.
+
 ## 1.0.0-alpha.91
 
 - Hand-written React and Preact consumers get complete `as` lists. An accepting component reads its accepted children from its own slot content, through arrays, fragments, conditions and keyed loops, on the first render, in server output and through hydration. Entries, `slots` content, `<slot of>` takeover, context, `host.state` and `HR007` warnings match a compiled consumer's.

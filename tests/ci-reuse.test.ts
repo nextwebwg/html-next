@@ -3,7 +3,7 @@ import { inputDigest, reusableReceipt } from "../scripts/ci-reuse.js";
 const context = { repository: "nextwebwg/html-next", headRepository: "nextwebwg/html-next", pullRequest: 42,
   workflow: ".github/workflows/ci.yml", image: "image@sha256:abc", node: "24.15.0", kernel: "6.11 x86_64", runnerImage: "20261020.1" };
 const plan = [{ name: "Chromium", files: ["runtime.test.ts"] }];
-const inputs = ["100644 blob a\tpackages/htmlkit/src/a.ts", "100644 blob b\tCHANGELOG.md"];
+const inputs = ["100644 blob a\tpackages/html-next/src/a.ts", "100644 blob b\tCHANGELOG.md"];
 const digest = inputDigest(inputs, plan, context);
 const receipt = { version: 1, digest, ...context, run: 100, attempt: 1, testedCommit: "a".repeat(40), testedTree: "b".repeat(40) };
 const run = { id: 100, head_sha: "c".repeat(40), run_attempt: 1, status: "completed", conclusion: "success", event: "pull_request",
@@ -13,11 +13,11 @@ describe("successful browser validation reuse", () => {
     expect(reusableReceipt(receipt, run, digest, context)).toBe(true);
     expect(inputDigest([inputs[0]!, "100644 blob c\tCHANGELOG.md"], plan, context)).toBe(digest);
   });
-  it.each(["packages/htmlkit/src/a.ts", "pnpm-lock.yaml", ".github/workflows/ci.yml", "tests/shared.ts", "docs/fixture.html", "docs/guide/transitions.md", "docs/guide/quick-start.md"])("invalidates changed %s", (path) => {
+  it.each(["packages/html-next/src/a.ts", "pnpm-lock.yaml", ".github/workflows/ci.yml", "tests/shared.ts", "docs/fixture.html", "docs/guide/transitions.md", "docs/guide/quick-start.md"])("invalidates changed %s", (path) => {
     expect(inputDigest([...inputs, `100644 blob changed\t${path}`], plan, context)).not.toBe(digest);
   });
   it("includes base changes through the tested merge tree's inputs", () => {
-    expect(inputDigest(["100644 blob base-change\tpackages/htmlkit/src/a.ts"], plan, context)).not.toBe(digest);
+    expect(inputDigest(["100644 blob base-change\tpackages/html-next/src/a.ts"], plan, context)).not.toBe(digest);
   });
   it.each(["image", "node", "kernel", "runnerImage", "headRepository", "repository", "pullRequest", "workflow"])("invalidates environment or trust change %s", (field) => {
     expect(inputDigest(inputs, plan, { ...context, [field]: "changed" })).not.toBe(digest);

@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync, readdirSync, realpathSync } from "node:fs
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const directories = ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"];
+const directories = ["html-next", "html-next-converter", "html-next-unplugin"];
 const manifests = directories.map((directory) => ({ directory, ...JSON.parse(
   readFileSync(`${root}packages/${directory}/package.json`, "utf8"),
 ) as { name: string; version: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> } }));
@@ -12,8 +12,6 @@ const durations = JSON.parse(readFileSync(`${root}tests/target-durations.json`, 
 Object.assign(durations, {
   "packages/html-next/tests/runtime.test.ts": 260,
   "packages/html-next/tests/server-hydration.test.ts": 217,
-  "packages/htmlkit/tests/client-navigation.test.ts": 164,
-  "packages/htmlkit/tests/browser.test.ts": 38,
 });
 
 export interface TestJob {
@@ -148,7 +146,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     corpus: JSON.stringify({ include: plan.corpus }),
     // The plugin's installed-consumer test also covers the converter; run it once.
     packages: JSON.stringify(packed.filter((name) => name !== "html-next-converter")), has_node: String(plan.node.length > 0),
-    has_browser: String(plan.browser.length > 0), converters: String(plan.packages.some(name => name !== "htmlkit")), has_packages: String(packed.length > 0),
+    has_browser: String(plan.browser.length > 0), converters: String(plan.packages.length > 0), has_packages: String(packed.length > 0),
     generated: String(metadataOnly.size > 0 || paths.includes("docs/guide/quick-start.md") || plan.packages.some((name) =>
       name === "html-next" || name === "html-next-converter")),
     playwright: /playwright:\s*\n\s*specifier:.*\n\s*version: ([\d.]+)/.exec(readFileSync(`${root}pnpm-lock.yaml`, "utf8"))?.[1],

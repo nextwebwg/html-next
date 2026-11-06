@@ -17,8 +17,6 @@ const config = mergeConfig(baseConfig, {
 // mergeConfig concatenates arrays, so replace the base Node-test include list explicitly.
 config.test!.include = [
   "packages/html-next/tests/await-browser.test.ts",
-  "packages/htmlkit/tests/browser.test.ts",
-  "packages/htmlkit/tests/client-navigation.test.ts",
   "packages/html-next/tests/browser-loader.test.ts",
   "packages/html-next/tests/component-registry-browser.test.ts",
   "packages/html-next/tests/conformance.test.ts",
