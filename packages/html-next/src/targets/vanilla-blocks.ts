@@ -2199,7 +2199,7 @@ export function emitBlocks(
         if (props === undefined) {
           lines.push(
             // A consumer's <template slot> renders here afresh, and is let go when this outlet goes.
-            `  if (r.f${index} === undefined) { r.f${index} = 1; ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d);`,
+            `  if (r.f${index} === undefined) { r.f${index} = 1; ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d${region.fallback === true ? ", r.z ??= []" : ""});`,
             `    if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; ${place} } }`,
             `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
           );
@@ -2217,7 +2217,7 @@ export function emitBlocks(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
           `    const s = { ${props.map((_, at) => `${objectKey(region.propNames![at]!)}: ${region.propDefaults?.[at] ?? "null"}`).join(", ")} }; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = ${given("y", at)}; }`).join(" ")}`,
-          `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
+          `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d${region.fallback === true ? ", r.z ??= []" : ""});`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
           `    else if (at !== undefined) { ${body} = ${make}; ${place} }`,
           `  } else if (${rendering} !== undefined) {`,

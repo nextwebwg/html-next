@@ -95,7 +95,12 @@ public static partial class HtmlNextCompiler
                     if (declaration.HasAttribute("name") && !ExpressionCompiler.IsIdentifier(name)) throw ValueType.Error(source, "A slot declaration's name requires an identifier.");
                     if (slotContracts.ContainsKey(name)) throw ValueType.Error(source, $"Slot '{name}' is declared more than once.");
                     foreach (var attribute in declaration.Attributes)
-                        if (attribute.Name != "name") Unsupported("slot declaration " + attribute.Name);
+                        if (attribute.Name is not ("name" or "accepts")) Unsupported("slot declaration " + attribute.Name);
+                    var accepts = declaration.GetAttribute("accepts")?.Split([' ', '\t', '\n', '\r', '\f'], StringSplitOptions.RemoveEmptyEntries);
+                    if (accepts is not null && (accepts.Length == 0 || accepts.Any(tag => !Regex.IsMatch(tag, @"^[a-z][a-z0-9._]*-[a-z0-9._-]*$", RegexOptions.CultureInvariant))))
+                        throw ValueType.Error(source, "A slot's accepts attribute requires component tags.");
+                    if (accepts is not null && Children(declaration).Any(Significant))
+                        throw ValueType.Error(source, "A slot declares either accepts or prop children.");
                     var declared = new List<Prop>();
                     var members = new List<ScopedSlotProp>();
                     foreach (var child in Children(declaration).Where(Significant))
@@ -106,7 +111,7 @@ public static partial class HtmlNextCompiler
                         declared.Add(definition);
                         members.Add(new(definition, prop.HasAttribute("default")));
                     }
-                    slotContracts.Add(name, new(name, members.ToArray()));
+                    slotContracts.Add(name, new(name, members.ToArray(), accepts));
                 }
                 foreach (var declaration in declarations.OfType<IElement>().Where(node => node.LocalName is "state" or "computed"))
                 {
@@ -548,7 +553,7 @@ public static partial class HtmlNextCompiler
                 if (IsRoot(element)) operations.Add(new ProjectionRootEnd(closing));
                 else Add(operations, closing);
             }
-            return Wrap(projected && !fragment ? [new ProjectionNode(operations.ToArray())] : operations.ToArray(), condition, each, localSlot, where, iteration);
+            return Wrap(projected && !fragment ? [new ProjectionNode(operations.ToArray(), element.LocalName)] : operations.ToArray(), condition, each, localSlot, where, iteration);
         }
 
         private ProjectionNode ProjectedText(string text, Dictionary<string, (int Slot, ValueType Type)> scope)
@@ -572,6 +577,28 @@ public static partial class HtmlNextCompiler
         private ProjectionGroup[] Projection(IElement invocation, Dictionary<string, (int Slot, ValueType Type)> scope)
         {
             var groups = new List<ProjectionGroup>();
+            Dictionary<string, AcceptedChildFilter>? filters = null;
+            AcceptedChildFilter? Filter(string name)
+            {
+                if (!components[invocation.LocalName].Slots.TryGetValue(name, out var contract) || contract.Accepts is null) return null;
+                filters ??= new(StringComparer.Ordinal);
+                if (filters.TryGetValue(name, out var known)) return known;
+                var targets = new HashSet<ComponentReference>();
+                foreach (var (tag, candidate) in components)
+                {
+                    var current = tag;
+                    var seen = new HashSet<string>(StringComparer.Ordinal);
+                    while (seen.Add(current))
+                    {
+                        if (contract.Accepts.Contains(current, StringComparer.Ordinal)) { targets.Add(candidate); break; }
+                        if (!components.TryGetValue(current, out var next) || next.DelegatedTag is not { } delegated) break;
+                        current = delegated;
+                    }
+                }
+                var filter = new AcceptedChildFilter(invocation.LocalName, name, contract.Accepts, targets, source);
+                filters.Add(name, filter);
+                return filter;
+            }
             var content = new List<object>();
             foreach (var child in Children(invocation))
             {
@@ -589,7 +616,7 @@ public static partial class HtmlNextCompiler
                     (index == 0 || index == content.Count - 1 || Named(content[index - 1]) || Named(content[index + 1]))) content.RemoveAt(index);
             foreach (var child in content)
             {
-                if (child is string text) groups.Add(new("", false, [ProjectedText(text, scope)]));
+                if (child is string text) groups.Add(new("", false, [ProjectedText(text, scope)], Filter: Filter("")));
                 else if (child is IElement element)
                 {
                     if (element.HasAttribute("from:slot")) throw ValueType.Error(source, "A consumer's slot assignment requires a literal name.");
@@ -616,7 +643,7 @@ public static partial class HtmlNextCompiler
                             locals.Add(new(slot, index));
                         }
                     }
-                    groups.Add(new(name, template, Element(element, templateScope, projected: true, guardHandled: template), guard, template ? SourceMarkup(element) : null, locals.Count == 0 ? null : locals.ToArray()));
+                    groups.Add(new(name, template, Element(element, templateScope, projected: true, guardHandled: template), guard, template ? SourceMarkup(element) : null, locals.Count == 0 ? null : locals.ToArray(), Filter(name)));
                 }
             }
             return groups.ToArray();

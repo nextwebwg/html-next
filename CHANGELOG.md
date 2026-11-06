@@ -3,6 +3,7 @@
 ## 1.0.0-alpha.92
 
 - Preserve non-ASCII case in public prop names, reflected attributes, invocation matching and style name resolution across Node, C# and generated targets. Allocate distinct React locals and emit valid JSX for Unicode prop inputs.
+- Filter Node, live and native .NET slot content declared with `accepts`, including structural content and delegated component lineage, without creating an `as` list. Omit rejected ordinary content from carriers. Keep forwarded fallback subscriptions independent and follow fallback component roots through lowering.
 - Enroll React and Svelte components in child-list bookkeeping only when a receiving slot declares an `as` list. Keep ordinary slot content on the frameworks' normal children paths.
 - Forward non-conflicting ordinary invocation attributes through native component roots, delegation, root choices and deferred carriers. Preserve caller scope, consume attributes that become declared props down the chain, and keep templates without reachable forwarding on their existing rendering path. Attribute collisions and class/style forwarding remain unfinished.
 - Apply native-element class bindings in authored order across generated targets, retaining each binding's accepted value and classes added through the DOM. Preserve raw class text for no-op toggles and scoped styles through replacements, server rendering and framework hydration. Keep class-only React and Preact rows as native elements with direct refs.

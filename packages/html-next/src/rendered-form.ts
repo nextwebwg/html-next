@@ -31,10 +31,14 @@ export function renderedFormMark(document: Document, target: string, data: strin
 
 /** 1 for the start mark of an `$if`, `$each`, `$with` or `$match` region, -1 for its end, else 0. Both runtimes write these marks (see `buildTemplate`). */
 function regionMark(node: Node): number {
+  if (node.nodeType === 7) return node.nodeName === "start" ? 1 : node.nodeName === "end" ? -1 : 0;
   if (node.nodeType !== 8) return 0;
   const data = (node as Comment).data;
-  return data === "html-next:start" || data === "html-next:each-start" ? 1 : data === "html-next:end" || data === "html-next:each-end" ? -1 : 0;
+  return data === "html-next:start" || data === "html-next:each-start" || data.startsWith('?start slot="') ? 1
+    : data === "html-next:end" || data === "html-next:each-end" || data === "?end?" ? -1 : 0;
 }
+
+export function regionStart(node: Node): boolean { return regionMark(node) === 1; }
 
 /** Writes a rendered-form mark's data, as a processing instruction or the comment standing in for one. */
 export function writeMark(mark: Node, target: string, data: string): void {
@@ -56,10 +60,17 @@ export function slotRegions(nodes: readonly Node[]): (readonly [Node, Node])[] |
       if (depth++ === 0) open = node;
     } else if (mark === -1) {
       if (--depth === 0) regions.push([open!, node]);
-    } else if (depth === 0) return undefined;
+    } else if (depth === 0 && (node.nodeType === 1 || node.nodeType === 3)) return undefined;
   }
   return regions.length === 0 || depth !== 0 ? undefined : regions;
 }
+
+let rejectedProjection: WeakSet<Node> | undefined;
+export function rejectProjection(node: Node): void {
+  (rejectedProjection ??= new WeakSet<Node>()).add(node);
+  node.parentNode?.removeChild(node);
+}
+export function projectionRejected(node: Node): boolean { return rejectedProjection?.has(node) ?? false; }
 
 /**
  * Projected nodes with each region's content as the DOM holds it now, between its marks, and each
@@ -70,11 +81,12 @@ export function withRegionContent<T>(entries: readonly (readonly [Node, T])[]): 
   const current: [Node, T][] = [];
   let depth = 0;
   for (const [node, slot] of entries) {
+    if (projectionRejected(node)) continue;
     const mark = regionMark(node);
     if (depth === 0 && mark === 1) {
       let inner = 0;
       for (let next: Node | null = node; next !== null; next = next.nextSibling) {
-        current.push([next, slot]);
+        if (!projectionRejected(next)) current.push([next, slot]);
         const nested = regionMark(next);
         if (nested === 1) inner += 1;
         else if (nested === -1 && --inner === 0) break;
@@ -89,11 +101,25 @@ export function withRegionContent<T>(entries: readonly (readonly [Node, T])[]): 
 export const currentProjection = (nodes: readonly Node[]): Node[] => withRegionContent(nodes.map((node) => [node, 0] as const)).map(([node]) => node);
 
 /** Each consumer region's slot, told when the region renders, by the region's start mark. */
-const regionListeners = new WeakMap<Node, () => void>();
+const regionListeners = new WeakMap<Node, Map<object, () => void>>();
+
+export function observeRegion(start: Node, owner: object, update: () => void): () => void {
+  let listeners = regionListeners.get(start);
+  if (listeners === undefined) regionListeners.set(start, listeners = new Map());
+  listeners.set(owner, update);
+  return () => { listeners.delete(owner); };
+}
 
 /** A region for a named slot rendered: its slot shows its fallback or its content accordingly. */
 export function regionChanged(start: Node): void {
-  regionListeners.get(start)?.();
+  const listeners = regionListeners.get(start);
+  if (listeners !== undefined) for (const update of listeners.values()) update();
+}
+
+export function slotRegionsEmpty(regions: readonly (readonly [Node, Node])[]): boolean {
+  for (const [start, end] of regions) for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling)
+    if (node.nodeType === 1 || node.nodeType === 3) return false;
+  return true;
 }
 
 /**
@@ -102,15 +128,30 @@ export function regionChanged(start: Node): void {
  * Each region tells its slot when it renders (`regionChanged`); `open`, the slot's start mark, keeps
  * its `fallback` attribute in step. The fallback goes before the first region.
  */
-export function switchFallback(open: Node, regions: readonly (readonly [Node, Node])[], fallback: readonly Node[]): void {
+export function switchFallback(open: Node, regions: readonly (readonly [Node, Node])[], fallback: readonly Node[]): () => void {
   const mark = open as CharacterData;
   const content = mark.data.replace(' fallback=""', "");
   const shown = content.replace(/(slot="[^"]*")/, '$1 fallback=""');
   let showing = mark.data !== content;
   const first = regions[0]![0];
+  const stops = new Map<Node, { stop: () => void; revision: number }>();
+  let revision = 0;
+  const watch = (start: Node): void => {
+    const known = stops.get(start);
+    if (known === undefined) stops.set(start, { stop: observeRegion(start, open, sync), revision });
+    else known.revision = revision;
+  };
   const sync = (): void => {
+    revision += 1;
     let empty = true;
-    for (let index = 0; empty && index < regions.length; index += 1) empty = regions[index]![0].nextSibling === regions[index]![1];
+    for (const [start, end] of regions) {
+      watch(start);
+      for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) {
+        if (node.nodeType === 1 || node.nodeType === 3) empty = false;
+        else if (regionStart(node)) watch(node);
+      }
+    }
+    for (const [node, subscription] of stops) if (subscription.revision !== revision) { subscription.stop(); stops.delete(node); }
     if (empty === showing) return;
     showing = empty;
     mark.data = empty ? shown : content;
@@ -121,7 +162,8 @@ export function switchFallback(open: Node, regions: readonly (readonly [Node, No
       else node.parentNode?.removeChild(node);
     }
   };
-  for (const [start] of regions) regionListeners.set(start, sync);
+  sync();
+  return () => { for (const { stop } of stops.values()) stop(); stops.clear(); };
 }
 
 export interface HydrationRange {

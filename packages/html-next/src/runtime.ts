@@ -37,7 +37,7 @@ import {
 import { asciiLowerCase, kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
-  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, writeMark, regionChanged, slotRegions, switchFallback, withRegionContent,
+  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, writeMark, projectionRejected, rejectProjection, observeRegion, regionChanged, regionStart, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -950,7 +950,7 @@ function componentScope(
       declaration.kind === "data"
     ) scope.set(declaration.name, null);
   }
-  // An `as` list is filled from the projection before the template renders (installChildList).
+  // An `as` list is filled from the projection before the template renders (installAcceptedChildren).
   for (const slot of definition.contract.slots === undefined ? [] : Object.values(definition.contract.slots)) {
     if (slot.as !== undefined) scope.set(slot.as, []);
   }
@@ -1829,8 +1829,7 @@ function renderDynamicNode(
     }
     if (slotted) markRegionContent(start, output);
     end.before(...output);
-    if (slotted) regionChanged(start);
-    if (childLists) childListeners.get(start)?.();
+    regionChanged(start);
     built = chosen;
     syncContainingSelect(end);
   });
@@ -2114,8 +2113,7 @@ function renderEachRegion(
     if (ordered !== undefined) for (let index = 0; index < ordered.length; index += 1) ordered[index]!.position = index;
     blocks = next;
     syncContainingSelect(end);
-    if (slotted) regionChanged(start);
-    if (childLists) childListeners.get(start)?.();
+    regionChanged(start);
   });
   for (const root of roots) {
     let previous: Value | typeof NONCONFORMING | undefined = ABSENT;
@@ -2654,8 +2652,7 @@ function renderInstance(
       child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot");
     const rendered = nested?.ranges.filter((range) => !range.fallback) ?? [];
     const walk = (children: readonly TemplateNode[], existing: readonly Node[]): void => {
-      let cursor = 0;
-      for (const child of children) cursor += renderTemplateNode(child, scope, document, context, existing[cursor]).length;
+      renderChildren(children, scope, document, context, existing[0]);
     };
     for (const child of node.children) {
       if (!scopedTemplate(child)) continue;
@@ -2942,12 +2939,8 @@ const childEntries = new WeakMap<object, ChildEntry>();
 const entriesByElement = new WeakMap<Element, ChildEntry>();
 /** A child's invocation read when its entry was made, so its own preparation shares that prop scope. */
 const earlyInvocations = new WeakMap<Element, ReturnType<typeof readInvocation>>();
-/** A list's update, by the start mark of each consumer region among the children it reads. */
-const childListeners = new WeakMap<Node, () => void>();
 /** The child whose slot a `<slot of>` outlet placed each node from, its logical parent for context. */
 const placedOwners = new WeakMap<Node, ChildEntry>();
-/** Set once any slot keeps an `as` list, so region updates without one never look. */
-let childLists = false;
 /** Set once any `<slot of>` outlet placed content, so lowering without one never looks. */
 let childPlacements = false;
 /** A server root's carried nodes, read before that child hydrates. */
@@ -2991,43 +2984,63 @@ function listed(names: readonly string[]): string {
   return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
 }
 
-/**
- * Keeps a slot's `as` list: one entry per accepted child assigned to it, in content order, following
- * the consumer's `$if`, `$each` and `$match` regions as they render. Other children are left out.
- */
-function installChildList(instance: RuntimeInstance, context: RuntimeRenderContext, slot: string, accepts: readonly string[], as: string, document: Document): void {
+function installAcceptedChildren(instance: RuntimeInstance, context: RuntimeRenderContext, slot: string, accepts: readonly string[], as: string | undefined, document: Document): void {
   const registry = registryFor(document);
   const owner = instance.definition;
   const named = `\`${owner.contract.tag}\`'s ${slot === "" ? "default slot" : `\`${slot}\` slot`}`;
   const leftOut = (key: string, message: string): void => warnAuthored(owner, `accepts:${slot}:${key}`, message);
-  let current: readonly object[] = [];
-  childLists = true;
+  let current: readonly object[] | undefined = as === undefined ? undefined : [];
+  const stops = new Map<Node, () => void>();
+  const observed = new Set<Node>();
+  const changed = (): void => untracked(update);
   const update = (): void => {
-    const next: object[] = [];
+    observed.clear();
+    const next: object[] | undefined = as === undefined ? undefined : [];
+    const discard = (node: Node): void => {
+      rejectProjection(node);
+      for (const nodes of [context.projectedNodes, instance.projection!.nodes]) {
+        const index = nodes.indexOf(node);
+        if (index >= 0) (nodes as Node[]).splice(index, 1);
+      }
+    };
     for (const [node, name] of withRegionContent(context.projectedNodes.map((node) => [node, projectedSlotName(node, context)] as const))) {
       if (name !== slot) continue;
-      if (node.nodeType === 8) {
-        const data = (node as Comment).data;
-        if (data === "html-next:start" || data === "html-next:each-start") childListeners.set(node, update);
+      if (projectionRejected(node)) continue;
+      if (node.nodeType === 8 || node.nodeType === 7) {
+        if (regionStart(node)) {
+          observed.add(node);
+          if (!stops.has(node)) stops.set(node, observeRegion(node, instance, changed));
+        }
         continue;
       }
-      if (node.nodeType === 3 && !HTML_WHITESPACE.test((node as Text).data)) leftOut("#text", `${named} accepts ${listed(accepts)}; this text is left out.`);
+      if (node.nodeType === 3) {
+        if (!HTML_WHITESPACE.test((node as Text).data)) {
+          leftOut("#text", `${named} accepts ${listed(accepts)}; this text is left out.`);
+          discard(node);
+        }
+        continue;
+      }
       if (node.nodeType !== 1) continue;
       const element = node as Element;
       const lineage = childLineage(element, registry);
       const tag = lineage[0]!;
       const definition = registry.definitions.get(tag)?.definition;
+      const delegated = lineage.find((candidate) => accepts.includes(candidate));
+      if (delegated !== undefined && as === undefined) continue;
       if (accepts.includes(tag) && definition !== undefined) {
-        next.push(childEntry(element, tag, definition, instance).value);
+        next!.push(childEntry(element, tag, definition, instance).value);
         continue;
       }
-      const delegated = lineage.find((candidate) => accepts.includes(candidate));
       leftOut(tag, delegated === undefined || delegated === tag
-        ? `${named} accepts ${listed(accepts)}; this \`<${element.localName}>\` is left out.`
+        ? `${named} accepts ${listed(accepts)}; this \`<${tag}>\` is left out.`
         : `\`<${tag}>\` is a preset of \`${delegated}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+      if (delegated === undefined) discard(node);
     }
-    if (next.length === current.length && next.every((value, index) => value === current[index])) return;
-    for (const value of current) {
+    for (const [region, stop] of stops) if (!observed.has(region)) { stop(); stops.delete(region); }
+    if (next === undefined || current === undefined) return;
+    const previous = current;
+    if (next.length === previous.length && next.every((value, index) => value === previous[index])) return;
+    for (const value of previous) {
       if (next.includes(value)) continue;
       // A child dropped before it lowered never prepares, so nothing else stops what its scope started.
       const element = childEntries.get(value)!.element;
@@ -3036,9 +3049,12 @@ function installChildList(instance: RuntimeInstance, context: RuntimeRenderConte
       for (const effect of early?.effects ?? []) effect.stop();
     }
     current = Object.freeze(next);
-    instance.scope.set(as, current as unknown as Value);
+    instance.scope.set(as!, current as unknown as Value);
   };
-  untracked(update);
+  ownEffect(context, instance.scope, () => {
+    changed();
+    return () => { for (const stop of stops.values()) stop(); stops.clear(); };
+  });
 }
 
 const HTML_WHITESPACE = /^[\t\n\f\r ]*$/;
@@ -3224,6 +3240,15 @@ function renderChildSlot(
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }
 
+function slotFallback(nodes: Node[]): Node[] {
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]!;
+    if (node.nodeType === 1 && (node as Element).localName.includes("-"))
+      whenLowered(node as Element, root => { nodes[index] = root; });
+  }
+  return nodes;
+}
+
 function renderSlot(
   node: SlotNode,
   scope: ReactiveScope,
@@ -3233,7 +3258,7 @@ function renderSlot(
 ): Node[] {
   if (node.of !== undefined) return renderChildSlot(node, scope, document, context, candidate);
   const name = node.name ?? "";
-  const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
+  const assigned = context.projectedNodes.filter((candidate) => !projectionRejected(candidate) && projectedSlotName(candidate, context) === name);
   const props = node.props ?? [];
   const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
   // A consumer's <template slot> renders lazily, like an $if body: only while this outlet renders,
@@ -3265,7 +3290,7 @@ function renderSlot(
           (context.projectedNodes as Node[]).push(mark);
           context.projectedSlotNames.set(mark, name);
         }
-        switchFallback(hydrating.markers[0]!, regions, adopted);
+        ownEffect(context, scope, () => switchFallback(hydrating.markers[0]!, regions, slotFallback(adopted)));
       }
       return [hydrating.markers[0]!, ...adopted, ...empty, ...hydrating.markers.slice(1)];
     }
@@ -3283,7 +3308,8 @@ function renderSlot(
     for (const candidate of hydrating.content) markProjectedRoot(candidate);
     const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(hydrating.content) : undefined;
     if (regions !== undefined) {
-      switchFallback(hydrating.markers[0]!, regions, materialize(renderChildren(node.fallback!, scope, document, context), document));
+      const fallback = slotFallback(materialize(renderChildren(node.fallback!, scope, document, context), document));
+      ownEffect(context, scope, () => switchFallback(hydrating.markers[0]!, regions, fallback));
     }
     return hydrating.markers.length === 1
       ? [hydrating.markers[0]!]
@@ -3302,6 +3328,9 @@ function renderSlot(
   if (assigned.length === 0) {
     return ranged(renderChildren(node.fallback ?? [], scope, document, context), true);
   }
+  if (context.definition.contract.slots?.[name]?.accepts !== undefined && !currentProjection(assigned).some(node => node.nodeType === 1 || node.nodeType === 3) && slotRegions(assigned) === undefined) {
+    return ranged([...renderChildren(node.fallback ?? [], scope, document, context), ...currentProjection(assigned)], true);
+  }
   if (lazy) {
     return ranged(renderScoped(), false);
   }
@@ -3317,10 +3346,10 @@ function renderSlot(
   // Given only the consumer's `$if` or `$each` regions, the slot shows its fallback while they render nothing.
   const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(assigned) : undefined;
   if (regions === undefined) return ranged(content, false);
-  const fallback = materialize(renderChildren(node.fallback!, scope, document, context), document);
-  const empty = regions.every(([start, end]) => start.nextSibling === end);
+  const fallback = slotFallback(materialize(renderChildren(node.fallback!, scope, document, context), document));
+  const empty = slotRegionsEmpty(regions);
   const range = ranged(empty ? [...fallback, ...content] : content, empty);
-  switchFallback(range[0]!, regions, fallback);
+  ownEffect(context, scope, () => switchFallback(range[0]!, regions, fallback));
   return range;
 }
 
@@ -3627,8 +3656,9 @@ function prepareRuntimeInvocation(
   let hydratedNodes = projectedNodes;
   let hydrationRanges: HydrationRange[] | undefined;
   let childRanges: HydrationRange[] | undefined;
-  const lists = definition.contract.slots === undefined ? undefined
-    : Object.entries(definition.contract.slots).filter(([, slot]) => slot.as !== undefined);
+  const accepting = definition.contract.slots === undefined ? undefined
+    : Object.entries(definition.contract.slots).filter(([, slot]) => slot.accepts !== undefined);
+  const lists = accepting?.filter(([, slot]) => slot.as !== undefined);
   if (hydration && hydratedNodes === undefined) {
     const server = serverRanges(invocation, true, definition.contract.tag);
     if (server !== undefined) {
@@ -3728,7 +3758,7 @@ function prepareRuntimeInvocation(
     hydrationRanges,
     childRanges,
   };
-  for (const [slot, { accepts, as }] of lists ?? []) installChildList(instance, context, slot, accepts ?? [], as!, invocation.ownerDocument);
+  for (const [slot, { accepts, as }] of accepting ?? []) installAcceptedChildren(instance, context, slot, accepts!, as, invocation.ownerDocument);
   const lifecycle = definition.lifecycle;
   if (lifecycle !== undefined) {
     // One connection-owned effect, as a controller's `host.on`: it runs `on:connect` each time the

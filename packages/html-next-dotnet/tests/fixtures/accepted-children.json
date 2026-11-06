@@ -1,0 +1,182 @@
+[
+  {
+    "name": "direct",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column></x-column></x-list></main></template>",
+    "expected": "<main><section><b>Column</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "literal-prop",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column label=\"Written\"></x-column></x-list></main></template>",
+    "expected": "<main><section><b>Written</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "ordinary-child-slot",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column><em>Child</em></x-column></x-list></main></template>",
+    "expected": "<main><section><b>Column<em>Child</em></b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "multiple",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column label=\"One\"></x-column><x-column label=\"Two\"></x-column></x-list></main></template>",
+    "expected": "<main><section><b>One</b><b>Two</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "empty",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "whitespace",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list> \n\t<!-- ignore --> </x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "native-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><p>Wrong</p></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "text-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list>Wrong</x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "component-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-other></x-other></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "mixed",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list>Wrong<p>Wrong</p><x-column></x-column><x-other></x-other></x-list></main></template>",
+    "expected": "<main><section><b>Column</b></section></main>",
+    "diagnostics": 3
+  },
+  {
+    "name": "hidden-accepted",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column $if=\"false\"></x-column></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "hidden-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><p $if=\"false\">Wrong</p></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "conditional",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><template $if=\"true\"><x-column label=\"Shown\"></x-column></template></x-list></main></template>",
+    "expected": "<main><section><b>Shown</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "iteration",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column $each=\"item of [1, 2]\" from:label=\"concat('Row ', $item)\"></x-column></x-list></main></template>",
+    "expected": "<main><section><b>Row 1</b><b>Row 2</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "iteration-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><p $each=\"item of [1, 2]\">Wrong</p></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "structural-iteration",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><template $each=\"item of [1, 2]\"><x-column from:label=\"concat('Row ', $item)\"></x-column></template></x-list></main></template>",
+    "expected": "<main><section><b>Row 1</b><b>Row 2</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "structural-match",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><template $match><x-column $when=\"false\" label=\"Hidden\"></x-column><x-column $else label=\"Chosen\"></x-column></template></x-list></main></template>",
+    "expected": "<main><section><b>Chosen</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "preset-lineage",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-preset\"><x-column label=\"Preset\"></x-column></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-preset></x-preset></x-list></main></template>",
+    "expected": "<main><section><b>Preset</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "named-slot",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot name=\"items\" accepts=\"x-column\"></slot></defs><section><header><slot name=\"items\">Empty</slot></header><slot></slot></section></template><template component=\"x-page\"><main><x-list><x-column slot=\"items\"></x-column><p>Free</p></x-list></main></template>",
+    "expected": "<main><section><header><b slot=\"items\">Column</b></header><p>Free</p></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "multiple-accepted-tags",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column x-other\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column></x-column><x-other></x-other></x-list></main></template>",
+    "expected": "<main><section><b>Column</b><i>Other</i></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "repeated-rejection-warning",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><p>First</p><p>Second</p></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "template-carrier-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><template slot=\"\"><x-column></x-column></template></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "dynamic-text-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><defs><state name=\"message\" type=\"string\" value=\"Wrong\"></state></defs><main><x-list>{$message}</x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "dynamic-empty-text",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><defs><state name=\"message\" type=\"string\" value=\"\"></state></defs><main><x-list>{$message}</x-list></main></template>",
+    "expected": "<main><section></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "dynamic-whitespace-text",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><defs><state name=\"message\" type=\"string\" value=\"  \"></state></defs><main><x-list>{$message}</x-list></main></template>",
+    "expected": "<main><section>  </section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "fragment-value-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><template $value=\"'Wrong'\"></template></x-list></main></template>",
+    "expected": "<main><section>Empty</section></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "visible-whitespace-retained",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-page\"><main><x-list><x-column label=\"One\"></x-column> \n\t<x-column label=\"Two\"></x-column></x-list></main></template>",
+    "expected": "<main><section><b>One</b> \n\t<b>Two</b></section></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "forwarded-valid",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-relay\"><article><x-list><slot></slot></x-list></article></template><template component=\"x-page\"><main><x-relay><x-column></x-column></x-relay></main></template>",
+    "expected": "<main><article><section><b>Column</b></section></article></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "forwarded-rejected",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-relay\"><article><x-list><slot></slot></x-list></article></template><template component=\"x-page\"><main><x-relay><p>Wrong</p></x-relay></main></template>",
+    "expected": "<main><article><section>Empty</section></article></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "forwarded-mixed",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot accepts=\"x-column\"></slot></defs><section><slot>Empty</slot></section></template><template component=\"x-relay\"><article><x-list><slot></slot></x-list></article></template><template component=\"x-page\"><main><x-relay><p>Wrong</p><x-column></x-column></x-relay></main></template>",
+    "expected": "<main><article><section><b>Column</b></section></article></main>",
+    "diagnostics": 1
+  }
+]

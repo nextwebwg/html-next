@@ -1,19 +1,46 @@
 namespace HtmlNext;
 
-internal sealed record ProjectionNode(RenderOperation[] Body) : RenderOperation
+internal sealed record ProjectionNode(RenderOperation[] Body, string? Tag = null) : RenderOperation
 {
-    public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation) => true;
+    public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation) => context?.AcceptsProjection(null, Tag, Body, values) ?? true;
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
+        if (writer.Context?.AcceptsProjection(null, Tag, Body, values) == false) return;
         foreach (var operation in Body) operation.Write(ref writer, values, cancellation);
     }
     public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
+        if (writer.Context?.AcceptsProjection(null, Tag, Body, values) == false) return;
         foreach (var operation in Body) operation.WriteDeferred(ref writer, values, cancellation);
     }
 }
 
-internal sealed record ProjectionGroup(string Name, bool Template, RenderOperation[] Body, ValueExpression? Guard = null, string? Source = null, ScopedSlotLocal[]? Locals = null);
+internal sealed record ProjectionGroup(string Name, bool Template, RenderOperation[] Body, ValueExpression? Guard = null, string? Source = null, ScopedSlotLocal[]? Locals = null, AcceptedChildFilter? Filter = null)
+{
+    public bool HasNodes(object?[] caller, RenderContext? context, CancellationToken cancellation)
+    {
+        var previous = context?.EnterAcceptedProjection(Filter) ?? -1;
+        try { return RenderOperation.AnyNodes(Body, caller, context, cancellation); }
+        finally { context?.LeaveAcceptedProjection(previous); }
+    }
+    public void Write(ref HtmlWriter writer, object?[] caller, CancellationToken cancellation, bool deferred)
+    {
+        var previous = writer.Context?.EnterAcceptedProjection(Filter) ?? -1;
+        try
+        {
+            foreach (var operation in Body)
+                if (deferred) operation.WriteDeferred(ref writer, caller, cancellation); else operation.Write(ref writer, caller, cancellation);
+        }
+        finally { writer.Context?.LeaveAcceptedProjection(previous); }
+    }
+    public void RejectTemplate(object?[] caller, RenderContext? context)
+    {
+        if (Guard is not null && !Guard.Evaluate(caller).Truthy) return;
+        var previous = context?.EnterAcceptedProjection(Filter) ?? -1;
+        try { context?.AcceptsProjection(null, "template", null, caller); }
+        finally { context?.LeaveAcceptedProjection(previous); }
+    }
+}
 
 internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot)
 {
@@ -23,13 +50,19 @@ internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller
     public object?[] Receiver { get; } = receiver;
     public ProjectionFrame? Parent { get; private set; }
     public bool CarrierHandled { get; private set; }
-    public bool NeedsCarrier
+    public bool NeedsCarrier(RenderContext? context, CancellationToken cancellation)
     {
-        get
+        for (var index = 0; index < Groups.Length; index++)
         {
-            for (var index = 0; index < Groups.Length; index++) if (Groups[index].Template || !used[index]) return true;
-            return false;
+            var group = Groups[index];
+            if (group.Template)
+            {
+                if (group.Filter is null) return true;
+                group.RejectTemplate(Caller, context);
+            }
+            else if (!used[index] && (group.Filter is null || group.HasNodes(Caller, context, cancellation))) return true;
         }
+        return false;
     }
     public void Reset(ProjectionFrame? parent) { Array.Clear(used); Parent = parent; CarrierHandled = false; }
 
@@ -39,23 +72,26 @@ internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller
         cancellation.ThrowIfCancellationRequested();
         if (sharedRoot) Parent?.WriteCarriers(ref writer, cancellation);
         CarrierHandled = true;
-        if (!NeedsCarrier) return;
+        if (!NeedsCarrier(writer.Context, cancellation)) return;
         writer.Write("<template carrier=\""); writer.Write(tag); writer.Write("\">");
         for (var index = 0; index < Groups.Length; index++)
         {
             var group = Groups[index];
-            if (group.Template) writer.Write(group.Source);
-            else if (!used[index]) foreach (var operation in group.Body) operation.WriteDeferred(ref writer, Caller, cancellation);
+            if (group.Template && group.Filter is null) writer.Write(group.Source);
+            else if (group.Template) group.RejectTemplate(Caller, writer.Context);
+            else if (!used[index]) group.Write(ref writer, Caller, cancellation, true);
         }
         writer.Write("</template>");
     }
 
-    public int Template(string name)
+    public int Template(string name, RenderContext? context)
     {
         for (var index = 0; index < Groups.Length; index++)
         {
             var group = Groups[index];
-            if (group.Name == name && group.Template && (group.Guard is null || group.Guard.Evaluate(Caller).Truthy)) return index;
+            if (group.Name != name || !group.Template || group.Guard is not null && !group.Guard.Evaluate(Caller).Truthy) continue;
+            if (group.Filter is null) return index;
+            group.RejectTemplate(Caller, context);
         }
         return -1;
     }
@@ -65,7 +101,7 @@ internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller
         for (var index = 0; index < Groups.Length; index++)
             if (Groups[index].Name == name && used[index]) return false;
         foreach (var group in Groups)
-            if (group.Name == name && !group.Template && RenderOperation.AnyNodes(group.Body, Caller, context, cancellation)) return true;
+            if (group.Name == name && !group.Template && group.HasNodes(Caller, context, cancellation)) return true;
         return false;
     }
 
@@ -80,6 +116,7 @@ internal sealed class ProjectionState(bool cache)
     private readonly List<ProjectionFrame>? frames = cache ? [] : null;
     private int position;
     public ProjectionFrame? Current { get; set; }
+    public AcceptedProjection? Accepted { get; set; }
     public ProjectionFrame? Enter(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot)
     {
         var previous = Current;
@@ -116,7 +153,7 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
         var frame = context?.ProjectionFor(values);
         if (frame is not null)
         {
-            var template = frame.Template(Name);
+            var template = frame.Template(Name, context);
             if (template >= 0)
             {
                 var group = frame.Groups[template];
@@ -131,6 +168,7 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
                 RequireTemplate();
                 return true;
             }
+            if (context!.HasAcceptedProjection) frame.Claim(Name);
         }
         return AnyNodes(Fallback, values, context, cancellation);
     }
@@ -146,7 +184,7 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
     {
         cancellation.ThrowIfCancellationRequested();
         var frame = writer.Context?.ProjectionFor(values);
-        var template = frame?.Template(Name) ?? -1;
+        var template = frame?.Template(Name, writer.Context) ?? -1;
         var assigned = template >= 0 || frame?.Assigned(Name, writer.Context, cancellation) == true;
         if (template < 0 && assigned) RequireTemplate();
         if (template < 0 && !deferred) frame?.Claim(Name);
@@ -177,7 +215,7 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
             if (assigned && template < 0)
             {
                 if (!deferred) foreach (var group in frame!.Groups)
-                    if (group.Name == Name && !group.Template) foreach (var operation in group.Body) operation.Write(ref writer, frame.Caller, cancellation);
+                    if (group.Name == Name && !group.Template) group.Write(ref writer, frame.Caller, cancellation, false);
             }
             else foreach (var operation in body)
             {

@@ -89,6 +89,26 @@ describe("compiled hydration of Node output", () => {
     });
   }
 
+  it("adopts accepted children after rejected siblings without losing their consumer templates", async () => {
+    const components = [
+      `<template component="x-accepted"><defs><prop name="label" type="string">Label.</prop>
+        <slot name="note"><prop name="text" type="string">Text.</prop></slot></defs><b><slot name="note" from:text="$label"></slot></b></template>`,
+      `<template component="x-filter"><defs><slot accepts="x-accepted"></slot></defs><section><slot></slot></section></template>`,
+      `<template component="x-page"><main><x-filter>rejected text<p>Rejected element</p><x-accepted label="Kept"><template slot="note"><em>{$text}</em></template></x-accepted></x-filter></main></template>`,
+    ].map(source => parseComponent(source));
+    const rendered = await renderComponents("<x-page></x-page>", { definitions: components });
+    const bundle = await compiledFixtures("esm", 'export { registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";', components);
+    const { document, runtime } = await page(rendered.html, bundle);
+    const originals = Array.from(document.querySelectorAll("b, em"));
+    runtime.registerComponentDefinitions(components);
+    runtime.lowerDocument();
+    await flush();
+    assert.equal(document.querySelectorAll("em").length, 2);
+    assert.ok(Array.from(document.querySelectorAll("em")).every(element => element.textContent === "Kept"));
+    assert.ok(originals.every(element => document.body.contains(element)));
+    assert.equal(document.querySelector("p"), null);
+  });
+
   it("attaches a framework-owned legacy root without adding a canonical mirror", async () => {
     const rendered = await renderComponents('<ssr-inline id="subject"></ssr-inline>', { definitions });
     const { document, runtime } = await page(rendered.html.replaceAll('component="', 'data-component="'));

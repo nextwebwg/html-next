@@ -41,6 +41,7 @@ internal sealed class ComponentReference
     internal static readonly IReadOnlyDictionary<string, ScopedSlotContract> EmptySlots = new Dictionary<string, ScopedSlotContract>();
     public IReadOnlyDictionary<string, ScopedSlotContract> Slots { get; set; } = EmptySlots;
     public Prop[] Props { get; set; } = [];
+    public string? DelegatedTag { get; init; }
     public bool ReceivesAttributes { get; set; }
     public CompiledTemplate Template { get; set; } = null!;
 }
@@ -118,7 +119,7 @@ public static partial class HtmlNextCompiler
             {
                 var compiler = new Compiler(carrier, resource.Source.Id, references, assets, hash);
                 compiler.ReadContract();
-                var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots };
+                var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots, DelegatedTag = compiler.DelegatedTag };
                 if (!references.TryAdd(compiler.Tag, reference)) throw ValueType.Error(resource.Source.Id, $"Duplicate component '{compiler.Tag}'.");
                 compilers.Add((compiler, reference));
             }

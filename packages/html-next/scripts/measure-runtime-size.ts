@@ -156,7 +156,9 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // The lifecycle query uses registered records; no interpreter or parser is added.
 // Namespace-aware prototype attribute keys cost 17-22 B gzip on these HTML-only fixtures.
 // Exact current measurements below include that branch; namespace writers and URI tables stay absent.
-const staticGenerated = await generatedFixture("static-card", 8_091);
+// Shared projection rejection and fallback ownership cost 18–29 B gzip on four fixtures.
+// Rejection storage is lazy; ordinary components do not create child-list entries.
+const staticGenerated = await generatedFixture("static-card", 8_115);
 // The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
 // +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
@@ -189,7 +191,7 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_895);
 // writes are omitted to preserve opaque native editing state (+19–34 B on affected prop/head
 // fixtures, +3 B on controller-keyed). These are exact measured costs, with no added allowance.
 // ASCII-only attribute folding preserves Unicode prop names: +18 B gzip here, +10–14 B in the head fixtures.
-const propGenerated = await generatedFixture("prop-button", 14_280);
+const propGenerated = await generatedFixture("prop-button", 14_298);
 // Lexical declared-reference checks add 168 B for await status/error aliases and 138 B for
 // seeded-state availability/error aliases. Ratchet to their measured cost without extra allowance.
 // +3 B from minifier allocation after moving live reference checks into expression evaluation;
@@ -210,12 +212,12 @@ const keyedGenerated = await generatedFixture("keyed-list", 8_328);
 // +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
 // does nothing until a component on the page asks.
 const dataGenerated = await generatedFixture("data-read", 8_221);
-const controllerGenerated = await generatedFixture("controller-lifecycle", 8_104);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 8_130);
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 9_801);
+const requestGenerated = await generatedFixture("controller-request", 9_830);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound

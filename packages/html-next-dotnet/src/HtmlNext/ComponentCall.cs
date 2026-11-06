@@ -9,50 +9,62 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
     private readonly Prop[] props = Target.Props;
     public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
-        cancellation.ThrowIfCancellationRequested();
-        ExecutionStack.Check(Target.Template.SourceName);
-        writer.Write('<'); writer.Write(Target.Template.Tag);
-        foreach (var operation in DeferredAttributes) operation.Write(ref writer, values, cancellation);
-        writer.Write('>');
-        if (Projection is not null) foreach (var group in Projection)
-        {
-            if (group.Template) writer.Write(group.Source);
-            else foreach (var operation in group.Body) operation.WriteDeferred(ref writer, values, cancellation);
-        }
-        writer.Write("</"); writer.Write(Target.Template.Tag); writer.Write('>');
-    }
-    public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation) => true;
-    public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
-    {
-        cancellation.ThrowIfCancellationRequested();
-        ExecutionStack.Check(Target.Template.SourceName);
-        var context = writer.Context!;
-        var child = context.NextChild();
-        if (child is null)
-        {
-            child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, SharedRoot ? context.InheritedAttributes : null);
-            context.RecordChild(child);
-        }
-        var projected = Projection is { Length: > 0 } || SharedRoot && context.ProjectionFor(values) is not null;
-        var previousProjection = projected ? context.EnterProjection(Projection ?? [], values, child, Target.Template.Tag, SharedRoot) : null;
-        var previousAttributes = context.EnterInvocationAttributes(Attributes, props, values, SharedRoot);
+        if (writer.Context?.AcceptsProjection(Target, Target.Template.Tag, null, values) == false) return;
+        var previousFilter = writer.Context?.PauseAcceptedProjection() ?? -1;
         try
         {
-            if (ParentStyle is null && !context.HasRootStyles) Target.Template.WritePlan(ref writer, child, cancellation);
-            else
+            cancellation.ThrowIfCancellationRequested();
+            ExecutionStack.Check(Target.Template.SourceName);
+            writer.Write('<'); writer.Write(Target.Template.Tag);
+            foreach (var operation in DeferredAttributes) operation.Write(ref writer, values, cancellation);
+            writer.Write('>');
+            if (Projection is not null) foreach (var group in Projection)
             {
-                var previous = context.EnterRootStyle(ParentStyle, values);
-                try { Target.Template.WritePlan(ref writer, child, cancellation); }
-                finally { context.LeaveRootStyle(previous); }
+                if (group.Template) writer.Write(group.Source);
+                else foreach (var operation in group.Body) operation.WriteDeferred(ref writer, values, cancellation);
             }
-            if (projected && context.ProjectionFor(child) is { CarrierHandled: false, NeedsCarrier: true })
-                throw ValueType.Error(Target.Template.SourceName, "The rendered root has no position for its projection carrier.");
+            writer.Write("</"); writer.Write(Target.Template.Tag); writer.Write('>');
         }
-        finally
+        finally { writer.Context?.ResumeAcceptedProjection(previousFilter); }
+    }
+    public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation) => context?.AcceptsProjection(Target, Target.Template.Tag, null, values) ?? true;
+    public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
+    {
+        if (writer.Context?.AcceptsProjection(Target, Target.Template.Tag, null, values) == false) return;
+        var previousFilter = writer.Context?.PauseAcceptedProjection() ?? -1;
+        try
         {
-            context.LeaveInvocationAttributes(previousAttributes);
-            if (projected) context.LeaveProjection(previousProjection);
+            cancellation.ThrowIfCancellationRequested();
+            ExecutionStack.Check(Target.Template.SourceName);
+            var context = writer.Context!;
+            var child = context.NextChild();
+            if (child is null)
+            {
+                child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, SharedRoot ? context.InheritedAttributes : null);
+                context.RecordChild(child);
+            }
+            var projected = Projection is { Length: > 0 } || SharedRoot && context.ProjectionFor(values) is not null;
+            var previousProjection = projected ? context.EnterProjection(Projection ?? [], values, child, Target.Template.Tag, SharedRoot) : null;
+            var previousAttributes = context.EnterInvocationAttributes(Attributes, props, values, SharedRoot);
+            try
+            {
+                if (ParentStyle is null && !context.HasRootStyles) Target.Template.WritePlan(ref writer, child, cancellation);
+                else
+                {
+                    var previous = context.EnterRootStyle(ParentStyle, values);
+                    try { Target.Template.WritePlan(ref writer, child, cancellation); }
+                    finally { context.LeaveRootStyle(previous); }
+                }
+                if (projected && context.ProjectionFor(child) is { CarrierHandled: false } frame && frame.NeedsCarrier(context, cancellation))
+                    throw ValueType.Error(Target.Template.SourceName, "The rendered root has no position for its projection carrier.");
+            }
+            finally
+            {
+                context.LeaveInvocationAttributes(previousAttributes);
+                if (projected) context.LeaveProjection(previousProjection);
+            }
         }
+        finally { writer.Context?.ResumeAcceptedProjection(previousFilter); }
     }
 }
 
@@ -90,6 +102,12 @@ internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnosti
     private int rootStyleStart;
     private ProjectionState? projections;
     private InvocationAttributeState? invocationAttributes;
+    public bool HasAcceptedProjection => projections?.Accepted?.Active == true;
+    public int EnterAcceptedProjection(AcceptedChildFilter? filter) => filter is null ? -1 : ((projections ??= new(children is not null)).Accepted ??= new()).Enter(filter);
+    public void LeaveAcceptedProjection(int previous) { if (previous >= 0) projections!.Accepted!.Leave(previous); }
+    public int PauseAcceptedProjection() => projections?.Accepted?.Pause() ?? -1;
+    public void ResumeAcceptedProjection(int previous) { if (previous >= 0) projections!.Accepted!.Resume(previous); }
+    public bool AcceptsProjection(ComponentReference? target, string? tag, RenderOperation[]? text, object?[] values) => projections?.Accepted?.Accepts(target, tag, text, values, OnDiagnostic) ?? true;
     public InvocationAttributeState? InheritedAttributes => invocationAttributes;
     public (int Start, int Count)? EnterInvocationAttributes(InvocationAttribute[]? attributes, Prop[] props, object?[] values, bool sharedRoot)
     {

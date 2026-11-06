@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { renderComponents } from "../src/server.js";
-import { parseComponent } from "../src/source-parser.js";
+import { parseComponent, parseComponentResource } from "../src/source-parser.js";
 import { compiledFixtures } from "./hydration-fixtures.js";
 
 // Columns as markup (components#columns-as-markup) in the live runtime. The column template starts
@@ -112,6 +112,56 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
   const pageHost = `window.HtmlRuntime.getComponentHost(document.querySelector("main"))`;
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const hydrate of [false, true]) it(`${engine} filters accepted content without as through forwarded fallbacks (${hydrate ? "hydrated" : "fresh"})`, async () => {
+      const source = `<template component="x-accepted"><defs><prop name="label" type="string">Label.</prop></defs><b>{$label}</b></template>
+        <template component="x-rejected"><defs><prop name="required" type="string" required>Required.</prop></defs><i>Wrong</i></template>
+        <template component="x-filter"><defs><slot accepts="x-accepted"></slot></defs><section><slot>List empty</slot></section></template>
+        <template component="x-forward"><defs><state name="show" type="boolean" value="true"></state></defs><article><x-filter $if="$show"><slot><x-accepted label="Relay"></x-accepted></slot></x-filter></article></template>
+        <template component="x-acceptance-page"><defs><state name="rows" type="list(object({ id: number, good: boolean, label: string }))" from="[]"></state></defs><main><x-forward><template $each="row of $rows" $key="$row.id"><template $match><x-accepted $when="$row.good" from:label="$row.label"></x-accepted><x-rejected $else></x-rejected></template></template></x-forward></main></template>`;
+      const definitions = parseComponentResource(source, "accepted-without-list.html").definitions;
+      const server = hydrate ? (await renderComponents("<x-acceptance-page></x-acceptance-page>", { definitions })).html : undefined;
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [], warnings: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(server ?? source + "<x-acceptance-page></x-acceptance-page>");
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(definitions => {
+          const api = (window as any).HtmlRuntime;
+          if (definitions !== undefined) api.registerComponentDefinitions(JSON.parse(definitions));
+          api.observeDocument(document);
+        }, hydrate ? JSON.stringify(definitions) : undefined);
+        const text = () => page.locator("section").textContent();
+        const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await settle();
+        assert.equal(await text(), "Relay");
+        const rows = async (value: readonly { id: number; good: boolean; label: string }[]) => {
+          await page.evaluate(value => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("main")).state.rows = value; }, value);
+          await settle();
+        };
+        await rows([{ id: 1, good: true, label: "A" }, { id: 2, good: false, label: "Wrong" }]);
+        assert.equal(await text(), "A");
+        await rows([]);
+        assert.equal(await text(), "Relay");
+        for (let index = 0; index < 3; index++) {
+          await page.evaluate(() => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("article")).state.show = false; });
+          await settle();
+          assert.equal(await page.locator("section").count(), 0);
+          await page.evaluate(() => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("article")).state.show = true; });
+          await settle();
+          assert.equal(await text(), "Relay");
+        }
+        await rows([{ id: 3, good: true, label: "B" }]);
+        assert.equal(await text(), "B");
+        assert.equal(await page.locator("section b").count(), 1);
+        assert.ok(warnings.length > 0);
+        assert.ok(warnings.every(message => /accepts .*left out/.test(message)), warnings.join("\n"));
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} renders the spec's data table, follows consumer $if and $each, and keeps cells by key`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

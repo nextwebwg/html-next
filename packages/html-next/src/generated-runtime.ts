@@ -18,7 +18,7 @@ import { applyBoundControlValue, controlValue, holdControl } from "./controls.js
 import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
 import {
-  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback, withRegionContent, writeMark,
+  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, projectionRejected, rejectProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent, writeMark,
 } from "./rendered-form.js";
 import type { HydrationRange, RenderedInstanceRecord } from "./rendered-form.js";
 import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
@@ -263,7 +263,7 @@ const regionSlots = new WeakMap<Node, readonly [slot: string, end: Node]>();
  * bundle it; without it a slot places its projected nodes as they are.
  */
 let regionFill: ((assigned: readonly Node[], fallback: boolean) =>
-  { readonly nodes: Node[]; readonly empty: boolean; readonly at?: (open: Node) => ChildNode }) | undefined;
+  { readonly nodes: Node[]; readonly empty: boolean; readonly at?: (open: Node, stops?: (() => void)[]) => ChildNode }) | undefined;
 
 /** Records that the region from `start` to `end` is for an element with `slot`; returns `start`. */
 export function slotRegion<T extends Node>(start: T, end: Node, slot: string): T {
@@ -272,14 +272,15 @@ export function slotRegion<T extends Node>(start: T, end: Node, slot: string): T
     const nodes = currentProjection(assigned);
     const regions = fallback ? slotRegions(assigned) : undefined;
     if (regions === undefined) return { nodes, empty: false };
-    const empty = (): boolean => regions.every(([first, last]) => first.nextSibling === last);
-    return { nodes, empty: empty(), at: (open) => {
+    const empty = (): boolean => slotRegionsEmpty(regions);
+    return { nodes, empty: empty(), at: (open, stops) => {
       // The fallback block is placed through this node's `before`, which hands its nodes to the switch.
       const at = open.ownerDocument!.createComment("");
       at.before = (...given) => {
         const fallback = (given as Node[]).flatMap((node) => node.nodeType === 11 ? Array.from(node.childNodes) : [node]);
         if (empty()) (regions[0]![0] as ChildNode).before(...fallback);
-        switchFallback(open, regions, fallback);
+        const stop = switchFallback(open, regions, fallback);
+        stops?.push(stop);
       };
       return at;
     } };
@@ -1696,10 +1697,10 @@ export function scopedTemplate(carrier: Element, template: ScopedTemplate): Scop
  */
 export function fillSlot(
   start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
-  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>,
+  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>, stops?: (() => void)[],
 ): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
   const doc = start.ownerDocument!;
-  const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
+  const assigned = projected.filter((entry) => entry[1] === name && !projectionRejected(entry[0])).map(([node]) => node);
   const slot = `slot="${name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
   let rendered: readonly [ScopedTemplate, ScopedRecord] | undefined;
   // A slot with props, or one given a consumer's <template slot>, renders that template afresh,
@@ -1744,7 +1745,7 @@ export function fillSlot(
       for (const realize of pending.values()) realize();
     }
   }
-  return regional?.at?.(open) ?? rendered;
+  return regional?.at?.(open, stops) ?? rendered;
 }
 
 /**
@@ -1755,11 +1756,11 @@ export function fillSlot(
  */
 export function adoptSlot(
   start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
-  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>,
+  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>, stops?: (() => void)[],
 ): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
   const mark = serverMark(start);
   const rendered = mark?.target === "start" && start !== end;
-  const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
+  const assigned = projected.filter((entry) => entry[1] === name && !projectionRejected(entry[0])).map(([node]) => node);
   const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template") as Element | undefined;
   const contents: Node[] = [];
   if (rendered) for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) contents.push(node);
@@ -1791,7 +1792,7 @@ export function adoptSlot(
       for (const realize of pending.values()) realize();
     }
     // Given only the consumer's regions, the slot keeps a fallback block for when they render nothing.
-    return regional?.at?.(start);
+    return regional?.at?.(start, stops);
   }
   // Rendered otherwise: the slot fills as it would have, in place of what the server rendered.
   const doc = start.ownerDocument!;
@@ -1802,7 +1803,7 @@ export function adoptSlot(
   start.replaceWith(open);
   if (end === start) open.after(close);
   else end.replaceWith(close);
-  return fillSlot(open, close, name, projected, fallback, props, dirty);
+  return fillSlot(open, close, name, projected, fallback, props, dirty, stops);
 }
 
 /**
@@ -1891,7 +1892,13 @@ export function childList(
         if (/^html-next:(?:each-)?start$/.test((node as Comment).data)) listWatchers.set(node, update);
         continue;
       }
-      if (node.nodeType === 3 && /[^\t\n\f\r ]/.test((node as Text).data)) leftOut("#text", `${named} accepts ${listed}; this text is left out.`);
+      if (node.nodeType === 3) {
+        if (/[^\t\n\f\r ]/.test((node as Text).data)) {
+          leftOut("#text", `${named} accepts ${listed}; this text is left out.`);
+          rejectProjection(node);
+        }
+        continue;
+      }
       if (node.nodeType !== 1) continue;
       const child = (node as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
       const tag = child?.S.g ?? (node as Element).localName;
@@ -1902,6 +1909,7 @@ export function childList(
       const delegated = child?.D?.find((inner) => accepts.includes(inner.S.g))?.S.g;
       leftOut(tag, delegated === undefined ? `${named} accepts ${listed}; this \`<${(node as Element).localName}>\` is left out.`
         : `\`<${tag}>\` is a preset of \`${delegated}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+      if (delegated === undefined) rejectProjection(node);
     }
     return next;
   };
