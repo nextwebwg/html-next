@@ -2,6 +2,7 @@
 
 ## 1.0.0-alpha.92
 
+- Render native keyed class bindings with literal and `from:class` composition, authored binding order, invalid-result retention and DOM token semantics. Fold constants and reuse request storage across rows. Accept non-ASCII spaces within class tokens, and correct literal-token removal in generated Vanilla, React, Preact, Vue and Angular components. Share class serialization with Svelte.
 - Bind only the authored item and optional index aliases in Node, native C# and compiled targets. Use list `.length` for size and CSS structural selectors for first/last presentation. Remove the implicit `$loop` binding, preserve lexical shadowing, and give item/index aliases their own types. Ordinary declarations named `loop` or `index` remain valid.
 - Compile native iteration index aliases, stable `$sort`, `$limit`, and `$key` checks. Apply filtering, sorting and limits before row indices, reject duplicate keys, use a surrounding template for an iteration guard, and preserve nested scopes, projected content and deferred carriers. Keep simple loops on their existing allocation path and cache sort keys before comparison.
 

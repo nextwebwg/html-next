@@ -1508,7 +1508,7 @@ function parseAttributes(
       const name = attribute.name.slice(target.length + 1);
       const valid =
         target === "class"
-          ? name !== "" && !/\s/.test(name)
+          ? name !== "" && !/[\t\n\f\r ]/.test(name)
           : /^(?:--[a-z0-9_-]+|[a-z][a-z0-9-]*)$/.test(name);
       if (!valid) {
         fail("HT020", `\`${attribute.name}\` does not name a valid ${target} binding target.`, source);

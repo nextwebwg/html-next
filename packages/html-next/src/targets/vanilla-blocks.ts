@@ -1198,7 +1198,7 @@ class Planner {
       }
       if (attribute.target === "class") {
         // The root's invocation may carry the class, so its first evaluation always writes.
-        const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
+        const initial = root ? "undefined" : String((literal("class") ?? "").split(/[\t\n\f\r ]+/).includes(attribute.name));
         block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial });
         continue;
       }

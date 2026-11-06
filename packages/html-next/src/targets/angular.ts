@@ -205,6 +205,9 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const inputStatuses: string[] = [];
     const nativeAttributes: string[] = [];
     const namespacedAttributes: string[] = [];
+    const keyedClasses = child === undefined && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "class");
+    const literalClass = node.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "class");
+    const classRules: { name: string; read: string }[] = [];
     const childView = child !== undefined && angularHostTag(child, graph) === "ng-template";
     if (childView) nativeAttributes.push(`${quote("data-hn-owner")}: ${quote(names.definition.contract.tag)}`);
     if (node.attributes.filter(attribute => attribute.kind === "attribute" && attribute.twoWay).length > 1) return unsupported("multiple two-way control bindings on one element require independent native control ownership.");
@@ -221,6 +224,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       }
       if (attribute.kind === "directive") continue;
       if (attribute.kind === "literal") {
+        if (keyedClasses && attribute.name === "class") continue;
         const inputName = child === undefined ? undefined : receivingProp(child, attribute.name);
         const contract = inputName === undefined ? undefined : child!.contract.props[inputName];
         if (inputName !== undefined) {
@@ -275,6 +279,10 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           : componentInput ?? (attribute.kind === "property" ? key : `attr.${key}`);
         let lowered = attribute.kind === "attribute" && attribute.target === "class" ? lowering.condition(attribute.expressionPlan!.ast, names)
           : attribute.kind === "attribute" && attribute.target === "style" ? lowering.text(attribute.expressionPlan!.ast, names) : code;
+        if (keyedClasses && attribute.kind === "attribute" && attribute.target === "class") {
+          classRules.push({ name: key, read: expression(lowered, names, root) });
+          continue;
+        }
         if (attribute.kind === "attribute" && attribute.target === undefined && componentInput === undefined && isNativeBooleanAttribute(key)) {
           helper("state"); lowered = `nativeBooleanAttribute(${lowered})`;
         }
@@ -285,6 +293,11 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         if (childView && componentInput === undefined) nativeAttributes.push(`${quote(attribute.kind === "property" ? `.${key}` : destination.replace(/^attr\./, ""))}: ${lowered}`);
         else put(`[${destination}]`, expression(lowered, names, root));
       }
+    }
+    if (classRules.length > 0) {
+      const compose = field();
+      methods.push(`${compose}(${classRules.map((_, index) => `value${index}: unknown`).join(", ")}): string | undefined { return ${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classRules.map((rule, index) => `{ kind: "class", name: ${quote(rule.name)}, read: () => value${index} ?? Symbol.for("html-next.invalid-result") }`).join(", ")}]); }`);
+      put("[attr.class]", `${nativeView && !root ? "hnController." : ""}${compose}(${classRules.map(rule => `(${rule.read})`).join(", ")})`);
     }
     if (namespacedAttributes.length > 0) attributes.push(`[hnNextNamespaces]="${expression(`[${namespacedAttributes.join(", ")}]`, names)}"`);
     if (inputStatuses.length > 0) attributes.push(`[hnInputStates]="${expression(`{ ${inputStatuses.join(", ")} }`, names)}"`);

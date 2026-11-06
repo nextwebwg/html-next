@@ -1,3 +1,4 @@
+import { CLASS_TEXT_SOURCE } from "./class-text.js";
 import type { GeneratedArtifact } from "../generate.js";
 
 const SOURCE = `export interface Decoration {
@@ -6,18 +7,7 @@ const SOURCE = `export interface Decoration {
   readonly read: () => unknown;
 }
 
-export function classText(base: string | undefined, decorations: readonly Decoration[]): string | undefined {
-  const tokens = new Set((base ?? '').split(/[ \\t\\r\\n\\f]+/).filter(Boolean));
-  let value = base;
-  for (const decoration of decorations) {
-    if (decoration.kind !== 'class') continue;
-    const candidate = decoration.read();
-    if (candidate === Symbol.for('html-next.invalid-result') || Boolean(candidate) === tokens.has(decoration.name)) continue;
-    if (candidate) tokens.add(decoration.name); else tokens.delete(decoration.name);
-    value = [...tokens].join(' ');
-  }
-  return value;
-}
+${CLASS_TEXT_SOURCE.replace("function classText", "export function classText")}
 `;
 
 export function svelteDecorationsArtifact(version: string): GeneratedArtifact {

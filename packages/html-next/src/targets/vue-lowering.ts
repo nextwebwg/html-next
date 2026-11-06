@@ -8,6 +8,7 @@
  * type chooses the inline form. Only a value whose type cannot be known falls back to a small named
  * function in the component, emitted when used.
  */
+import { CLASS_TEXT_SOURCE } from "./class-text.js";
 import { finiteStep, isEnumeratedBoolean, referencePath, wholeNumber, type ReferencePath, type ExpressionNode } from "../expression.js";
 import { formattingType } from "../format.js";
 import { DECIMAL_SOURCE } from "../generated/decimal-source.js";
@@ -288,6 +289,7 @@ export function typeScript(value: Static): string {
 
 /** Fallback functions for values whose type is unknown: HTML Next's value rules, written plainly. */
 const FALLBACKS: Readonly<Record<string, string>> = {
+  classText: CLASS_TEXT_SOURCE,
   acceptsBindingResult: `function acceptsBindingResult(value: unknown, accepts?: (value: unknown) => boolean): boolean {
   return value !== Symbol.for("html-next.invalid-result") && (accepts?.(value) ?? true);
 }`,

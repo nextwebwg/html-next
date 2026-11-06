@@ -613,7 +613,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     // An emptied control reverts query to its declared value without echoing it.
     assert.match(vue, /@input="query = revertBoundControl\(/);
     assert.match(vue, /@click="flip"/);
-    assert.match(vue, /:class="\{ compact: checkedProps\.size === 'sm' \}"/);
+    assert.match(vue, /:class="classText\('panel', \[\{ kind: 'class', name: 'compact', read: \(\) => checkedProps\.size === 'sm' \}\]\)"/);
     assert.match(vue, /:style="\{ '--gap': checkedProps\.size \}"/);
     assert.match(vue, /<XBadge\s+class="x-badge"\s+:tone="checkedProps\.size"\s*><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
@@ -630,7 +630,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
     assert.match(vue, /v-for="\(tab, index\) in uniqueKeys\(tabs, \(tab, index\) => referenceMember\(tab, 'id'\)\)"/);
-    assert.match(vue, /:id="referenceMember\(tab, 'id'\)"\n\s+:aria-selected="referenceMember\(tab, 'active'\)"\n\s+:class="\{ active: referenceMember\(tab, 'active'\) \}"\n\s+>\n?\s*\{\{ referenceMember\(tab, 'label'\) \}\}/);
+    assert.match(vue, /:id="referenceMember\(tab, 'id'\)"\n\s+:aria-selected="referenceMember\(tab, 'active'\)"\n\s+:class="classText\(undefined, \[\{\s+kind: 'class',\s+name: 'active',\s+read: \(\) => referenceMember\(tab, 'active'\),\s+\}\]\)"\n\s+>\n?\s*\{\{ referenceMember\(tab, 'label'\) \}\}/);
     assert.doesNotMatch(vue, /function (truthy|attribute)\(/);
   });
 
@@ -1035,7 +1035,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(style, /:global\(:scope\[data-x-feature-state~="open"\] \.panel:where\(\[data-hn-x-feature\]\)\)/);
     assert.match(style, /:global\(:where\(:not\(\[data-hn-x-feature\]\)\):is\(p\)\)/);
     assert.match(style, /:is\(x-badge, :where\(\.x-badge\)\)/);
-    assert.match(vue, /<section\s+class="x-feature panel"[^>]*\sdata-hn\s+data-hn-x-feature\s/);
+    assert.match(vue, /<section\s+class="x-feature"[^>]*\sdata-hn\s+data-hn-x-feature\s/);
+    assert.match(vue, /:class="classText\('panel', \[\{ kind: 'class', name: 'compact', read: \(\) => checkedProps\.size === 'sm' \}\]\)"/);
     assert.match(vue, /<h2 data-hn-x-feature>/);
     assert.match(vue, /<XBadge\s+class="x-badge"\s/);
     assert.doesNotMatch(vue, /<XBadge[^>]*data-hn/);

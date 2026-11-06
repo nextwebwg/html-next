@@ -41,6 +41,7 @@ const page = `${[...Object.keys(cases), "defaults", "finite", "optional"].map((n
 <div data-shadow><b $each="loop, index of $values" $where="$index = 'named'" $key="$loop">{$loop}:{$index + 1}</b><i>{$loop}:{$index}</i></div>
 <div data-dimension><p $each="position of $values" $where="round($position, 1) > 3">{round($position, 1)}</p><b $each="value, position of $values">{round($position, 1)}</b><i>{$position}</i></div>
 <div data-edits><label $each="entry of $edits" $key="$entry.label"><input bind:value="entry.label"><span>{$entry.label}</span></label></div>
+<div data-classes><b class="one two" class:one two="$values.length > 2"></b><i class:one two="$values.length > 2"></i></div>
 <button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
 // A default fills a rejected value and a null or missing one, typed or `unknown`.
 const defaults = `<template component="x-defaults" status="early" summary="Defaults."><defs>
@@ -173,6 +174,8 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             assert.equal(warnings.length, 4);
             const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));
             assert.deepEqual(await iteration(), [["declared:named:0:5:2", true, false], ["declared:named:1:4:2", false, true]]);
+            const classes = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-classes] > *'), element => [...element.classList]));
+            assert.deepEqual(await classes(), [[], []]);
             await page.locator('[data-edits] input').nth(1).fill("Edited");
             await page.waitForFunction(() => document.querySelectorAll('[data-edits] span')[1]?.textContent === "Edited");
             assert.deepEqual(await page.locator('[data-edits] span').allTextContents(), ["A", "Edited"]);
@@ -183,6 +186,7 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             await page.click("#change-aliases");
             await page.waitForFunction(() => document.querySelector('[data-iteration] p')?.textContent === "declared:named:0:5:3");
             assert.deepEqual(await iteration(), [["declared:named:0:5:3", true, false], ["declared:named:1:4:3", false, true]]);
+            assert.deepEqual(await classes(), [["one\u00a0two"], ["one\u00a0two"]]);
             assert.equal((await shadows()).replace(/\s/g, ""), "5:14:23:3declared:named");
             assert.deepEqual(await dimensions(), { items: ["5", "4"], indices: ["0", "1", "2"], outer: "8px" });
             await page.click("button");

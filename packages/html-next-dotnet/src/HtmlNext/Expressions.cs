@@ -124,7 +124,7 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
         return string.Create(counter.Length, this, static (span, value) => { var writer = new HtmlWriter(span); value.WriteRaw(ref writer); });
     }
 
-    private void WriteRaw(ref HtmlWriter writer)
+    internal void WriteRaw(ref HtmlWriter writer)
     {
         if (IsText) writer.Write((string)Data!); else Write(ref writer, false);
     }

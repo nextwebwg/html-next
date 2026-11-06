@@ -67,7 +67,7 @@ const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentI
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
-  "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
+  "model", "controllerModule", "event", "element", "classText", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
   "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
@@ -659,6 +659,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     }
   }
   const classes: string[] = [];
+  const keyedClasses = node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "class");
+  const literalClass = node.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "class");
   const styles: string[] = [];
   const bindingInputs: string[] = [];
   const inputSnapshots: { readonly name: string; readonly source: string }[] = [];
@@ -674,6 +676,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   let content: string | undefined;
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
+      if (keyedClasses && attribute.name === "class") continue;
       if (!component && attributeNamespace(attribute.name) !== undefined) {
         namespacedAttributes.push(namespacedAttributeSource(attribute.name, quote(attribute.value)));
         continue;
@@ -708,7 +711,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     } else if (attribute.target === "class") {
       const value = ast(attribute.expressionPlan, attribute.expression);
       const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.condition(value, scope));
-      classes.push(`${quote(attribute.name)}: ${guarded ?? lowering.condition(value, names.template)}`);
+      classes.push(`{ kind: "class", name: ${quote(attribute.name)}, read: () => ${guarded === undefined ? lowering.condition(value, names.template) : `${guarded} ?? Symbol.for("html-next.invalid-result")`} }`);
     } else if (attribute.target === "style") {
       const value = ast(attribute.expressionPlan, attribute.expression);
       const code = lowering.text(value, names.template);
@@ -787,7 +790,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const inputs = bindingInputs.length === 0 ? undefined : `[BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} }`;
   // A delegated root's inputs join its consumer's attributes: Vue rejects a second object `v-bind`.
   if (inputs !== undefined && !isRoot) attributes.push(`v-bind=${bound(`{ ${inputs} }`)}`);
-  if (classes.length > 0) attributes.push(`:class=${bound(`{ ${classes.join(", ")} }`)}`);
+  if (classes.length > 0) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
   if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
   for (const event of node.events ?? []) {
     const handler = context.handlers.get(event.handler);

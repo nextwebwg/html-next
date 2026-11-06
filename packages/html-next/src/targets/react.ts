@@ -45,7 +45,7 @@ const REACT_RESERVED = new Set([
   "document", "console", "globalThis",
   "applyNamespacedAttributes", "namespacedAttributeProps", "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "ownedRootRef", "propValidityContract", "propValidityElement",
-  "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
+  "classText", "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
   "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
   "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
@@ -60,7 +60,7 @@ const REACT_RESERVED = new Set([
 
 /** Names a template local (a loop item or `$with` alias) must not shadow inside the markup it scopes. */
 const REACT_LOCAL_RESERVED = new Set([...REACT_RENDER_EXPORTS, "dispatchDeclaredTargets", "htmlNextAuthoredCheck",
-  "htmlNextAuthoredCheckReported", "Symbol", "Object", "String", "Number", "Array", "Math"]);
+  "htmlNextAuthoredCheckReported", "classText", "Symbol", "Object", "String", "Number", "Array", "Math"]);
 
 /** A generated name the component builds from an index, such as `attachEvents2`, or a private `__` name. */
 const GENERATED_NAME = /^(?:__|_|attachEvents\d|controlRef|controlValue|previousProperty|propertyRef|genericCleanup|HtmlNextContext_)/;
@@ -607,6 +607,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const inputBindings: string[] = [];
   const retainedBindings: Array<{ readonly alias: string; readonly value: string; readonly accepts?: string; readonly propName?: string }> = [];
   const classes: string[] = [];
+  const classRules: string[] = [];
   const literalStyles: string[] = [];
   const reactiveStyles: string[] = [];
   const importantStyles: Array<{ readonly name: string; readonly value: string }> = [];
@@ -661,12 +662,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else if (attribute.kind === "attribute" && attribute.target === "class") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) classes.push(`${lowering.condition(attribute.expressionPlan.ast, scope)} ? ${quote(attribute.name)} : ""`);
+      if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) classRules.push(`{ kind: "class", name: ${quote(attribute.name)}, read: () => ${lowering.condition(attribute.expressionPlan.ast, scope)} }`);
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;
         retainedBindings.push({ alias, value: lowering.condition(attribute.expressionPlan.ast, scope), ...(guard === undefined ? {} : { accepts: `() => ${guard}` }) });
-        classes.push(`${alias} ? ${quote(attribute.name)} : ""`);
+        classRules.push(`{ kind: "class", name: ${quote(attribute.name)}, read: () => ${alias} ?? Symbol.for("html-next.invalid-result") }`);
       }
     } else if (attribute.kind === "attribute" && attribute.target === "style") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
@@ -903,7 +904,11 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const site = state.entrySites.get(node.attributes);
     if (site !== undefined && providesContexts(node.name, state.componentGraph)) bindings.push(`htmlNextEntry={${entryKeySource(site, state.rowKeys)}}`);
   }
-  if (classes.length > 0) bindings.push(`className={[${classes.join(", ")}${rootTag === undefined ? "" : ", nativeAttrs.className"}].filter(Boolean).join(" ")}`);
+  if (classRules.length > 0) {
+    const base = [...classes, ...(rootTag === undefined ? [] : ["nativeAttrs.className"])];
+    const text = base.length === 0 ? "undefined" : `[${base.join(", ")}].filter(value => value != null).join(" ")`;
+    bindings.push(`className={${lowering.use("classText")}(${text}, [${classRules.join(", ")}])}`);
+  } else if (classes.length > 0) bindings.push(`className={[${classes.join(", ")}${rootTag === undefined ? "" : ", nativeAttrs.className"}].filter(Boolean).join(" ")}`);
   if (literalStyles.length > 0 || reactiveStyles.length > 0) bindings.push(`style={{ ${[
     ...literalStyles,
     ...(rootTag === undefined ? [] : ["...nativeAttrs.style"]),

@@ -460,15 +460,42 @@ public static partial class HtmlNextCompiler
             var operations = new List<RenderOperation>();
             if (!fragment) Add(operations, "<" + element.LocalName);
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
+            var attributes = element.Attributes.ToArray();
+            var classInstructions = new List<ClassInstruction>();
+            if (attributes.Any(attribute => attribute.Name.StartsWith("class:", StringComparison.Ordinal)))
+                for (var index = 0; index < attributes.Length; index++)
+                {
+                    var attribute = attributes[index];
+                    if (attribute.Name.StartsWith("class:", StringComparison.Ordinal))
+                    {
+                        var token = attribute.Name[6..];
+                        if (token.Length == 0 || token.Any(character => character is ' ' or '\t' or '\n' or '\r' or '\f'))
+                            throw ValueType.Error(source, "A class binding requires one nonempty class token.");
+                        classInstructions.Add(new(token, Expression(attribute.Value, scope), index));
+                    }
+                    else if (attribute.Name == "from:class") classInstructions.Add(new(null, Expression(attribute.Value, scope), index));
+                }
+            var classes = classInstructions.Count == 0 ? null : new ClassBinding(element, classInstructions.ToArray(), Storage, source);
+            if (classes is { Constant: false }) operations.Add(new PrepareClasses(classes));
             var names = new HashSet<string>(StringComparer.Ordinal);
-            var boundNames = element.Attributes.Where(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal))
+            var literalOrder = new List<(string Name, RenderOperation? Operation)>();
+            var bindingOrder = new List<(string Name, int Position)>();
+            var bindingsByName = new Dictionary<string, RenderOperation>(StringComparer.Ordinal);
+            var boundNames = attributes.Where(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal))
                 .Select(attribute => AttributeName(element, attribute.Name[5..])).ToHashSet(StringComparer.Ordinal);
-            foreach (var attribute in element.Attributes)
+            for (var position = 0; position < attributes.Length; position++)
             {
+                var attribute = attributes[position];
                 var authoredName = QualifiedAttributeName(attribute);
                 if (fragment && projected && authoredName == "slot") continue;
                 if (authoredName is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" || matchArm && authoredName is "$when" or "$else") continue;
                 if (fragment) Unsupported("attribute '" + authoredName + "' on a wrapper-free template");
+                if (classes is not null && (authoredName.StartsWith("class:", StringComparison.Ordinal) || authoredName == "from:class"))
+                {
+                    bindingOrder.Add(("class", position));
+                    continue;
+                }
+                if (classes is not null && authoredName == "class") { literalOrder.Add(("class", null)); continue; }
                 if (authoredName.StartsWith("from:", StringComparison.Ordinal))
                 {
                     var name = AttributeName(element, authoredName[5..]);
@@ -476,11 +503,12 @@ public static partial class HtmlNextCompiler
                     if (name.StartsWith("on", StringComparison.OrdinalIgnoreCase) || name is "innerhtml" or "outerhtml" or "textcontent" or "innertext" or "srcdoc") Unsupported(authoredName);
                     var path = Expression(attribute.Value, scope);
                     var kind = BoundAttribute.Kind(name);
-                    var initial = element.Attributes.FirstOrDefault(candidate => QualifiedAttributeName(candidate) == name);
+                    var initial = attributes.FirstOrDefault(candidate => QualifiedAttributeName(candidate) == name);
                     var fallback = initial is null ? null : " " + name + "=\"" + HtmlOutput.Escape(initial.Value, true) + "\"";
                     RenderOperation operation = path is PathExpression { Type.Reference: false } bound ? new AttributeValue(name, bound.Path, kind, source, fallback)
                         : new ExpressionAttribute(name, path, kind, source, fallback);
-                    operations.Add(rootAttributes is not null && IsStateAttribute(name) ? new RootAuthoredAttribute(name, operation, rootAttributes) : operation);
+                    bindingsByName.Add(name, rootAttributes is not null && IsStateAttribute(name) ? new RootAuthoredAttribute(name, operation, rootAttributes) : operation);
+                    bindingOrder.Add((name, position));
                 }
                 else
                 {
@@ -488,14 +516,24 @@ public static partial class HtmlNextCompiler
                         || authoredName.Contains(':') && !authoredName.StartsWith("xmlns", StringComparison.Ordinal) && attribute.NamespaceUri is null) Unsupported(authoredName);
                     if (authoredName == "srcdoc" || BoundAttributeRules.IsUrl(authoredName) && BoundAttribute.ExecutableUrl(attribute.Value))
                         throw ValueType.Error(source, $"Literal attribute '{authoredName}' contains executable content.");
-                    if (boundNames.Contains(authoredName)) continue;
+                    if (boundNames.Contains(authoredName)) { literalOrder.Add((authoredName, null)); continue; }
                     if (!names.Add(authoredName)) throw ValueType.Error(source, $"Duplicate attribute '{authoredName}'.");
                     if (rootAttributes is not null && authoredName == "component") continue;
                     var text = " " + authoredName + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
-                    if (rootAttributes is not null && IsStateAttribute(authoredName)) operations.Add(new RootAuthoredAttribute(authoredName, new Literal(text), rootAttributes));
-                    else Add(operations, text);
+                    RenderOperation literal = new Literal(text);
+                    literalOrder.Add((authoredName, rootAttributes is not null && IsStateAttribute(authoredName)
+                        ? new RootAuthoredAttribute(authoredName, literal, rootAttributes) : literal));
                 }
             }
+            foreach (var attribute in literalOrder)
+            {
+                if (attribute.Name == "class" && classes is not null) { if (classes.At(-1) is { } operation) Append(operations, [operation]); }
+                else Append(operations, [attribute.Operation ?? bindingsByName[attribute.Name]]);
+            }
+            var literalNames = literalOrder.Select(attribute => attribute.Name).ToHashSet(StringComparer.Ordinal);
+            foreach (var attribute in bindingOrder)
+                if (attribute.Name == "class" && classes is not null) { if (classes.At(attribute.Position) is { } operation) Append(operations, [operation]); }
+                else if (!literalNames.Contains(attribute.Name)) Append(operations, [bindingsByName[attribute.Name]]);
             if (rootAttributes is not null) operations.Add(element.GetAttribute("component") is { } identity
                 ? rootAttributes with { AuthoredIdentity = Regex.Split(identity, @"\s+").Where(token => token.Length > 0).Distinct(StringComparer.Ordinal).ToArray() } : rootAttributes);
             if (!fragment) Add(operations, ">");

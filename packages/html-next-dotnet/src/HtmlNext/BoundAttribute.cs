@@ -14,7 +14,7 @@ internal static class BoundAttribute
         return ValidText(value, source);
     }
 
-    private static bool ValidText(ExpressionValue value, string source)
+    public static bool ValidText(ExpressionValue value, string source)
     {
         if (value.IsInvalid) return false;
         if (value.Type.Kind != "list") return true;
@@ -50,6 +50,17 @@ internal static class BoundAttribute
         {
             if (i > 0) writer.Write(' ');
             Text(ref writer, value.Item(i), source);
+        }
+    }
+
+    public static void RawText(ref HtmlWriter writer, ExpressionValue value, string source)
+    {
+        if (value.Type.Kind != "list") { value.WriteRaw(ref writer); return; }
+        ExecutionStack.Check(source);
+        for (var index = 0; index < value.Count; index++)
+        {
+            if (index > 0) writer.Write(' ');
+            RawText(ref writer, value.Item(index), source);
         }
     }
 

@@ -1,0 +1,257 @@
+[
+  {
+    "name": "class-add",
+    "source": "<template component=\"x-page\"><main><b class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "class-no-op",
+    "source": "<template component=\"x-page\"><main><b class:active=\"false\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-remove-literal",
+    "source": "<template component=\"x-page\"><main><b class=\"base active\" class:active=\"false\"></b></main></template>",
+    "expected": "<main><b class=\"base\"></b></main>"
+  },
+  {
+    "name": "class-empty-literal",
+    "source": "<template component=\"x-page\"><main><b class=\"active\" class:active=\"false\"></b></main></template>",
+    "expected": "<main><b class=\"\"></b></main>"
+  },
+  {
+    "name": "class-preserve-literal-on-no-op",
+    "source": "<template component=\"x-page\"><main><b class=\" base  base \" class:active=\"false\"></b></main></template>",
+    "expected": "<main><b class=\" base  base \"></b></main>"
+  },
+  {
+    "name": "class-normalize-on-change",
+    "source": "<template component=\"x-page\"><main><b class=\" base  base \" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"base active\"></b></main>"
+  },
+  {
+    "name": "class-invalid-retains",
+    "source": "<template component=\"x-page\"><main><b class=\"active\" class:active=\"1 / 0\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "class-order",
+    "source": "<template component=\"x-page\"><main><b id=\"x\" class:active=\"true\" title=\"y\"></b></main></template>",
+    "expected": "<main><b id=\"x\" title=\"y\" class=\"active\"></b></main>"
+  },
+  {
+    "name": "root-class",
+    "source": "<template component=\"x-page\"><defs><prop name=\"active\" type=\"boolean\" default=\"true\">Active.</prop></defs><main class=\"base\" class:active=\"$active\"></main></template>",
+    "expected": "<main class=\"base active\"></main>"
+  },
+  {
+    "name": "multiple-classes",
+    "source": "<template component=\"x-page\"><main><b class=\"base old\" class:active=\"true\" class:old=\"false\" class:later=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"base active later\"></b></main>"
+  },
+  {
+    "name": "class-false-missing",
+    "source": "<template component=\"x-page\"><defs><prop name=\"record\" type=\"object({ ... })\" default=\"{}\">Data.</prop></defs><main><b class=\"active\" class:active=\"$record.missing\"></b></main></template>",
+    "expected": "<main><b class=\"\"></b></main>"
+  },
+  {
+    "name": "class-truthy-null",
+    "source": "<template component=\"x-page\"><main><b class:active=\"null\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-truthy-zero",
+    "source": "<template component=\"x-page\"><main><b class:active=\"0\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-truthy-empty-string",
+    "source": "<template component=\"x-page\"><main><b class:active=\"''\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-truthy-empty-list",
+    "source": "<template component=\"x-page\"><main><b class:active=\"[]\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-truthy-empty-object",
+    "source": "<template component=\"x-page\"><main><b class:active=\"{}\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-truthy-list",
+    "source": "<template component=\"x-page\"><main><b class:active=\"['']\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "class-truthy-record",
+    "source": "<template component=\"x-page\"><main><b class:active=\"{ x: 1 }\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "class-truthy-text",
+    "source": "<template component=\"x-page\"><main><b class:active=\"'false'\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "invalid-list-retains",
+    "source": "<template component=\"x-page\"><main><b class=\"active\" class:active=\"[1 / 0]\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "binding-before-replacement",
+    "source": "<template component=\"x-page\"><main><b class:active=\"true\" from:class=\"'base'\"></b></main></template>",
+    "expected": "<main><b class=\"base\"></b></main>"
+  },
+  {
+    "name": "binding-after-replacement",
+    "source": "<template component=\"x-page\"><main><b from:class=\"'base'\" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"base active\"></b></main>"
+  },
+  {
+    "name": "invalid-replacement-retains-toggles",
+    "source": "<template component=\"x-page\"><main><b class=\"base\" class:active=\"true\" from:class=\"1 / 0\" class:last=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"base active last\"></b></main>"
+  },
+  {
+    "name": "replacement-resets-whitespace",
+    "source": "<template component=\"x-page\"><main><b class=\"base\" class:active=\"true\" from:class=\"' new  new '\" class:new=\"true\"></b></main></template>",
+    "expected": "<main><b class=\" new  new \"></b></main>"
+  },
+  {
+    "name": "replacement-before-removal",
+    "source": "<template component=\"x-page\"><main><b from:class=\"'active'\" class:active=\"false\"></b></main></template>",
+    "expected": "<main><b class=\"\"></b></main>"
+  },
+  {
+    "name": "replacement-null-removes",
+    "source": "<template component=\"x-page\"><main><b class=\"base\" class:active=\"true\" from:class=\"null\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "removed-class-recreated-last",
+    "source": "<template component=\"x-page\"><main><b class=\"base\" title=\"y\" from:class=\"null\" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b title=\"y\" class=\"active\"></b></main>"
+  },
+  {
+    "name": "class-first-created-before-other-binding",
+    "source": "<template component=\"x-page\"><main><b class:active=\"true\" from:title=\"'y'\" from:class=\"'base'\"></b></main></template>",
+    "expected": "<main><b class=\"base\" title=\"y\"></b></main>"
+  },
+  {
+    "name": "class-created-after-other-binding",
+    "source": "<template component=\"x-page\"><main><b class:active=\"false\" from:title=\"'y'\" from:class=\"'base'\"></b></main></template>",
+    "expected": "<main><b title=\"y\" class=\"base\"></b></main>"
+  },
+  {
+    "name": "from-class-number",
+    "source": "<template component=\"x-page\"><main><b from:class=\"123\" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"123 active\"></b></main>"
+  },
+  {
+    "name": "from-class-list",
+    "source": "<template component=\"x-page\"><main><b from:class=\"['a', false, 0, null, ['b', 'c'], { x: 1 }]\" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"a false 0 b c active\"></b></main>"
+  },
+  {
+    "name": "from-class-true",
+    "source": "<template component=\"x-page\"><main><b from:class=\"true\" class:active=\"false\"></b></main></template>",
+    "expected": "<main><b class=\"\"></b></main>"
+  },
+  {
+    "name": "from-class-object",
+    "source": "<template component=\"x-page\"><main><b class=\"base\" from:class=\"{ x: 1 }\" class:active=\"false\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "escaped-class",
+    "source": "<template component=\"x-page\"><main><b class=\"a&amp;b &quot;q&quot;\" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"a&amp;b &quot;q&quot; active\"></b></main>"
+  },
+  {
+    "name": "unicode-class",
+    "source": "<template component=\"x-page\"><main><b class=\"你好\" class:é=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"你好 é\"></b></main>"
+  },
+  {
+    "name": "loop-class",
+    "source": "<template component=\"x-page\"><main><b $each=\"n, i of [0, 1, 2]\" class=\"base\" class:active=\"$n > 0\" class:first=\"$i = 0\">{$n}</b></main></template>",
+    "expected": "<main><b class=\"base first\">0</b><b class=\"base active\">1</b><b class=\"base active\">2</b></main>"
+  },
+  {
+    "name": "scope-class",
+    "source": "<template component=\"x-page\"><main><template $with=\"2 as n\"><b class:active=\"$n > 1\"></b></template></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "projected-class",
+    "source": "<template component=\"x-wrap\"><section><slot></slot></section></template><template component=\"x-page\"><main><x-wrap><b class=\"base\" class:active=\"true\">Slot</b></x-wrap></main></template>",
+    "expected": "<main><section><b class=\"base active\">Slot</b></section></main>",
+    "native": "<main><section><?start slot=\"\"?><b class=\"base active\">Slot</b><?end?></section></main>"
+  },
+  {
+    "name": "deferred-class",
+    "source": "<template component=\"x-unused\"><section></section></template><template component=\"x-page\"><main><x-unused><b class=\"base\" class:active=\"true\">Unused</b></x-unused></main></template>",
+    "expected": "<main><section></section></main>",
+    "native": "<main><section><template carrier=\"x-unused\"><b class=\"base active\">Unused</b></template></section></main>",
+    "carrier": "<b class=\"base active\">Unused</b>"
+  },
+  {
+    "name": "dynamic-replacement-no-op",
+    "source": "<template component=\"x-page\"><defs><prop name=\"classes\" type=\"string\" default=\" base  base \">Classes.</prop><prop name=\"active\" type=\"boolean\" default=\"false\">Active.</prop></defs><main><b from:class=\"$classes\" class:active=\"$active\"></b></main></template>",
+    "expected": "<main><b class=\" base  base \"></b></main>"
+  },
+  {
+    "name": "dynamic-replacement-normalizes",
+    "source": "<template component=\"x-page\"><defs><prop name=\"classes\" type=\"string\" default=\" base  base \">Classes.</prop><prop name=\"active\" type=\"boolean\" default=\"true\">Active.</prop></defs><main><b from:class=\"$classes\" class:active=\"$active\"></b></main></template>",
+    "expected": "<main><b class=\"base active\"></b></main>"
+  },
+  {
+    "name": "dynamic-replacement-null-recreated",
+    "source": "<template component=\"x-page\"><defs><prop name=\"classes\" type=\"string\">Classes.</prop><prop name=\"active\" type=\"boolean\" default=\"true\">Active.</prop></defs><main><b class=\"base\" title=\"y\" from:class=\"$classes\" class:active=\"$active\"></b></main></template>",
+    "expected": "<main><b title=\"y\" class=\"active\"></b></main>"
+  },
+  {
+    "name": "class-empty-optional-record",
+    "source": "<template component=\"x-page\"><defs><prop name=\"record\" type=\"object({ value?: string })\" default=\"{}\">Record.</prop></defs><main><b class:active=\"$record\"></b></main></template>",
+    "expected": "<main><b></b></main>"
+  },
+  {
+    "name": "class-optional-null-member",
+    "source": "<template component=\"x-page\"><defs><prop name=\"record\" type=\"object({ value?: string })\" default=\"{ value: null }\">Record.</prop></defs><main><b class:active=\"$record\"></b></main></template>",
+    "expected": "<main><b class=\"active\"></b></main>"
+  },
+  {
+    "name": "dynamic-invalid-replacement",
+    "source": "<template component=\"x-page\"><defs><prop name=\"zero\" type=\"number\" default=\"0\">Zero.</prop><prop name=\"active\" type=\"boolean\" default=\"true\">Active.</prop></defs><main><b class=\"base\" class:active=\"$active\" from:class=\"1 / $zero\" class:last=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"base active last\"></b></main>"
+  },
+  {
+    "name": "dynamic-list-replacement",
+    "source": "<template component=\"x-page\"><defs><prop name=\"classes\" type=\"list(string)\" default=\"['base', 'base']\">Classes.</prop><prop name=\"active\" type=\"boolean\" default=\"true\">Active.</prop></defs><main><b from:class=\"$classes\" class:active=\"$active\"></b></main></template>",
+    "expected": "<main><b class=\"base active\"></b></main>"
+  },
+  {
+    "name": "dynamic-concat-replacement",
+    "source": "<template component=\"x-page\"><defs><prop name=\"classes\" type=\"string\" default=\"base\">Classes.</prop><prop name=\"active\" type=\"boolean\" default=\"true\">Active.</prop></defs><main><b from:class=\"concat($classes, ' base')\" class:active=\"$active\"></b></main></template>",
+    "expected": "<main><b class=\"base active\"></b></main>"
+  },
+  {
+    "name": "nonbreaking-literal-token",
+    "source": "<template component=\"x-page\"><main><b class=\"one two\" class:active=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"one&nbsp;two active\"></b></main>",
+    "native": "<main><b class=\"one two active\"></b></main>"
+  },
+  {
+    "name": "nonbreaking-binding-token",
+    "source": "<template component=\"x-page\"><main><b class:one two=\"true\"></b></main></template>",
+    "expected": "<main><b class=\"one&nbsp;two\"></b></main>",
+    "native": "<main><b class=\"one two\"></b></main>"
+  },
+  {
+    "name": "nonbreaking-remove-literal-token",
+    "source": "<template component=\"x-page\"><main><b class=\"one two\" class:one two=\"false\"></b></main></template>",
+    "expected": "<main><b class=\"\"></b></main>"
+  }
+]
