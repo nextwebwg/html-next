@@ -2,7 +2,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, NONCONFORMING, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
+import { ITERATION_INDEX, checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, NONCONFORMING, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
@@ -285,7 +285,7 @@ interface ParseScope {
   readonly at?: DiagnosticLocation | undefined;
   /** What each `$each`, `$with`, and `$match` name stands for when a path field writes through it. */
   readonly aliases?: ReadonlyMap<string, Writable>;
-  /** How many `$each` layers enclose this point, so a `loop.index` segment names the right loop. */
+  /** How many `$each` layers enclose this point, so a private row index segment names the right loop. */
   readonly loops?: number;
   /** Among table-structure or SVG-container children, where whitespace-only text never renders. */
   readonly discardsWhitespace?: boolean;
@@ -296,7 +296,7 @@ interface ParseScope {
 /** The names a structural directive binds for its subtree, recording which stand for an `as` list's entries. */
 function withEntries(scope: ParseScope, flow: Flow | undefined, contract: ComponentContract): ParseScope {
   if (flow === undefined) return scope;
-  const bound = flow.kind === "each" ? [flow.item, flow.index, "loop"] : flow.kind === "with" || flow.kind === "match" ? [flow.alias] : [];
+  const bound = flow.kind === "each" ? [flow.item, flow.index] : flow.kind === "with" || flow.kind === "match" ? [flow.alias] : [];
   const source = flow.kind === "each" ? flow.listPlan?.ast : undefined;
   const list = source?.kind === "id" && Object.values(contract.slots ?? {}).some((slot) => slot.as === source.name) ? source.name : undefined;
   if (list === undefined && !bound.some((name) => name !== undefined && scope.entries?.has(name) === true)) return scope;
@@ -307,16 +307,16 @@ function withEntries(scope: ParseScope, flow: Flow | undefined, contract: Compon
 }
 
 /**
- * A path's state destination, valid only at `loops` depth when it reads a `loop.index`, or why it
+ * A path's state destination, valid only at `loops` depth when it reads a private row index, or why it
  * cannot be written. An alias of a writable path is writable (Declarative Components, Bindings).
  */
 type Writable = { readonly path: WritablePath; readonly loops?: number } | { readonly reason?: string };
 
-function readsLoop(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some(readsLoop);
+function readsPrivateIndex(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(readsPrivateIndex);
   if (node === null || typeof node !== "object") return false;
   const id = node as ExpressionNode;
-  return id.kind === "id" && id.name === "loop" || Object.values(node).some(readsLoop);
+  return id.kind === "id" && id.name === ITERATION_INDEX || Object.values(node).some(readsPrivateIndex);
 }
 
 function writableAt(node: ExpressionNode, scope: ParseScope): Writable {
@@ -324,7 +324,7 @@ function writableAt(node: ExpressionNode, scope: ParseScope): Writable {
   if (segments === undefined || segments[0] === "$$event") return {};
   const [root, ...rest] = segments as [string, ...typeof segments];
   const loops = scope.loops ?? 0;
-  const local = rest.some((segment) => typeof segment === "object" && readsLoop(segment.expression)) ? loops : undefined;
+  const local = rest.some((segment) => typeof segment === "object" && readsPrivateIndex(segment.expression)) ? loops : undefined;
   const alias = scope.aliases?.get(root);
   if (alias === undefined) return scope.writableRoots.has(root) ? { path: segments, ...local === undefined ? {} : { loops: local } } : {};
   if (!("path" in alias)) return alias;
@@ -351,13 +351,12 @@ function withAliases(scope: ParseScope, flow: Flow | undefined): ParseScope {
         : list.loops !== undefined ? { reason: `\`${flow.item}\` iterates an outer loop's item; name that loop's index to write through it` }
           : {
               path: [...list.path, { kind: "index", item: flow.item, expression: flow.index === undefined
-                ? { kind: "member", object: { kind: "id", name: "loop" }, key: "index" }
+                ? { kind: "id", name: ITERATION_INDEX }
                 : { kind: "id", name: flow.index } }],
               ...flow.index === undefined ? { loops } : {},
             };
     const aliases = new Map(scope.aliases);
     aliases.set(flow.item, item);
-    aliases.set("loop", { reason: "`loop` is the loop record" });
     if (flow.index !== undefined) aliases.set(flow.index, { reason: `\`${flow.index}\` is a loop index` });
     return { ...scope, aliases, loops };
   }
@@ -1669,10 +1668,10 @@ function extractFlow(
     }
     const item = match[1]!;
     const index = match[2];
-    if (scope.roots.has(item) || (index !== undefined && scope.roots.has(index))) {
-      fail("HC020", "Loop locals may not collide with an existing scope name.", source);
+    if (index === item) {
+      fail("HC020", "The item and index aliases must have distinct names.", source);
     }
-    const localScope = withRoots(scope, item, index, "loop");
+    const localScope = withRoots(scope, item, index);
     const result: {
       kind: "each";
       item: string;
@@ -1697,7 +1696,7 @@ function extractFlow(
     const where = values.$where;
     if (where !== undefined) {
       result.where = where;
-      result.wherePlan = compileScopedExpression(where, localScope, source);
+      result.wherePlan = compileScopedExpression(where, withRoots(scope, item), source);
     }
     // A path list rooted at the loop item, so `p.price` cannot be confused with a field named `p`:
     // `-p.name` sorts descending, `p` alone sorts by the item itself, and a leading `$` is accepted.
@@ -1719,7 +1718,7 @@ function extractFlow(
     const limit = values.$limit;
     if (limit !== undefined) {
       result.limit = limit;
-      result.limitPlan = compileScopedExpression(limit, localScope, source);
+      result.limitPlan = compileScopedExpression(limit, scope, source);
     }
     const key = values.$key;
     if (key !== undefined) {
@@ -1900,7 +1899,7 @@ function parseElementAtSource(
   const flow = extractFlow(flowValues, scope, source);
   const nodeScope = withEntries(withAliases(
     flow?.kind === "each"
-      ? withRoots(scope, flow.item, flow.index, "loop")
+      ? withRoots(scope, flow.item, flow.index)
       : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
         ? withRoots(scope, flow.alias)
         : scope,
@@ -1994,7 +1993,7 @@ function parseElementAtSource(
       const place = (node: TemplateNode): void => {
         children.push(condition === undefined ? node : { kind: "element", name: "template", attributes: [], children: [node], flow: condition });
       };
-      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index, "loop"), flow), flow, contract);
+      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index), flow), flow, contract);
       const ofPlan = ofSource === undefined ? undefined : compileScopedExpression(ofSource, slotScope, source);
       const ofList = ofPlan?.ast.kind === "id" ? slotScope.entries?.get(ofPlan.ast.name) : undefined;
       if (ofPlan !== undefined && ofList === undefined) {

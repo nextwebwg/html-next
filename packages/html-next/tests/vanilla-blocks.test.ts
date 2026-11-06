@@ -629,7 +629,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <b $if="$rows.length">some</b><i $if="$rows">truthy</i><s $if="$rows[0].tags">tagged</s>
         <span $with="$rows[0] as first"><em $value="$first.label"></em> <u $value="$first.tags.length"></u></span>
         <template $match="$selected as chosen"><b $when="$chosen = 1">one</b><i $when="$chosen > 1">many {$chosen}</i><u $else>none</u></template>
-        <ol><li $each="row, i of $rows" from:data-id="$row.id" class:first="$loop.first" class:last="$loop.last">{$i}/{$loop.count} {$row.label}
+        <ol><li $each="row, i of $rows" from:data-id="$row.id">{$i}/{$rows.length} {$row.label}
           <button $ref="picks" on:click.stop="pick">{$row.label}</button><em $if="$row.tags.length > 0 and $ready">{$row.tags}</em>
           <ul><li $each="tag of $row.tags" $key="$tag">{$tag}</li></ul></li></ol>
         <menu><li $each="row of $rows" $key="concat($prefix, $row.id)" $where="$row.label" $sort="-row.label,row.id" $limit="$limit" from:data-key="$row.id">{$row.label}</li></menu>
@@ -858,7 +858,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="title" type="string" value="a"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
       <section><ul><li $each="row, i of $rows" $key="$row.id"><b $each="n of [1]">{$i}:{$row.label}</b></li></ul>
-        <ol><li $each="row, i of $rows" $key="$row.id"><p $each="n of [1]"><s $if="$row.id > 1"><b $each="m of [1]">{$i}/{$loop.count}</b></s></p><i>{$row.label} {$loop.last}</i></li></ol>
+        <ol><li $each="row, i of $rows" $key="$row.id"><p $each="n of [1]"><s $if="$row.id > 1"><b $each="m of [1]">{$i}/{$rows.length}</b></s></p><i>{$row.label}</i></li></ol>
         <dl><template $each="row of $rows"><dt $each="n of [1]">{$title}{$row.id}</dt><dd><b $each="m of [1]"><i $each="k of [1]">{$title}</i></b></dd></template></dl></section>`);
     await same(text, [
       (host) => { host.state.rows = [1, 2, 3].map((id) => ({ id, label: `l${id}` })); },
@@ -1743,8 +1743,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ];
     for (const body of [
       `<section><p></p><dl><template $each="row of $rows" $key="$row.id"><dt from:data-id="$row.id">{$row.label}</dt><dd $if="$row.id = $selected">sel</dd>text</template></dl></section>`,
-      `<section><p></p><dl><template $each="row of $rows"><dt from:data-id="$row.id">{$row.label}</dt><dd>{$loop.index}</dd></template></dl></section>`,
-      `<section><p></p><dl><template $each="row, i of $rows" $key="$row.id"><dt from:data-id="$row.id">{$i}</dt><dd>{$loop.count}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row, i of $rows"><dt from:data-id="$row.id">{$row.label}</dt><dd>{$i}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row, i of $rows" $key="$row.id"><dt from:data-id="$row.id">{$i}</dt><dd>{$rows.length}</dd></template></dl></section>`,
     ]) {
       await same(component(rows, body), steps);
     }

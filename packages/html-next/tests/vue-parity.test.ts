@@ -711,7 +711,7 @@ const cases: readonly ParityCase[] = [
         <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
         <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
-        <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>`,
+        <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>`,
       "x-scoped-consumer": `<template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
         <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
         <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
@@ -733,7 +733,7 @@ const cases: readonly ParityCase[] = [
         <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
         <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button type="button" on:click="add">Add</button><ul>
-        <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">
+        <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index">
         <li class="fallback" $value="$row.name"></li></slot></ul></section></template>`,
     },
     invocation: `<x-scoped-list id="case"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-list>`,

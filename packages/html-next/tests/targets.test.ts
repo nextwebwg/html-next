@@ -528,11 +528,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("passes repeated scoped-slot values through Vue's native slot outlet", () => {
     const vue = generated(`<template component="x-row-list"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>` +
       '<prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>' +
-      '<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"><li $value="$row.name"></li></slot></ul></template>')
+      '<ul><slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index"><li $value="$row.name"></li></slot></ul></template>')
       .get("vue/XRowList.vue")!;
     compileVue(vue, "XRowList.vue");
     assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
-    assert.match(vue, /<RetainedSlotValues[\s\S]*?:values="\{[\s\S]*?item: slotProp\([\s\S]*?referenceValue\([\s\S]*?row,[\s\S]*?index: referenceMember\(loop, 'index'\)/);
+    assert.match(vue, /<RetainedSlotValues[\s\S]*?:values="\{[\s\S]*?item: slotProp\([\s\S]*?referenceValue\([\s\S]*?row,[\s\S]*?index: index/);
     assert.match(vue, /:defaults="\{ item: null, index: null \}"\s+v-slot="slotValues"/);
     assert.match(vue, /<slot\s+:name="scopedSlotName\('row'\)"\s+:item="slotValues\['item'\]"\s+:index="slotValues\['index'\]"/);
     assert.match(vue, /<li>\s*<RetainedInlineText[\s\S]*?referenceMember\(row, 'name'\)/);
@@ -606,7 +606,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /<ul\s+v-if="open"\s*>/);
     assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
     assert.match(vue, /sortBy\(\s*\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) =>\s*referenceValue\(\s*referenceMember\(item, 'done'\)/);
-    assert.match(vue, /\(item, index, loop\) =>\s*referenceValue\(\s*referenceMember\(item, 'id'\)/);
+    assert.match(vue, /\(item, index\) =>\s*referenceValue\(\s*referenceMember\(item, 'id'\)/);
     assert.match(vue, /:key="referenceValue\(\s*referenceMember\(item, 'id'\)/);
     assert.match(vue, /<span>\s*<RetainedInlineText[\s\S]*?referenceMember\(item, 'name'\)/);
     assert.match(vue, /v-bind-control="\{\s*tag: 'input',\s*name: 'value',\s*value: referenceValue\(\s*query,[\s\S]*?\),\s*defaultValue: '',?\s*\}"/);
@@ -629,7 +629,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
-    assert.match(vue, /v-for="tab in uniqueKeys\(tabs, \(tab, index, loop\) => referenceMember\(tab, 'id'\)\)"/);
+    assert.match(vue, /v-for="\(tab, index\) in uniqueKeys\(tabs, \(tab, index\) => referenceMember\(tab, 'id'\)\)"/);
     assert.match(vue, /:id="referenceMember\(tab, 'id'\)"\n\s+:aria-selected="referenceMember\(tab, 'active'\)"\n\s+:class="\{ active: referenceMember\(tab, 'active'\) \}"\n\s+>\n?\s*\{\{ referenceMember\(tab, 'label'\) \}\}/);
     assert.doesNotMatch(vue, /function (truthy|attribute)\(/);
   });
@@ -831,12 +831,12 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const react = generateReactComponent(definition);
     await transform(react, { loader: "tsx", format: "esm" });
     assert.match(vue, /draft\.owner\.name = revertBoundControl\([\s\S]*?'Ada',?\s*\) as any/);
-    assert.match(vue, /rows\[referenceMember\(loop, 'index'\)\]\.label = readBoundControl\(/);
+    assert.match(vue, /rows\[index\]\.label = readBoundControl\(/);
     assert.match(react, /\["owner", "name"\]/);
-    assert.match(react, /\[referenceMember\(loop, "index"\), "label"\]/);
+    assert.match(react, /\[index, "label"\]/);
     const svelte = Object.values(generateSvelteOutput(definition, "test")).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
     assert.match(svelte, /writePath\(draft, \["owner", "name"\]/);
-    assert.match(svelte, /writePath\(rows, \[referenceMember\(loop, "index"\), "label"\]/);
+    assert.match(svelte, /writePath\(rows, \[index, "label"\]/);
   });
 
   it("compiles numeric two-way controls directly through the shared control writer", () => {

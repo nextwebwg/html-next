@@ -82,6 +82,9 @@ export interface ReferenceChecks {
   accepts(reference: ReferencePath, value: Value, type: TypeNode | undefined): boolean;
 }
 
+/** Compiler-only row position for writable item paths; `#` is outside the expression identifier grammar. */
+export const ITERATION_INDEX = "#index";
+
 export type WritablePathSegment =
   | string
   | number

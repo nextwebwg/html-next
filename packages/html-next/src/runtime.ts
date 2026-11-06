@@ -96,7 +96,7 @@ import type {
   TextNode,
 } from "./template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
-import type { WritablePath } from "./expression.js";
+import { ITERATION_INDEX, type WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
 import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
@@ -1691,12 +1691,13 @@ function shapeList(
   items: readonly Value[],
   flow: Extract<Flow, { kind: "each" }>,
   scope: ReactiveScope,
+  itemTypes: Readonly<Record<string, TypeNode | undefined>>,
 ): Value[] {
   // Rows stay plain: tracked like the proxy's reads, but no row ever needs its own proxy.
   let result = readItems(items);
   if (flow.where !== undefined) {
     const where = flow.where;
-    result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
+    result = result.filter((item) => truthy(evalValue(where, typedLayer(scope, { [flow.item]: item }, itemTypes))));
   }
   if (flow.sortKeys !== undefined) {
     // A `$sort` key is a path from the loop item (unlike `$key`, which is an expression):
@@ -1984,7 +1985,9 @@ function renderEachRegion(
   const flow = node.flow as Extract<Flow, { kind: "each" }>;
   const listType = declaredExpressionType(flow.listPlan ?? flow.list, scope);
   const itemType = listType?.kind === "list" ? listType.item : undefined;
-  const itemTypes = { [flow.item]: itemType };
+  const whereTypes = { [flow.item]: itemType };
+  const itemTypes: Readonly<Record<string, TypeNode | undefined>> = flow.index === undefined ? whereTypes
+    : { ...whereTypes, [flow.index]: { kind: "terminal", name: "number" } };
   const existing = context.committed ? existingEachRange(candidate, "each") : undefined;
   const start = existing?.[0] ?? document.createComment("html-next:each-start");
   const end = existing?.[1] ?? document.createComment("html-next:each-end");
@@ -2032,7 +2035,7 @@ function renderEachRegion(
   ownEffect(context, scope, () => {
     const value = evalConforming(flow.list, scope, context.definition);
     if (value === NONCONFORMING) return;
-    const items = Array.isArray(value) ? shapeList(value, flow, scope) : [];
+    const items = Array.isArray(value) ? shapeList(value, flow, scope, whereTypes) : [];
     const next = new Map<unknown, EachBlock>();
     const keyed = flow.key !== undefined;
     const ordered: EachBlock[] | undefined = keyed ? [] : undefined;
@@ -2042,7 +2045,7 @@ function renderEachRegion(
       const item = items[index]!;
       const locals: Record<string, Value> = {
         [flow.item]: item,
-        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+        [ITERATION_INDEX]: index,
       };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
@@ -2083,15 +2086,7 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        // A row's loop fields change one by one, so a reader of one that holds does not run again;
-        // a row whose position and count hold writes nothing.
-        const rowScope = block.scope;
-        const next = locals.loop as Record<string, Value>;
-        const plain = untracked(() => rowScope.read("loop")) as Record<string, Value>;
-        if (plain.index !== next.index || plain.first !== next.first || plain.last !== next.last || plain.count !== next.count) {
-          const loop = untracked(() => rowScope.get("loop")) as Record<string, Value>;
-          loop.index = next.index!; loop.first = next.first!; loop.last = next.last!; loop.count = next.count!;
-        }
+        block.scope.set(ITERATION_INDEX, index);
       }
       next.set(key, block);
       ordered?.push(block);

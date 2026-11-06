@@ -1,3 +1,4 @@
+import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { namespacedAttributeSource } from "./shared.js";
 import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
@@ -407,22 +408,19 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const index = localIdentifier(flow.index ?? "index", scope, state);
       const itemType = typeOf(flow.listPlan.ast, scope).type;
       const itemContract = referenceType(flow.listPlan.ast, scope);
-      const scoped = localScope(scope, [
+      const filterScope = localScope(scope, [
         [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item, itemContract?.kind === "list" ? itemContract.item : undefined],
-        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
-        ["loop", { type: { kind: "object", open: false, fields: [
-          { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
-          { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
-          { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
-          { name: "count", type: { kind: "terminal", name: "number" }, optional: false },
-        ] }, nullable: false }],
+      ]);
+      const scoped = localScope(filterScope, [
+        [flow.index ?? ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+        [ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
       ]);
       const retainedList = mayProduceInvalidResult(flow.listPlan.ast, scope);
       const listAlias = retainedList ? `__retained${state.nextRetainedAlias++}` : undefined;
       const listScope = listAlias === undefined ? scope : localScope(scope, [[listAlias, typeOf(flow.listPlan.ast, scope)]]);
       const list = lowering.list(listAlias === undefined ? flow.listPlan.ast : { kind: "id", name: listAlias }, listScope, item, {
         ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-        itemScope: scoped,
+        itemScope: filterScope,
         sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
@@ -432,9 +430,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       // An accepted child in these rows keys its entry by the row's key.
       if (node.kind === "element") state.rowKeys.set(node.attributes, key);
       const child = renderNode(body, scoped, lowering, imports, handlers, attachments, state, undefined, projected, inSvg);
-      const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
+      const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}) => ${key}`);
       const rows = lowering.eachRows(checked);
-      const renderRows = `${rows}.map(({ item: ${item}, index: ${index}, loop }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
+      const renderRows = `${rows}.map(({ item: ${item}, index: ${index} }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
       const content = flow.keyPlan === undefined
         ? listAlias === undefined ? `{${renderRows}}` : `<>{${renderRows}}</>`
         : `<KeyedBoundary renderRows={() => ${renderRows}} />`;
@@ -1111,18 +1109,20 @@ function childDescriptors(
       const index = localIdentifier(flow.index ?? "index", itemScope, state);
       const itemType = typeOf(flow.listPlan.ast, itemScope).type;
       const itemContract = referenceType(flow.listPlan.ast, itemScope);
-      const rowScope = localScope(itemScope, [
+      const filterScope = localScope(itemScope, [
         [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item, itemContract?.kind === "list" ? itemContract.item : undefined],
-        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
-        ["loop", UNKNOWN],
+      ]);
+      const rowScope = localScope(filterScope, [
+        [flow.index ?? ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+        [ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
       ]);
       const list = lowering.list(flow.listPlan.ast, itemScope, item, {
-        ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }), itemScope: rowScope,
+        ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }), itemScope: filterScope,
         sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
       const keys = new Map(rowKeys).set(child.attributes, flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, rowScope));
-      return [`${lowering.eachRows(list)}.flatMap(({ item: ${item}, index: ${index}, loop }) => ${entry(rowScope, [...segments, child.attributes], keys)})`];
+      return [`${lowering.eachRows(list)}.flatMap(({ item: ${item}, index: ${index} }) => ${entry(rowScope, [...segments, child.attributes], keys)})`];
     }
     if (flow.kind === "match" && body.name === "template") {
       const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, itemScope, state);

@@ -100,7 +100,7 @@ describe("parseComponent", () => {
       <state name="rows" type="list(string)" value="[]"></state></defs><section>${body}</section></template>`;
     const scoped = `<div $with="$account.owner as owner"><p>{$owner}</p></div>` +
       `<template $match="$account.plan as plan"><b $when="$plan = 'pro'">{$plan}</b><i $else>{$plan}</i></template>` +
-      `<ul><li $each="row, i of $rows">{$row} {$i} {$loop.index}</li></ul>`;
+      `<ul><li $each="row, i of $rows">{$row} {$i}</li></ul>`;
     assert.doesNotThrow(() => parseComponent(source(scoped)));
     for (const outside of ["$owner", "$plan", "$row", "$i", "$loop.index"]) {
       expectDiagnostic("HT003", source(`${scoped}<p>{${outside}}</p>`));
@@ -539,7 +539,7 @@ describe("parseComponent", () => {
   it("parses repeated scoped slots and exposes their row bindings", () => {
     const definition = parseComponent(
       `<template component="x-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
-      `<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">` +
+      `<ul><slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index">` +
       `<li $value="$row.name"></li></slot></ul></template>`,
     );
     const slot = definition.template.children[0];
@@ -548,7 +548,7 @@ describe("parseComponent", () => {
     assert.deepEqual(slot.flow?.kind === "each" && slot.flow.listPlan?.dependencies, ["rows"]);
     assert.deepEqual(slot.flow?.kind === "each" && slot.flow.keyPlan?.dependencies, ["row.id"]);
     assert.deepEqual(slot.props?.map((prop) => [prop.name, prop.expressionPlan.dependencies]), [
-      ["item", ["row"]], ["index", ["loop.index"]],
+      ["item", ["row"]], ["index", ["index"]],
     ]);
     assert.deepEqual(definition.slots?.map(({ declared: _declared, ...slot }) => slot), [{ name: "row", required: false, props: ["item", "index"] }]);
     assert.deepEqual(slot.fallback?.[0]?.kind === "element" && slot.fallback[0].attributes[0]?.kind === "directive"
@@ -808,7 +808,7 @@ describe("parseComponent", () => {
       const own = (node as { twoWay?: boolean }).twoWay === true ? [(node as unknown as { writablePath: unknown }).writablePath] : [];
       return [...own, ...Object.values(node).flatMap(writes)];
     };
-    const loopIndex = { kind: "index", item: "row", expression: { kind: "member", object: { kind: "id", name: "loop" }, key: "index" } };
+    const loopIndex = { kind: "index", item: "row", expression: { kind: "id", name: "#index" } };
     assert.deepEqual(writes(parse(`<div $with="$draft.owner as owner"><input bind:value="owner.name"></div>` +
       `<template $match="$draft as d"><input $when="$d.plan" bind:value="d.plan"><i $else></i></template>` +
       `<p $each="row of $rows"><input bind:value="row.label"></p>` +

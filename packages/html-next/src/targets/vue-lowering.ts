@@ -462,13 +462,13 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
     return 0;
   });
 }`,
-  eachRows: `function eachRows<T>(items: readonly T[]): { item: T; index: number; loop: { index: number; first: boolean; last: boolean; count: number } }[] {
-  return items.map((item, index) => ({ item, index, loop: { index, first: index === 0, last: index === items.length - 1, count: items.length } }));
+  eachRows: `function eachRows<T>(items: readonly T[]): { item: T; index: number }[] {
+  return items.map((item, index) => ({ item, index }));
 }`,
-  uniqueKeys: `function uniqueKeys<T>(items: readonly T[], keyOf: (item: T, index: number, loop: { index: number; first: boolean; last: boolean; count: number }) => unknown): readonly T[] {
+  uniqueKeys: `function uniqueKeys<T>(items: readonly T[], keyOf: (item: T, index: number) => unknown): readonly T[] {
   const seen = new Set<unknown>();
   for (let index = 0; index < items.length; index += 1) {
-    const key = keyOf(items[index]!, index, { index, first: index === 0, last: index === items.length - 1, count: items.length });
+    const key = keyOf(items[index]!, index);
     if (seen.has(key)) {
       const message = \`A keyed list produced duplicate key \\\`\${text(key)}\\\`.\`;
       throw Object.assign(new Error(\`HR004: \${message}\`), {
@@ -847,7 +847,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     return code;
   }
 
-  /** Bind an already-shaped list and its loop metadata once for Vue's iteration. */
+  /** Bind an already-shaped list and its item and index once for Vue's iteration. */
   eachRows(code: string): string {
     return `${this.use("eachRows")}(${code})`;
   }

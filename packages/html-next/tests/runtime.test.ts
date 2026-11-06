@@ -592,11 +592,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
-    it(`${engine} keeps each row's loop record through list runs that leave its fields as they were`, async () => {
+    it(`${engine} keeps each row's explicit index through list runs that leave its position unchanged`, async () => {
       const definition = parseComponent(`<template component="loop-record-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
-        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-index="$loop.index" from:data-edge="$loop.first ? 'first' : $loop.last ? 'last' : ''">
-        <span $value="$loop.count"></span></li></ul></section></template>`);
+        </defs><section><ul><li $each="row, index of $rows" $key="$row.id" from:data-index="$index">
+        <span $value="$rows.length"></span></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -609,10 +609,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const host = runtime.getComponentHost(root);
           const list = root.querySelector("ul")!;
           const read = () => Array.from(list.querySelectorAll("li"), row =>
-            [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
+            [row.getAttribute("data-index"), row.querySelector("span")!.textContent].join(" "));
           const initial = read();
-          // An equal-keyed replacement reruns the list without changing any row's loop fields. A row
-          // keeps its loop record and writes only fields that changed, so no loop reader writes.
+          // Replacing an item at the same position leaves its index binding unchanged.
           const observer = new MutationObserver(() => undefined);
           observer.observe(list, { attributes: true, subtree: true });
           host.state.rows[1] = { id: 2 };
@@ -624,9 +623,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return { initial, indexWrites, reordered: read() };
         }, JSON.stringify(definition));
         assert.deepEqual(actual, {
-          initial: ["0 first 3", "1  3", "2 last 3"],
+          initial: ["0 3", "1 3", "2 3"],
           indexWrites: 0,
-          reordered: ["0 first 2", "1 last 2"],
+          reordered: ["0 2", "1 2"],
         });
       } finally { await browser.close(); }
     });
@@ -1700,7 +1699,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button type="button" on:click="add">Add</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index">
           <li class="fallback" $value="$row.name"></li></slot></ul></section></template>
           <x-scoped-list id="filled"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-list>
           <x-scoped-list id="empty"></x-scoped-list>`);
@@ -1729,7 +1728,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           <handler name="rename"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><button class="rename" type="button" on:click="rename">Rename</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"></slot>
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index"></slot>
           </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-hydrate></main>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -1778,7 +1777,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
           <template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
           <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
           <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
@@ -1806,7 +1805,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="renameRow"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
           <template component="x-hydrated-consumer"><defs><state name="heading" value="People"></state>
           <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
           <main><button class="rename" type="button" on:click="rename">Rename</button><x-hydrated-rows>

@@ -1,3 +1,4 @@
+import { ITERATION_INDEX } from "../expression.js";
 /**
  * The direct-extend Vanilla planner: components with a controller, declared state, `$if` and keyed
  * `$each` compile to cloned prototypes, compile-time site walks and fused, compare-before-write
@@ -48,7 +49,7 @@ import type { Invoked } from "../generate.js";
 const NESTED = 1 << 30;
 /** Roots from index 29 on share this bit; which of them changed is in the written map (`d`). */
 const OVERFLOW = 1 << 29;
-/** A row's position changed: what reads an index or `loop` re-runs (keyed.ts `POSITION`). */
+/** A row's position changed: what reads an index re-runs (keyed.ts `POSITION`). */
 const POSITION = 1 << 31;
 
 /** A loop's bit in a position mask, by its rows' level; levels past 30 share one bit, which only over-approximates. */
@@ -107,10 +108,8 @@ interface Lowered {
   readonly contents: boolean;
   /** May evaluate to NONCONFORMING, which a binding then does not write. */
   readonly fails: boolean;
-  /** The loops whose index or `loop` record it reads, one `levelBit` each. */
+  /** The loops whose index it reads, one `levelBit` each. */
   readonly positional?: number;
-  /** The loops whose row count it reads (through `loop`, except `loop.index` and `loop.first`). */
-  readonly counted?: number;
   /** The blocks whose item or alias value it reads, one `levelBit` each: rows below an outer one follow its item. */
   readonly items?: number;
   /** Roots from index 29 on that it reads, whose changes share the overflow bit. */
@@ -160,10 +159,8 @@ interface Region {
   /** Keyed rows' key, or undefined for rows that follow positions. */
   readonly key?: Lowered | undefined;
   readonly alias?: string;
-  /** Something in the rows, below them, or their key reads their index or `loop`. */
+  /** Something in the rows, below them, or their key reads their index. */
   readonly positional?: boolean;
-  /** Rows (or their key) read the row count. */
-  readonly counted?: boolean;
   /** A slot's name. */
   readonly slot?: string;
   /** The slot the region's element names (`slot`), which its marks and content are projected into. */
@@ -510,12 +507,12 @@ function valueSource(value: unknown): string {
     .map(([key, item]) => `${JSON.stringify(key)}: ${valueSource(item)}`).join(", ")} }`;
 }
 
-/** A local name: a row's item, index or `loop` record, or a `$with`/`$match` alias. */
+/** A local name: a row's item, index, or a `$with`/`$match` alias. */
 interface AliasEntry {
   readonly name: string;
   /** The level of the block whose record holds it. */
   readonly level: number;
-  readonly kind: "item" | "index" | "loop";
+  readonly kind: "item" | "index";
   /** A variable that holds it where it is evaluated (a function's parameter), not the record chain. */
   readonly source?: string;
   /** The holder record's field for it, as a scoped slot's prop values are held. */
@@ -555,7 +552,6 @@ function aliasSource(scope: Scope, entry: AliasEntry): string {
   const record = `r${".u".repeat(up)}`;
   if (entry.field !== undefined) return `${record}.${entry.field}`;
   if (entry.kind === "index") return `${record}.j`;
-  if (entry.kind === "loop") return `loopRecord(${record})`;
   return up === 0 && scope.closure !== true ? "o" : `${record}.i`;
 }
 
@@ -592,7 +588,7 @@ function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
       return { ...none(key, valueSource(value)), boolean: typeof value === "boolean" };
     }
     case "id": {
-      // The innermost local of that name: an item, an index or a `loop` record, which follow positions.
+      // The innermost local of that name: an item, an index, which follow positions.
       const entry = scope.aliases.findLast((candidate) => candidate.name === node.name);
       if (entry !== undefined && entry.field !== undefined) {
         // A scoped slot's prop, by name; one this rendering's slot does not give is the consumer's own.
@@ -606,7 +602,7 @@ function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
         const source = read(scope, aliasSource(scope, entry));
         return entry.kind === "index" ? { ...none(key, source), item: true, positional: levelBit(entry.level) }
           : { ...none(key, source), item: true, deep: true,
-            ...entry.kind === "loop" ? { positional: levelBit(entry.level), counted: levelBit(entry.level) } : { items: levelBit(entry.level) } };
+            items: levelBit(entry.level) };
       }
       if (node.name === "$$event" && scope.event === true) return { ...none(key, "e"), deep: true };
       const index = scope.roots.findIndex((root) => root.name === node.name);
@@ -629,11 +625,9 @@ function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
       };
     }
     case "member": {
-      const { counted, ...object } = lower(node.object, scope, true);
-      // `loop.index` and `loop.first` follow the row's index only, not the count.
-      const indexOnly = node.object.kind === "id" && (node.key === "index" || node.key === "first");
+      const object = lower(node.object, scope, true);
       return {
-        ...object, ...counted === undefined || indexOnly ? {} : { counted }, key, boolean: false, deep: true,
+        ...object, key, boolean: false, deep: true,
         source: read(scope, `${object.fails ? "readFailing" : "readMember"}(${object.source}, ${JSON.stringify(node.key)})`),
         // A read below a root follows that root's data; a read below the item is item data.
         nested: object.nested || !object.item && object.bits !== 0,
@@ -761,7 +755,7 @@ function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
   }
 }
 
-type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "counted" | "items" | "overflow">;
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "items" | "overflow">;
 
 /** What reads nothing: the seed of reads merged over a literal's or call's parts, which may be none. */
 const NO_READS: Reads = { bits: 0, nested: false, item: false, contents: false, fails: false };
@@ -770,7 +764,7 @@ function merge(left: Reads, right: Reads): Reads {
   return {
     bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item,
     contents: left.contents || right.contents, fails: left.fails || right.fails,
-    positional: (left.positional ?? 0) | (right.positional ?? 0), counted: (left.counted ?? 0) | (right.counted ?? 0),
+    positional: (left.positional ?? 0) | (right.positional ?? 0),
     items: (left.items ?? 0) | (right.items ?? 0),
     ...left.overflow === undefined && right.overflow === undefined ? {}
       : { overflow: [...new Set([...left.overflow ?? [], ...right.overflow ?? []])] },
@@ -1516,22 +1510,23 @@ class Planner {
     const list = this.checked(listPlan, scope);
     const listType = declaredExpressionType(listPlan, scope.types);
     const itemType = listType?.kind === "list" ? listType.item : undefined;
-    // A row holds its item, its index alias and its `loop` record.
-    // The index and `loop` are the rows' level in a key too, so a position mask tells them from an outer loop's.
-    const positions = (base: Scope, item?: string, index?: string, loop?: string): Scope => {
+    // Internal writable paths and authored index aliases read the same private row position.
+    const positions = (base: Scope, item?: string, index?: string): Scope => {
       const layered = this.layer(base, flow.item, itemType, "item", item);
+      const types: TypeScope = flow.index === undefined ? layered.types : { get: () => undefined };
+      if (flow.index !== undefined) declareLayerTypes(types, layered.types, { [flow.index]: { kind: "terminal", name: "number" } });
       return {
-        ...layered,
+        ...layered, types,
         aliases: [
           ...layered.aliases,
           ...flow.index === undefined ? [] : [{ name: flow.index, level: inner.level, kind: "index" as const, ...index === undefined ? {} : { source: index } }],
-          { name: "loop", level: inner.level, kind: "loop" as const, ...loop === undefined ? {} : { source: loop } },
+          { name: ITERATION_INDEX, level: inner.level, kind: "index" as const, ...index === undefined ? {} : { source: index } },
         ],
       };
     };
     const rowScope = positions(inner);
     // A key is a function of the item and its position, run beside the row's owner: `(o, j, l, r)`.
-    const keyScope: Scope = { ...positions(scope, "o", "j", "loopRecord({ j, l })"), closure: true };
+    const keyScope: Scope = { ...positions(scope, "o", "j"), closure: true };
     const key = flow.key === undefined ? undefined : lower(plan(flow.keyPlan, flow.key).ast, keyScope);
     const shaped = this.shape(flow, scope, list, itemType);
     this.listingContent = listed;
@@ -1542,7 +1537,7 @@ class Planner {
     const positional = reads.some((value) => ((value.positional ?? 0) & own) !== 0);
     rows.positional = positional;
     block.regions.push({ kind: "each", site, block: rows, list: shaped.list, key, alias: flow.item, positional,
-      counted: reads.some((value) => ((value.counted ?? 0) & own) !== 0), ...projected });
+      ...projected });
     return 2;
   }
 
@@ -2377,7 +2372,6 @@ export function emitBlocks(
     }
     block.regions.forEach((region, index) => {
       if (region.kind === "each" && listOwned(region)) lines.push(`${indent}${record}.L${index}.u = ${record};`);
-      if (region.kind === "each" && region.counted === true) lines.push(`${indent}${record}.L${index}.q = true;`);
     });
     // A consumer's scoped-slot templates, which the component it projects into renders with its props.
     block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: ${hydrate
@@ -2568,10 +2562,7 @@ export function emitBlocks(
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { ${rootEntries.join(", ")} };`,
     ...root.selects.map((select) => `  R.c${select} = ${selection(root, select, (site) => root.sites[site]!.length === 0 ? "element" : `R.a${site}`, hydrate)};`),
-    ...root.regions.flatMap((region, index) => region.kind !== "each" ? [] : [
-      ...listOwned(region) ? [`  R.L${index}.u = R;`] : [],
-      ...region.counted === true ? [`  R.L${index}.q = true;`] : [],
-    ]),
+    ...root.regions.flatMap((region, index) => region.kind === "each" && listOwned(region) ? [`  R.L${index}.u = R;`] : []),
   );
   // Contexts and `as` lists are read-only: the host reads them as it reads a computed.
   const contextStart = plan.roots.findIndex(readOnlyRoot);
@@ -2826,7 +2817,7 @@ export function emitBlocks(
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
     "writeUrlAttribute", "writeNamespacedAttribute", "writeNamespacedUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "plainObject", "eventPasses", "listen", "refTargets", "rootValue", "setState",
-    "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
+    "dispose", "shapeItems", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "acceptHydratedProps", "manageProps", "generatedInputs", "awaitInput", "evaluateInput", "inputRead", "inputDefault", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "notifyPropertySet", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke", "propValue",

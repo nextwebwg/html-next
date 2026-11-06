@@ -206,12 +206,12 @@ it("lowers a match inside table markup to one selected native row", async () => 
   compile(source, { filename: "XTable.svelte", generate: "server" });
 });
 
-it("renders sorted, filtered, limited rows with loop metadata and no wrapper", async () => {
+it("renders sorted, filtered, limited rows with explicit index aliases and no wrapper", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-each-"));
   temporary.push(root);
   await writeFile(join(root, "list.html"), `<template component="x-list" status="early" summary="List.">
     <ul><li $each="n, i of [3, 1, 2, 5]" $where="$n < 5" $sort="n" $limit="3"
-      from:data-i="$i" from:data-last="$loop.last" from:data-count="$loop.count" $value="$n"></li></ul>
+      from:data-i="$i" $value="$n"></li></ul>
   </template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["list.html"] });
@@ -221,10 +221,8 @@ it("renders sorted, filtered, limited rows with loop metadata and no wrapper", a
   const html = await serverHtml(outDirectory, "XList", source);
   assert.deepEqual([...html.matchAll(/<li ([^>]*)>([^<]*)<\/li>/g)].map((match) => [
     /data-i="([^"]*)"/.exec(match[1]!)?.[1],
-    /data-count="([^"]*)"/.exec(match[1]!)?.[1],
-    /data-last="([^"]*)"/.exec(match[1]!)?.[1] ?? null,
     match[2],
-  ]), [["0", "3", null, "1"], ["1", "3", null, "2"], ["2", "3", "", "3"]]);
+  ]), [["0", "1"], ["1", "2"], ["2", "3"]]);
 });
 
 it("treats an absent list as empty and reports duplicate keyed rows", async () => {

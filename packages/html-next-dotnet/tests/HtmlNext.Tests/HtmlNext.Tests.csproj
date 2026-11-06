@@ -12,6 +12,7 @@
     <None Include="../fixtures/element-references.json" Link="fixtures/element-references.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/deferred-components.json" Link="fixtures/deferred-components.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/invocation-props.json" Link="fixtures/invocation-props.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/iterations.json" Link="fixtures/iterations.json" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="../../src/HtmlNext/HtmlNext.csproj" />
     <None Include="../fixtures/attribute-bindings.json" Link="fixtures/attribute-bindings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/interface-declarations.json" Link="fixtures/interface-declarations.json" CopyToOutputDirectory="PreserveNewest" />

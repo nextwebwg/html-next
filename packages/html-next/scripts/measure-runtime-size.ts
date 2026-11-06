@@ -202,7 +202,8 @@ const seededGenerated = await generatedFixture("state-seed", 16_266);
 // +5 B gzip: finite arithmetic checks and invalid-result retention in the computed counter.
 const computedGenerated = await generatedFixture("computed-counter", 8_585);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
-const keyedGenerated = await generatedFixture("keyed-list", 8_326);
+// Removing loop metadata leaves this fixture at 20,798 B; minifier allocation shifts gzip by 2 B on Node 24.
+const keyedGenerated = await generatedFixture("keyed-list", 8_328);
 // +5 B: a root renders, at its first connection, what changed after its construction while it waited
 // detached, such as a parent's bound list of objects; until then such a change never rendered.
 // +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that

@@ -1,3 +1,4 @@
+import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { namespacedAttributeSource } from "./shared.js";
 import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
@@ -286,12 +287,6 @@ function withSlotProps(names: Names, props: readonly string[], alias: string, de
   return { ...local, template: remap(local.template, names.template), script: remap(local.script, names.script) };
 }
 
-function readsLoop(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return false;
-  if (!Array.isArray(value) && "kind" in value && "name" in value && value.kind === "id" && value.name === "loop") return true;
-  return Object.values(value).some(readsLoop);
-}
-
 /** A consumer template's free names are the receiving slot's props, not setup-scope globals. */
 function projectedNames(children: readonly TemplateNode[], scope: Scope): readonly string[] {
   const exposed = new Set<string>();
@@ -312,7 +307,6 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
       dependencies(flow.listPlan, known);
       known.add(flow.item);
       if (flow.index !== undefined) known.add(flow.index);
-      known.add("loop");
       dependencies(flow.wherePlan, known);
       dependencies(flow.limitPlan, known);
       dependencies(flow.keyPlan, known);
@@ -342,33 +336,29 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
   const item = localIdentifier(flow.item, context);
   const index = flow.index === undefined ? context.identifiers.take("index", "Loop")
     : localIdentifier(flow.index, context);
-  const local = withLocal(names, [
+  const itemLocal = withLocal(names, [
     [flow.item, itemType, item, (() => { const type = referenceType(listNode, names.template); return type?.kind === "list" ? type.item : undefined; })()],
-    [flow.index ?? index, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
-    ["loop", { type: { kind: "object", open: false, fields: [
-      { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
-      { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
-      { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
-      { name: "count", type: { kind: "terminal", name: "number" }, optional: false },
-    ] }, nullable: false }],
+  ]);
+  const local = withLocal(itemLocal, [
+    [flow.index ?? ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+    [ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
   ]);
   const options = {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-    itemScope: local.template,
+    itemScope: itemLocal.template,
     sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
   };
   const list = (flow.listPlan === undefined || !mayProduceInvalidResult(listNode, names.script) ? undefined : guardedBinding(flow.listPlan, names, context, (scope) =>
-    lowering.list(listNode, scope, item, { ...options, itemScope: local.script })))
+    lowering.list(listNode, scope, item, { ...options, itemScope: itemLocal.script })))
     ?? lowering.list(listNode, names.template, item, options);
   const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, local.template);
   // An `as` list's entry is its own key: Vue keys vnodes by identity, though its types take only property keys.
   const entryKey = flow.keyPlan?.ast.kind === "id" && flow.keyPlan.ast.name === flow.item && listNode.kind === "id" && context.childLists.has(listNode.name);
   const { flow: _flow, ...body } = node;
-  const needsLoop = readsLoop(body) || readsLoop(flow.keyPlan?.ast);
-  const row = needsLoop ? `({ item: ${item}, index: ${index}, loop })` : flow.index === undefined && flow.keyPlan !== undefined ? item : `(${item}, ${index})`;
-  const checkedList = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
-  const rows = needsLoop ? lowering.eachRows(checkedList) : checkedList;
+  const row = `(${item}, ${index})`;
+  const checkedList = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}) => ${key}`);
+  const rows = checkedList;
   const directives = [`v-for=${bound(`${row} in ${rows}`)}`, `:key=${bound(entryKey ? `${key} as any` : key)}`];
   const markup = node.kind === "slot"
     ? `<template ${directives.join(" ")}>${renderNode(body as SlotNode, local, context)}</template>`

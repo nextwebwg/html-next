@@ -138,7 +138,12 @@ export function declareLayerTypes(child: Scope, parent: Scope, types: Readonly<R
     layerTypeResolvers.set(types, resolver);
   }
   child.typeOfDeclaredPath = resolver.resolve;
-  child.typeOfPath = (path) => dimensionOf(child.typeOfDeclaredPath?.(path)) ?? parent.typeOfPath?.(path);
+  child.typeOfPath = (path) => {
+    const dot = path.indexOf(".");
+    const local = Object.hasOwn(types, dot < 0 ? path : path.slice(0, dot));
+    const dimension = dimensionOf(child.typeOfDeclaredPath?.(path));
+    return local ? dimension : dimension ?? parent.typeOfPath?.(path);
+  };
 }
 
 /** The declared type of an expression that is a path (`items`, `order.lines.0`), or undefined. */

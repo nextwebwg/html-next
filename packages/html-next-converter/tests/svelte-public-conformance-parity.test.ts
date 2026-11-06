@@ -45,7 +45,7 @@ const selected = new Set([
   "invalid structural expressions keep the last rendered region until a valid update",
   "initially invalid structural expressions render nothing until a valid update",
   "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
-  "$each with $sort/$limit and the loop object (index/last/count), plus item, i binding",
+  "$each with $sort/$limit and explicit item/index aliases",
   "$each $where filters and reindexes the loop",
   "$sort with multiple keys and descending (a,-b)",
   "$match/$when/$else renders only the winning arm",
@@ -611,7 +611,7 @@ const regressions: readonly ConverterCase[] = [
       <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state>
       <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
       </defs><div><button class="add" on:click="add">Add</button><ul>
-        <slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot>
+        <slot name="row" $each="row, index of $rows" $key="$row.id" from:item="$row" from:index="$index"><li>Missing</li></slot>
       </ul></div><style>:host { display: block; background: rgb(238 244 250); padding: 4px; } li { font-weight: bold; }
         :slotted(li) { color: rgb(32 48 64); }</style></template>` },
     source: `<template component="x-scoped-app" status="early" summary="Scoped app."><defs>
@@ -634,7 +634,7 @@ const regressions: readonly ConverterCase[] = [
       <handler name="invalidate"><set name="rows.0.width" value="1rem"></set></handler>
       <handler name="restore"><set name="rows.0.width" value="2px"></set><set name="rows.1.width" value="6px"></set></handler>
       </defs><section><button class="invalidate" on:click="invalidate">Invalidate</button><button class="restore" on:click="restore">Restore</button>
-        <slot name="measure" $each="row of $rows" $key="$row.id" from:item="min($row.width, 5px)" from:index="$loop.index"></slot></section></template>` },
+        <slot name="measure" $each="row, index of $rows" $key="$row.id" from:item="min($row.width, 5px)" from:index="$index"></slot></section></template>` },
     source: `<template component="x-measure-app" status="early" summary="Measure app."><div><x-measures>
       <template slot="measure"><span .title="$item" $value="concat($item, '/', $index)"></span><input .value="$item"></template>
       </x-measures></div></template><x-measure-app></x-measure-app>`,

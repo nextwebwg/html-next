@@ -1,3 +1,4 @@
+import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { namespacedAttributeSource } from "./shared.js";
 import { referenceContext, referenceType, withReferenceTypes } from "./reference-types.js";
@@ -28,7 +29,7 @@ import { angularValidityArtifact } from "./angular-validity.js";
 import { angularControlArtifact } from "./angular-control.js";
 import { invocationValue } from "../prop-values.js";
 import { declaredStateLiteral, literalInitial, revertSource, withRevert, publishedStates } from "./state-roots.js";
-import { expressionHelpersSource, AUTHORED_CHECK_SOURCE, inputScope, present, typeOf, UNKNOWN, type Scope } from "./vue-lowering.js";
+import { expressionHelpersSource, AUTHORED_CHECK_SOURCE, inputScope, present, typeOf, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 import { escapeHtml, isVoidElement, isNativeBooleanAttribute, objectKey as propertyKey, quote, propTypeSource, propValueIsNullable, selectorGenerics, dependentPropTypeSource, slotPropsType, slotPropValueSource, slotPropDefaultSource, svgAttributeName } from "./shared.js";
 import type { GeneratedArtifact } from "../generate.js";
 import { typedPropsModule } from "./vue-props.js";
@@ -471,11 +472,13 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
           sort: flow.sortKeys?.map(key => `${key.descending ? "-" : ""}${key.path.join(".")}`) ?? [], ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }) }, `((${retained} ?? []) as any[])`);
         const scoped = localScope(names, [[id, id, undefined]]);
-        const code = new Map(scoped.code); code.set(flow.item, `${id}.item`); code.set("loop", `${id}.loop`);
+        const code = new Map(scoped.code); code.set(flow.item, `${id}.item`); code.set(ITERATION_INDEX, `${id}.index`);
         if (flow.index !== undefined) code.set(flow.index, `${id}.index`);
-        const loopNames = withReferenceTypes({ ...scoped, code, types: new Map([...scoped.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN]]) }, [[flow.item, itemContract], ["loop", undefined], ...(flow.index === undefined ? [] : [[flow.index, undefined] as const])]);
-        const keyScope = withReferenceTypes({ ...itemNames, code: new Map([...itemNames.code, ["loop", "loop"], ...(flow.index === undefined ? [] : [[flow.index, "index"] as const])]) }, [["loop", undefined], ...(flow.index === undefined ? [] : [[flow.index, undefined] as const])]);
-        const unique = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(item: any, index: number, loop: any) => ${value(flow.keyPlan, keyScope)}`);
+        const indexType: Static = { type: { kind: "terminal", name: "number" }, nullable: false };
+        const indexTypes = [[ITERATION_INDEX, indexType], ...flow.index === undefined ? [] : [[flow.index, indexType] as const]] as const;
+        const loopNames = withReferenceTypes({ ...scoped, code, types: new Map([...scoped.types, [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN], ...indexTypes]) }, [[flow.item, itemContract], [ITERATION_INDEX, undefined], ...(flow.index === undefined ? [] : [[flow.index, undefined] as const])]);
+        const keyScope = withReferenceTypes({ ...itemNames, types: new Map([...itemNames.types, ...indexTypes]), code: new Map([...itemNames.code, [ITERATION_INDEX, "index"], ...(flow.index === undefined ? [] : [[flow.index, "index"] as const])]) }, [[ITERATION_INDEX, undefined], ...(flow.index === undefined ? [] : [[flow.index, undefined] as const])]);
+        const unique = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(item: any, index: number) => ${value(flow.keyPlan, keyScope)}`);
         const rows = lowering.eachRows(unique);
         const keyedRows = flow.keyPlan === undefined ? rows : `${rows}.map((${id}: any) => ({ ...${id}, hnKey: ${value(flow.keyPlan, loopNames)} }))`;
         return `@let ${retained} = ${expression(value(flow.listPlan, names), names)};@for (${id} of ${expression(keyedRows, retainedNames)}; track ${id}.${flow.keyPlan === undefined ? "index" : "hnKey"}) {${render(plain, loopNames, projection)}}`;

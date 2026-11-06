@@ -1186,10 +1186,6 @@ export function shapeItems(
   return result;
 }
 
-/** A row's `loop` record, made afresh for each read as live makes one per update. */
-export const loopRecord = (row: { j?: number; l?: number }): Record<string, unknown> =>
-  ({ index: row.j, first: row.j === 0, last: row.j === row.l! - 1, count: row.l });
-
 /** Flags a row whose binding converts a list or object (see `KeyedRow.w`); returns the value. */
 export const trackContainer = (row: { w?: number }, value: unknown): unknown => {
   if (value !== null && typeof value === "object") row.w = 1;

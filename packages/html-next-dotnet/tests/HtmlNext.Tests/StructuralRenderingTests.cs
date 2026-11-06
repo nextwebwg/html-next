@@ -60,7 +60,7 @@ public sealed class StructuralRenderingTests
     public void WholeIterationGuardUsesOuterScopeAndWhereFiltersItems()
     {
         var template = Compile("""
-            <div><b $each="row of [1, 2, 3]" $if="$row" $where="$row > 1">{$row}</b><i>{$row}</i></div>
+            <div><template $if="$row"><b $each="row of [1, 2, 3]" $where="$row > 1">{$row}</b></template><i>{$row}</i></div>
             """, "<prop name=\"row\" type=\"boolean\">Whole-list guard.</prop>");
         Output(template, "<div><b>2</b><b>3</b><i>true</i></div>", new { row = true });
         Output(template, "<div><i>false</i></div>", new { row = false });

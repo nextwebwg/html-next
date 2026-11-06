@@ -679,7 +679,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
   it("server-renders React structural templates and sorted loops without wrapper elements", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
-      <ul><template $if="true"><li $each="n, i of [3, 1, 2]" $sort="n" from:data-i="$i" from:data-last="$loop.last" $value="$n"></li></template></ul>
+      <ul><template $if="true"><li $each="n, i of [3, 1, 2]" $sort="n" from:data-i="$i" $value="$n"></li></template></ul>
     </template>`);
     const outDirectory = join(root, "out-react-structure");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -691,7 +691,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})),
-      "<ul data-html-next-renderer=\"react\" component=\"x-card\"><li data-i=\"0\">1</li><li data-i=\"1\">2</li><li data-i=\"2\" data-last=\"\">3</li></ul>");
+      "<ul data-html-next-renderer=\"react\" component=\"x-card\"><li data-i=\"0\">1</li><li data-i=\"1\">2</li><li data-i=\"2\">3</li></ul>");
   });
 
   it("server-renders a React $match branch inside a table", async () => {
@@ -1614,7 +1614,7 @@ void [named, functionSlot, undeclared];`);
     await mkdir(join(root, "components"), { recursive: true });
     await writeFile(join(root, "components/rows.html"), `<template component="x-rows" status="early" summary="Rows."><defs><slot name="row"><prop name="item" type="object({ id: string, name: string })" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
       <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></state>
-    </defs><ul><slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot></ul></template>`);
+    </defs><ul><slot name="row" $each="row, index of $rows" $key="$row.id" from:item="$row" from:index="$index"><li>Missing</li></slot></ul></template>`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./rows.html">
       <template component="x-app" status="early" summary="App."><defs><state type="object" name="item" value="{ name: 'Parent' }"></state>
       <state name="heading" value="Team"></state></defs><main><output $value="$item.name"></output>

@@ -2,6 +2,9 @@
 
 ## 1.0.0-alpha.92
 
+- Bind only the authored item and optional index aliases in Node, native C# and compiled targets. Use list `.length` for size and CSS structural selectors for first/last presentation. Remove the implicit `$loop` binding, preserve lexical shadowing, and give item/index aliases their own types. Ordinary declarations named `loop` or `index` remain valid.
+- Compile native iteration index aliases, stable `$sort`, `$limit`, and `$key` checks. Apply filtering, sorting and limits before row indices, reject duplicate keys, use a surrounding template for an iteration guard, and preserve nested scopes, projected content and deferred carriers. Keep simple loops on their existing allocation path and cache sort keys before comparison.
+
 - Render caller-owned bindings, conditions, loops, fragments and forwarding slots inside native deferred component carriers while keeping unplaced component setup and original lazy templates deferred. Preserve literal prop fallbacks for invalid or waiting inputs, distinguish available null and absence, and verify placed prop bindings in either attribute order against Node output.
 
 - Validate and consume native `$ref` directives on element and component roots, descendants, repeated content and lazy projections. Reject invalid names and authored duplicates, allow reuse across root `$match` alternatives, and retain reference directives in original inert template bodies. Keep reference validation out of request binding.

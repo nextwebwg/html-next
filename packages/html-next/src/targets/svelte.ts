@@ -1,3 +1,4 @@
+import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
 /** Svelte 5 output from the shared, checked component definition. */
@@ -359,21 +360,14 @@ function eachParts(node: ElementNode | SlotNode, scope: Scope, lowering: Lowerin
     ? { type: present(listType.type.item).type, nullable: false }
     : { type: { kind: "terminal", name: "unknown" }, nullable: false };
   const indexType: Static = { type: { kind: "terminal", name: "number" }, nullable: false };
-  const loopType: Static = { type: { kind: "object", open: false, fields: [
-    { name: "index", type: indexType.type, optional: false },
-    { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
-    { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
-    { name: "count", type: indexType.type, optional: false },
-  ] }, nullable: false };
   // Each row destructures to the names the source gives its item and index.
   const item = context.localName(flow.item, "item");
   const index = context.localName(flow.index ?? "index", "index");
-  const loop = context.localName("loop", "loop");
-  const scopeWith = (item: string, index: string, loop: string): Scope => withReferenceTypes({
+  const scopeWith = (item: string, index?: string): Scope => withReferenceTypes({
     ...scope,
-    code: new Map([...scope.code, [flow.item, item], ...(flow.index === undefined ? [] : [[flow.index, index] as const]), ["loop", loop]]),
-    types: new Map([...scope.types, [flow.item, itemType], ...(flow.index === undefined ? [] : [[flow.index, indexType] as const]), ["loop", loopType]]),
-  }, [[flow.item, (() => { const type = referenceType(listNode, scope); return type?.kind === "list" ? type.item : undefined; })()], [flow.index ?? "index", undefined], ["loop", undefined]]);
+    code: new Map([...scope.code, [flow.item, item], ...(index === undefined ? [] : [...flow.index === undefined ? [] : [[flow.index, index] as const], [ITERATION_INDEX, index] as const])]),
+    types: new Map([...scope.types, [flow.item, itemType], ...(index === undefined ? [] : [...flow.index === undefined ? [] : [[flow.index, indexType] as const], [ITERATION_INDEX, indexType] as const])]),
+  }, [[flow.item, (() => { const type = referenceType(listNode, scope); return type?.kind === "list" ? type.item : undefined; })()], ...index === undefined ? [] : [[flow.index ?? ITERATION_INDEX, undefined] as const, [ITERATION_INDEX, undefined] as const]]);
   const read = conformingRead(flow.listPlan, scope, context, lowering.value(listNode, scope));
   const stableSource = read.invalid ? retained(context, read.source, "[] as any[]") : read.source;
   // Native structural reads accept absence, even for an initialized declared list.
@@ -381,21 +375,21 @@ function eachParts(node: ElementNode | SlotNode, scope: Scope, lowering: Lowerin
   const filterItem = context.freshIdentifier("htmlNextItem");
   const list = lowering.list(listNode, scope, filterItem, {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-    itemScope: scopeWith(filterItem, "index", "loop"),
+    itemScope: scopeWith(filterItem),
     sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
   }, listSource);
-  const callbackScope = scopeWith("item", "index", "loop");
+  const callbackScope = scopeWith(item, index);
   const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list,
-    `(item, index, loop) => ${lowering.value(flow.keyPlan.ast, callbackScope)}`);
+    `(${item}, ${index}) => ${lowering.value(flow.keyPlan.ast, callbackScope)}`);
   const rows = lowering.eachRows(checked);
-  const rowScope = scopeWith(item, index, loop);
+  const rowScope = scopeWith(item, index);
   const keyValue = flow.keyPlan === undefined ? undefined : lowering.value(flow.keyPlan.ast, rowScope);
-  return { rows, rowScope, item, index, loop, keyValue };
+  return { rows, rowScope, item, index, keyValue };
 }
 
 function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Lowering, context: RenderContext): string {
-  const { rows, rowScope, item, index, loop, keyValue } = eachParts(node, scope, lowering, context);
+  const { rows, rowScope, item, index, keyValue } = eachParts(node, scope, lowering, context);
   const key = keyValue === undefined ? "" : ` (${keyValue})`;
   const { flow: _flow, ...body } = node;
   const firstHtmlSite = context.htmlSites;
@@ -407,7 +401,7 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
   context.eachKeys.pop();
   const declarations = localOwnership(context, firstHtmlSite, firstRetention);
   const content = `${declarations}${inputs.join("")}${markup}`;
-  const fields = ([["item", item], ["index", index], ["loop", loop]] as const)
+  const fields = ([["item", item], ["index", index]] as const)
     .filter(([field, name]) => field === "item" || new RegExp(`\\b${name}\\b`).test(`${key}${content}`))
     .map(([field, name]) => field === name ? field : `${field}: ${name}`);
   return `{#each ${rows} as { ${fields.join(", ")} }${key}}${content}{/each}`;
@@ -457,8 +451,8 @@ function childListSource(node: ElementNode, scope: Scope, lowering: Lowering, co
       if (child.flow?.kind === "each") {
         const parts = eachParts(child, scope, lowering, context);
         const { flow: _flow, ...body } = child;
-        const inner = items([body], parts.rowScope, [...keys, parts.keyValue ?? parts.index], [...locals, parts.item, parts.index, parts.loop]).join(", ");
-        const fields = ([["item", parts.item], ["index", parts.index], ["loop", parts.loop]] as const)
+        const inner = items([body], parts.rowScope, [...keys, parts.keyValue ?? parts.index], [...locals, parts.item, parts.index]).join(", ");
+        const fields = ([["item", parts.item], ["index", parts.index]] as const)
           .filter(([field, name]) => field === "item" || new RegExp(`\\b${name}\\b`).test(inner)).map(([field, name]) => `${field}: ${name}`);
         return [`...${parts.rows}.flatMap(({ ${fields.join(", ")} }) => [${inner}])`];
       }

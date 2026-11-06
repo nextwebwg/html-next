@@ -1,0 +1,213 @@
+[
+  {
+    "name": "index-alias",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row, i of [10, 20]\">{$i}:{$row}</b></main></template>",
+    "expected": "<main><b>0:10</b><b>1:20</b></main>"
+  },
+  {
+    "name": "filtered-indices",
+    "source": "<template component=\"x-page\"><defs><state name=\"rows\" type=\"list(number)\" from=\"[1, 2, 3, 4]\"></state></defs><main><b $each=\"row, i of $rows\" $where=\"$row > 2\">{$i}:{$rows.length}:{$row}</b></main></template>",
+    "expected": "<main><b>0:4:3</b><b>1:4:4</b></main>"
+  },
+  {
+    "name": "scalar-sort",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of [3, 1, 2]\" $sort=\"-row\">{$row}</b></main></template>",
+    "expected": "<main><b>3</b><b>2</b><b>1</b></main>"
+  },
+  {
+    "name": "stable-sort",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row, i of [{ n: 2, id: 1 }, { n: 1, id: 2 }, { n: 1, id: 3 }]\" $sort=\"row.n\">{$i}:{$row.id}</b></main></template>",
+    "expected": "<main><b>0:2</b><b>1:3</b><b>2:1</b></main>"
+  },
+  {
+    "name": "sort-then-limit",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row, i of [{ n: 2, name: 'A' }, { n: 1, name: 'B' }, { n: 1, name: 'C' }]\" $where=\"$row.n > 0\" $sort=\"$row.n,-row.name\" $limit=\"2\" $key=\"$row.name\">{$row.name}:{$i}</b></main></template>",
+    "expected": "<main><b>C:0</b><b>B:1</b></main>"
+  },
+  {
+    "name": "limit-truncates",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of [1, 2, 3]\" $limit=\"2.9\">{$row}</b></main></template>",
+    "expected": "<main><b>1</b><b>2</b></main>"
+  },
+  {
+    "name": "negative-limit",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of [1, 2, 3]\" $limit=\"-2\">{$row}</b></main></template>",
+    "expected": "<main></main>"
+  },
+  {
+    "name": "null-limit",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of [1, 2]\" $limit=\"null\">{$row}</b></main></template>",
+    "expected": "<main><b>1</b><b>2</b></main>"
+  },
+  {
+    "name": "empty-loop",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row, i of []\" $key=\"$i\">{$i}</b></main></template>",
+    "expected": "<main></main>"
+  },
+  {
+    "name": "keyed-fragment",
+    "source": "<template component=\"x-page\"><defs></defs><main><template $each=\"row, i of [2, 1]\" $key=\"$row\"><b>{$i}</b><i>{$row}</i></template></main></template>",
+    "expected": "<main><b>0</b><i>2</i><b>1</b><i>1</i></main>"
+  },
+  {
+    "name": "nested-loop-scope",
+    "source": "<template component=\"x-page\"><defs></defs><main><section $each=\"outer, i of [10, 20]\"><template $with=\"$i as parent\"><b $each=\"inner, j of [1, 2]\">{$i}:{$j}:{$parent}:{$j}:{$outer + $inner}</b></template><i>{$i}</i></section></main></template>",
+    "expected": "<main><section><b>0:0:0:0:11</b><b>0:1:0:1:12</b><i>0</i></section><section><b>1:0:1:0:21</b><b>1:1:1:1:22</b><i>1</i></section></main>"
+  },
+  {
+    "name": "keyed-component",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"number\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs></defs><main><x-leaf $each=\"row, i of [4, 5]\" $key=\"$row\" from:value=\"$i + $row\"></x-leaf></main></template>",
+    "expected": "<main><b>4</b><b>6</b></main>"
+  },
+  {
+    "name": "shaped-slot-content",
+    "source": "<template component=\"x-list\"><section><slot></slot></section></template><template component=\"x-page\"><defs></defs><main><x-list><b $each=\"row, i of [3, 1, 2]\" $sort=\"row\" $limit=\"2\" $key=\"$row\">{$i}:{$row}</b></x-list></main></template>",
+    "expected": "<main><section><b>0:1</b><b>1:2</b></section></main>",
+    "native": "<main><section><?start slot=\"\"?><b>0:1</b><b>1:2</b><?end?></section></main>"
+  },
+  {
+    "name": "shaped-empty-slot-fallback",
+    "source": "<template component=\"x-list\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><defs></defs><main><x-list><b $each=\"row, i of [3, 1, 2]\" $limit=\"0\" $key=\"$row\">{$i}</b></x-list></main></template>",
+    "expected": "<main><section>Fallback</section></main>",
+    "native": "<main><section><?start slot=\"\" fallback=\"\"?>Fallback<?end?></section></main>"
+  },
+  {
+    "name": "text-sort-collation",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of ['z', 'A', '\u00e4', 'a']\" $sort=\"row\">{$row}</b></main></template>",
+    "expected": "<main><b>a</b><b>A</b><b>\u00e4</b><b>z</b></main>"
+  },
+  {
+    "name": "limit-from-outer",
+    "source": "<template component=\"x-page\"><defs><prop name=\"count\" type=\"integer\" default=\"2\">Count.</prop></defs><main><b $each=\"row of [1, 2, 3]\" $limit=\"$count\">{$row}</b></main></template>",
+    "expected": "<main><b>1</b><b>2</b></main>"
+  },
+  {
+    "name": "scalar-member-sort",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of [3, 1, 2]\" $sort=\"row.field\">{$row}</b></main></template>",
+    "expected": "<main><b>1</b><b>2</b><b>3</b></main>"
+  },
+  {
+    "name": "null-sort",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of ['x', null, 'a']\" $sort=\"row\">{$row}</b></main></template>",
+    "expected": "<main><b></b><b>a</b><b>x</b></main>"
+  },
+  {
+    "name": "invalid-limit",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row of [1, 2]\" $limit=\"1 / 0\">{$row}</b></main></template>",
+    "expected": "<main><b>1</b><b>2</b></main>"
+  },
+  {
+    "name": "distinct-key-types",
+    "source": "<template component=\"x-page\"><defs><state name=\"rows\" type=\"unknown\" from=\"[1, '1', true, 'true', null]\"></state></defs><main><b $each=\"row, i of $rows\" $key=\"$row\">{$i}:{$row}</b></main></template>",
+    "expected": "<main><b>0:1</b><b>1:1</b><b>2:true</b><b>3:true</b><b>4:</b></main>"
+  },
+  {
+    "name": "distinct-object-keys",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row, i of [{ id: 1 }, { id: 1 }]\" $key=\"$row\">{$i}:{$row.id}</b></main></template>",
+    "expected": "<main><b>0:1</b><b>1:1</b></main>"
+  },
+  {
+    "name": "deferred-keyed-components",
+    "source": "<template component=\"x-leaf\" module=\"./unused.js\"><defs><prop name=\"value\" type=\"number\" required>Value.</prop></defs><b></b></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><main><x-unused><x-leaf $each=\"row, i of [3, 1, 2]\" $sort=\"row\" $limit=\"2\" $key=\"$row\" from:value=\"$i + $row\"></x-leaf></x-unused></main></template>",
+    "expected": "<main><section></section></main>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"1\"></x-leaf><x-leaf value=\"3\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"1\"></x-leaf><x-leaf value=\"3\"></x-leaf>"
+  },
+  {
+    "name": "outer-loop-in-filter",
+    "source": "<template component=\"x-page\"><main><section $each=\"outer, i of [1, 2]\"><b $each=\"inner, j of [3, 4]\" $where=\"$i = 0\">{$inner}:{$j}</b></section></main></template>",
+    "expected": "<main><section><b>3:0</b><b>4:1</b></section><section></section></main>"
+  },
+  {
+    "name": "iteration-whitespace",
+    "source": "<template component=\"x-page\"><main><b $each=\"  row , i of[1, 2]  \">{$i}:{$row}</b></main></template>",
+    "expected": "<main><b>0:1</b><b>1:2</b></main>"
+  },
+  {
+    "name": "mixed-scalar-sort",
+    "source": "<template component=\"x-page\"><main><b $each=\"row of [3, '2', 1]\" $sort=\"row\">{$row}</b></main></template>",
+    "expected": "<main><b>1</b><b>2</b><b>3</b></main>"
+  },
+  {
+    "name": "boolean-sort",
+    "source": "<template component=\"x-page\"><main><b $each=\"row of [true, false]\" $sort=\"row\">{$row}</b></main></template>",
+    "expected": "<main><b>false</b><b>true</b></main>"
+  },
+  {
+    "name": "list-text-sort",
+    "source": "<template component=\"x-page\"><main><b $each=\"row of [[2], [10]]\" $sort=\"row\">{$row.0}</b></main></template>",
+    "expected": "<main><b>10</b><b>2</b></main>"
+  },
+  {
+    "name": "repeated-record-key",
+    "source": "<template component=\"x-page\"><defs><state name=\"same\" type=\"unknown\" from=\"{ id: 1 }\"></state><state name=\"rows\" type=\"unknown\" from=\"[$same, $same]\"></state></defs><main><b $each=\"row of $rows\" $key=\"$row\">Row</b></main></template>",
+    "expected": "",
+    "error": "duplicate key"
+  },
+  {
+    "name": "repeated-list-key",
+    "source": "<template component=\"x-page\"><defs><state name=\"same\" type=\"unknown\" from=\"[1, 2]\"></state><state name=\"rows\" type=\"unknown\" from=\"[$same, $same]\"></state></defs><main><b $each=\"row of $rows\" $key=\"$row\">Row</b></main></template>",
+    "expected": "",
+    "error": "duplicate key"
+  },
+  {
+    "name": "declared-loop-name",
+    "source": "<template component=\"x-page\"><defs><prop name=\"loop\" type=\"string\" default=\"owned\">Label.</prop></defs><main><b $each=\"row, i of [1, 2]\">{$loop}:{$i}</b></main></template>",
+    "expected": "<main><b>owned:0</b><b>owned:1</b></main>"
+  },
+  {
+    "name": "loop-item-name",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"loop, i of [4, 5]\">{$loop}:{$i}</b></main></template>",
+    "expected": "<main><b>4:0</b><b>5:1</b></main>"
+  },
+  {
+    "name": "loop-index-name",
+    "source": "<template component=\"x-page\"><defs></defs><main><b $each=\"row, loop of [4, 5]\">{$row}:{$loop}</b></main></template>",
+    "expected": "<main><b>4:0</b><b>5:1</b></main>"
+  },
+  {
+    "name": "declared-index-name",
+    "source": "<template component=\"x-page\"><defs><prop name=\"index\" type=\"string\" default=\"named\">Label.</prop></defs><main><b $each=\"row of [4, 5]\">{$index}:{$row}</b></main></template>",
+    "expected": "<main><b>named:4</b><b>named:5</b></main>"
+  },
+  {
+    "name": "list-length",
+    "source": "<template component=\"x-page\"><defs><state name=\"rows\" type=\"list(number)\" from=\"[1, 2, 3]\"></state><state name=\"empty\" type=\"list(string)\" from=\"[]\"></state></defs><main><b>{$rows.length}</b><i>{$empty.length}</i></main></template>",
+    "expected": "<main><b>3</b><i>0</i></main>"
+  },
+  {
+    "name": "shadowing-item",
+    "source": "<template component=\"x-page\"><defs><prop name=\"row\" type=\"string\" default=\"outer\">Outer.</prop></defs><main><b $each=\"row of [4, 5]\">{$row}</b><i>{$row}</i></main></template>",
+    "expected": "<main><b>4</b><b>5</b><i>outer</i></main>"
+  },
+  {
+    "name": "shadowing-index-in-shaping",
+    "source": "<template component=\"x-page\"><defs><prop name=\"i\" type=\"number\" default=\"2\">Outer.</prop></defs><main><b $each=\"row, i of [4, 5]\" $where=\"$row > $i\" $limit=\"$i\" $key=\"$i\">{$i}:{$row}</b><i>{$i}</i></main></template>",
+    "expected": "<main><b>0:4</b><b>1:5</b><i>2</i></main>"
+  },
+  {
+    "name": "shadowing-item-in-limit",
+    "source": "<template component=\"x-page\"><defs><prop name=\"row\" type=\"number\" default=\"1\">Outer.</prop></defs><main><b $each=\"row of [3, 4]\" $limit=\"$row\">{$row}</b><i>{$row}</i></main></template>",
+    "expected": "<main><b>3</b><i>1</i></main>"
+  },
+  {
+    "name": "nested-shadowing",
+    "source": "<template component=\"x-page\"><main><section $each=\"row, i of [10, 20]\"><b $each=\"row, i of [1, 2]\">{$i}:{$row}</b><i>{$i}:{$row}</i></section></main></template>",
+    "expected": "<main><section><b>0:1</b><b>1:2</b><i>0:10</i></section><section><b>0:1</b><b>1:2</b><i>1:20</i></section></main>"
+  },
+  {
+    "name": "guarded-shadowing",
+    "source": "<template component=\"x-page\"><defs><prop name=\"row\" type=\"boolean\" default=\"true\">Guard.</prop></defs><main><template $if=\"$row\"><b $each=\"row of [1, 2, 3]\" $where=\"$row > 1\">{$row}</b></template><i>{$row}</i></main></template>",
+    "expected": "<main><b>2</b><b>3</b><i>true</i></main>"
+  },
+  {
+    "name": "shadowing-index-type",
+    "source": "<template component=\"x-page\"><defs><prop name=\"index\" type=\"string\" default=\"outer\">Outer.</prop></defs><main><b $each=\"row, index of [4, 5]\">{$index + 1}:{$row}</b><i>{$index}</i></main></template>",
+    "expected": "<main><b>1:4</b><b>2:5</b><i>outer</i></main>"
+  },
+  {
+    "name": "shadowing-dimensional-type",
+    "source": "<template component=\"x-page\"><defs><prop name=\"row\" type=\"length\" default=\"8px\">Outer.</prop><prop name=\"index\" type=\"length\" default=\"9px\">Outer index.</prop><state name=\"rows\" type=\"list(number)\" from=\"[1, 2]\"></state></defs><main><b $each=\"row, index of $rows\" $where=\"round($row, 1) > 1\">{round($index, 1)}:{$row}</b><i>{$row}:{$index}</i></main></template>",
+    "expected": "<main><b>0:2</b><i>8px:9px</i></main>"
+  }
+]

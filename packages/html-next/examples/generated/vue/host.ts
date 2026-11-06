@@ -2350,36 +2350,17 @@ export function sortBy(items: readonly any[], keys: readonly string[]): any[] {
   })
 }
 
-export function eachRows<T>(
-  items: readonly T[],
-): {
-  item: T
-  index: number
-  loop: { index: number; first: boolean; last: boolean; count: number }
-}[] {
-  return items.map((item, index) => ({
-    item,
-    index,
-    loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
-  }))
+export function eachRows<T>(items: readonly T[]): { item: T; index: number }[] {
+  return items.map((item, index) => ({ item, index }))
 }
 
 export function uniqueKeys<T>(
   items: readonly T[],
-  keyOf: (
-    item: T,
-    index: number,
-    loop: { index: number; first: boolean; last: boolean; count: number },
-  ) => unknown,
+  keyOf: (item: T, index: number) => unknown,
 ): readonly T[] {
   const seen = new Set<unknown>()
   for (let index = 0; index < items.length; index += 1) {
-    const key = keyOf(items[index]!, index, {
-      index,
-      first: index === 0,
-      last: index === items.length - 1,
-      count: items.length,
-    })
+    const key = keyOf(items[index]!, index)
     if (seen.has(key)) {
       const message = `A keyed list produced duplicate key \`${text(key)}\`.`
       throw Object.assign(new Error(`HR004: ${message}`), {

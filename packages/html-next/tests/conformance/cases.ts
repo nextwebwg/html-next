@@ -726,21 +726,20 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "$each with $sort/$limit and the loop object (index/last/count), plus item, i binding",
+    name: "$each with $sort/$limit and explicit item/index aliases",
     source: scene({
       root:
         `<ul><li $each="n, i of [3, 1, 2, 5]" $sort="n" $limit="3" ` +
-        ` from:data-i="$i" from:data-last="$loop.last" from:data-count="$loop.count" $value="$n"></li></ul>`,
+        ` from:data-i="$i" $value="$n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
       probe:
-        `return qa('#b li').map(li => [li.getAttribute('data-i'), li.textContent, ` +
-        `li.hasAttribute('data-last'), li.getAttribute('data-count')]);`,
+        `return qa('#b li').map(li => [li.getAttribute('data-i'), li.textContent]);`,
       result: [
-        ["0", "1", false, "3"],
-        ["1", "2", false, "3"],
-        ["2", "3", true, "3"],
+        ["0", "1"],
+        ["1", "2"],
+        ["2", "3"],
       ],
     },
   },

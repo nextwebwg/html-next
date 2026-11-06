@@ -16,7 +16,7 @@ public static partial class HtmlNextCompiler
     }
 
     private static bool Significant(INode node) => node is not IComment && (node is not IText text || !string.IsNullOrWhiteSpace(text.Data));
-    [GeneratedRegex(@"^(\S+)\s+of\s+(.+)$", RegexOptions.CultureInvariant | RegexOptions.Singleline)]
+    [GeneratedRegex(@"^\s*([^\s,]+)(?:\s*,\s*([^\s,]+))?\s+of\b\s*(.+)$", RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex EachPattern();
     [GeneratedRegex(@"^(.+)\s+as\s+(\S+)\s*$", RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex AliasPattern();
@@ -37,6 +37,7 @@ public static partial class HtmlNextCompiler
         private bool hasComponents;
         private readonly Dictionary<string, ScopedSlotContract> slotContracts = new(StringComparer.Ordinal);
         private readonly Dictionary<int, ScopedSlotValue> projectionLocals = [];
+        private readonly Dictionary<int, IterationIndexBinding> indexLocals = [];
         public IReadOnlyDictionary<string, ScopedSlotContract> Slots => slotContracts;
         private readonly HashSet<string> outletNames = new(StringComparer.Ordinal);
         private IReadOnlyList<string> styleNames = [];
@@ -197,7 +198,7 @@ public static partial class HtmlNextCompiler
             compiled.Add(name);
         }
 
-        private sealed class DeclarationScope(Compiler compiler, IReadOnlyDictionary<string, (int Slot, ValueType Type)>? locals = null) : IDeclarationExpressionScope
+        private sealed class DeclarationScope(Compiler compiler, IReadOnlyDictionary<string, (int Slot, ValueType Type)>? locals = null, bool declarations = true) : IDeclarationExpressionScope
         {
             private IReadOnlyDictionary<string, (int Slot, ValueType Type)> ValuesByName => locals ?? compiler.bindings;
             public (int Slot, ValueType Type) this[string key] => TryGetValue(key, out var value) ? value : throw new KeyNotFoundException(key);
@@ -206,18 +207,29 @@ public static partial class HtmlNextCompiler
             public int Count => ValuesByName.Count;
             public bool ContainsKey(string key) => ValuesByName.ContainsKey(key);
             public bool TryGetValue(string key, out (int Slot, ValueType Type) value) { compiler.CompileDerived(key); return ValuesByName.TryGetValue(key, out value); }
-            public ValueExpression Read(string name, int slot, ValueType type) => compiler.derived.TryGetValue(name, out var item) && item.Declaration.Slot == slot
-                ? new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration))
-                : locals is IDeclarationExpressionScope declarations ? declarations.Read(name, slot, type)
-                : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null));
+            public ValueExpression Read(string name, int slot, ValueType type)
+            {
+                if (compiler.indexLocals.TryGetValue(slot, out var local))
+                {
+                    if (local.Slot < 0) local.Slot = compiler.slots++;
+                    return new IterationIndexExpression(local.Slot);
+                }
+                if (declarations && compiler.derived.TryGetValue(name, out var item) && item.Declaration.Slot == slot)
+                    return new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration));
+                return locals is IDeclarationExpressionScope inherited ? inherited.Read(name, slot, type)
+                    : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null));
+            }
             public IEnumerator<KeyValuePair<string, (int Slot, ValueType Type)>> GetEnumerator() => ValuesByName.GetEnumerator();
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
         }
 
         private void Unsupported(string feature) => throw ValueType.Error(source, $"'{feature}' is not implemented in the measured rendering slice.");
 
-        private IReadOnlyDictionary<string, (int Slot, ValueType Type)> ExpressionScope(Dictionary<string, (int Slot, ValueType Type)> scope) =>
-            projectionLocals.Count == 0 ? scope : new ProjectionExpressionScope(scope, projectionLocals);
+        private IReadOnlyDictionary<string, (int Slot, ValueType Type)> ExpressionScope(Dictionary<string, (int Slot, ValueType Type)> scope)
+        {
+            IReadOnlyDictionary<string, (int Slot, ValueType Type)> result = projectionLocals.Count == 0 ? scope : new ProjectionExpressionScope(scope, projectionLocals);
+            return scope.Values.Any(binding => binding.Slot < 0) ? new DeclarationScope(this, result, false) : result;
+        }
 
         private ValueExpression Expression(string expression, Dictionary<string, (int Slot, ValueType Type)> scope) =>
             new ExpressionCompiler(expression, source, ExpressionScope(scope), Storage).Compile();
@@ -378,26 +390,54 @@ public static partial class HtmlNextCompiler
             var fragment = element is IHtmlTemplateElement;
             if (!matchArm && (element.HasAttribute("$when") || element.HasAttribute("$else")))
                 throw ValueType.Error(source, "$when and $else require a direct $match parent.");
-            var structural = new[] { "$each", "$with", "$match" }.Count(element.HasAttribute);
-            if (structural > 1 || element.HasAttribute("$if") && structural > 0 && !element.HasAttribute("$each"))
+            var structural = new[] { "$if", "$each", "$with", "$match" }.Count(element.HasAttribute);
+            if (structural > 1)
                 throw ValueType.Error(source, "Conflicting structural directives.");
-            if (!element.HasAttribute("$each") && element.HasAttribute("$where"))
-                throw ValueType.Error(source, "$where requires $each.");
+            if (!element.HasAttribute("$each") && new[] { "$where", "$sort", "$limit", "$key" }.Any(element.HasAttribute))
+                throw ValueType.Error(source, "Iteration modifiers require $each.");
 
             var condition = !guardHandled && element.GetAttribute("$if") is { } test ? Expression(test, scope) : null;
             ValueExpression? each = null;
             ValueExpression? where = null;
             var localSlot = -1;
+            IterationPlan? iteration = null;
             if (element.GetAttribute("$each") is { } loop)
             {
                 var match = EachPattern().Match(loop);
-                if (!match.Success || !ExpressionCompiler.IsIdentifier(match.Groups[1].Value)) throw ValueType.Error(source, "Expected '$each=\"item of $list\"'.");
-                each = Expression(match.Groups[2].Value, scope);
+                if (!match.Success || !ExpressionCompiler.IsIdentifier(match.Groups[1].Value) || match.Groups[2].Success && !ExpressionCompiler.IsIdentifier(match.Groups[2].Value))
+                    throw ValueType.Error(source, "Expected '$each=\"item of $list\"' or '$each=\"item, index of $list\"'.");
+                var itemName = match.Groups[1].Value;
+                var indexName = match.Groups[2].Success ? match.Groups[2].Value : null;
+                if (itemName == indexName)
+                    throw ValueType.Error(source, "Iteration aliases must have distinct names in their scope.");
+                each = Expression(match.Groups[3].Value, scope);
                 if (each.Type.Kind is not ("list" or "unknown")) throw ValueType.Error(source, "$each requires a list.");
+                var outerScope = scope;
                 scope = new(scope, StringComparer.Ordinal);
                 localSlot = slots++;
-                scope[match.Groups[1].Value] = (localSlot, each.Type.Item ?? new("unknown"));
+                scope[itemName] = (localSlot, each.Type.Item ?? new("unknown"));
                 if (element.GetAttribute("$where") is { } filter) where = Expression(filter, scope);
+                var limit = element.GetAttribute("$limit") is { } count ? Expression(count, outerScope) : null;
+                var sort = new List<IterationSort>();
+                if (element.GetAttribute("$sort") is { } ordering) foreach (var part in ordering.Split(','))
+                {
+                    var text = part.Trim();
+                    var descending = text.StartsWith('-');
+                    var pathText = descending ? text[1..].Trim() : text;
+                    var path = (pathText.StartsWith('$') ? pathText[1..] : pathText).Split('.');
+                    if (path[0] != itemName || path.Where((step, index) => !ExpressionCompiler.IsIdentifier(step) && !(index > 0 && step.Length > 0 && step.All(char.IsAsciiDigit))).Any())
+                        throw ValueType.Error(source, "$sort requires paths rooted at the loop item.");
+                    sort.Add(new(Expression("$" + string.Join('.', path), scope), path.Length > 1, descending));
+                }
+                var indexBinding = new IterationIndexBinding();
+                if (indexName is not null)
+                {
+                    var indexMarker = -indexLocals.Count - 1;
+                    indexLocals.Add(indexMarker, indexBinding);
+                    scope[indexName] = (indexMarker, ExpressionValue.NumberType);
+                }
+                var key = element.GetAttribute("$key") is { } identity ? Expression(identity, scope) : null;
+                iteration = new(indexBinding, where, limit, key, sort.ToArray(), source);
             }
             if (IsRoot(element) && (condition is not null || each is not null)) throw ValueType.Error(source, "A component root must always select exactly one native or delegated element.");
             if (element.LocalName == "slot" || fragment && element.HasAttribute("$slot"))
@@ -407,10 +447,10 @@ public static partial class HtmlNextCompiler
                     throw ValueType.Error(source, "A slot name requires a literal expression identifier.");
                 if (!outletNames.Add(name)) throw ValueType.Error(source, $"Slot '{name}' is duplicated.");
                 var arguments = SlotArguments(element, name, scope, fragment);
-                return Wrap([new SlotOutlet(name, ProjectedBody(element, scope), arguments)], condition, each, localSlot, where);
+                return Wrap([new SlotOutlet(name, ProjectedBody(element, scope), arguments)], condition, each, localSlot, where, iteration);
             }
             if (element.LocalName.Contains('-'))
-                return Wrap([Invocation(element, scope, matchArm)], condition, each, localSlot, where);
+                return Wrap([Invocation(element, scope, matchArm)], condition, each, localSlot, where, iteration);
             var childrenScope = scope;
             (ValueExpression Value, int Slot)? alias = null;
             if (element.GetAttribute("$with") is { } with) alias = Alias(with, scope, out childrenScope);
@@ -427,7 +467,7 @@ public static partial class HtmlNextCompiler
             {
                 var authoredName = QualifiedAttributeName(attribute);
                 if (fragment && projected && authoredName == "slot") continue;
-                if (authoredName is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$ref" || matchArm && authoredName is "$when" or "$else") continue;
+                if (authoredName is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" || matchArm && authoredName is "$when" or "$else") continue;
                 if (fragment) Unsupported("attribute '" + authoredName + "' on a wrapper-free template");
                 if (authoredName.StartsWith("from:", StringComparison.Ordinal))
                 {
@@ -484,7 +524,7 @@ public static partial class HtmlNextCompiler
                 if (IsRoot(element)) operations.Add(new ProjectionRootEnd(closing));
                 else Add(operations, closing);
             }
-            return Wrap(projected && !fragment ? [new ProjectionNode(operations.ToArray())] : operations.ToArray(), condition, each, localSlot, where);
+            return Wrap(projected && !fragment ? [new ProjectionNode(operations.ToArray())] : operations.ToArray(), condition, each, localSlot, where, iteration);
         }
 
         private ProjectionNode ProjectedText(string text, Dictionary<string, (int Slot, ValueType Type)> scope)
@@ -565,7 +605,7 @@ public static partial class HtmlNextCompiler
             var supplied = new HashSet<int>();
             foreach (var attribute in element.Attributes)
             {
-                if (attribute.Name == (template ? "$slot" : "name") || attribute.Name is "$if" or "$each" or "$where") continue;
+                if (attribute.Name == (template ? "$slot" : "name") || attribute.Name is "$if" or "$each" or "$where" or "$sort" or "$limit" or "$key") continue;
                 if (attribute.Name is "of" or "from:of") Unsupported("slot of");
                 if (attribute.Name.StartsWith('$')) Unsupported("slot attribute '" + attribute.Name + "'");
                 if (attribute.Name == "from:name" || template && attribute.Name == "name") throw ValueType.Error(source, "A slot name is a literal identifier.");
@@ -631,9 +671,10 @@ public static partial class HtmlNextCompiler
             _ => attribute.Name,
         };
 
-        private static RenderOperation[] Wrap(RenderOperation[] body, ValueExpression? condition, ValueExpression? each, int localSlot, ValueExpression? where)
+        private static RenderOperation[] Wrap(RenderOperation[] body, ValueExpression? condition, ValueExpression? each, int localSlot, ValueExpression? where, IterationPlan? iteration = null)
         {
-            if (each is PathExpression { Type.Reference: false } eachPath) body = [new Each(eachPath.Path, localSlot, body, where)];
+            if (each is not null && iteration is { NeedsPlan: true }) body = [new PlannedEach(each, localSlot, body, iteration)];
+            else if (each is PathExpression { Type.Reference: false } eachPath) body = [new Each(eachPath.Path, localSlot, body, where)];
             else if (each is not null) body = [new ExpressionEach(each, localSlot, body, where)];
             if (condition is not null) body = [condition is PathExpression { Type.Kind: "boolean", Type.Reference: false } testPath
                 ? new Conditional(testPath.Path, body) : new ExpressionConditional(condition, body)];
@@ -652,7 +693,7 @@ public static partial class HtmlNextCompiler
             var fallbacks = new Dictionary<int, string>();
             foreach (var attribute in element.Attributes)
             {
-                if (attribute.Name is "$if" or "$each" or "$where" or "$ref" || matchArm && attribute.Name is "$when" or "$else") continue;
+                if (attribute.Name is "$if" or "$each" or "$where" or "$sort" or "$limit" or "$key" or "$ref" || matchArm && attribute.Name is "$when" or "$else") continue;
                 var dynamic = attribute.Name.StartsWith("from:", StringComparison.Ordinal);
                 var name = dynamic ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));

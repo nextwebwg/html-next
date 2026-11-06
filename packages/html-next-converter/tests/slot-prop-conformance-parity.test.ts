@@ -29,24 +29,31 @@ const list = (tag: string, row: string, later?: string) => `<template component=
   <slot name="row"><prop name="row" type="object" required>The row.<prop name="id" required type="string">Id.</prop><prop name="label" required type="string">Label.</prop></prop></slot>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', label: 'A' }, ${row}]"></state>
   ${later === undefined ? "" : `<handler name="change"><set name="rows" expr:value="[{ id: 'a', label: 'A' }, ${later}]"></set></handler>`}</defs>
-  <div><ul class="${tag}"><slot $each="r of $rows" $key="$loop.index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
+  <div><ul class="${tag}"><slot $each="r, index of $rows" $key="$index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
 const cases = { extra: "{ id: 'b', label: 'B', index: 1 }", missing: "{ id: 'b' }", wrong: "{ id: 2, label: 'B' }", later: "{ id: 'b', label: 'B' }" } as const;
 const page = `${[...Object.keys(cases), "defaults", "finite", "optional"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
-<template component="x-page" status="early" summary="Page."><defs><state name="label" type="string" value="Outer"></state><state name="count" type="number" value="99"></state><state name="empty" type="number" value="98"></state></defs><main>${Object.keys(cases).map((name) =>
+<template component="x-page" status="early" summary="Page."><defs><state name="label" type="string" value="Outer"></state><state name="count" type="number" value="99"></state><state name="empty" type="number" value="98"></state>
+<state name="loop" type="string" value="declared"></state><state name="index" type="string" value="named"></state>
+<state name="values" type="list(number)" from="[4, 5]"></state><state name="position" type="length" value="8px"></state><state name="edits" type="list(object({ label: string }))" from="[{ label: 'A' }, { label: 'B' }]"></state><handler name="change-aliases"><set name="values" expr:value="[5, 4, 3]"></set></handler></defs><main>${Object.keys(cases).map((name) =>
   `<x-${name}><template slot="row"><li $value="$row.label"></li></template></x-${name}>`).join("")}
-  <x-defaults><template slot="row"><li><b $value="$label"></b><i $value="$note"></i></li></template></x-defaults><x-finite><template slot="row"><li>{$count}:{$empty}:{$missing = null}:{$__proto__}</li></template></x-finite><x-optional><template slot="row"><li>{$label}</li></template></x-optional></main></template>`;
+  <x-defaults><template slot="row"><li><b $value="$label"></b><i $value="$note"></i></li></template></x-defaults><x-finite><template slot="row"><li>{$count}:{$empty}:{$missing = null}:{$__proto__}</li></template></x-finite><x-optional><template slot="row"><li>{$label}</li></template></x-optional>
+<ol data-iteration><p $each="item, position of $values" $key="concat($loop, $index, $item)" $sort="-item" $limit="2">{$loop}:{$index}:{$position}:{$item}:{$values.length}</p></ol>
+<div data-shadow><b $each="loop, index of $values" $where="$index = 'named'" $key="$loop">{$loop}:{$index + 1}</b><i>{$loop}:{$index}</i></div>
+<div data-dimension><p $each="position of $values" $where="round($position, 1) > 3">{round($position, 1)}</p><b $each="value, position of $values">{round($position, 1)}</b><i>{$position}</i></div>
+<div data-edits><label $each="entry of $edits" $key="$entry.label"><input bind:value="entry.label"><span>{$entry.label}</span></label></div>
+<button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
 // A default fills a rejected value and a null or missing one, typed or `unknown`.
 const defaults = `<template component="x-defaults" status="early" summary="Defaults."><defs>
   <slot name="row"><prop name="label" type="string" default="Fallback">Label.</prop><prop name="note" type="unknown" default="n">Note.</prop></slot>
   <state type="list(unknown)" name="rows" value="[{ label: 'A', note: 'x' }, { label: 3 }, { label: null, note: null }]"></state></defs>
-  <div><ul class="x-defaults"><slot $each="r of $rows" $key="$loop.index" name="row" from:label="$r.label" from:note="$r.note"></slot></ul></div></template>`;
+  <div><ul class="x-defaults"><slot $each="r, index of $rows" $key="$index" name="row" from:label="$r.label" from:note="$r.note"></slot></ul></div></template>`;
 const finite = `<template component="x-finite"><defs>
   <slot name="row"><prop name="count" type="number" default="7">Count.</prop><prop name="empty" type="number" required>Empty.</prop><prop name="missing" type="unknown" required>Missing.</prop><prop name="__proto__" type="number" default="9">Prototype name.</prop></slot>
   <state name="denominator" type="number" value="0"></state><state name="record" type="object({ ... })" value="{}"></state>
   <handler name="valid"><set name="denominator" value="2"></set></handler>
   <handler name="invalid"><set name="denominator" value="0"></set></handler>
   <handler name="recover"><set name="denominator" value="4"></set></handler>
-</defs><div><ul class="x-finite"><slot name="row" $each="offset of [0, 1]" $key="$loop.index" from:count="1 / ($denominator + $offset)" from:empty="1 / ($denominator + $offset)" from:missing="$record.absent" from:__proto__="1 / ($denominator + $offset)"></slot></ul>
+</defs><div><ul class="x-finite"><slot name="row" $each="offset, index of [0, 1]" $key="$index" from:count="1 / ($denominator + $offset)" from:empty="1 / ($denominator + $offset)" from:missing="$record.absent" from:__proto__="1 / ($denominator + $offset)"></slot></ul>
 <button id="finite-valid" on:click="valid">Valid</button><button id="finite-invalid" on:click="invalid">Invalid</button><button id="finite-recover" on:click="recover">Recover</button></div></template>`;
 const optional = `<template component="x-optional"><defs><slot name="row"><prop name="label" type="string">Label.</prop></slot></defs><div><ul class="x-optional"><slot name="row"></slot></ul></div></template>`;
 const files: Readonly<Record<string, string>> = { "optional.html": optional, "finite.html": finite, "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
@@ -164,6 +171,20 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             await page.waitForFunction(() => document.querySelectorAll("li").length === 14);
             assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", "B"]], filled, ["x-finite", ["7::true:9", "1:1:true:1"]], ["x-optional", ["Outer"]]]);
             assert.equal(warnings.length, 4);
+            const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));
+            assert.deepEqual(await iteration(), [["declared:named:0:5:2", true, false], ["declared:named:1:4:2", false, true]]);
+            await page.locator('[data-edits] input').nth(1).fill("Edited");
+            await page.waitForFunction(() => document.querySelectorAll('[data-edits] span')[1]?.textContent === "Edited");
+            assert.deepEqual(await page.locator('[data-edits] span').allTextContents(), ["A", "Edited"]);
+            const dimensions = () => page.evaluate(() => ({ items: Array.from(document.querySelectorAll('[data-dimension] p'), row => row.textContent), indices: Array.from(document.querySelectorAll('[data-dimension] b'), row => row.textContent), outer: document.querySelector('[data-dimension] i')!.textContent }));
+            assert.deepEqual(await dimensions(), { items: ["4", "5"], indices: ["0", "1"], outer: "8px" });
+            const shadows = () => page.locator('[data-shadow]').innerText();
+            assert.equal((await shadows()).replace(/\s/g, ""), "4:15:2declared:named");
+            await page.click("#change-aliases");
+            await page.waitForFunction(() => document.querySelector('[data-iteration] p')?.textContent === "declared:named:0:5:3");
+            assert.deepEqual(await iteration(), [["declared:named:0:5:3", true, false], ["declared:named:1:4:3", false, true]]);
+            assert.equal((await shadows()).replace(/\s/g, ""), "5:14:23:3declared:named");
+            assert.deepEqual(await dimensions(), { items: ["5", "4"], indices: ["0", "1", "2"], outer: "8px" });
             await page.click("button");
             await page.waitForFunction(() => document.querySelector(".x-later")!.textContent === "A");
             assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", ""]], filled, ["x-finite", ["7::true:9", "1:1:true:1"]], ["x-optional", ["Outer"]]]);
