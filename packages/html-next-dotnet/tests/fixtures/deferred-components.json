@@ -118,5 +118,53 @@
     "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"number\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs></defs><main><x-unused><x-leaf value=\"03\" from:value=\"1 / 0\"></x-leaf></x-unused></main></template>",
     "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"03\"></x-leaf></template></section></main>",
     "carrier": "<x-leaf value=\"03\"></x-leaf>"
+  },
+  {
+    "name": "pending-state",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$waiting\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\"></x-leaf>"
+  },
+  {
+    "name": "pending-computed",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$derived\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\"></x-leaf>"
+  },
+  {
+    "name": "pending-fallback",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"default($waiting, 9)\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"9\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"9\"></x-leaf>"
+  },
+  {
+    "name": "pending-unread-branch",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"true ? 9 : $waiting\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"9\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"9\"></x-leaf>"
+  },
+  {
+    "name": "available-missing-field",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$record.missing\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "pending-name-shadowed-by-alias",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><template $with=\"3 as waiting\"><x-leaf value=\"7\" from:value=\"$waiting\"></x-leaf></template></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"3\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"3\"></x-leaf>"
+  },
+  {
+    "name": "pending-binding-followed-by-ready-binding",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop><prop name=\"other\" type=\"integer\">Other.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$waiting\" from:other=\"9\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\" other=\"9\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\" other=\"9\"></x-leaf>"
+  },
+  {
+    "name": "typed-row-props",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(object({ value: integer }))\" from=\"[{ value: 1.5 }, { value: 3 }, 4]\"></state></defs><main><x-unused><x-leaf $each=\"row of $rows\" value=\"7\" from:value=\"$row.value\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf><x-leaf value=\"3\"></x-leaf><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\"></x-leaf><x-leaf value=\"3\"></x-leaf><x-leaf></x-leaf>"
   }
 ]

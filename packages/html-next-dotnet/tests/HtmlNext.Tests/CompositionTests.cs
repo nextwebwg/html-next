@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HtmlNext;
 using Xunit;
 
@@ -5,6 +6,28 @@ namespace HtmlNext.Tests;
 
 public sealed class CompositionTests
 {
+    public static IEnumerable<object[]> PropCases()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "invocation-props.json")));
+        foreach (var entry in document.RootElement.EnumerateArray())
+            yield return [entry.GetProperty("name").GetString()!, entry.GetProperty("source").GetString()!, entry.GetProperty("expected").GetString()!, entry.GetProperty("diagnostics").GetInt32()];
+    }
+
+    [Theory]
+    [MemberData(nameof(PropCases))]
+    public void BindsPlacedPropsWithLiteralFallbackInEitherAttributeOrder(string name, string source, string expected, int diagnosticCount)
+    {
+        var template = HtmlNextCompiler.CompileResource(source, name + ".html").Template("x-page");
+        var diagnostics = new List<HtmlNextDiagnostic>();
+        Assert.Equal(expected, template.Render(onDiagnostic: diagnostics.Add));
+        Assert.Equal(diagnosticCount, diagnostics.Count);
+        Assert.All(diagnostics, diagnostic => Assert.Equal("HNCS004", diagnostic.Code));
+        diagnostics.Clear();
+        using var writer = new StringWriter(); template.Write(writer, onDiagnostic: diagnostics.Add);
+        Assert.Equal(expected, writer.ToString());
+        Assert.Equal(diagnosticCount, diagnostics.Count);
+    }
+
     private const string Label = """
         <template component="x-label"><defs><prop name="label" type="string" default="Default">Label.</prop></defs><b>{$label}</b></template>
         """;
@@ -13,10 +36,10 @@ public sealed class CompositionTests
     public void BindsStaticAndDynamicPropsAndResolvesNullThroughChildDefaults()
     {
         var graph = HtmlNextCompiler.CompileResource(Label + """
-            <template component="x-page"><defs><prop name="name" type="string">Name.</prop></defs><div><x-label label="&lt;Literal&gt;"></x-label><x-label from:label="$name"></x-label><x-label></x-label><x-label from:label="null"></x-label></div></template>
+            <template component="x-page"><defs><prop name="name" type="string">Name.</prop></defs><div><x-label label="&lt;Literal&gt;"></x-label><x-label from:label="$name"></x-label><x-label></x-label><x-label from:label="null"></x-label><x-label label="one" from:label="'two'"></x-label></div></template>
             """);
         var template = graph.Template("x-page");
-        var expected = "<div><b>&lt;Literal&gt;</b><b>A &amp; B</b><b>Default</b><b>Default</b></div>";
+        var expected = "<div><b>&lt;Literal&gt;</b><b>A &amp; B</b><b>Default</b><b>Default</b><b>two</b></div>";
         Assert.Equal(expected, template.Render(new { name = "A & B" }));
         using var writer = new StringWriter(); template.Write(writer, new { name = "A & B" });
         Assert.Equal(expected, writer.ToString());
@@ -148,10 +171,9 @@ public sealed class CompositionTests
     }
 
     [Theory]
-    [InlineData("<x-label label=\"one\" from:label=\"'two'\"></x-label>")]
     [InlineData("<x-label from:label=\"1\"></x-label>")]
     [InlineData("<x-label onclick=\"run()\"></x-label>")]
-    public void RejectsConflictingInvalidOrUnimplementedInvocationFeatures(string call)
+    public void RejectsInvalidOrUnimplementedInvocationFeatures(string call)
     {
         Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.CompileResource(Label + "<template component=\"x-page\"><div>" + call + "</div></template>"));
     }

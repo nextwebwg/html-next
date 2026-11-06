@@ -197,17 +197,19 @@ public static partial class HtmlNextCompiler
             compiled.Add(name);
         }
 
-        private sealed class DeclarationScope(Compiler compiler) : IDeclarationExpressionScope
+        private sealed class DeclarationScope(Compiler compiler, IReadOnlyDictionary<string, (int Slot, ValueType Type)>? locals = null) : IDeclarationExpressionScope
         {
-            private Dictionary<string, (int Slot, ValueType Type)> ValuesByName => compiler.bindings;
+            private IReadOnlyDictionary<string, (int Slot, ValueType Type)> ValuesByName => locals ?? compiler.bindings;
             public (int Slot, ValueType Type) this[string key] => TryGetValue(key, out var value) ? value : throw new KeyNotFoundException(key);
             public IEnumerable<string> Keys => ValuesByName.Keys;
             public IEnumerable<(int Slot, ValueType Type)> Values => ValuesByName.Values;
             public int Count => ValuesByName.Count;
             public bool ContainsKey(string key) => ValuesByName.ContainsKey(key);
             public bool TryGetValue(string key, out (int Slot, ValueType Type) value) { compiler.CompileDerived(key); return ValuesByName.TryGetValue(key, out value); }
-            public ValueExpression Read(string name, int slot, ValueType type) => compiler.derived.TryGetValue(name, out var item)
-                ? new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration)) : new PathExpression(new(slot, [], type));
+            public ValueExpression Read(string name, int slot, ValueType type) => compiler.derived.TryGetValue(name, out var item) && item.Declaration.Slot == slot
+                ? new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration))
+                : locals is IDeclarationExpressionScope declarations ? declarations.Read(name, slot, type)
+                : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null));
             public IEnumerator<KeyValuePair<string, (int Slot, ValueType Type)>> GetEnumerator() => ValuesByName.GetEnumerator();
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
         }
@@ -660,7 +662,7 @@ public static partial class HtmlNextCompiler
                 var prop = target.Props[index];
                 if (dynamic)
                 {
-                    var expression = Expression(attribute.Value, scope);
+                    var expression = new ExpressionCompiler(attribute.Value, source, new DeclarationScope(this, ExpressionScope(scope)), Storage, declarationContextSlot).Compile();
                     if (!prop.Type.CanBindType(expression.Type)) throw ValueType.Error(source, $"Binding '{name}' has an incompatible type.");
                     arguments[index] = new(expression, arguments[index]?.Constant);
                     names[index] = name;
@@ -674,7 +676,7 @@ public static partial class HtmlNextCompiler
             var deferred = new List<RenderOperation>();
             foreach (var index in order)
                 if (arguments[index]!.Expression is { } expression)
-                    deferred.Add(new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index)));
+                    deferred.Add(new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index), declarationContextSlot));
                 else Add(deferred, fallbacks[index]);
             hasComponents = true;
             return new(target, arguments, deferred.ToArray(), IsRoot(element) ? rootStyle : null, projection.Length == 0 ? null : projection, IsRoot(element));

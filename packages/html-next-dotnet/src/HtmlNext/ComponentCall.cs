@@ -50,11 +50,22 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
     }
 }
 
-internal sealed record DeferredPropAttribute(string Name, ValueExpression Expression, ValueType Destination, BoundAttributeKind Kind, string Source, string? Fallback) : RenderOperation
+internal sealed record DeferredPropAttribute(string Name, ValueExpression Expression, ValueType Destination, BoundAttributeKind Kind, string Source, string? Fallback, int DeclarationContextSlot) : RenderOperation
 {
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
-        var value = Expression.Evaluate(values);
+        var evaluation = DeclarationContextSlot < 0 ? null : (DeclarationEvaluation)values[DeclarationContextSlot]!;
+        var previousReady = evaluation?.Ready ?? true;
+        if (evaluation is not null) evaluation.Ready = true;
+        ExpressionValue value;
+        bool ready;
+        try
+        {
+            value = Expression.Evaluate(values);
+            ready = evaluation?.Ready ?? true;
+        }
+        finally { if (evaluation is not null) evaluation.Ready = previousReady; }
+        if (!ready) { writer.Write(Fallback); return; }
         var conforms = value.IsNull || value.IsAbsent || (Destination.Kind switch
         {
             "object" or "list" => value.Type.Kind == Destination.Kind,

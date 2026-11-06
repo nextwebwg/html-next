@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Render caller-owned bindings, conditions, loops, fragments and forwarding slots inside native deferred component carriers while keeping unplaced component setup and original lazy templates deferred. Preserve literal prop fallbacks for invalid or waiting inputs, distinguish available null and absence, and verify placed prop bindings in either attribute order against Node output.
+
 - Validate and consume native `$ref` directives on element and component roots, descendants, repeated content and lazy projections. Reject invalid names and authored duplicates, allow reuse across root `$match` alternatives, and retain reference directives in original inert template bodies. Keep reference validation out of request binding.
 
 - Compile native scoped slot declarations and typed outlet props, preserving consumer guards, lazy outer bindings, repeated placement and request isolation. Cache constant conversions during compilation and dynamic snapshots between buffered output passes; report rejected types once per authored outlet and prop. Accepted-child projection remains in progress.
