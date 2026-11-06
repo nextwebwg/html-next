@@ -643,7 +643,11 @@ public static partial class HtmlNextCompiler
             if (!components.TryGetValue(element.LocalName, out var target)) throw ValueType.Error(source, $"Unknown component '{element.LocalName}'.");
             var projection = Projection(element, scope);
             var arguments = new ComponentArgument?[target.Props.Length];
-            var supplied = new HashSet<int>();
+            var literals = new HashSet<int>();
+            var bound = new HashSet<int>();
+            var order = new List<int>();
+            var names = new Dictionary<int, string>();
+            var fallbacks = new Dictionary<int, string>();
             foreach (var attribute in element.Attributes)
             {
                 if (attribute.Name is "$if" or "$each" or "$where" or "$ref" || matchArm && attribute.Name is "$when" or "$else") continue;
@@ -651,18 +655,29 @@ public static partial class HtmlNextCompiler
                 var name = dynamic ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
                 if (index < 0) Unsupported("invocation attribute '" + attribute.Name + "'");
-                if (!supplied.Add(index)) throw ValueType.Error(source, $"Duplicate component prop '{name}'.");
+                if (!(dynamic ? bound : literals).Add(index)) throw ValueType.Error(source, $"Duplicate component prop '{name}'.");
+                if (arguments[index] is null) order.Add(index);
                 var prop = target.Props[index];
                 if (dynamic)
                 {
                     var expression = Expression(attribute.Value, scope);
                     if (!prop.Type.CanBindType(expression.Type)) throw ValueType.Error(source, $"Binding '{name}' has an incompatible type.");
-                    arguments[index] = new(expression, null);
+                    arguments[index] = new(expression, arguments[index]?.Constant);
+                    names[index] = name;
                 }
-                else arguments[index] = new(null, Default(attribute.Value, prop.Type));
+                else
+                {
+                    arguments[index] = new(arguments[index]?.Expression, Default(attribute.Value, prop.Type));
+                    fallbacks[index] = " " + name + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
+                }
             }
+            var deferred = new List<RenderOperation>();
+            foreach (var index in order)
+                if (arguments[index]!.Expression is { } expression)
+                    deferred.Add(new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index)));
+                else Add(deferred, fallbacks[index]);
             hasComponents = true;
-            return new(target, arguments, IsRoot(element) ? rootStyle : null, projection.Length == 0 ? null : projection, IsRoot(element), SourceMarkup(element));
+            return new(target, arguments, deferred.ToArray(), IsRoot(element) ? rootStyle : null, projection.Length == 0 ? null : projection, IsRoot(element));
         }
 
         private static string SourceMarkup(INode node, bool inert = false)

@@ -4,9 +4,22 @@ namespace HtmlNext;
 
 internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant);
 
-internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, string? Source = null) : RenderOperation
+internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false) : RenderOperation
 {
-    public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation) => writer.Write(Source);
+    public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        ExecutionStack.Check(Target.Template.SourceName);
+        writer.Write('<'); writer.Write(Target.Template.Tag);
+        foreach (var operation in DeferredAttributes) operation.Write(ref writer, values, cancellation);
+        writer.Write('>');
+        if (Projection is not null) foreach (var group in Projection)
+        {
+            if (group.Template) writer.Write(group.Source);
+            else foreach (var operation in group.Body) operation.WriteDeferred(ref writer, values, cancellation);
+        }
+        writer.Write("</"); writer.Write(Target.Template.Tag); writer.Write('>');
+    }
     public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation) => true;
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
@@ -34,6 +47,21 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
                 throw ValueType.Error(Target.Template.SourceName, "The rendered root has no position for its projection carrier.");
         }
         finally { if (projected) context.LeaveProjection(previousProjection); }
+    }
+}
+
+internal sealed record DeferredPropAttribute(string Name, ValueExpression Expression, ValueType Destination, BoundAttributeKind Kind, string Source, string? Fallback) : RenderOperation
+{
+    public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
+    {
+        var value = Expression.Evaluate(values);
+        var conforms = value.IsNull || value.IsAbsent || (Destination.Kind switch
+        {
+            "object" or "list" => value.Type.Kind == Destination.Kind,
+            _ => !Destination.CheckReference(value).IsInvalid,
+        });
+        if (!conforms) { writer.Write(Fallback); return; }
+        BoundAttribute.Write(ref writer, Name, value, Kind, Source, Fallback);
     }
 }
 

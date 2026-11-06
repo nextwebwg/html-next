@@ -153,7 +153,11 @@ public sealed class CompiledTemplate
             if (argument?.Expression is { } expression)
             {
                 var input = expression.Evaluate(parent);
-                if (input.IsInvalid) continue;
+                if (input.IsInvalid)
+                {
+                    values[index] = argument.Constant ?? prop.Default;
+                    continue;
+                }
                 try
                 {
                     if (!input.IsNull && !input.IsAbsent) values[index] = prop.Type.BindExpression(input, source, cancellation);
@@ -161,6 +165,7 @@ public sealed class CompiledTemplate
                 catch (HtmlNextException error) when (error.Code == "HNCS001")
                 {
                     failed = true;
+                    values[index] = argument.Constant ?? prop.Default;
                     onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
                 }
             }

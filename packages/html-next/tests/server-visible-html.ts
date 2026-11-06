@@ -1,5 +1,18 @@
 import { JSDOM } from "jsdom";
 
+/** The ordinary content of a named carrier, excluding only renderer-owned region markers. */
+export function carrierHtml(html: string, tag: string): string {
+  const dom = new JSDOM(html);
+  try {
+    const carrier = Array.from(dom.window.document.querySelectorAll<HTMLTemplateElement>("template[carrier]")).find(element => element.getAttribute("carrier") === tag)!;
+    const comments: Comment[] = [];
+    const walker = dom.window.document.createTreeWalker(carrier.content, 128);
+    while (walker.nextNode()) comments.push(walker.currentNode as Comment);
+    for (const comment of comments) if (/^html-next:|^\?(?:start|end|marker)(?:\s|\?)/.test(comment.data)) comment.remove();
+    return carrier.innerHTML;
+  } finally { dom.window.close(); }
+}
+
 /** Reference names that remain observable inside inert serialized carrier content. */
 export function inertCarrierReferences(html: string): string[] {
   const dom = new JSDOM(html);
