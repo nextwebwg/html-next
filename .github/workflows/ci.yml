@@ -18,7 +18,7 @@ concurrency:
 jobs:
   changes:
     name: Affected packages
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 1
     outputs:
       node: ${{ steps.plan.outputs.node }}
@@ -59,7 +59,7 @@ jobs:
   repository:
     name: Repository contracts
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +80,7 @@ jobs:
     name: Test ${{ matrix.name }}
     needs: changes
     if: needs.changes.outputs.has_node == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -102,7 +102,7 @@ jobs:
     name: Browser ${{ matrix.name }}
     needs: changes
     if: needs.changes.outputs.has_browser == 'true' && needs.changes.outputs.browser_reused != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     # Immutable browser userspace includes all three engines and OS libraries.
     container:
       image: ${{ needs.changes.outputs.browser_image }}
@@ -138,7 +138,7 @@ jobs:
     name: Packed ${{ matrix.package }}
     needs: changes
     if: needs.changes.outputs.has_packages == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     strategy:
       fail-fast: false
@@ -162,7 +162,7 @@ jobs:
     name: Deno and Bun runtime
     needs: changes
     if: contains(fromJSON(needs.changes.outputs.packages), 'htmlkit')
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -201,7 +201,7 @@ jobs:
     name: Required
     if: always()
     needs: [changes, repository, verify, browser, packages, runtimes, converters]
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 3
     steps:
       # Only empty selection or validated browser reuse may skip a matrix. Fail closed otherwise.
