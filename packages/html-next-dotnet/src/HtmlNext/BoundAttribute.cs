@@ -72,7 +72,7 @@ internal static class BoundAttribute
         return ExecutablePrefix(prefix[..length]);
     }
 
-    private static bool ExecutableUrl(ExpressionValue value, string source)
+    public static bool ExecutableUrl(ExpressionValue value, string source)
     {
         Span<char> prefix = stackalloc char[11];
         var length = 0;

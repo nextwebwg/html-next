@@ -41,6 +41,7 @@ internal sealed class ComponentReference
     internal static readonly IReadOnlyDictionary<string, ScopedSlotContract> EmptySlots = new Dictionary<string, ScopedSlotContract>();
     public IReadOnlyDictionary<string, ScopedSlotContract> Slots { get; set; } = EmptySlots;
     public Prop[] Props { get; set; } = [];
+    public bool ReceivesAttributes { get; set; }
     public CompiledTemplate Template { get; set; } = null!;
 }
 
@@ -125,6 +126,18 @@ public static partial class HtmlNextCompiler
                 hash,
                 Array.AsReadOnly(resource.Dependencies.ToArray())));
         }
+        foreach (var (compiler, _) in compilers) compiler.FindInvocationAttributes();
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var (compiler, reference) in compilers)
+                if (reference.ReceivesAttributes && compiler.DelegatedTag is { } tag && references.TryGetValue(tag, out var delegated) && !delegated.ReceivesAttributes)
+                {
+                    delegated.ReceivesAttributes = true;
+                    changed = true;
+                }
+        } while (changed);
         foreach (var (compiler, reference) in compilers)
         {
             cancellation.ThrowIfCancellationRequested();

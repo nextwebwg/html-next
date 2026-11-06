@@ -43,6 +43,19 @@ public static partial class HtmlNextCompiler
         private IReadOnlyList<string> styleNames = [];
         private RootStyle? rootStyle;
         public string Tag { get; private set; } = "";
+        public string? DelegatedTag => root.LocalName.Contains('-') ? root.LocalName : null;
+
+        public void FindInvocationAttributes() => Visit(root);
+        private void Visit(IElement element)
+        {
+            if (components.TryGetValue(element.LocalName, out var target))
+                foreach (var attribute in element.Attributes)
+                {
+                    var name = attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? attribute.Name[5..] : attribute.Name;
+                    if (!name.StartsWith('$') && !target.Props.Any(prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name))) target.ReceivesAttributes = true;
+                }
+            foreach (var child in Children(element)) if (child is IElement nested) Visit(nested);
+        }
         public Prop[] Props => props.ToArray();
         private HtmlNextModuleReference? module;
         private ExpressionStorage? expressionStorage;
@@ -234,38 +247,7 @@ public static partial class HtmlNextCompiler
         private ValueExpression Expression(string expression, Dictionary<string, (int Slot, ValueType Type)> scope) =>
             new ExpressionCompiler(expression, source, ExpressionScope(scope), Storage).Compile();
 
-        private object? Default(string text, ValueType type)
-        {
-            object? value;
-            if (type.Kind is "string" or "keyword" or "length" or "percentage" or "duration") value = text;
-            else if (type.Kind == "boolean" && text is "true" or "false" or "") value = text != "false";
-            else if (type.Kind is "number" or "integer" && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) value = number;
-            else
-            {
-                var compiler = new ExpressionCompiler(text, source, new Dictionary<string, (int, ValueType)>());
-                var expression = compiler.Compile();
-                if (!expression.Constant || !compiler.LiteralOnly) throw ValueType.Error(source, "A default requires a literal value.");
-                value = ModelValue(expression.Evaluate([]));
-            }
-            return type.Bind(value, source, default);
-        }
-
-        private static object? ModelValue(ExpressionValue value)
-        {
-            if (value.Type.Kind == "object")
-            {
-                var result = new Dictionary<string, object?>(StringComparer.Ordinal);
-                for (var index = 0; index < value.Count; index++) result.Add(value.Type.Fields![index].Name, ModelValue(value.Item(index)));
-                return result;
-            }
-            if (value.Type.Kind == "list")
-            {
-                var result = new object?[value.Count];
-                for (var index = 0; index < result.Length; index++) result[index] = ModelValue(value.Item(index));
-                return result;
-            }
-            return value.IsDimension ? value.ScalarText() : value.Store();
-        }
+        private object? Default(string text, ValueType type) => AttributeInput(text, type, source);
 
         private ValueExpression Scalar(string expression, Dictionary<string, (int Slot, ValueType Type)> scope)
         {
@@ -530,6 +512,10 @@ public static partial class HtmlNextCompiler
                 if (attribute.Name == "class" && classes is not null) { if (classes.At(-1) is { } operation) Append(operations, [operation]); }
                 else Append(operations, [attribute.Operation ?? bindingsByName[attribute.Name]]);
             }
+            if (!fragment && IsRoot(element) && components[Tag].ReceivesAttributes)
+                operations.Add(new ForwardedRootAttributes(attributes.Where(attribute => !attribute.Name.StartsWith('$'))
+                    .Select(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? AttributeName(element, attribute.Name[5..]) : attribute.Name)
+                    .ToHashSet(StringComparer.Ordinal)));
             var literalNames = literalOrder.Select(attribute => attribute.Name).ToHashSet(StringComparer.Ordinal);
             foreach (var attribute in bindingOrder)
                 if (attribute.Name == "class" && classes is not null) { if (classes.At(attribute.Position) is { } operation) Append(operations, [operation]); }
@@ -729,13 +715,25 @@ public static partial class HtmlNextCompiler
             var order = new List<int>();
             var names = new Dictionary<int, string>();
             var fallbacks = new Dictionary<int, string>();
+            var forwarded = new Dictionary<string, InvocationAttribute>(StringComparer.Ordinal);
             foreach (var attribute in element.Attributes)
             {
                 if (attribute.Name is "$if" or "$each" or "$where" or "$sort" or "$limit" or "$key" or "$ref" || matchArm && attribute.Name is "$when" or "$else") continue;
                 var dynamic = attribute.Name.StartsWith("from:", StringComparison.Ordinal);
                 var name = dynamic ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
-                if (index < 0) Unsupported("invocation attribute '" + attribute.Name + "'");
+                if (index < 0)
+                {
+                    name = AttributeName(element, name);
+                    if (name is "class" or "style" or "srcdoc" or "innerhtml" or "outerhtml" or "textcontent" or "innertext"
+                        || name.StartsWith("on", StringComparison.OrdinalIgnoreCase) || name.StartsWith('$') || name.Contains(':')) Unsupported("invocation attribute '" + attribute.Name + "'");
+                    if (!dynamic && BoundAttributeRules.IsUrl(name) && BoundAttribute.ExecutableUrl(attribute.Value))
+                        throw ValueType.Error(source, $"Literal attribute '{name}' contains executable content.");
+                    forwarded.TryGetValue(name, out var previous);
+                    if (dynamic ? previous?.Expression is not null : previous?.Literal is not null) throw ValueType.Error(source, $"Duplicate invocation attribute '{name}'.");
+                    forwarded[name] = new(name, dynamic ? previous?.Literal : attribute.Value, dynamic ? Expression(attribute.Value, scope) : previous?.Expression, source);
+                    continue;
+                }
                 if (!(dynamic ? bound : literals).Add(index)) throw ValueType.Error(source, $"Duplicate component prop '{name}'.");
                 if (arguments[index] is null) order.Add(index);
                 var prop = target.Props[index];
@@ -752,13 +750,28 @@ public static partial class HtmlNextCompiler
                     fallbacks[index] = " " + name + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
                 }
             }
-            var deferred = new List<RenderOperation>();
+            var propAttributes = new Dictionary<int, RenderOperation>();
             foreach (var index in order)
                 if (arguments[index]!.Expression is { } expression)
-                    deferred.Add(new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index), declarationContextSlot));
-                else Add(deferred, fallbacks[index]);
+                    propAttributes.Add(index, new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index), declarationContextSlot));
+                else propAttributes.Add(index, new Literal(fallbacks[index]));
+            var deferred = new List<RenderOperation>();
+            var attributes = new List<InvocationAttribute>();
+            var writtenProps = new HashSet<int>();
+            var writtenAttributes = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var attribute in element.Attributes.OrderBy(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal)))
+            {
+                var name = attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? attribute.Name[5..] : attribute.Name;
+                var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
+                if (index >= 0 && writtenProps.Add(index)) deferred.Add(propAttributes[index]);
+                else if (index < 0 && forwarded.TryGetValue(name, out var entry) && writtenAttributes.Add(name))
+                {
+                    deferred.Add(entry);
+                    attributes.Add(entry);
+                }
+            }
             hasComponents = true;
-            return new(target, arguments, deferred.ToArray(), IsRoot(element) ? rootStyle : null, projection.Length == 0 ? null : projection, IsRoot(element));
+            return new(target, arguments, deferred.ToArray(), IsRoot(element) ? rootStyle : null, projection.Length == 0 ? null : projection, IsRoot(element), attributes.Count == 0 ? null : attributes.ToArray());
         }
 
         private static string SourceMarkup(INode node, bool inert = false)
@@ -776,16 +789,50 @@ public static partial class HtmlNextCompiler
             return output.ToString();
         }
 
-        private static bool AsciiEquals(string a, string b)
+
+    }
+    internal static bool AsciiEquals(string a, string b)
+    {
+        if (a.Length != b.Length) return false;
+        for (var index = 0; index < a.Length; index++)
         {
-            if (a.Length != b.Length) return false;
-            for (var index = 0; index < a.Length; index++)
-            {
-                var left = a[index] is >= 'A' and <= 'Z' ? (char)(a[index] + 32) : a[index];
-                var right = b[index] is >= 'A' and <= 'Z' ? (char)(b[index] + 32) : b[index];
-                if (left != right) return false;
-            }
-            return true;
+            var left = a[index] is >= 'A' and <= 'Z' ? (char)(a[index] + 32) : a[index];
+            var right = b[index] is >= 'A' and <= 'Z' ? (char)(b[index] + 32) : b[index];
+            if (left != right) return false;
         }
+        return true;
+    }
+
+    internal static object? AttributeInput(string text, ValueType type, string source, CancellationToken cancellation = default)
+    {
+        object? value;
+        if (type.Kind is "string" or "keyword" or "length" or "percentage" or "duration") value = text;
+        else if (type.Kind == "boolean" && text is "true" or "false" or "") value = text != "false";
+        else if (type.Kind is "number" or "integer" && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) value = number;
+        else
+        {
+            var compiler = new ExpressionCompiler(text, source, new Dictionary<string, (int, ValueType)>());
+            var expression = compiler.Compile();
+            if (!expression.Constant || !compiler.LiteralOnly) throw ValueType.Error(source, "A default requires a literal value.");
+            value = ModelValue(expression.Evaluate([]));
+        }
+        return type.Bind(value, source, cancellation);
+    }
+
+    private static object? ModelValue(ExpressionValue value)
+    {
+        if (value.Type.Kind == "object")
+        {
+            var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (var index = 0; index < value.Count; index++) result.Add(value.Type.Fields![index].Name, ModelValue(value.Item(index)));
+            return result;
+        }
+        if (value.Type.Kind == "list")
+        {
+            var result = new object?[value.Count];
+            for (var index = 0; index < result.Length; index++) result[index] = ModelValue(value.Item(index));
+            return result;
+        }
+        return value.IsDimension ? value.ScalarText() : value.Store();
     }
 }

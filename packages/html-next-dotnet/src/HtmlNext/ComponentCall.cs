@@ -4,8 +4,9 @@ namespace HtmlNext;
 
 internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant);
 
-internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false) : RenderOperation
+internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute[]? Attributes = null) : RenderOperation
 {
+    private readonly Prop[] props = Target.Props;
     public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
@@ -29,11 +30,12 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
         var child = context.NextChild();
         if (child is null)
         {
-            child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic);
+            child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, SharedRoot ? context.InheritedAttributes : null);
             context.RecordChild(child);
         }
         var projected = Projection is { Length: > 0 } || SharedRoot && context.ProjectionFor(values) is not null;
         var previousProjection = projected ? context.EnterProjection(Projection ?? [], values, child, Target.Template.Tag, SharedRoot) : null;
+        var previousAttributes = context.EnterInvocationAttributes(Attributes, props, values, SharedRoot);
         try
         {
             if (ParentStyle is null && !context.HasRootStyles) Target.Template.WritePlan(ref writer, child, cancellation);
@@ -46,7 +48,11 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             if (projected && context.ProjectionFor(child) is { CarrierHandled: false, NeedsCarrier: true })
                 throw ValueType.Error(Target.Template.SourceName, "The rendered root has no position for its projection carrier.");
         }
-        finally { if (projected) context.LeaveProjection(previousProjection); }
+        finally
+        {
+            context.LeaveInvocationAttributes(previousAttributes);
+            if (projected) context.LeaveProjection(previousProjection);
+        }
     }
 }
 
@@ -83,6 +89,18 @@ internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnosti
     private List<RootStyleFrame>? rootStyles;
     private int rootStyleStart;
     private ProjectionState? projections;
+    private InvocationAttributeState? invocationAttributes;
+    public InvocationAttributeState? InheritedAttributes => invocationAttributes;
+    public (int Start, int Count)? EnterInvocationAttributes(InvocationAttribute[]? attributes, Prop[] props, object?[] values, bool sharedRoot)
+    {
+        if (attributes is null && invocationAttributes is null) return null;
+        return (invocationAttributes ??= new()).Enter(attributes ?? [], props, values, sharedRoot);
+    }
+    public void LeaveInvocationAttributes((int Start, int Count)? previous)
+    {
+        if (previous is { } frame) invocationAttributes!.Leave(frame);
+    }
+    public void WriteInvocationAttributes(ref HtmlWriter writer, IReadOnlySet<string> owned, CancellationToken cancellation) => invocationAttributes?.Write(ref writer, owned, cancellation);
     public ProjectionFrame? EnterProjection(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot) =>
         (projections ??= new(children is not null)).Enter(groups, caller, receiver, tag, sharedRoot);
     public void WarnSlot(ScopedSlotArguments outlet, int prop)

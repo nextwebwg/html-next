@@ -2,6 +2,7 @@
 
 ## 1.0.0-alpha.92
 
+- Forward non-conflicting ordinary invocation attributes through native component roots, delegation, root choices and deferred carriers. Preserve caller scope, consume attributes that become declared props down the chain, and keep templates without reachable forwarding on their existing rendering path. Attribute collisions and class/style forwarding remain unfinished.
 - Apply native-element class bindings in authored order across generated targets, retaining each binding's accepted value and classes added through the DOM. Preserve raw class text for no-op toggles and scoped styles through replacements, server rendering and framework hydration. Keep class-only React and Preact rows as native elements with direct refs.
 - Render native keyed class bindings with literal and `from:class` composition, authored binding order, invalid-result retention and DOM token semantics. Fold constants and reuse request storage across rows. Accept non-ASCII spaces within class tokens, and correct literal-token removal in generated Vanilla, React, Preact, Vue and Angular components. Share class serialization with Svelte.
 - Bind only the authored item and optional index aliases in Node, native C# and compiled targets. Use list `.length` for size and CSS structural selectors for first/last presentation. Remove the implicit `$loop` binding, preserve lexical shadowing, and give item/index aliases their own types. Ordinary declarations named `loop` or `index` remain valid.

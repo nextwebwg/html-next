@@ -140,7 +140,7 @@ public sealed class CompiledTemplate
         return values;
     }
 
-    internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, InvocationAttributeState? inherited = null)
     {
         var values = CreateValues();
         for (var index = 0; index < props.Length; index++)
@@ -148,6 +148,9 @@ public sealed class CompiledTemplate
             cancellation.ThrowIfCancellationRequested();
             var prop = props[index];
             var argument = arguments[index];
+            var inheritedText = inherited?.Read(props, index);
+            if (argument is not null && inheritedText is not null)
+                throw ValueType.Error(source, "Inherited prop collisions are not implemented.");
             var failed = false;
             values[index] = prop.Default;
             if (argument?.Expression is { } expression)
@@ -170,6 +173,15 @@ public sealed class CompiledTemplate
                 }
             }
             else if (argument is not null) values[index] = argument.Constant;
+            else if (inheritedText is { } text)
+            {
+                try { values[index] = HtmlNextCompiler.AttributeInput(text, prop.Type, source, cancellation); }
+                catch (HtmlNextException error) when (error.Code == "HNCS001")
+                {
+                    failed = true;
+                    onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
+                }
+            }
             if (!failed && values[index] is null && prop.Required)
                 onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
         }
