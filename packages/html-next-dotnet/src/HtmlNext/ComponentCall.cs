@@ -7,6 +7,41 @@ internal sealed record ComponentArgument(ValueExpression? Expression, object? Co
 internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute?[]? Attributes = null) : RenderOperation
 {
     private readonly Prop[] props = Target.Props;
+    internal AcceptedChildEntry ReadEntry(string[] accepts, object?[] caller, object?[] owner, RenderContext context, CancellationToken cancellation)
+    {
+        var frames = new List<ProjectionFrame>();
+        return Read(this, caller);
+
+        AcceptedChildEntry Read(ComponentCall call, object?[] parent)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            ExecutionStack.Check(call.Target.Template.SourceName);
+            var template = call.Target.Template;
+            var child = template.BindInvocation(call.Arguments, parent, cancellation, context.OnDiagnostic, call.Attributes, context.InvocationAttributesFor(parent), initialize: false);
+            var matched = accepts.Contains(template.Tag, StringComparer.Ordinal);
+            var frame = new ProjectionFrame(call.Projection ?? [], parent, matched ? owner : child, template.Tag, call.SharedRoot);
+            context.RecordCollectedInvocation(call, parent, child, frame.Claims);
+            frames.Add(frame);
+            if (matched) return new(new(call.Target.EntryType!, child), template.Tag, owner, frames.ToArray());
+            var delegated = template.DelegatedInvocation ?? throw ValueType.Error(template.SourceName, "This accepted preset root is not implemented.");
+            if (call.Target.ForwardsAttributes) context.CaptureInvocationAttributes(call.Attributes, call.props, parent, child);
+            var previousFilter = context.PauseAcceptedProjection();
+            var previousProjection = context.EnterMetadataProjection(frame);
+            var previousAttributes = call.Target.ForwardsAttributes ? context.EnterInvocationAttributes(call.Attributes, call.props, parent, child) : null;
+            try
+            {
+                template.PrepareEntryInvocation(child, parent, call.Projection, context, cancellation, context.OnDiagnostic);
+                return Read(delegated, child);
+            }
+            finally
+            {
+                context.LeaveInvocationAttributes(previousAttributes);
+                context.LeaveProjection(previousProjection);
+                context.ResumeAcceptedProjection(previousFilter);
+            }
+        }
+    }
+
     public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
         if (writer.Context?.AcceptsProjection(Target, Target.Template.Tag, null, values) == false) return;
@@ -40,7 +75,9 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             var child = context.NextChild();
             if (child is null)
             {
-                child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, Attributes, context.InvocationAttributesFor(values));
+                child = context.TakeCollectedInvocation(this, values);
+                if (child is null) child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, Attributes, context.InvocationAttributesFor(values), Projection, context);
+                else Target.Template.InitializeInvocation(child, values, Projection, context, cancellation, context.OnDiagnostic);
                 context.RecordChild(child);
             }
             var projected = Projection is { Length: > 0 } || SharedRoot && context.ProjectionFor(values) is not null;
@@ -118,24 +155,59 @@ internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnosti
         output.Clear();
         return output;
     }
+    private AcceptedChildContext ChildLists => (projections ??= new(children is not null)).ChildLists ??= new();
+    public object?[] CaptureScope(object?[] values) => ChildLists.CaptureScope(values);
+    private object?[] ScopeOwner(object?[] values) => projections?.ChildLists?.ScopeOwner(values) ?? values;
+    public void RecordEntry(AcceptedChildEntry entry) => ChildLists.RecordEntry(entry);
+    public void RecordPreparedInvocation(object?[] values) => ChildLists.RecordPreparedInvocation(values);
+    public bool TakePreparedInvocation(object?[] values) => projections?.ChildLists?.TakePreparedInvocation(values) == true;
+    public void RecordCollectedInvocation(ComponentCall call, object?[] caller, object?[] child, bool[] claims) => ChildLists.RecordCollectedInvocation(call, caller, child, claims);
+    public object?[]? TakeCollectedInvocation(ComponentCall call, object?[] caller) => projections?.ChildLists?.TakeCollectedInvocation(call, caller);
+    public AcceptedChildEntry? Entry(ExpressionValue value, object?[] owner) => projections?.ChildLists?.Entry(value, owner);
+    public ProjectionFrame? EnterBorrowedProjection(AcceptedChildEntry entry)
+    {
+        projections ??= new(children is not null);
+        var previous = projections.Current;
+        entry.Attach(previous);
+        projections.Current = entry.Frame;
+        return previous;
+    }
+    public ProjectionFrame? EnterMetadataProjection(ProjectionFrame frame)
+    {
+        projections ??= new(children is not null);
+        var previous = projections.Current;
+        frame.Attach(previous);
+        projections.Current = frame;
+        return previous;
+    }
     public bool HasAcceptedProjection => projections?.Accepted?.Active == true;
     public int EnterAcceptedProjection(AcceptedChildFilter? filter) => filter is null ? -1 : ((projections ??= new(children is not null)).Accepted ??= new()).Enter(filter);
     public void LeaveAcceptedProjection(int previous) { if (previous >= 0) projections!.Accepted!.Leave(previous); }
     public int PauseAcceptedProjection() => projections?.Accepted?.Pause() ?? -1;
     public void ResumeAcceptedProjection(int previous) { if (previous >= 0) projections!.Accepted!.Resume(previous); }
     public bool AcceptsProjection(ComponentReference? target, string? tag, RenderOperation[]? text, object?[] values) => projections?.Accepted?.Accepts(target, tag, text, values, OnDiagnostic) ?? true;
-    public InvocationAttributeFrame? InvocationAttributesFor(object?[] values) => invocationAttributes?.Find(values);
+    public InvocationAttributeFrame? InvocationAttributesFor(object?[] values)
+    {
+        var owner = ScopeOwner(values);
+        return invocationAttributes?.Find(owner) ?? projections?.ChildLists?.InvocationAttributesFor(owner);
+    }
+    public void CaptureInvocationAttributes(InvocationAttribute?[]? attributes, Prop[] props, object?[] caller, object?[] receiver)
+    {
+        var parent = projections?.ChildLists?.InvocationAttributesFor(ScopeOwner(caller)) ?? InvocationAttributesFor(caller);
+        ChildLists.RecordInvocationAttributes(new(attributes ?? [], props, caller, receiver, parent));
+    }
     public int? EnterInvocationAttributes(InvocationAttribute?[]? attributes, Prop[] props, object?[] caller, object?[] receiver)
     {
         if (attributes is null && invocationAttributes is null) return null;
-        return (invocationAttributes ??= new()).Enter(attributes ?? [], props, caller, receiver);
+        return (invocationAttributes ??= new()).Enter(attributes ?? [], props, caller, receiver, InvocationAttributesFor(caller));
     }
     public void LeaveInvocationAttributes(int? previous)
     {
         if (previous is { } frame) invocationAttributes!.Leave(frame);
     }
     public ProjectionFrame? EnterProjection(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot) =>
-        (projections ??= new(children is not null)).Enter(groups, caller, receiver, tag, sharedRoot);
+        (projections ??= new(children is not null)).Enter(groups, caller, receiver, tag, sharedRoot,
+            projections?.ChildLists?.ProjectionClaims(receiver));
     public void WarnSlot(ScopedSlotArguments outlet, int prop)
     {
         if (OnDiagnostic is null) return;
@@ -147,7 +219,7 @@ internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnosti
         if (warnings.Warn(outlet, prop)) OnDiagnostic(new("HNCS004", $"Slot '{outlet.Contract.Name}' prop '{outlet.Contract.Props[prop].Definition.Name}' does not satisfy its declared type.", outlet.Source));
     }
     public void LeaveProjection(ProjectionFrame? previous) => projections!.Current = previous;
-    public ProjectionFrame? ProjectionFor(object?[] values) => projections?.Find(values);
+    public ProjectionFrame? ProjectionFor(object?[] values) => projections?.Find(ScopeOwner(values));
     public bool HasRootStyles => rootStyles?.Count > rootStyleStart;
     public ReadOnlySpan<RootStyleFrame> RootStyles() => rootStyles is null ? [] : CollectionsMarshal.AsSpan(rootStyles)[rootStyleStart..];
     public (int Start, int Count) EnterRootStyle(RootStyle? style, object?[] values)
@@ -165,7 +237,7 @@ internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnosti
     public Action<HtmlNextDiagnostic>? OnDiagnostic { get; private set; } = onDiagnostic;
     public object?[]? NextChild() => position >= 0 ? children![position++] : null;
     public void RecordChild(object?[] values) => children?.Add(values);
-    public void Replay() { position = 0; projections?.Replay(); }
+    public void Replay() { position = 0; projections?.Replay(); projections?.ChildLists?.Replay(); }
 }
 
 internal readonly record struct RootStyleFrame(RootStyle Style, object?[] Values);

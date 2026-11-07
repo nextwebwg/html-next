@@ -3,6 +3,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="../fixtures/accepted-child-lists.json" Link="fixtures/accepted-child-lists.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/accepted-children.json" Link="fixtures/accepted-children.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/attribute-forwarding.json" Link="fixtures/attribute-forwarding.json" CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />

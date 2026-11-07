@@ -37,9 +37,9 @@ public static partial class HtmlNextCompiler
         private bool hasComponents;
         private readonly Dictionary<string, ScopedSlotContract> slotContracts = new(StringComparer.Ordinal);
         private readonly Dictionary<int, ScopedSlotValue> projectionLocals = [];
+        private readonly List<AcceptedChildListBinding> childLists = [];
         private readonly Dictionary<int, IterationIndexBinding> indexLocals = [];
         public IReadOnlyDictionary<string, ScopedSlotContract> Slots => slotContracts;
-        private readonly HashSet<string> outletNames = new(StringComparer.Ordinal);
         private IReadOnlyList<string> styleNames = [];
         private RootStyle? rootStyle;
         public string Tag { get; private set; } = "";
@@ -86,7 +86,7 @@ public static partial class HtmlNextCompiler
                     if (declaration.HasAttribute("name") && !ExpressionCompiler.IsIdentifier(name)) throw ValueType.Error(source, "A slot declaration's name requires an identifier.");
                     if (slotContracts.ContainsKey(name)) throw ValueType.Error(source, $"Slot '{name}' is declared more than once.");
                     foreach (var attribute in declaration.Attributes)
-                        if (attribute.Name is not ("name" or "accepts")) Unsupported("slot declaration " + attribute.Name);
+                        if (attribute.Name is not ("name" or "accepts" or "as")) Unsupported("slot declaration " + attribute.Name);
                     var accepts = declaration.GetAttribute("accepts")?.Split([' ', '\t', '\n', '\r', '\f'], StringSplitOptions.RemoveEmptyEntries);
                     if (accepts is not null && (accepts.Length == 0 || accepts.Any(tag => !Regex.IsMatch(tag, @"^[a-z][a-z0-9._]*-[a-z0-9._-]*$", RegexOptions.CultureInvariant))))
                         throw ValueType.Error(source, "A slot's accepts attribute requires component tags.");
@@ -102,7 +102,17 @@ public static partial class HtmlNextCompiler
                         declared.Add(definition);
                         members.Add(new(definition, prop.HasAttribute("default")));
                     }
-                    slotContracts.Add(name, new(name, members.ToArray(), accepts));
+                    var listName = declaration.GetAttribute("as");
+                    var listSlot = -1;
+                    if (listName is not null)
+                    {
+                        if (accepts is null) throw ValueType.Error(source, "A slot's as list requires accepts.");
+                        if (!ExpressionCompiler.IsIdentifier(listName) || bindings.ContainsKey(listName))
+                            throw ValueType.Error(source, $"Invalid or duplicate declaration name '{listName}'.");
+                        listSlot = slots++;
+                        bindings.Add(listName, (listSlot, new("list", new("unknown"))));
+                    }
+                    slotContracts.Add(name, new(name, members.ToArray(), accepts, listName, listSlot));
                 }
                 foreach (var declaration in declarations.OfType<IElement>().Where(node => node.LocalName is "state" or "computed"))
                 {
@@ -151,6 +161,41 @@ public static partial class HtmlNextCompiler
                     || arms[^1] is not IElement last || !last.HasAttribute("$else"))
                     throw ValueType.Error(source, "A root template requires a bare $match with native element arms ending in $else.");
             }
+            ReadImplicitSlots(root);
+        }
+
+        private void ReadImplicitSlots(IElement element)
+        {
+            ExecutionStack.Check(source);
+            if (!element.HasAttribute("of") && (element.LocalName == "slot" || element is IHtmlTemplateElement && element.HasAttribute("$slot")))
+            {
+                var name = element.GetAttribute(element.LocalName == "slot" ? "name" : "$slot") ?? "";
+                slotContracts.TryAdd(name, new(name, []));
+            }
+            foreach (var child in Children(element).OfType<IElement>()) ReadImplicitSlots(child);
+        }
+
+        public void BindChildListTypes()
+        {
+            foreach (var contract in slotContracts.Values)
+            {
+                if (contract.As is not { } name) continue;
+                var fields = new Dictionary<string, ValueType.Field>(StringComparer.Ordinal);
+                foreach (var tag in contract.Accepts!)
+                {
+                    if (!components.TryGetValue(tag, out var component)) throw ValueType.Error(source, $"An as list accepts unknown component '{tag}'.");
+                    component.EntryType ??= new("object", Fields: component.Props.Select(prop => new ValueType.Field(prop.Name, prop.Type)).ToArray());
+                    foreach (var prop in component.Props)
+                    {
+                        var type = prop.Type.AsReference();
+                        if (fields.TryGetValue(prop.Name, out var previous) && previous.Type != type) type = new("unknown");
+                        fields[prop.Name] = new(prop.Name, type, Optional: true);
+                    }
+                }
+                var listType = new ValueType("list", new("object", Fields: fields.Values.ToArray(), ChildSource: contract), Reference: true).AsReference();
+                bindings[name] = (contract.ListSlot, listType);
+                childLists.Add(new(contract.Name, contract.ListSlot, listType, contract.Accepts!));
+            }
         }
 
         public CompiledTemplate Compile()
@@ -161,7 +206,7 @@ public static partial class HtmlNextCompiler
                 bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
-            return new(Tag, props.ToArray(), operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), assets?.Stylesheets);
+            return new(Tag, props.ToArray(), operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), assets?.Stylesheets, childLists.ToArray());
         }
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)
@@ -348,7 +393,6 @@ public static partial class HtmlNextCompiler
             var elseSeen = false;
             foreach (var child in Children(element).Where(Significant))
             {
-                if (ReferenceEquals(element, root)) outletNames.Clear();
                 if (child is not IElement arm || arm.HasAttribute("$when") == arm.HasAttribute("$else"))
                     throw ValueType.Error(source, "Every direct $match child requires one $when or $else.");
                 if (elseSeen) throw ValueType.Error(source, "$else must be the last $match arm.");
@@ -423,7 +467,22 @@ public static partial class HtmlNextCompiler
                 var name = element.GetAttribute(fragment ? "$slot" : "name") ?? "";
                 if ((!fragment && element.HasAttribute("name") || name.Length > 0) && !ExpressionCompiler.IsIdentifier(name))
                     throw ValueType.Error(source, "A slot name requires a literal expression identifier.");
-                if (!outletNames.Add(name)) throw ValueType.Error(source, $"Slot '{name}' is duplicated.");
+                if (element.GetAttribute("of") is { } borrowed)
+                {
+                    var entry = Expression(borrowed, scope);
+                    var origin = entry.Type.ChildSource;
+                    if (origin is null || !slotContracts.Values.Any(contract => ReferenceEquals(contract, origin)))
+                        throw ValueType.Error(source, "of requires an entry of this component's own as list.");
+                    var outlets = new Dictionary<string, SlotOutlet>(StringComparer.Ordinal);
+                    var fallback = ProjectedBody(element, scope);
+                    foreach (var tag in origin.Accepts!)
+                    {
+                        if (!components[tag].Slots.TryGetValue(name, out var childSlot))
+                            throw ValueType.Error(source, $"'{tag}' does not declare slot '{name}'.");
+                        outlets.Add(tag, new(name, fallback, SlotArguments(element, name, scope, fragment, childSlot)));
+                    }
+                    return Wrap([new BorrowedSlotOutlet(entry, outlets, source)], condition, each, localSlot, where, iteration);
+                }
                 var arguments = SlotArguments(element, name, scope, fragment);
                 return Wrap([new SlotOutlet(name, ProjectedBody(element, scope), arguments)], condition, each, localSlot, where, iteration);
             }
@@ -644,14 +703,16 @@ public static partial class HtmlNextCompiler
             return groups.ToArray();
         }
 
-        private ScopedSlotArguments? SlotArguments(IElement element, string name, Dictionary<string, (int Slot, ValueType Type)> scope, bool template)
+        private ScopedSlotArguments? SlotArguments(IElement element, string name, Dictionary<string, (int Slot, ValueType Type)> scope, bool template, ScopedSlotContract? borrowed = null)
         {
             slotContracts.TryGetValue(name, out var contract);
+            contract = borrowed ?? contract;
             var arguments = new ComponentArgument?[contract?.Props.Length ?? 0];
             var supplied = new HashSet<int>();
             foreach (var attribute in element.Attributes)
             {
                 if (attribute.Name == (template ? "$slot" : "name") || attribute.Name is "$if" or "$each" or "$where" or "$sort" or "$limit" or "$key") continue;
+                if (attribute.Name == "of" && borrowed is not null) continue;
                 if (attribute.Name is "of" or "from:of") Unsupported("slot of");
                 if (attribute.Name.StartsWith('$')) Unsupported("slot attribute '" + attribute.Name + "'");
                 if (attribute.Name == "from:name" || template && attribute.Name == "name") throw ValueType.Error(source, "A slot name is a literal identifier.");

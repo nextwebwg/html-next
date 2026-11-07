@@ -59,6 +59,20 @@ internal sealed record PlannedEach(ValueExpression Expression, int Slot, RenderO
         }
     }
 
+    internal void Visit(object?[] values, CancellationToken cancellation, Action visit)
+    {
+        using var scope = new IterationScope(values, Slot, Plan.Index.Slot);
+        var rows = Prepare(values, cancellation);
+        HashSet<IterationKey>? keys = Plan.Key is null ? null : [];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            scope.Bind(rows, index);
+            CheckKey(keys, values);
+            visit();
+        }
+    }
+
     private void CheckKey(HashSet<IterationKey>? keys, object?[] values)
     {
         if (keys is not null && !keys.Add(new(Plan.Key!.Evaluate(values))))

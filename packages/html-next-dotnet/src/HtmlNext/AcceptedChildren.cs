@@ -9,6 +9,7 @@ internal sealed class AcceptedChildFilter(string owner, string slot, string[] ta
 
 internal sealed class AcceptedProjection
 {
+    public AcceptedChildContext? ChildLists { get; set; }
     private readonly List<AcceptedChildFilter> filters = [];
     private HashSet<(AcceptedChildFilter Filter, string Tag)>? warned;
     private int start;

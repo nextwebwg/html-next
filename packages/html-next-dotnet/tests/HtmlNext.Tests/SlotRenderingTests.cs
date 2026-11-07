@@ -149,10 +149,28 @@ public sealed class SlotRenderingTests
     [InlineData("<slot name=''></slot>")]
     [InlineData("<slot from:name='null'></slot>")]
     [InlineData("<template $slot='bad-name'></template>")]
-    [InlineData("<slot></slot><slot></slot>")]
     public void RejectsMalformedSlotOutlets(string outlets)
     {
         Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.Compile("<template component='x-card'><section>" + outlets + "</section></template>"));
+    }
+
+    [Theory]
+    [InlineData("<b>Plain</b>", "<main><section><b>Plain</b>SecondFallback</section></main>")]
+    [InlineData("<template slot=''>Templated</template>", "<main><section>TemplatedTemplated</section></main>")]
+    public async Task RepeatedOutletsKeepPlainContentOnceAndRenderTemplatesAfresh(string content, string expected)
+    {
+        var template = HtmlNextCompiler.CompileResource("<template component='x-card'><section><slot>FirstFallback</slot><slot>SecondFallback</slot></section></template><template component='x-page'><main><x-card>" + content + "</x-card></main></template>").Template("x-page");
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            var html = template.Render();
+            using var writer = new StringWriter(); template.Write(writer);
+            Assert.Equal(html, writer.ToString());
+            using var document = new HtmlParser().ParseDocument(html);
+            var root = document.Body!.FirstElementChild!;
+            foreach (var carrier in root.QuerySelectorAll("template[carrier]")) carrier.Remove();
+            RemoveMarks(root);
+            Assert.Equal(expected, root.OuterHtml);
+        })));
     }
 
     [Theory]

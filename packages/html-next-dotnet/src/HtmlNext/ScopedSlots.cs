@@ -1,7 +1,7 @@
 namespace HtmlNext;
 
 internal sealed record ScopedSlotProp(Prop Definition, bool HasDefault);
-internal sealed record ScopedSlotContract(string Name, ScopedSlotProp[] Props, string[]? Accepts = null);
+internal sealed record ScopedSlotContract(string Name, ScopedSlotProp[] Props, string[]? Accepts = null, string? As = null, int ListSlot = -1);
 internal sealed record ScopedSlotLocal(int Slot, int Prop);
 
 internal sealed record ScopedSlotValue(int Slot, ValueType Declared, ValueExpression? Outer, ValueType Result) : ValueExpression(Result)

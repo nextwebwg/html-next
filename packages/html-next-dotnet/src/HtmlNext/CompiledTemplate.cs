@@ -16,6 +16,7 @@ public sealed record HtmlNextDiagnostic(string Code, string Message, string Sour
 public sealed class CompiledTemplate
 {
     private readonly Prop[] props;
+    private readonly AcceptedChildListBinding[] childLists;
     private readonly RenderOperation[] operations;
     private readonly int slots;
     private readonly string source;
@@ -25,11 +26,12 @@ public sealed class CompiledTemplate
     private readonly int declarationContextSlot;
     private readonly LocalDeclaration[] declarations;
 
-    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null)
+    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null)
     {
         Tag = tag;
         Stylesheets = stylesheets ?? Array.Empty<string>();
         this.props = props;
+        this.childLists = childLists ?? [];
         this.operations = operations;
         this.slots = slots;
         this.source = source;
@@ -45,6 +47,7 @@ public sealed class CompiledTemplate
     public IReadOnlyList<string> Stylesheets { get; }
     public HtmlNextModuleReference? Module { get; }
     internal string SourceName => source;
+    internal ComponentCall? DelegatedInvocation => operations is [ComponentCall call] ? call : null;
 
     public string Render(object? inputs = null, CancellationToken cancellationToken = default, Action<HtmlNextDiagnostic>? onDiagnostic = null)
     {
@@ -79,11 +82,23 @@ public sealed class CompiledTemplate
 
     private void Initialize(object?[] values, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
     {
+        PrepareDeclarations(values, cancellation, onDiagnostic);
+        InitializeSeeds(values);
+    }
+
+    private void PrepareDeclarations(object?[] values, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    {
         foreach (var initializer in initializers) initializer.Initialize(values, source, cancellation);
         if (declarations.Length == 0) return;
         var evaluation = new DeclarationEvaluation(values, declarations.Length, source, cancellation, onDiagnostic);
         values[declarationContextSlot] = evaluation;
         foreach (var declaration in declarations) values[declaration.Slot] = declaration;
+    }
+
+    private void InitializeSeeds(object?[] values)
+    {
+        if (declarations.Length == 0) return;
+        var evaluation = (DeclarationEvaluation)values[declarationContextSlot]!;
         foreach (var declaration in declarations)
             if (declaration.SeedType is not null) evaluation.Read(declaration);
     }
@@ -136,11 +151,12 @@ public sealed class CompiledTemplate
     private object?[] CreateValues()
     {
         var values = new object?[slots];
+        foreach (var list in childLists) values[list.Slot] = new ExpressionValue(list.Type, Array.Empty<object?>());
         if (expressionStorage is { Length: > 0 } storage) values[storage.Slot] = new ExpressionValue[storage.Length];
         return values;
     }
 
-    internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, InvocationAttribute?[]? attributes = null, InvocationAttributeFrame? inherited = null)
+    internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, InvocationAttribute?[]? attributes = null, InvocationAttributeFrame? inherited = null, ProjectionGroup[]? projection = null, RenderContext? context = null, bool initialize = true)
     {
         var values = CreateValues();
         var marker = -1;
@@ -195,8 +211,27 @@ public sealed class CompiledTemplate
             if (!failed && values[index] is null && prop.Required)
                 onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
         }
-        Initialize(values, cancellation, onDiagnostic);
+        if (initialize) InitializeInvocation(values, parent, projection, context, cancellation, onDiagnostic);
         return values;
+    }
+
+    internal void PrepareEntryInvocation(object?[] values, object?[] parent, ProjectionGroup[]? projection, RenderContext context, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    {
+        foreach (var list in childLists)
+            values[list.Slot] = AcceptedChildLists.Read(list, projection ?? [], parent, values, context, cancellation);
+        PrepareDeclarations(values, cancellation, onDiagnostic);
+        context.RecordPreparedInvocation(values);
+    }
+
+    internal void InitializeInvocation(object?[] values, object?[] parent, ProjectionGroup[]? projection, RenderContext? context, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    {
+        if (context?.TakePreparedInvocation(values) != true)
+        {
+            foreach (var list in childLists)
+                values[list.Slot] = AcceptedChildLists.Read(list, projection ?? [], parent, values, context, cancellation);
+            PrepareDeclarations(values, cancellation, onDiagnostic);
+        }
+        InitializeSeeds(values);
     }
 
     internal void WritePlan(ref HtmlWriter writer, object?[] values, CancellationToken cancellationToken)
@@ -311,6 +346,13 @@ internal sealed record ExpressionConditional(ValueExpression Expression, RenderO
 
 internal sealed record ScopedValue(ValueExpression Expression, int Slot, RenderOperation[] Body) : RenderOperation
 {
+    internal void Visit(object?[] values, Action visit)
+    {
+        var previous = values[Slot];
+        values[Slot] = Expression is PathExpression path ? path.Path.Read(values) : Expression.Evaluate(values).Store();
+        try { visit(); }
+        finally { values[Slot] = previous; }
+    }
     public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation)
     {
         var previous = values[Slot];
@@ -335,34 +377,39 @@ internal sealed record ScopedValue(ValueExpression Expression, int Slot, RenderO
 internal sealed record MatchArm(ValueExpression? Test, RenderOperation[] Body);
 internal sealed record MatchChoice(MatchArm[] Arms) : RenderOperation
 {
-    public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation)
+    internal RenderOperation[]? SelectBody(object?[] values)
     {
         foreach (var arm in Arms)
-            if (arm.Test is null || arm.Test.Evaluate(values).Truthy) return AnyNodes(arm.Body, values, context, cancellation);
-        return false;
+            if (arm.Test is null || arm.Test.Evaluate(values).Truthy) return arm.Body;
+        return null;
     }
+    public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation) =>
+        SelectBody(values) is { } body && AnyNodes(body, values, context, cancellation);
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
-        foreach (var arm in Arms)
-        {
-            if (arm.Test is not null && !arm.Test.Evaluate(values).Truthy) continue;
-            foreach (var operation in arm.Body) operation.Write(ref writer, values, cancellation);
-            return;
-        }
+        if (SelectBody(values) is { } body) foreach (var operation in body) operation.Write(ref writer, values, cancellation);
     }
     public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
-        foreach (var arm in Arms)
-        {
-            if (arm.Test is not null && !arm.Test.Evaluate(values).Truthy) continue;
-            foreach (var operation in arm.Body) operation.WriteDeferred(ref writer, values, cancellation);
-            return;
-        }
+        if (SelectBody(values) is { } body) foreach (var operation in body) operation.WriteDeferred(ref writer, values, cancellation);
     }
 }
 
 internal sealed record ExpressionEach(ValueExpression Expression, int Slot, RenderOperation[] Body, ValueExpression? Where = null) : RenderOperation
 {
+    internal void Visit(object?[] values, CancellationToken cancellation, Action visit)
+    {
+        var list = Expression.Evaluate(values);
+        if (list.Type.Kind != "list") return;
+        using var scope = new IterationScope(values, Slot, -1);
+        var rows = new IterationRows(list, null, list.Count);
+        for (var index = 0; index < rows.Count; index++)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            scope.Bind(rows, index);
+            if (Where is null || Where.Evaluate(values).Truthy) visit();
+        }
+    }
     public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation)
     {
         var list = Expression.Evaluate(values);
@@ -461,6 +508,23 @@ internal sealed record Conditional(BoundPath Path, RenderOperation[] Body) : Ren
 
 internal sealed record Each(BoundPath Path, int Slot, RenderOperation[] Body, ValueExpression? Where = null) : RenderOperation
 {
+    internal void Visit(object?[] values, CancellationToken cancellation, Action visit)
+    {
+        var value = Path.Read(values);
+        var items = value as object?[] ?? (value is ExpressionValue { Type.Kind: "list", Data: object?[] computed } ? computed : null);
+        if (items is null) return;
+        var previous = values[Slot];
+        try
+        {
+            foreach (var item in items)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                values[Slot] = item;
+                if (Where is null || Where.Evaluate(values).Truthy) visit();
+            }
+        }
+        finally { values[Slot] = previous; }
+    }
     public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation)
     {
         var value = Path.Read(values);

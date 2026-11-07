@@ -42,9 +42,11 @@ internal sealed record ProjectionGroup(string Name, bool Template, RenderOperati
     }
 }
 
-internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot)
+internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot, bool[]? claims = null)
 {
-    private readonly bool[] used = new bool[groups.Length];
+    private readonly bool[] used = claims ?? new bool[groups.Length];
+    private readonly bool ownsClaims = claims is null;
+    public bool[] Claims => used;
     public ProjectionGroup[] Groups { get; } = groups;
     public object?[] Caller { get; } = caller;
     public object?[] Receiver { get; } = receiver;
@@ -64,7 +66,8 @@ internal sealed class ProjectionFrame(ProjectionGroup[] groups, object?[] caller
         }
         return false;
     }
-    public void Reset(ProjectionFrame? parent) { Array.Clear(used); Parent = parent; CarrierHandled = false; }
+    public void Attach(ProjectionFrame? parent) => Parent = parent;
+    public void Reset(ProjectionFrame? parent) { if (ownsClaims) Array.Clear(used); Parent = parent; CarrierHandled = false; }
 
     public void WriteCarriers(ref HtmlWriter writer, CancellationToken cancellation)
     {
@@ -117,10 +120,15 @@ internal sealed class ProjectionState(bool cache)
     private int position;
     public ProjectionFrame? Current { get; set; }
     public AcceptedProjection? Accepted { get; set; }
-    public ProjectionFrame? Enter(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot)
+    public AcceptedChildContext? ChildLists
+    {
+        get => Accepted?.ChildLists;
+        set => (Accepted ??= new()).ChildLists = value;
+    }
+    public ProjectionFrame? Enter(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot, bool[]? claims = null)
     {
         var previous = Current;
-        var frame = frames is not null && position < frames.Count ? frames[position] : new ProjectionFrame(groups, caller, receiver, tag, sharedRoot);
+        var frame = frames is not null && position < frames.Count ? frames[position] : new ProjectionFrame(groups, caller, receiver, tag, sharedRoot, claims);
         if (frames is not null && position == frames.Count) frames.Add(frame);
         position++;
         frame.Reset(previous);
@@ -180,10 +188,12 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
         if (Inputs?.ExposesProps == true) throw ValueType.Error(Inputs.Source, $"Scoped slot '{Name}' requires a consumer <template slot=\"{Name}\">.");
     }
 
-    private void WritePlacement(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred)
+    internal void WriteMissing(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred) => WritePlacement(ref writer, values, cancellation, deferred, true);
+
+    private void WritePlacement(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred, bool missing = false)
     {
         cancellation.ThrowIfCancellationRequested();
-        var frame = writer.Context?.ProjectionFor(values);
+        var frame = missing ? null : writer.Context?.ProjectionFor(values);
         var template = frame?.Template(Name, writer.Context) ?? -1;
         var assigned = template >= 0 || frame?.Assigned(Name, writer.Context, cancellation) == true;
         if (template < 0 && assigned) RequireTemplate();

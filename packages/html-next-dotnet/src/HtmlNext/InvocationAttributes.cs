@@ -113,10 +113,9 @@ internal sealed class InvocationAttributeState
         for (var index = count - 1; index >= 0; index--) if (ReferenceEquals(frames[index].Receiver, values)) return frames[index];
         return null;
     }
-    public int Enter(InvocationAttribute?[] attributes, Prop[] props, object?[] caller, object?[] receiver)
+    public int Enter(InvocationAttribute?[] attributes, Prop[] props, object?[] caller, object?[] receiver, InvocationAttributeFrame? parent)
     {
         var previous = count;
-        var parent = Find(caller);
         if (count == frames.Count) frames.Add(new(attributes, props, caller, receiver, parent));
         else
         {
