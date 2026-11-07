@@ -227,6 +227,7 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
             assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
             assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+            assert.deepEqual(await plainSlots(), plainSlotExpected);
             const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));
             assert.deepEqual(await iteration(), [["declared:named:0:5:2", true, false], ["declared:named:1:4:2", false, true]]);
             const classes = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-classes] > *'), element => [...element.classList]));

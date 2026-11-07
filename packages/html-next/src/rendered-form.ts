@@ -2,6 +2,7 @@ import { COMPONENT_ROOT_SELECTOR, componentIdentity } from "./component-identity
 import { fail } from "./diagnostics.js";
 import { decodeHydrationValue } from "./hydration-value.js";
 import type { InputStatus } from "./inputs.js";
+import type { ReactiveEffect } from "./reactivity.js";
 
 /**
  * The rendered form's marks (slot ranges, carried projection). The live runtime and compiled
@@ -266,14 +267,31 @@ export function releaseContent(content: readonly Node[]): void {
 
 /** Plain ownership belongs to one logical projection and slot, including its structural marks. */
 export class ProjectionClaims {
-  readonly #owners = new Map<string, object>();
+  readonly #owners = new Map<string, { readonly owner: object; mark?: Node | undefined; lifetime?: ReactiveEffect; released?: boolean }>();
+  #tracked?: WeakSet<ReactiveEffect>;
   #waiters: Map<string, Set<readonly [Node, () => void]>> | undefined;
 
   take(name: string, owner: object): boolean {
     const current = this.#owners.get(name);
-    if (current !== undefined && current !== owner) return false;
-    this.#owners.set(name, owner);
+    if (current?.owner === owner) { current.released = false; return true; }
+    if (current !== undefined && (!current.released || current.mark?.isConnected && current.lifetime?.stopped !== true)) return false;
+    this.#owners.set(name, { owner });
     return true;
+  }
+
+  /** Preserve placement across pause/resume; permanent stop uses the existing ownership registration. */
+  track(name: string, owner: object, mark: Node | undefined, lifetime: ReactiveEffect): void {
+    const current = this.#owners.get(name);
+    if (current?.owner !== owner) return;
+    current.mark = mark; current.lifetime = lifetime;
+    const tracked = this.#tracked ??= new WeakSet();
+    if (tracked.has(lifetime)) return;
+    tracked.add(lifetime);
+    const registration = lifetime.registration;
+    lifetime.registration = { release: effect => {
+      try { registration?.release(effect); }
+      finally { if (this.#owners.get(name)?.lifetime === effect) this.release(name, owner); }
+    } };
   }
 
   wait(name: string, mark: Node, place: () => void): () => void {
@@ -286,11 +304,14 @@ export class ProjectionClaims {
   }
 
   release(name: string, owner: object): void {
-    if (this.#owners.get(name) !== owner) return;
-    this.#owners.delete(name);
+    const current = this.#owners.get(name);
+    if (current?.owner !== owner) return;
+    if (current.mark !== undefined && current.lifetime?.paused && !current.lifetime.stopped) current.released = true;
+    else this.#owners.delete(name);
     const waiting = this.#waiters?.get(name);
     if (waiting !== undefined) queueMicrotask(() => {
-      if (this.#owners.has(name)) return;
+      const current = this.#owners.get(name);
+      if (current !== undefined && (!current.released || current.mark?.isConnected && current.lifetime?.stopped !== true)) return;
       let first: readonly [Node, () => void] | undefined;
       for (const waiter of waiting) {
         if (!waiter[0].isConnected) continue;

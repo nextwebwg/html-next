@@ -473,7 +473,10 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
       content[slot] = typeof supplied === "function" ? supplied : childDescriptors(supplied, tag, slot, accepts, name, derived[name] = []);
     }
     descriptors = derived;
-  } else for (const [slot] of Object.values(lists)) content[slot] = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
+  } else for (const [name, [slot, accepts]] of Object.entries(lists)) {
+    const supplied = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
+    content[slot] = typeof supplied === "function" ? supplied : childDescriptors(supplied, tag, slot, accepts, name, undefined);
+  }
   const current = new Map<string, object>();
   const result: Record<string, object[]> = {};
   for (const name of Object.keys(lists)) {
@@ -485,7 +488,7 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
       let entry = kept.get(descriptor.key);
       if (entry === undefined || childLinks.get(entry)!.tag !== descriptor.tag) entry = childEntry(descriptor.tag, descriptor.props);
       const link = childLinks.get(entry)!;
-      // Plain content is claimed afresh each render by the first outlet that places it.
+      // Entries retain their source frames while their props and slot values change.
       link.props = descriptor.props; link.slots = descriptor.slots; preparePlain(link);
       current.set(descriptor.key, entry);
       return entry;
@@ -532,16 +535,17 @@ function withMounted(direct: object[], last: readonly object[] | undefined, moun
  * renders joins through \`useChildEntry\`. The content returns with each accepted element given its
  * entry's key, so it finds its entry when it renders.
  */
-function childDescriptors(content: ReactNode, tag: string, slot: string, accepts: readonly string[], as: string, descriptors: ChildDescriptor[]): ReactNode {
+function childDescriptors(content: ReactNode, tag: string, slot: string, accepts: readonly string[], as: string, descriptors: ChildDescriptor[] | undefined): ReactNode {
   const named = "\`" + tag + "\`'s " + (slot === "" ? "default slot" : "\`" + slot + "\` slot");
   const quoted = accepts.map((name) => "\`" + name + "\`");
   const listed = named + " accepts " + (quoted.length < 2 ? quoted.join("") : quoted.slice(0, -1).join(", ") + " and " + quoted.at(-1));
-  const leftOut = (name: string, message: string): void => { descriptors.push({ leftOut: tag + ":accepts:" + slot + ":" + name, message }); };
+  const leftOut = (name: string, message: string): void => { descriptors?.push({ leftOut: tag + ":accepts:" + slot + ":" + name, message }); };
   const walk = (node: ReactNode, key: string): ReactNode => {
     if (Array.isArray(node)) return node.map((item: ReactNode, index) => walk(item, key + "." + (isElement(item) && item.key != null ? "$" + item.key : index)));
     if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
-      if (!/^[\\t\\n\\f\\r ]*$/.test(String(node))) leftOut("#text", listed + "; this text is left out.");
-      return node;
+      if (/^[\\t\\n\\f\\r ]*$/.test(String(node))) return node;
+      leftOut("#text", listed + "; this text is left out.");
+      return null;
     }
     if (!isElement(node)) return node;
     if (node.type === React.Fragment) {
@@ -550,15 +554,18 @@ function childDescriptors(content: ReactNode, tag: string, slot: string, accepts
     }
     const mark = (node.type as unknown as { readonly htmlNextChild?: ChildMark }).htmlNextChild;
     if (mark !== undefined && accepts.includes(mark.tags[0]!)) {
-      descriptors.push({ key, tag: mark.tags[0]!, props: markedProps(mark, node.props), slots: node.props.slots as Readonly<Record<string, unknown>> | undefined });
-      return React.cloneElement(node, { htmlNextEntry: key });
+      descriptors?.push({ key, tag: mark.tags[0]!, props: markedProps(mark, node.props), slots: node.props.slots as Readonly<Record<string, unknown>> | undefined });
+      return descriptors === undefined ? node : React.cloneElement(node, { htmlNextEntry: key });
     }
     const preset = mark?.tags.find((candidate) => accepts.includes(candidate));
     if (preset !== undefined) {
       leftOut(mark!.tags[0]!, "\`<" + mark!.tags[0]! + ">\` is a preset of \`" + preset + "\`, which " + named + " accepts; a preset among accepted children is not supported yet, so it is left out.");
       return React.createElement(ChildEntries, { key: node.key, value: undefined }, markProjected(node));
     }
-    if (typeof node.type === "string") leftOut(node.type, listed + "; this \`<" + node.type + ">\` is left out.");
+    if (typeof node.type === "string") {
+      leftOut(node.type, listed + "; this \`<" + node.type + ">\` is left out.");
+      return null;
+    }
     return node;
   };
   return walk(content, as + ":");
@@ -637,8 +644,8 @@ export type ChildSlots = Readonly<Record<string, readonly [readonly string[], re
 
 /**
  * \`<slot of="$column" name="cell">\`: the entry's child's \`<template slot>\` rendered with the outlet's
- * values, its plain content where its own template does not place it and no earlier outlet took it, or
- * the fallback.
+ * values, or the shared source for ordinary content. Own and borrowed outlets place that source once;
+ * other outlets show their fallback.
  */
 export function ChildSlot(props: {
   readonly entry: unknown; readonly name: string; readonly values?: Record<string, unknown>; readonly slots: ChildSlots; readonly file: string; readonly fallback: ReactNode;
@@ -660,8 +667,8 @@ export function ChildSlot(props: {
   let content: ReactNode;
   // A \`<template slot>\` renders afresh at every outlet; plain content renders at one.
   if (typeof slot === "function") content = (slot as (values: Record<string, unknown>) => ReactNode)(shapes?.[link.tag]?.(values ?? {}) ?? values ?? {});
-  else if (!hasSlotContent(slot as ReactNode)) return fallback;
   else if (values !== undefined || known?.[1].includes(name) === true) {
+    if (!hasSlotContent(slot as ReactNode)) return fallback;
     warnUnless(false, location + ":plain", prefix + "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
     return fallback;
   } else {

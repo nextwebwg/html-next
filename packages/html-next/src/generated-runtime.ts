@@ -1580,6 +1580,7 @@ function installPlainSlots(): void {
       let block: PlainBlock | undefined;
       let stops: (() => void)[] = [];
       let latest = dirty;
+      let lifetime: ReturnType<typeof createEffect> | undefined;
       const server = adopt ? serverMark(start) : undefined;
       // An adopted fallback leaves plain content at the server's other outlet until it releases it.
       let borrowed = server?.attributes.has("fallback") === true && assigned.some(node => borrowedRanges.get(instance.e)?.includes(node));
@@ -1605,6 +1606,7 @@ function installPlainSlots(): void {
         const at = (first && adopt ? adoptSlot : fillSlot)(open, close, name, available ? projected : [], fallback, undefined, latest, stops);
         open = (before?.nextSibling ?? parent.firstChild) as ChildNode;
         close = (after?.previousSibling ?? parent.lastChild) as ChildNode;
+        if (available && lifetime !== undefined) claims.track(name, owner, open, lifetime);
         if (at !== undefined && !Array.isArray(at)) {
           block = make(latest, first && adopt ? at as ChildNode : undefined);
           if (block.n !== at) placeFallback(at as ChildNode, block.n);
@@ -1622,6 +1624,8 @@ function installPlainSlots(): void {
           if (held) { claims.release(name, owner); held = false; }
         };
       }, 2);
+      lifetime = effect;
+      claims.track(name, owner, open, effect);
       instance.o.push(effect);
       (record.z ??= []).push(() => { release(instance, effect); dispose(block); for (const stop of stops) stop(); });
       return (changed, dirty) => { latest = dirty; if (block !== undefined) patch(block as never, changed, dirty); };

@@ -1,12 +1,17 @@
+import { REACT_PLAIN_NATIVE_SOURCE } from "./react-plain-native-source.js";
+
 /** Feature-only plain projection support shared by React and Preact output. */
 export const REACT_PLAIN_SOURCE = String.raw`
 const emptyPlainFrames = /* @__PURE__ */ new Map<string, PlainFrame>();
-type PlainSite = { readonly start: Comment; readonly end: Comment };
+type PlainSite = { anchor?: Comment; sourceStart?: Comment; boundary?: PlainBoundary; released?: boolean };
+${REACT_PLAIN_NATIVE_SOURCE}
 class PlainFrame {
   content: ReactNode;
-  serverOwner?: object;
+  first?: PlainSite;
   current?: PlainSite;
+  adopted = false;
   version = 0;
+  readWrap?: () => ((content: ReactNode) => ReactNode) | undefined;
   readonly sites = new Set<PlainSite>();
   readonly listeners = new Set<() => void>();
   readonly subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -14,16 +19,22 @@ class PlainFrame {
   #fragment?: DocumentFragment;
   #park?: DocumentFragment;
   #parent?: Node;
+  #range?: { start: Comment; end: Comment };
+  #source?: PlainBoundary;
+  #host?: PlainBoundary;
   readonly #events: (readonly [string, EventListenerOrEventListenerObject, boolean | AddEventListenerOptions | undefined])[] = [];
 
   constructor(content: ReactNode) { this.content = content; }
+  source(): ReactNode {
+    const content = markProjected(this.content), wrap = this.readWrap?.();
+    return wrap === undefined ? content : wrap(content);
+  }
   get fragment(): DocumentFragment {
     if (this.#fragment !== undefined) return this.#fragment;
     const fragment = this.#fragment = document.createDocumentFragment();
     const append = fragment.appendChild.bind(fragment);
     fragment.appendChild = <T extends Node>(node: T): T => {
-      if (this.current !== undefined) this.current.end.before(node);
-      else if (this.#park?.firstChild != null) this.#park.append(node);
+      if (this.#range !== undefined) this.#range.end.before(node);
       else append(node);
       return node;
     };
@@ -50,33 +61,92 @@ class PlainFrame {
     return fragment;
   }
   private nodes(): Node[] {
-    if (this.current === undefined) return [...this.#park?.childNodes ?? [], ...this.#fragment?.childNodes ?? []];
     const nodes: Node[] = [];
-    for (let node = this.current.start.nextSibling; node !== null && node !== this.current.end; node = node.nextSibling) nodes.push(node);
+    for (let node: Node | null | undefined = this.#range?.start; node != null; node = node.nextSibling) {
+      nodes.push(node); if (node === this.#range!.end) break;
+    }
     return nodes;
   }
-  private select(next: PlainSite | undefined): void {
-    const nodes = this.nodes();
+  private changed(): void { this.version++; for (const listener of this.listeners) listener(); }
+  private listenAt(parent: Node | undefined): void {
+    if (parent === this.#parent) return;
     for (const [type, listener, options] of this.#events) this.#parent?.removeEventListener(type, listener, options);
-    this.current = next;
-    this.#parent = next?.end.parentNode ?? undefined;
-    if (next !== undefined) next.end.before(...nodes);
-    else (this.#park ??= document.createDocumentFragment()).append(...nodes);
+    this.#parent = parent;
     for (const [type, listener, options] of this.#events) this.#parent?.addEventListener(type, listener, options);
-    this.version += 1;
-    for (const listener of this.listeners) listener();
   }
-  attach(template: HTMLTemplateElement, site: PlainSite): () => void {
-    template.replaceWith(site.start, site.end);
-    this.sites.add(site);
-    if (this.current === undefined) this.select(site);
-    return () => {
-      this.sites.delete(site);
-      if (this.current === site) this.select([...this.sites].filter(site => site.start.isConnected)
-        .sort((left, right) => left.start.compareDocumentPosition(right.start) & 4 ? -1 : 1)[0]);
-      site.start.before(template);
-      site.start.remove(); site.end.remove();
-    };
+  private select(next: PlainSite | undefined): void {
+    const changed = this.current !== next;
+    if (changed && this.current !== undefined) this.current.sourceStart = undefined;
+    this.current = next;
+    if (next !== undefined) next.sourceStart = this.#range?.start;
+    if (this.#range !== undefined) {
+      if (next?.anchor?.parentNode != null) {
+        if (this.#range.end.nextSibling !== next.anchor) for (const node of this.nodes()) next.anchor.before(node);
+      } else for (const node of this.nodes()) (this.#park ??= document.createDocumentFragment()).appendChild(node);
+    }
+    this.listenAt(this.#range?.end.parentNode ?? next?.anchor?.parentNode ?? undefined);
+    if (changed) this.changed();
+  }
+  private choose(): void {
+    queueMicrotask(() => {
+      if (this.current?.boundary !== undefined && !this.current.released) return;
+      const sites = [...this.sites].filter(site => !site.released && site.anchor?.parentNode != null);
+      const connected = sites.filter(site => site.anchor!.isConnected);
+      this.select((connected.length > 0 ? connected : sites).sort((left, right) => left.anchor!.compareDocumentPosition(right.anchor!) & 4 ? -1 : 1)[0]);
+    });
+  }
+  private adopt(): void {
+    if (this.adopted || this.#source === undefined || this.#host === undefined || this.first?.boundary === undefined) return;
+    const owner = plainNativeOwner(this.#source);
+    const nodes = plainNativeNodes(owner.node, owner.react);
+    const first = nodes[0], last = nodes.at(-1);
+    const placement = first?.parentNode == null ? plainNativePlacement(owner) : { parent: first.parentNode, before: first };
+    const document = placement.parent.ownerDocument!;
+    const start = document.createComment("html-next:plain-start"), end = document.createComment("html-next:plain-end");
+    placement.parent.insertBefore(start, placement.before);
+    if (last?.parentNode != null) last.parentNode.insertBefore(end, last.nextSibling);
+    else placement.parent.insertBefore(end, placement.before);
+    this.#range = { start, end };
+    plainAdoptSource(this.#source, this.#host, this.fragment);
+    this.adopted = true;
+    this.select(this.first);
+    this.changed();
+  }
+  readonly sourceReady = (boundary: PlainBoundary): void => { this.#source = boundary; this.adopt(); };
+  readonly sourceGone = (): void => { this.#source = undefined; };
+  readonly hostReady = (boundary: PlainBoundary): void => { this.#host = boundary; this.adopt(); };
+  readonly hostGone = (): void => {
+    const host = this.#host, source = this.#source;
+    this.#host = undefined;
+    queueMicrotask(() => {
+      if (this.#host !== undefined) return;
+      // Native Activity hides layout lifetimes while retaining the mounted subtree.
+      if (host !== undefined && plainBoundaryMounted(host)) { this.#host = host; this.#source ??= source; return; }
+      for (const [type, listener, options] of this.#events) this.#parent?.removeEventListener(type, listener, options);
+      for (const node of this.nodes()) node.parentNode?.removeChild(node);
+      this.#range = undefined; this.#source = undefined; this.#parent = undefined; this.#events.length = 0;
+    });
+  };
+  place(site: PlainSite, boundary: PlainBoundary): void {
+    site.boundary = boundary; site.released = false; this.sites.add(site);
+    const owner = plainNativeOwner(boundary);
+    const nodes = plainNativeNodes(owner.node, owner.react);
+    const last = nodes.at(-1);
+    const placement = last?.parentNode == null ? plainNativePlacement(owner) : { parent: last.parentNode, before: last.nextSibling };
+    const anchor = site.anchor ??= placement.parent.ownerDocument!.createComment("html-next:plain-outlet");
+    if (placement.before !== anchor && (anchor.parentNode !== placement.parent || anchor.nextSibling !== placement.before)) placement.parent.insertBefore(anchor, placement.before);
+    if (this.current === site) this.select(site);
+    this.adopt();
+    if (this.adopted && this.current === undefined) this.choose();
+  }
+  release(site: PlainSite): void {
+    site.boundary = undefined; site.released = true; this.sites.delete(site);
+    if (this.current === site) {
+      for (const node of this.nodes()) (this.#park ??= document.createDocumentFragment()).appendChild(node);
+      this.listenAt(this.#range?.end.parentNode ?? undefined);
+      this.choose();
+    }
+    site.anchor?.remove();
   }
 }
 
@@ -85,21 +155,22 @@ function preparePlain(link: ChildLink): void {
   for (const [name, content] of Object.entries(link.slots ?? {})) {
     if (typeof content === "function") continue;
     const frames = link.plain ??= new Map();
-    if (!frames.has(name)) frames.set(name, new PlainFrame(content as ReactNode));
+    if (!frames.has(name)) { const frame = new PlainFrame(content as ReactNode); frame.readWrap = () => link.wrap; frames.set(name, frame); }
   }
 }
 function linkedPlain(link: ChildLink, name: string): PlainFrame | undefined { return link.plain?.get(name); }
 
-/** A stable portal source outlives the own or borrowed outlet currently placing its nodes. */
-function PlainHost(props: { readonly frame: PlainFrame; readonly wrap?: (content: ReactNode) => ReactNode }): ReactNode {
-  if (typeof document === "undefined") return null;
-  const content = markProjected(props.frame.content);
-  return createPortal(props.wrap === undefined ? content : props.wrap(content), props.frame.fragment);
+/** The initially hydrated subtree joins this stable portal without remounting. */
+function PlainHost(props: { readonly frame: PlainFrame }): ReactNode {
+  const { frame } = props;
+  React.useSyncExternalStore(frame.subscribe, frame.snapshot, frame.snapshot);
+  const source = frame.adopted ? <PlainBoundary ready={frame.sourceReady} gone={frame.sourceGone}>{frame.source()}</PlainBoundary> : null;
+  return <PlainBoundary ready={frame.hostReady} gone={frame.hostGone}>{typeof document === "undefined" ? null : createPortal(source, frame.fragment)}</PlainBoundary>;
 }
 function PlainLinkHost(props: { readonly link: ChildLink }): ReactNode {
   const { link } = props;
   React.useSyncExternalStore(link.subscribe, () => link.stamp, () => link.stamp);
-  return <>{[...link.plain ?? []].map(([name, frame]) => <PlainHost key={name} frame={frame} wrap={link.wrap} />)}</>;
+  return <>{[...link.plain ?? []].map(([name, frame]) => <PlainHost key={name} frame={frame} />)}</>;
 }
 export function PlainChildren(props: { readonly entries: ReadonlyMap<string, object> }): ReactNode {
   return <>{[...props.entries.values()].map(entry => <PlainLinkHost key={identityKey(entry)} link={childLinks.get(entry)!} />)}</>;
@@ -121,22 +192,20 @@ export function usePlainSlots(link: ChildLink | undefined, props: { readonly chi
 export function PlainSlots(props: { readonly frames: ReadonlyMap<string, PlainFrame> }): ReactNode {
   return <>{[...props.frames].map(([name, frame]) => <PlainHost key={name} frame={frame} />)}</>;
 }
-/** A comment range preserves native CSS child selectors and restores its temporary host before framework deletion. */
+/** Hydrate the first source in place, then retain it independently of its destination. */
 export function PlainSlot(props: { readonly frame: PlainFrame | undefined; readonly content: ReactNode; readonly fallback: ReactNode }): ReactNode {
   const { frame, content, fallback } = props;
-  const token = React.useRef({}).current;
-  const site = React.useRef<PlainSite | undefined>(undefined);
+  const site = React.useRef<PlainSite>({}).current;
   React.useSyncExternalStore(frame?.subscribe ?? noSubscribe, frame?.snapshot ?? (() => 0), frame?.snapshot ?? (() => 0));
-  const ref = React.useCallback((template: HTMLTemplateElement | null): (() => void) | undefined => {
-    if (template === null || frame === undefined) return undefined;
-    const range = site.current ??= { start: template.ownerDocument.createComment("html-next:plain-start"), end: template.ownerDocument.createComment("html-next:plain-end") };
-    return frame.attach(template, range);
-  }, [frame]);
+  const ready = React.useCallback((boundary: PlainBoundary): void => { frame?.place(site, boundary); }, [frame, site]);
+  const gone = React.useCallback((): void => { frame?.release(site); }, [frame, site]);
   if (frame === undefined || typeof content === "function") return renderPlainSlot(content, fallback);
-  if (typeof document === "undefined") {
-    frame.serverOwner ??= token;
-    return frame.serverOwner === token ? renderPlainSlot(content, fallback) : fallback;
-  }
-  return <><template ref={ref} />{frame.current === site.current && hasSlotContent(frame.content) ? null : fallback}</>;
+  frame.first ??= site;
+  const first = frame.first === site;
+  const filled = hasSlotContent(frame.content);
+  return <PlainBoundary ready={ready} gone={gone} place={site}>
+    {!frame.adopted && first ? <PlainBoundary ready={frame.sourceReady} gone={frame.sourceGone}>{filled ? frame.source() : null}</PlainBoundary> : null}
+    {(frame.adopted ? frame.current === site : first) && filled ? null : fallback}
+  </PlainBoundary>;
 }
 `;

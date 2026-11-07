@@ -3328,7 +3328,8 @@ function placeChildSlot(
   }
   for (const placed of content) { borrowedContent.add(placed); placedOwners.set(placed, entry); }
   childPlacements = true;
-  ownEffect(context, scope, () => () => { claims.release(name, mark); releaseContent(content); });
+  const lifetime = ownEffect(context, scope, () => () => { claims.release(name, mark); releaseContent(content); });
+  if (!documentState(document).staticRendering) claims.track(name, mark, mark, lifetime);
   if (existing !== undefined) nodes = [...existing];
   else if (context.committed) {
     nodes = currentProjection(content);
@@ -3432,7 +3433,8 @@ function renderClaimedSlot(
   const fragment = hydration === undefined ? document.createDocumentFragment() : undefined;
   let start: ChildNode | undefined, end: ChildNode | undefined;
   let first = true;
-  ownEffect(context, scope, () => {
+  let lifetime: ReactiveEffect | undefined;
+  lifetime = ownEffect(context, scope, () => {
     let claimed = false;
     let cancel: (() => void) | undefined;
     let owned: RenderOwned | undefined;
@@ -3454,6 +3456,7 @@ function renderClaimedSlot(
       const content = renderSlot(node, scope, document, local, first ? candidate : undefined);
       start = content[0] as ChildNode;
       end = content.at(-1) as ChildNode;
+      if (available && lifetime !== undefined && !documentState(document).staticRendering) claims.track(name, owner, start, lifetime);
       if (first && fragment !== undefined) fragment.append(...content);
       else if (!first && parent != null) {
         const nodes = document.createDocumentFragment();
@@ -3470,6 +3473,7 @@ function renderClaimedSlot(
       if (claimed) claims.release(name, owner);
     };
   });
+  if (!documentState(document).staticRendering) claims.track(name, owner, start, lifetime);
   return fragment === undefined ? rangeNodes(start!, end!) : [fragment];
 }
 

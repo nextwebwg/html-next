@@ -46,6 +46,18 @@ async function fixture(): Promise<string> {
   return root;
 }
 
+for (const target of ["react", "preact"] as const) it(`${target} prunes retained projection owners from ordinary named and default slots`, async () => {
+  const root = await fixture();
+  await writeFile(join(root, "ordinary.html"), '<template component="x-label"><button><slot name="icon"></slot><slot></slot></button></template>' +
+    '<template component="x-page"><main><x-label><i slot="icon">Icon</i>Label</x-label></main></template>');
+  const out = join(root, "out");
+  const manifest = await convertComponents({ target, mode: "application", root, outDirectory: out, entries: ["ordinary.html"] });
+  const entry = manifest.components.find(component => component.tag === "x-page")!.artifact;
+  const bundle = await build({ entryPoints: [join(out, entry)], bundle: true, write: false, platform: "browser", format: "esm", jsx: "automatic",
+    ...(target === "preact" ? { jsxImportSource: "preact" } : {}), nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))], loader: { ".css": "empty" } });
+  assert.doesNotMatch(bundle.outputFiles[0]!.text, /\b(?:PlainFrame|PlainBoundary|plainNativeOwner|plainAdoptSource)\b|html-next:plain-start/);
+});
+
 /** Compiles a converted SFC with Vue's own compiler, failing on any error. */
 function compileVue(source: string, filename: string): void {
   const parsed = parseVue(source, { filename });
