@@ -3,6 +3,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="../fixtures/selected-types.json" Link="fixtures/selected-types.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/accepted-child-lists.json" Link="fixtures/accepted-child-lists.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/accepted-children.json" Link="fixtures/accepted-children.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/attribute-forwarding.json" Link="fixtures/attribute-forwarding.json" CopyToOutputDirectory="PreserveNewest" />

@@ -26,6 +26,8 @@ public sealed class CompiledTemplate
     private readonly int declarationContextSlot;
     private readonly LocalDeclaration[] declarations;
     private readonly InstanceRecordPlan? instance;
+    private readonly int[]? bindingOrder;
+    private readonly int preparationSlot;
 
     internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null, HtmlNextServerAssets? assets = null, InstanceRecordPlan? instance = null)
     {
@@ -44,6 +46,9 @@ public sealed class CompiledTemplate
         this.declarations = declarations ?? [];
         Assets = assets;
         this.instance = instance;
+        bindingOrder = props.Any(prop => prop.Selection is not null)
+            ? Enumerable.Range(0, props.Length).OrderBy(index => props[index].Selection is not null).ToArray() : null;
+        preparationSlot = props.Select(prop => prop.Selection?.PreparationSlot ?? -1).FirstOrDefault(slot => slot >= 0, -1);
     }
 
     public string Tag { get; }
@@ -103,6 +108,11 @@ public sealed class CompiledTemplate
 
     private void PrepareDeclarations(object?[] values, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
     {
+        if (preparationSlot >= 0)
+        {
+            if (values[preparationSlot] is true) return;
+            values[preparationSlot] = true;
+        }
         foreach (var initializer in initializers) initializer.Initialize(values, source, cancellation);
         if (declarations.Length == 0) return;
         var evaluation = new DeclarationEvaluation(values, declarations.Length, source, cancellation, onDiagnostic);
@@ -121,12 +131,15 @@ public sealed class CompiledTemplate
     private object?[] Bind(object? inputs, CancellationToken cancellationToken, Action<HtmlNextDiagnostic>? onDiagnostic, List<HtmlNextValidationError>? validation = null, bool interactive = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var values = validation is null ? CreateValues(interactive) : new object?[props.Length];
+        var values = validation is null || preparationSlot >= 0 ? CreateValues(interactive) : new object?[props.Length];
         var record = interactive ? instance?.Inputs(values) : null;
         BindingSnapshot? snapshot = null;
-        for (var index = 0; index < props.Length; index++)
+        for (var position = 0; position < props.Length; position++)
         {
+            var index = bindingOrder?[position] ?? position;
             var prop = props[index];
+            if (prop.Selection?.FromState == true) PrepareDeclarations(values, cancellationToken, onDiagnostic);
+            var type = prop.EffectiveType(values);
             object? input;
             object? captured = null;
             bool supplied;
@@ -156,10 +169,11 @@ public sealed class CompiledTemplate
             if (!bindInput) { record?.Add(prop.Name, captured, supplied, supplied); continue; }
             try
             {
-                if (prop.Type.NeedsSnapshot) snapshot ??= new(source, cancellationToken);
-                values[index] = captured is ExpressionValue aggregate ? prop.Type.BindExpression(aggregate, source, cancellationToken)
-                    : prop.Type.Bind(input, source, cancellationToken, snapshot);
-                record?.Add(prop.Name, ExpressionValue.StoredValue(values[index], prop.Type), supplied, supplied);
+                if (type is null) throw ValueType.Error(source, $"Input '{prop.Name}' requires a null value while its selector is null.");
+                if (type.NeedsSnapshot) snapshot ??= new(source, cancellationToken);
+                values[index] = prop.Store(captured is ExpressionValue aggregate ? type.BindExpression(aggregate, source, cancellationToken)
+                    : type.Bind(input, source, cancellationToken, snapshot), type);
+                record?.Add(prop.Name, ExpressionValue.StoredValue(values[index], type), supplied, supplied);
                 if (validation is not null && !empty) prop.ValidateValue(values[index], source, validation);
             }
             catch (HtmlNextException error) when (error.Code == "HNCS001")
@@ -197,10 +211,14 @@ public sealed class CompiledTemplate
             if (attributes[index] is null) marker = index;
             else if (attributes[index]!.Target == "class") classModifiers = true;
         }
-        for (var index = 0; index < props.Length; index++)
+        for (var position = 0; position < props.Length; position++)
         {
+            var index = bindingOrder?[position] ?? position;
             cancellation.ThrowIfCancellationRequested();
             var prop = props[index];
+            if (prop.Selection?.FromState == true && values[preparationSlot] is not true)
+                PrepareInvocation(values, parent, projection, context, cancellation, onDiagnostic);
+            var type = prop.EffectiveType(values);
             var argument = arguments[index];
             string? inheritedText = null;
             var forwarded = marker >= 0 && (argument is null || argument.Position < marker) && inherited is not null &&
@@ -219,8 +237,8 @@ public sealed class CompiledTemplate
                 var input = expression.Evaluate(parent);
                 if (input.IsInvalid)
                 {
-                    values[index] = argument.Constant ?? prop.Default;
-                    record?.Add(prop.Name, raw, present, present, inputSource);
+                    values[index] = LiteralFallback(prop, argument, type, cancellation, onDiagnostic, ref failed);
+                    record?.Add(prop.Name, raw, present, present && !failed, inputSource);
                     continue;
                 }
                 raw = input;
@@ -230,21 +248,26 @@ public sealed class CompiledTemplate
                 {
                     if (!input.IsNull && !input.IsAbsent)
                     {
-                        values[index] = prop.Type.BindExpression(input, source, cancellation);
-                        raw = ExpressionValue.StoredValue(values[index], prop.Type);
+                        if (type is null) throw ValueType.Error(source, $"Input '{prop.Name}' requires a null value while its selector is null.");
+                        values[index] = prop.Store(type.BindExpression(input, source, cancellation), type);
+                        raw = ExpressionValue.StoredValue(values[index], type);
                     }
                 }
                 catch (HtmlNextException error) when (error.Code == "HNCS001")
                 {
                     failed = true;
-                    values[index] = argument.Constant ?? prop.Default;
+                    values[index] = LiteralFallback(prop, argument, type, cancellation, onDiagnostic, ref failed);
                     onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
                 }
             }
-            else if (argument is not null) values[index] = argument.Constant;
+            else if (argument is not null) values[index] = LiteralFallback(prop, argument, type, cancellation, onDiagnostic, ref failed);
             else if (forwarded && inheritedText is { } text)
             {
-                try { values[index] = HtmlNextCompiler.AttributeInput(text, prop.Type, source, cancellation); }
+                try
+                {
+                    if (type is null) throw ValueType.Error(source, $"Input '{prop.Name}' requires a null value while its selector is null.");
+                    values[index] = prop.Store(HtmlNextCompiler.AttributeInput(text, type, source, cancellation), type);
+                }
                 catch (HtmlNextException error) when (error.Code == "HNCS001")
                 {
                     failed = true;
@@ -259,21 +282,42 @@ public sealed class CompiledTemplate
         return values;
     }
 
-    internal void PrepareEntryInvocation(object?[] values, object?[] parent, ProjectionGroup[]? projection, RenderContext context, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    private object? LiteralFallback(Prop prop, ComponentArgument argument, ValueType? type, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, ref bool failed)
+    {
+        if (prop.Selection is null) return argument.Constant ?? prop.Default;
+        if (argument.Written is null) return prop.Default;
+        try
+        {
+            if (type is null) throw ValueType.Error(source, $"Input '{prop.Name}' requires a null value while its selector is null.");
+            return prop.Store(HtmlNextCompiler.AttributeInput(argument.Written, type, source, cancellation), type);
+        }
+        catch (HtmlNextException error) when (error.Code == "HNCS001")
+        {
+            failed = true;
+            onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
+            return prop.Default;
+        }
+    }
+
+    private void PrepareInvocation(object?[] values, object?[] parent, ProjectionGroup[]? projection, RenderContext? context, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
     {
         foreach (var list in childLists)
             values[list.Slot] = AcceptedChildLists.Read(list, projection ?? [], parent, values, context, cancellation);
         PrepareDeclarations(values, cancellation, onDiagnostic);
+    }
+
+    internal void PrepareEntryInvocation(object?[] values, object?[] parent, ProjectionGroup[]? projection, RenderContext context, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    {
+        if (preparationSlot < 0 || values[preparationSlot] is not true)
+            PrepareInvocation(values, parent, projection, context, cancellation, onDiagnostic);
         context.RecordPreparedInvocation(values);
     }
 
     internal void InitializeInvocation(object?[] values, object?[] parent, ProjectionGroup[]? projection, RenderContext? context, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
     {
-        if (context?.TakePreparedInvocation(values) != true)
+        if (context?.TakePreparedInvocation(values) != true && (preparationSlot < 0 || values[preparationSlot] is not true))
         {
-            foreach (var list in childLists)
-                values[list.Slot] = AcceptedChildLists.Read(list, projection ?? [], parent, values, context, cancellation);
-            PrepareDeclarations(values, cancellation, onDiagnostic);
+            PrepareInvocation(values, parent, projection, context, cancellation, onDiagnostic);
         }
         InitializeSeeds(values);
     }
@@ -287,8 +331,10 @@ public sealed class CompiledTemplate
     }
 }
 
-internal sealed partial record Prop(string Name, ValueType Type, bool Required, object? Default, ValueConstraints? Constraints = null)
+internal sealed partial record Prop(string Name, ValueType Type, bool Required, object? Default, ValueConstraints? Constraints = null, SelectedType? Selection = null)
 {
+    public ValueType? EffectiveType(object?[] values) => Selection is null ? Type : Selection.Read(values);
+    public object? Store(object? value, ValueType type) => Selection is null ? value : ExpressionValue.StoredValue(value, type).Store();
     [GeneratedRegex("([a-z0-9])([A-Z])", RegexOptions.CultureInvariant)]
     private static partial Regex AttributeWords();
     public string AttributeName { get; } = HtmlNextCompiler.AsciiLowerCase(AttributeWords().Replace(Name, "$1-$2"));

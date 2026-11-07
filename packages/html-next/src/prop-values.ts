@@ -14,7 +14,7 @@ export function invocationValue(prop: PropContract, input: unknown, source: "htm
   // Bare boolean attributes retain HTML presence semantics. Explicit values
   // are invocation strings and must still pass through the declared type.
   const candidate = type === "boolean" && attributePresent && input === "" ? true : input;
-  if (type === null) return candidate as PropValue;
+  if (type === null) return undefined;
   const parsed = parseTypedValue(candidate, type, "$", source);
   return parsed.ok ? parsed.value as PropValue : undefined;
 }

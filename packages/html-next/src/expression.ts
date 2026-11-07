@@ -39,7 +39,7 @@ export interface Scope {
   reveal?(value: Value): Value;
   typeOfDeclaredPath?: ((path: string, values?: Scope) => TypeNode | undefined) | undefined;
   /** Declared type of a reference, when the host has one. */
-  typeOfPath?: ((path: string) => "length" | "percentage" | "duration" | undefined) | undefined;
+  typeOfPath?: ((path: string, currentValues?: boolean) => "length" | "percentage" | "duration" | undefined) | undefined;
 }
 
 export class UndeclaredName extends Error {
@@ -211,7 +211,7 @@ function evalNode(node: ExpressionNode, scope: Scope, checks?: ReferenceChecks):
       const operand = evalNode(node.operand, scope, checks);
       if (operand === NONCONFORMING) return NONCONFORMING;
       if (node.op === "not") return !truthyIn(operand, scope);
-      return negate(operand, dimensionType(node.operand, scope));
+      return negate(operand, dimensionType(node.operand, scope, true));
     }
     case "binary": return evalBinary(node, scope, checks);
     case "conditional": {
@@ -256,7 +256,7 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
   const dimensional = (op === "+" || op === "-" || op === "*" || op === "/") &&
     (typeof left !== "number" || typeof right !== "number");
   return binaryValue(op, left, right,
-    dimensional ? dimensionType(node.left, scope) : undefined, dimensional ? dimensionType(node.right, scope) : undefined,
+    dimensional ? dimensionType(node.left, scope, true) : undefined, dimensional ? dimensionType(node.right, scope, true) : undefined,
     ARITHMETIC[op]);
 }
 
@@ -365,9 +365,9 @@ function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope,
     return textCall(fn, values);
   }
   if (!mathArity(fn, args.length)) return NONCONFORMING;
-  const dimension = dimensionType(args[0]!, scope);
+  const dimension = dimensionType(args[0]!, scope, true);
   return mathCall(fn, args.map((argument) => evalNode(argument, scope, checks)), dimension,
-    dimension === undefined ? [] : args.map((argument) => dimensionType(argument, scope)));
+    dimension === undefined ? [] : args.map((argument) => dimensionType(argument, scope, true)));
 }
 
 /** `format`, `formatRange` and `formatParts` over evaluated arguments and the first one's formatting type. */
@@ -456,33 +456,33 @@ function parseQuantity(value: string): { value: number; unit: string; dimension:
 }
 
 /** The dimensional type an expression carries into a later math call. */
-export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "length" | "percentage" | "duration" | undefined {
+export function dimensionType(node: ExpressionNode | undefined, scope: Scope, currentValues = false): "length" | "percentage" | "duration" | undefined {
   if (node === undefined) return undefined;
   if (node.kind === "literal") return node.dimension;
-  if (node.kind === "unary" && node.op === "-") return dimensionType(node.operand, scope);
+  if (node.kind === "unary" && node.op === "-") return dimensionType(node.operand, scope, currentValues);
   if (node.kind === "binary") {
-    const left = dimensionType(node.left, scope);
-    const right = dimensionType(node.right, scope);
+    const left = dimensionType(node.left, scope, currentValues);
+    const right = dimensionType(node.right, scope, currentValues);
     if (node.op === "+" || node.op === "-") return left !== undefined && left === right ? left : undefined;
     if (node.op === "*") return left === undefined ? right : right === undefined ? left : undefined;
     if (node.op === "/") return right === undefined ? left : undefined;
   }
   if (node.kind === "conditional") {
-    const consequent = dimensionType(node.consequent, scope);
-    const alternate = dimensionType(node.alternate, scope);
+    const consequent = dimensionType(node.consequent, scope, currentValues);
+    const alternate = dimensionType(node.alternate, scope, currentValues);
     if (node.consequent.kind === "literal" && node.consequent.value === null) return alternate;
     if (node.alternate.kind === "literal" && node.alternate.value === null) return consequent;
     return consequent !== undefined && consequent === alternate ? consequent : undefined;
   }
   if (node.kind === "call" && (node.fn === "round" || node.fn === "min" || node.fn === "max" ||
     node.fn === "clamp" || node.fn === "abs")) {
-    return dimensionType(node.args[node.fn === "clamp" ? 1 : 0]!, scope);
+    return dimensionType(node.args[node.fn === "clamp" ? 1 : 0]!, scope, currentValues);
   }
   if (node.kind === "call" && node.fn === "default") {
-    return dimensionType(node.args[0]!, scope) ?? dimensionType(node.args[1]!, scope);
+    return dimensionType(node.args[0]!, scope, currentValues) ?? dimensionType(node.args[1]!, scope, currentValues);
   }
   const name = path(node);
-  return name === undefined ? undefined : scope.typeOfPath?.(name);
+  return name === undefined ? undefined : scope.typeOfPath?.(name, currentValues);
 }
 
 /**

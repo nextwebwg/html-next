@@ -1,0 +1,172 @@
+[
+  {
+    "name": "named number selected after dependent declaration",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": "number",
+      "value": 3
+    },
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "named string retains its own value type",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": "text",
+      "value": "3"
+    },
+    "expected": "<output>3:false</output>"
+  },
+  {
+    "name": "wrong typed bound value takes null",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": "number",
+      "value": "3"
+    },
+    "expected": "<output>:false</output>"
+  },
+  {
+    "name": "inline type has the same selection",
+    "source": "<template component=\"x-field\"><defs><prop name=\"value\">Value.<type from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type></prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": "number",
+      "value": 3
+    },
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "initialized state selects a number",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><state name=\"mode\" type=\"keyword\" values=\"text, number\" value=\"number\"></state></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": 3
+    },
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "seeded state selects from accepted input",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"kind\" type=\"keyword\" values=\"text, number\" default=\"number\">Kind.</prop><state name=\"mode\" type=\"keyword\" values=\"text, number\" from=\"$kind\"></state></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": 3,
+      "kind": "number"
+    },
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "null selector permits only null dependent values",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" required>Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": null,
+      "value": 3
+    },
+    "expected": "<output>:false</output>"
+  },
+  {
+    "name": "child selection value=\"3\" mode=\"number\"",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template><template component=\"x-page\"><div><x-field value=\"3\" mode=\"number\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>3:true</output></div>"
+  },
+  {
+    "name": "child selection mode=\"number\" value=\"3\"",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template><template component=\"x-page\"><div><x-field mode=\"number\" value=\"3\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>3:true</output></div>"
+  },
+  {
+    "name": "child selection from:mode=\"'number'\" from:value=\"3\"",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template><template component=\"x-page\"><div><x-field from:mode=\"'number'\" from:value=\"3\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>3:true</output></div>"
+  },
+  {
+    "name": "dependent default uses the selector default",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\" default=\"3\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"number\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {},
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "explicit null resets the dependent default",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\" default=\"3\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"number\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": null
+    },
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "selected literal survives invalid binding value=\"3\" from:value=\"1 / 0\" mode=\"number\"",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template><template component=\"x-page\"><div><x-field value=\"3\" from:value=\"1 / 0\" mode=\"number\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>3:true</output></div>"
+  },
+  {
+    "name": "selected literal survives invalid binding from:value=\"1 / 0\" mode=\"number\" value=\"3\"",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"text\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template><template component=\"x-page\"><div><x-field from:value=\"1 / 0\" mode=\"number\" value=\"3\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>3:true</output></div>"
+  },
+  {
+    "name": "child seeded selector initializes once",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\">Value.</prop><prop name=\"kind\" type=\"keyword\" values=\"text, number\" default=\"number\">Kind.</prop><state name=\"mode\" type=\"keyword\" values=\"text, number\" from=\"$kind\"></state></defs><output>{$value}:{$value = 3}</output></template><template component=\"x-page\"><div><x-field from:value=\"3\" kind=\"number\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>3:true</output></div>"
+  },
+  {
+    "name": "selected list preserves its element types",
+    "source": "<template component=\"x-field\"><defs><type name=\"shape\" from=\"mode\"><option value=\"many\" type=\"list(number)\"></option><option value=\"one\" type=\"number\"></option></type><prop name=\"value\" type=\"shape\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"many, one\" default=\"many\">Mode.</prop></defs><output>{$value[0]}:{$value[1] = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": [
+        2,
+        3
+      ]
+    },
+    "expected": "<output>2:true</output>"
+  },
+  {
+    "name": "selected object preserves its field layout",
+    "source": "<template component=\"x-field\"><defs><type name=\"shape\" from=\"mode\"><option value=\"record\" type=\"object({ label: string, count: number })\"></option><option value=\"text\" type=\"string\"></option></type><prop name=\"value\" type=\"shape\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"record, text\" default=\"record\">Mode.</prop></defs><output>{$value.label}:{$value.count = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": {
+        "label": "Item",
+        "count": 3
+      }
+    },
+    "expected": "<output>Item:true</output>"
+  },
+  {
+    "name": "boolean selectors use parsed option keys",
+    "source": "<template component=\"x-field\"><defs><type name=\"shape\" from=\"mode\"><option value=\"true\" type=\"number\"></option><option value=\"false\" type=\"string\"></option></type><prop name=\"value\" type=\"shape\">Value.</prop><prop name=\"mode\" type=\"boolean\" values=\"true, false\" default=\"false\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": 3,
+      "mode": true
+    },
+    "expected": "<output>3:true</output>"
+  },
+  {
+    "name": "selected dimensions retain their quantity type",
+    "source": "<template component=\"x-field\"><defs><type name=\"shape\" from=\"mode\"><option value=\"length\" type=\"length\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"shape\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"length, number\" default=\"length\">Mode.</prop></defs><output>{$value * 2}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "value": "2px"
+    },
+    "expected": "<output>4px</output>"
+  }
+]

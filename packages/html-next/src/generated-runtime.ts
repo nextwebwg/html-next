@@ -794,7 +794,7 @@ export function chosen(props: CompiledProps, prop: CompiledProp, values: Readonl
 /** An input through a prop's type (`invocationValue`): null uses its default, and a refused value is undefined. */
 function taken(checks: PropChecks | null, input: unknown, source: "html" | "value", fallback?: unknown): unknown {
   if (input === null) return fallback === undefined ? null : fallback;
-  if (checks === null) return input;
+  if (checks === null) return undefined;
   const parsed = checks.c(input, "$", source);
   return parsed.ok ? parsed.value : undefined;
 }

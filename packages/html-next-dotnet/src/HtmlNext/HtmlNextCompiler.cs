@@ -73,7 +73,8 @@ public static partial class HtmlNextCompiler
             {
                 var declarations = defs.ChildNodes.Where(Significant).ToArray();
                 foreach (var node in declarations)
-                    if (node is not IElement declaration || declaration.LocalName is not ("prop" or "state" or "computed" or "event" or "request" or "slot")) Unsupported("declaration");
+                    if (node is not IElement declaration || declaration.LocalName is not ("prop" or "state" or "computed" or "event" or "request" or "slot" or "type")) Unsupported("declaration");
+                SelectedTypes.Named(defs, source);
                 foreach (var node in declarations.OfType<IElement>().Where(node => node.LocalName == "prop"))
                 {
                     if (node is not IElement { LocalName: "prop" } prop) { Unsupported("declaration"); continue; }
@@ -150,6 +151,10 @@ public static partial class HtmlNextCompiler
                         AddDerived(name, slot, expression, null);
                     }
                 }
+                var preparationSlot = props.Any(prop => prop.Selection?.FromState == true) ? slots++ : -1;
+                foreach (var prop in props)
+                    if (prop.Selection is { } selection) selection.Link(bindings,
+                        derived.TryGetValue(selection.From, out var item) ? item.Declaration : null, selection.FromState ? preparationSlot : -1);
                 children.RemoveAt(0);
             }
             if (assets is not null) children.RemoveAll(node => node is IElement { LocalName: "style" });
@@ -224,12 +229,16 @@ public static partial class HtmlNextCompiler
             var name = prop.GetAttribute("name") ?? throw ValueType.Error(source, "A prop requires a name.");
             if (!ExpressionCompiler.IsIdentifier(name)) throw ValueType.Error(source, $"Invalid prop name '{name}'.");
             if (declared.Any(item => AsciiEquals(item.Name, name))) throw ValueType.Error(source, $"Duplicate prop '{name}'.");
-            var type = DeclarationTypes.Read(prop, source, false, Default, javaScriptValues: !attributeOnly).At(name);
-            if (attributeOnly && !type.HasAttributeForm) throw ValueType.Error(source, "A prop and its declared fields require an HTML attribute type.");
+            var selection = attributeOnly ? SelectedTypes.Read(prop, source) : null;
+            var type = selection is null ? DeclarationTypes.Read(prop, source, false, Default, javaScriptValues: !attributeOnly).At(name) : new ValueType("unknown").At(name);
+            if (attributeOnly && selection is null && !type.HasAttributeForm) throw ValueType.Error(source, "A prop and its declared fields require an HTML attribute type.");
             var literal = prop.GetAttribute("default");
-            var value = literal is null ? null : !attributeOnly && type.Kind == "unknown" ? literal : Default(literal, type);
+            if (literal is not null && selection is not null && selection.DefaultType is null)
+                throw ValueType.Error(source, "A dependent prop default requires a prop selector with a matching default.");
+            var value = literal is null ? null : !attributeOnly && type.Kind == "unknown" ? literal : Default(literal, selection?.DefaultType ?? type);
             var constraints = ValueConstraints.Read(prop, type, source, Default);
-            var definition = new Prop(name, type, prop.HasAttribute("required"), value, constraints);
+            var definition = new Prop(name, type, prop.HasAttribute("required"), value, constraints, selection);
+            if (selection?.DefaultType is { } defaultType) definition = definition with { Default = definition.Store(value, defaultType) };
             if (literal is not null)
             {
                 var errors = new List<HtmlNextValidationError>();
@@ -880,7 +889,7 @@ public static partial class HtmlNextCompiler
                 }
                 else
                 {
-                    arguments[index] = new(arguments[index]?.Expression, Default(attribute.Value, prop.Type), Written: attribute.Value);
+                    arguments[index] = new(arguments[index]?.Expression, prop.Selection is null ? Default(attribute.Value, prop.Type) : null, Written: attribute.Value);
                     fallbacks[index] = " " + name + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
                 }
             }

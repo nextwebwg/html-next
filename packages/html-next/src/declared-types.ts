@@ -105,14 +105,14 @@ export function declareTypes(scope: Scope, definition: ComponentDefinition): voi
     declaredTypeResolvers.set(definition, resolver);
   }
   scope.typeOfDeclaredPath = resolver;
-  scope.typeOfPath = (path) => {
-    const dimension = dimensionOf(scope.typeOfDeclaredPath?.(path));
+  scope.typeOfPath = (path, currentValues) => {
+    const dimension = dimensionOf(scope.typeOfDeclaredPath?.(path, currentValues ? scope : undefined));
     if (dimension !== undefined) return dimension;
     if (path.includes(".") || resolvingDimensions.has(path)) return undefined;
     const computed = definition.declarations?.find((item) => item.kind === "computed" && item.name === path);
     if (computed?.kind !== "computed" || computed.expression === undefined) return undefined;
     resolvingDimensions.add(path);
-    try { return dimensionType(computed.expression.ast, scope); }
+    try { return dimensionType(computed.expression.ast, scope, currentValues); }
     finally { resolvingDimensions.delete(path); }
   };
 }
@@ -138,11 +138,11 @@ export function declareLayerTypes(child: Scope, parent: Scope, types: Readonly<R
     layerTypeResolvers.set(types, resolver);
   }
   child.typeOfDeclaredPath = resolver.resolve;
-  child.typeOfPath = (path) => {
+  child.typeOfPath = (path, currentValues) => {
     const dot = path.indexOf(".");
     const local = Object.hasOwn(types, dot < 0 ? path : path.slice(0, dot));
-    const dimension = dimensionOf(child.typeOfDeclaredPath?.(path));
-    return local ? dimension : dimension ?? parent.typeOfPath?.(path);
+    const dimension = dimensionOf(child.typeOfDeclaredPath?.(path, currentValues ? child : undefined));
+    return local ? dimension : dimension ?? parent.typeOfPath?.(path, currentValues);
   };
 }
 

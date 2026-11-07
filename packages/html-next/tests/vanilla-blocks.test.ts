@@ -1412,6 +1412,26 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], { mode: "number", value: "7" });
   });
 
+  it("refuses an initial non-null dependent value when the selector is null", async () => {
+    const text = propsShape(`
+      <type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type>
+      <prop name="value" type="input-value">Value.</prop>
+      <prop name="mode" type="keyword" values="text, number" required>Mode.</prop>`,
+      `<section><output>{$value}:{$value = 3}</output></section>`);
+    const result = await same(text, [], { mode: null, value: 3 });
+    for (const snapshot of result.snapshots) assert.match(snapshot, /<output>:false<\/output>/);
+  });
+
+  it("keeps selected string values out of dimensional arithmetic", async () => {
+    const text = propsShape(`
+      <type name="input-value" from="mode"><option value="length" type="length"></option><option value="text" type="string"></option></type>
+      <prop name="value" type="input-value">Value.</prop>
+      <prop name="mode" type="keyword" values="length, text" default="length">Mode.</prop>`,
+      `<section><output>{$value * 2}</output></section>`);
+    const result = await same(text, [], { mode: "text", value: "2px" });
+    for (const snapshot of result.snapshots) assert.match(snapshot, /<output><\/output>/);
+  });
+
   const slotsShape = (defs: string, body: string): string =>
     `<template component="x-shape" controller="./slots-controller.js" status="early" summary="Shape.">
     <defs><state name="open" type="boolean" value="false"></state><state name="label" type="string" value="L"></state>${defs}</defs>${body}</template>`;

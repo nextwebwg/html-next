@@ -17,7 +17,7 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             cancellation.ThrowIfCancellationRequested();
             ExecutionStack.Check(call.Target.Template.SourceName);
             var template = call.Target.Template;
-            var child = template.BindInvocation(call.Arguments, parent, cancellation, context.OnDiagnostic, call.Attributes, context.InvocationAttributesFor(parent), context: context, initialize: false);
+            var child = template.BindInvocation(call.Arguments, parent, cancellation, context.OnDiagnostic, call.Attributes, context.InvocationAttributesFor(parent), call.Projection, context, initialize: false);
             var matched = accepts.Contains(template.Tag, StringComparer.Ordinal);
             var frame = new ProjectionFrame(call.Projection ?? [], parent, matched ? owner : child, template.Tag, call.SharedRoot);
             context.RecordCollectedInvocation(call, parent, child, frame.Claims);
