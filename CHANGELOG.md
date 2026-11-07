@@ -2,6 +2,7 @@
 
 ## 1.0.0-alpha.92
 
+- Preserve native controller changes to input names and types through React updates. Keep native input ownership in one component, retain dirty value/default behavior and StrictMode ref lifecycles, and avoid replacing style refs when no important declaration needs applying.
 - Preserve non-ASCII case in public prop names, reflected attributes, invocation matching and style name resolution across Node, C# and generated targets. Allocate distinct React locals and emit valid JSX for Unicode prop inputs.
 - Filter Node, live and native .NET slot content declared with `accepts`, including structural content and delegated component lineage, without creating an `as` list. Omit rejected ordinary content from carriers. Keep forwarded fallback subscriptions independent and follow fallback component roots through lowering.
 - Enroll React and Svelte components in child-list bookkeeping only when a receiving slot declares an `as` list. Keep ordinary slot content on the frameworks' normal children paths.

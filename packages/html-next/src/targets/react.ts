@@ -1092,7 +1092,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     attributes.push(`{...styleBinding((${style}) as React.CSSProperties${previous === undefined ? "" : `, ${previous}`})}`);
   }
   const finalAttributes = htmlInputs === undefined ? attributes : [`{...(invocationProps(${jsxAttributeRecord(attributes)}, ${htmlInputs}) as any)}`];
-  const opening = `<${tag}${finalAttributes.length === 0 ? "" : ` ${finalAttributes.join(" ")}`}`;
+  const renderedAttributes = !state.preact && (tag === "HtmlNextInput" || tag === "HtmlNextValueInput")
+    ? [`htmlNextAttributes={${jsxAttributeRecord(finalAttributes)}}`] : finalAttributes;
+  const opening = `<${tag}${renderedAttributes.length === 0 ? "" : ` ${renderedAttributes.join(" ")}`}`;
   const markup = component && children === "" || !component && isVoidElement(node.name)
     ? `${opening} />` : `${opening}>${children}</${tag}>`;
   const selectorNames = new Set(Object.values(componentContracts ?? {}).flatMap((contract) => contract.select === undefined ? [] : [contract.select.from]));

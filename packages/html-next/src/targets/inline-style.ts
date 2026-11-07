@@ -23,6 +23,7 @@ export function styleObject(value) {
   }));
 }
 export function styleBinding(value, ref) {
+  if (value === null || typeof value !== 'object' || !Object.values(value).some(text => typeof text === 'string' && text.trimEnd().endsWith('!important'))) return { style: value, ref };
   return { style: value, ref: element => { applyStylePriority(element, value); return ref?.(element); } };
 }
 export function applyStylePriority(element, value) {

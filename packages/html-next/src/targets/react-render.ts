@@ -52,15 +52,18 @@ export function useRootHandle<T extends Element>(root: { current: T | null }, re
     if (previous.current?.element === element && previous.current?.ref === ref) return;
     dispose.current?.(); dispose.current = undefined;
     previous.current = { element, ref };
-    if (!ref || !element) return;
-    if (typeof ref === "function") {
-      const cleanup = ref(element);
-      dispose.current = typeof cleanup === "function" ? cleanup : () => { ref(null); };
-    } else {
-      ref.current = element;
-      dispose.current = () => { ref.current = null; };
-    }
+    dispose.current = bindRootHandle(element, ref);
   });
+}
+
+function bindRootHandle<T extends Element>(element: T | null, ref: React.Ref<T> | undefined): (() => void) | undefined {
+  if (!ref || !element) return undefined;
+  if (typeof ref === "function") {
+    const cleanup = ref(element);
+    return typeof cleanup === "function" ? cleanup : () => { ref(null); };
+  }
+  ref.current = element;
+  return () => { ref.current = null; };
 }
 
 /** Structured prop metadata keeps its initial value; rendered bindings read current inputs. */
@@ -123,12 +126,73 @@ function useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial
   return htmlNextDefault === undefined || htmlNextDefault === "defaultChecked" && mounted.current ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
 }
 /** Inputs and textareas render through these, so React DOM, which rewrites an input's name and type and a textarea's default whenever it commits one, commits nothing to them on an unrelated render. */
-export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>
-  <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
-export const HtmlNextTextarea = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
+${preact ? `export const HtmlNextInput = /* @__PURE__ */ React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>
+  <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);` : ""}
+export const HtmlNextTextarea = /* @__PURE__ */ React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
   <textarea {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 
-${preact ? "" : `/** Native value attributes retain the browser's dirty-value flag and textarea attribute semantics. */
+${preact ? "" : `type NativeInputAttributes = React.ComponentProps<"input"> & ControlDefaults & Readonly<Record<string, unknown>> & { readonly htmlNextValue?: unknown };
+interface NativeInputProps { readonly htmlNextAttributes: NativeInputAttributes }
+type NativeInputSnapshot = Partial<Record<'name' | 'type', string | null>> | null;
+/** One input owner preserves controller edits before React commits its native fields. */
+const NativeInput = /* @__PURE__ */ (() => class extends React.Component<NativeInputProps, {}, NativeInputSnapshot> {
+  private readonly root = React.createRef<HTMLInputElement>();
+  private mounted = false;
+  private currentRef: React.Ref<HTMLInputElement> | undefined;
+  private cleanup: (() => void) | undefined;
+  private commit(previous?: NativeInputAttributes): void {
+    const element = this.root.current;
+    const attributes = this.props.htmlNextAttributes;
+    if ('htmlNextValue' in attributes && (!previous || !Object.is(previous.htmlNextValue, attributes.htmlNextValue))) {
+      if (attributes.htmlNextValue == null) element?.removeAttribute('value');
+      else element?.setAttribute('value', String(attributes.htmlNextValue));
+    }
+    if (this.currentRef !== attributes.ref) {
+      this.cleanup?.();
+      this.currentRef = attributes.ref;
+      this.cleanup = bindRootHandle(element, attributes.ref);
+    }
+  }
+  componentDidMount(): void {
+    this.commit();
+    this.mounted = true;
+    if (this.props.htmlNextAttributes.htmlNextDefault !== undefined) this.forceUpdate();
+  }
+  componentWillUnmount(): void {
+    this.cleanup?.();
+    this.cleanup = undefined;
+    this.currentRef = undefined;
+  }
+  getSnapshotBeforeUpdate(previous: NativeInputProps): NativeInputSnapshot {
+    const element = this.root.current;
+    if (element === null) return null;
+    const before = previous.htmlNextAttributes, after = this.props.htmlNextAttributes;
+    let name = before.name === after.name ? element.getAttribute('name') : undefined;
+    let type = before.type === after.type ? element.getAttribute('type') : undefined;
+    if (name === (before.name == null ? null : String(before.name))) name = undefined;
+    if (type === (before.type == null ? null : String(before.type))) type = undefined;
+    return name === undefined && type === undefined ? null : { name, type };
+  }
+  componentDidUpdate(previous: NativeInputProps, _state: {}, attributes: NativeInputSnapshot): void {
+    const element = this.root.current;
+    if (element !== null && attributes !== null) for (const name of ['name', 'type'] as const) {
+      const value = attributes[name];
+      if (value === undefined || element.getAttribute(name) === value) continue;
+      if (value === null) element.removeAttribute(name); else element.setAttribute(name, value);
+    }
+    this.commit(previous.htmlNextAttributes);
+  }
+  render(): ReactNode {
+    const { htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref: _ref, ...props } = this.props.htmlNextAttributes;
+    const defaults = htmlNextDefault === undefined || htmlNextDefault === 'defaultChecked' && this.mounted
+      ? {} : { [htmlNextDefault]: this.mounted ? htmlNextAuthored : htmlNextInitial };
+    return <input {...props} defaultValue={typeof document === 'undefined' && htmlNextValue != null ? String(htmlNextValue) : props.defaultValue} {...defaults} ref={this.root} />;
+  }
+})();
+export const HtmlNextInput: React.NamedExoticComponent<NativeInputProps> = /* @__PURE__ */ React.memo(NativeInput, (before, after) => sameControlProps(before.htmlNextAttributes, after.htmlNextAttributes));
+export const HtmlNextValueInput = HtmlNextInput;
+
+/** Native value attributes retain the browser's dirty-value flag and textarea attribute semantics. */
 ${closureFreeFunctionSource(nativeValueCss, "nativeValueCss")}
 function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(value: unknown, ref: React.Ref<T> | undefined, style?: React.CSSProperties): { ref: React.RefObject<T | null>; style?: React.CSSProperties } {
   const root = React.useRef<T | null>(null);
@@ -153,8 +217,6 @@ function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HT
   useRootHandle(root, ref);
   return { ref: root, style: represented };
 }
-export const HtmlNextValueInput = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, ...props }: React.ComponentProps<"input"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
-  <input {...props} ref={useValueAttribute<HTMLInputElement>(htmlNextValue, ref).ref} defaultValue={typeof document === "undefined" && htmlNextValue != null ? String(htmlNextValue) : undefined} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 interface NativeTextareaProps extends React.ComponentPropsWithoutRef<"textarea"> { readonly htmlNextRoot: React.RefObject<HTMLTextAreaElement | null> }
 /** React rewrites an uncontrolled textarea's default on every commit. Snapshot controller-owned defaults before that mutation. */
 const NativeTextarea = /* @__PURE__ */ (() => class extends React.Component<NativeTextareaProps, {}, string | null> {
