@@ -583,6 +583,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       '<ul><slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index"><li $value="$row.name"></li></slot></ul></template>')
       .get("vue/XRowList.vue")!;
     compileVue(vue, "XRowList.vue");
+    assert.doesNotMatch(vue, /usePlainSlots|PlainSlot/);
     assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
     assert.match(vue, /<RetainedSlotValues[\s\S]*?:values="\{[\s\S]*?item: slotProp\([\s\S]*?referenceValue\([\s\S]*?row,[\s\S]*?index: index/);
     assert.match(vue, /:defaults="\{ item: null, index: null \}"\s+v-slot="slotValues"/);
@@ -792,7 +793,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`);
     const render = (props: Record<string, unknown>): Promise<string> =>
       module.renderToString(module.createSSRApp({ render: () => module.h(module.default, props, { default: () => "Go" }) }))
-        .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
+        .then((html: string) => html.replace(/<!--(?:\[|\]|teleport start|teleport end)?-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
     // The styles select the root as `:host`, so each arm's root carries the tag as a class, the
     // converted-root marker, and the attribute of the component's own markup.
     assert.equal(await render({}), '<button class="x-action action" type="button" data-hn data-hn-x-action>Go</button>');

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, it } from "vitest";
 import { computed, createSSRApp, h, nextTick, onServerPrefetch, shallowRef, watchEffect } from "vue";
 import { renderToString } from "@vue/server-renderer";
 
-import { transform } from "esbuild";
+import { build, transform } from "esbuild";
 
 import * as decimal from "../src/decimal.js";
 import { generateVueComponent, vueHostArtifact } from "../src/generate.js";
@@ -30,7 +30,7 @@ async function loadReactiveHost() {
 async function loadHost(incoming?: Record<string, unknown>) {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
   const instance = incoming === undefined ? "null" : JSON.stringify({ vnode: { props: incoming } });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createCommentVNode=()=>{},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},provide=()=>{},inject=()=>undefined,camelize=(s)=>s,Comment={},isVNode=()=>false,renderSlot=()=>{},Text={}';`);
+  const stubbed = code.replace(/from\s+["']vue["'];?/, `from 'data:text/javascript,export const customRef=()=>{},ref=()=>{},computed=()=>{},getCurrentInstance=()=>(${instance}),onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={},createCommentVNode=()=>{},createTextVNode=()=>{},defineComponent=(options)=>options,h=()=>{},provide=()=>{},inject=()=>undefined,camelize=(s)=>s,Comment={},isVNode=()=>false,renderSlot=()=>{},Text={},Teleport={},cloneVNode=(node)=>node';`);
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
     useReflectedProp: () => (name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean) => string | undefined;
     createDispatch: (
@@ -42,6 +42,15 @@ async function loadHost(incoming?: Record<string, unknown>) {
 }
 
 describe("the shared Vue host", () => {
+  it("omits projection machinery when a consumer imports only native root metadata", async () => {
+    const bundle = await build({ stdin: { contents: 'export { rootMetadata } from "./host";', loader: "ts" },
+      bundle: true, write: false, format: "esm", external: ["vue"], plugins: [{ name: "generated-host", setup(builder) {
+        builder.onResolve({ filter: /^\.\/host$/ }, () => ({ path: "host", namespace: "generated-host" }));
+        builder.onLoad({ filter: /.*/, namespace: "generated-host" }, () => ({ contents: vueHostArtifact().content, loader: "ts", resolveDir: fileURLToPath(new URL("..", import.meta.url)) }));
+      } }] });
+    assert.doesNotMatch(bundle.outputFiles[0]!.text, /PlainFrame|PlainPortal|PlainPlacement|ChildPlacement/);
+  });
+
   it("keeps structured hydration data stable without freezing authored bindings or scalar props", async () => {
     const { useReflectedProp } = await loadHost({ content: {}, label: "" });
     const reflect = useReflectedProp();

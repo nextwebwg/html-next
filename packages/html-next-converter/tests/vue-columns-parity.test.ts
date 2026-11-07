@@ -9,6 +9,8 @@ import { build, type BuildOptions } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
+import { dynamicPlainSource, plainSlotExpected, plainSlotFiles, plainSlotInvocations, repeatedPlainSource } from "../../html-next/tests/fixtures/plain-slot-ownership.js";
 
 /**
  * Columns as markup (https://nextwebwg.org/declarative-components/components#columns-as-markup) in
@@ -22,8 +24,10 @@ const nodeModules = new URL("../node_modules", import.meta.url).pathname;
 // The server renderer is a dependency of the html-next package's own tests.
 const serverModules = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
+const wrappedMovingPlain = dynamicPlainSource.replace("<x-moving-column>", '<template $with="1 as ignored"><x-moving-column>')
+  .replace("</x-moving-column></x-moving-list>", "</x-moving-column></template></x-moving-list>");
 
-const source = `<template component="x-column" status="early" summary="Column."><th scope="col"><slot name="header">{$header}</slot></th>
+const source = `<template component="x-column" status="early" summary="Column."><th $attributes scope="col"><slot name="header">{$header}</slot></th>
   <defs><prop name="field" type="string">Field.</prop><prop name="header" type="string">Header.</prop>
     <prop name="span" type="number" default="1">Span.</prop>
     <state name="tone" type="string" value="quiet"></state>
@@ -85,7 +89,10 @@ const source = `<template component="x-column" status="early" summary="Column.">
       <template $match><x-column $when="$wide" field="price" header="Wide"></x-column><x-column $else field="name" header="Narrow"><template slot="note"><u>n</u></template></x-column></template>
       <template $with="'W' as label"><x-column from:header="$label"><template slot="cell"><x-badge from:text="$label"></x-badge></template></x-column></template>
       <template $each="tag of $tags" $key="$tag"><x-column from:header="$tag"><template slot="cell"><x-badge from:text="$tag"></x-badge></template><template slot="tag"><em>{$size + 1}{$unit}</em></template></x-column></template>
-    </x-datatable></div></template>`;
+    </x-datatable></div></template>${Object.values(plainSlotFiles).join("")}${wrappedMovingPlain}${repeatedPlainSource}
+<template component="x-plain-page"><main>${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page></main></template>
+<template component="x-hand-card"><defs><state name="first" type="boolean" value="true"></state><handler name="toggle"><set name="first" expr:value="not $first"></set></handler></defs>
+<section data-hand-card><button data-hand-toggle on:click="toggle">Toggle</button><p $if="$first"><slot name="cell">First</slot></p><b><slot name="cell">Second</slot></b></section></template>`;
 /** Reads the table's \`as\` list from its controller. */
 const controller = `export default function initialize(host) {
   return host.effect(() => host.root.setAttribute("data-columns", host.state.columns.map((column) => (column.header ?? column.field ?? "-") + ":" + column.span).join(",")));
@@ -132,6 +139,8 @@ describe.skipIf(!enabled)("columns as markup in converted Vue", () => {
   let fresh = "";
   let hydrate = "";
   let server = "";
+  let plainServer = "";
+  let plainHydrate = "";
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-vue-columns-"));
@@ -164,22 +173,115 @@ describe.skipIf(!enabled)("columns as markup in converted Vue", () => {
       await writeFile(file.replace(/\.vue$/, ".ssr.ts"), `${script.content.replace("export default", "const Component =")}\n${template.code}\nexport default Object.assign(Component, { ssrRender });\n`);
     }
     const artifact = manifest.components.find((component) => component.tag === "x-app")!.artifact;
+    const plain = manifest.components.find(component => component.tag === "x-plain-page")!.artifact;
+    const hand = manifest.components.find(component => component.tag === "x-hand-card")!.artifact;
+    const plainConsumer = `const Counter = defineComponent({ setup() {
+      const count = ref(0), id = useId(), context = inject("plain-context");
+      onUnmounted(() => { if (typeof window !== "undefined") window.plainCounterDisposals = (window.plainCounterDisposals ?? 0) + 1; });
+      return () => h("button", { id, "data-hand-counter": "", onClick: () => { count.value++; } }, context + ":" + count.value);
+    } });
+    const PlainConsumer = defineComponent({ setup() {
+      provide("plain-context", "Context");
+      const label = ref("A"); if (typeof window !== "undefined") window.updatePlainLabel = () => { label.value = "B"; };
+      return () => { const value = label.value; return h(Fragment, [h(Plain), h("aside", { "data-hand-live": "" }, h(Hand, {}, { cell: () => [h("mark", value), h("input", { value, onInput: event => { label.value = event.target.value; } }), h(Counter)] })),
+        h("aside", { "data-hand-empty": "" }, h(Hand, {}, { cell: () => createTextVNode("") }))]); };
+    } });`;
     const options: BuildOptions = { bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModules], plugins: [sfc] };
     await writeFile(join(out, "entry.ts"), `import { createApp, h } from "vue"; import App from "./${artifact}"; createApp({ render: () => h(App) }).mount("#mount");`);
     await build({ ...options, entryPoints: [join(out, "entry.ts")], outfile: fresh = join(directory, "vue.js") });
     await writeFile(join(out, "hydrate.ts"), `import { createSSRApp, h } from "vue"; import App from "./${artifact}"; createSSRApp({ render: () => h(App) }).mount("#mount");`);
     await build({ ...options, entryPoints: [join(out, "hydrate.ts")], outfile: hydrate = join(directory, "hydrate.js") });
-    await writeFile(join(out, "server.ts"), `import { createSSRApp, h } from "vue"; import { renderToString } from "@vue/server-renderer"; import App from "./${artifact}";
-export const render = () => renderToString(createSSRApp({ render: () => h(App) }));`);
+    await writeFile(join(out, "plain-hydrate.ts"), `import { createSSRApp, createTextVNode, defineComponent, Fragment, h, inject, onUnmounted, provide, ref, useId } from "vue"; import Plain from "./${plain}"; import Hand from "./${hand}";
+${plainConsumer}
+const app = createSSRApp(PlainConsumer); app.mount("#mount"); window.finishPlain = () => app.unmount();`);
+    await build({ ...options, entryPoints: [join(out, "plain-hydrate.ts")], outfile: plainHydrate = join(directory, "plain-hydrate.js") });
+    await writeFile(join(out, "server.ts"), `import { createSSRApp, createTextVNode, defineComponent, Fragment, h, inject, onUnmounted, provide, ref, useId } from "vue"; import { renderToString } from "@vue/server-renderer"; import App from "./${artifact}";
+import Plain from "./${plain}"; import Hand from "./${hand}";
+${plainConsumer}
+export const render = () => renderToString(createSSRApp({ render: () => h(App) }));
+export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
     const serverBuild = await build({ entryPoints: [join(out, "server.ts")], bundle: true, format: "esm", platform: "node", write: false, nodePaths: [serverModules, nodeModules], plugins: [ssrSfc] });
-    const module = await import(`data:text/javascript;base64,${Buffer.from(serverBuild.outputFiles[0]!.text).toString("base64")}`) as { render(): Promise<string> };
+    const module = await import(`data:text/javascript;base64,${Buffer.from(serverBuild.outputFiles[0]!.text).toString("base64")}`) as { render(): Promise<string>; renderPlain(): Promise<string> };
     server = await module.render();
+    plainServer = await module.renderPlain();
   }, 180_000);
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} hydrates shared plain ranges and preserves edited controls through transfers and reconnect`, async () => {
+      const browser = await launchParityBrowser(browserType);
+      try {
+        const page = await browser.newPage(), errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        page.on("console", message => { if (message.type() === "error" || message.type() === "warning" && !message.text().startsWith("Feature flags ")) errors.push(message.text()); });
+        await page.setContent(`<div id="mount">${plainServer}</div>`);
+        const read = () => page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent])));
+        assert.deepEqual(await read(), plainSlotExpected);
+        assert.deepEqual(await page.locator("[data-hand-empty] p, [data-hand-empty] b").allTextContents(), ["", "Second"]);
+        await page.evaluate(() => { (window as any).plainNodes = Array.from(document.querySelectorAll("i, input")); });
+        const moving = await page.locator("[data-moving-plain] input").elementHandle(), repeated = await page.locator("[data-repeated-plain] input").elementHandle();
+        await page.locator("[data-moving-plain] input").fill("Before hydration");
+        await page.locator("[data-repeated-plain] input").fill("Kept");
+        const counter = await page.locator("[data-hand-counter]").elementHandle();
+        const counterId = await page.locator("[data-hand-counter]").getAttribute("id");
+        await page.addScriptTag({ path: plainHydrate });
+        const frames = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await frames(); assert.deepEqual(errors, []); assert.deepEqual(await read(), plainSlotExpected);
+        assert.ok(await page.evaluate(() => (window as any).plainNodes.every((node: Node) => node.isConnected)));
+        const kept = async (): Promise<void> => {
+          assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+          assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+          assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
+          assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+        };
+        await kept();
+        const hand = await page.locator("[data-hand-card] mark").elementHandle();
+        assert.equal(await page.locator("[data-hand-card] mark").textContent(), "A");
+        await page.evaluate(() => (window as any).updatePlainLabel()); await frames();
+        assert.equal(await page.locator("[data-hand-card] mark").textContent(), "B");
+        assert.ok(await hand!.evaluate(node => node === document.querySelector("[data-hand-card] mark")));
+        const handInput = page.locator("[data-hand-card] input");
+        await handInput.fill("Typed"); await frames();
+        assert.equal(await page.locator("[data-hand-card] mark").textContent(), "Typed");
+        assert.ok(await handInput.evaluate(node => node === node.ownerDocument.activeElement), "reactive slot updates keep native focus");
+        await page.locator("[data-hand-counter]").click();
+        await page.locator("[data-hand-live] [data-hand-toggle]").click(); await frames();
+        assert.equal(await page.locator("[data-hand-live] b [data-hand-counter]").textContent(), "Context:1");
+        assert.ok(await counter!.evaluate(node => node === document.querySelector("[data-hand-counter]")));
+        assert.equal(await page.locator("[data-hand-counter]").getAttribute("id"), counterId);
+        await page.locator("[data-hand-counter]").click(); await frames();
+        assert.equal(await page.locator("[data-hand-counter]").textContent(), "Context:2");
+        assert.deepEqual(await page.locator("[data-hand-empty] p, [data-hand-empty] b").allTextContents(), ["", "Second"]);
+        for (const [action, expected] of [
+          ["borrowed", [["b", "Plain"]]], ["borrowed", [["p", "BorrowedFallback"], ["b", "Plain"]]],
+          ["root", [["p", "Plain"]]], ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
+        ] as const) {
+          await page.locator(`[data-plain-action="${action}"]`).click(); await frames(); assert.deepEqual(errors, []); await kept();
+          assert.deepEqual(await page.locator("[data-moving-plain] > p, [data-moving-plain] > b").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent])), expected);
+          const owner = expected.some(([name, text]) => name === "b" && text === "Plain") ? "b" : "p";
+          for (const text of ["", "Plain"]) {
+            await page.locator('[data-plain-action="content"]').click(); await frames();
+            assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text); await kept();
+          }
+        }
+        await page.locator('[data-plain-action="first"]').click(); await frames(); await kept();
+        assert.ok(await page.locator("[data-repeated-plain] footer").evaluate(node => node.matches(":last-child")));
+        assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
+        assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
+        await page.evaluate(async () => {
+          const root = document.querySelector("#mount")!, parent = root.parentNode!, after = root.nextSibling;
+          root.remove(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          parent.insertBefore(root, after);
+        });
+        await frames(); await kept(); assert.deepEqual(await read(), plainSlotExpected);
+        await page.evaluate(() => (window as any).finishPlain()); await frames();
+        assert.equal(await page.locator("#mount").textContent(), ""); assert.deepEqual(errors, []);
+        assert.equal(await page.evaluate(() => (window as any).plainCounterDisposals), 1);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} renders, updates and hydrates the tables like live`, async () => {
-      const browser = await browserType.launch({ headless: true });
+      const browser = await launchParityBrowser(browserType);
       try {
         const pages: Record<"live" | "vue" | "hydrated", Page> = { live: await browser.newPage(), vue: await browser.newPage(), hydrated: await browser.newPage() };
         const errors: string[] = [];
