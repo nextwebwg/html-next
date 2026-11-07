@@ -591,6 +591,24 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /<li>\s*<RetainedInlineText[\s\S]*?referenceMember\(row, 'name'\)/);
   });
 
+  it("retains removable ordinary Vue slots while leaving permanent and scoped slots native", () => {
+    for (const [outlet, retained] of [
+      ["<slot></slot>", false],
+      ['<template $with="1 as item"><slot></slot></template>', false],
+      ['<slot $if="$open"></slot>', true],
+      ['<p $if="$open"><slot></slot></p>', true],
+      ['<template $match><p $when="$open"><slot></slot></p><i $else>Closed</i></template>', true],
+    ] as const) {
+      for (const scoped of [false, true]) {
+        const definition = parseComponent(`<template component="x-conditional-slot"><defs><state name="open" type="boolean" value="true"></state>` +
+          `${scoped ? '<slot><prop name="item" type="number">Item.</prop></slot>' : ""}</defs><section>${outlet}</section></template>`);
+        const vue = generateVueComponent(definition);
+        compileVue(vue, "XConditionalSlot.vue");
+        assert.equal(vue.includes("usePlainSlots("), retained && !scoped, `${outlet}, scoped=${scoped}`);
+      }
+    }
+  });
+
   it("converts a consumer's scoped-slot template with its lexical state", () => {
     const vue = generated(`<template component="x-consumer"><defs><state name="heading" type="string" value="People"></state></defs>` +
       `<section><x-row-list><template slot="row"><b $value="$item.name"></b><i $value="$heading"></i></template></x-row-list></section></template>`)

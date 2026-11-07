@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Preserve ordinary Vue slot content when a single conditional outlet closes and reopens. Place accepted roots once across repeated receiving outlets, retaining child state, injected context and edited controls through transfers and temporary absence. Select retention from shared template lifetime analysis while keeping permanent single outlets and scoped slots on native paths.
+
 - Retain Vue child-slot content through destination changes, server hydration, caller updates and reconnect, including stateful Vue children and injected context. Preserve native control edits and focus during updates, forward literal control values as attributes, and keep scoped-only slots on Vue's native outlet path. Filter rejected projected text and elements through structural fragments, and remove unused projection helpers from ordinary bundles.
 
 - Share plain slot content between own, borrowed and repeated outlets in Node, compiled Vanilla and Angular. Retain original nodes and control edits through transfers, hydration and reconnect, and instantiate authored lazy templates at each outlet. Keep Angular views registered for server serialization and preserve native DOM order around structural anchors.

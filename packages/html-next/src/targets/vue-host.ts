@@ -824,6 +824,7 @@ interface ChildRecord {
 }
 const childRecords = new WeakMap<object, ChildRecord>();
 const vnodeRecords = new WeakMap<object, ChildRecord>();
+const projectionFrames = /* @__PURE__ */ new WeakMap<object, PlainFrame>();
 ${VUE_PLAIN_SOURCE}
 /** A slot's content as vnodes: a render function's slot may return one node, text or nothing, where a template's returns a list. */
 const slotContent = (value: unknown): VNode[] => (Array.isArray(value) ? value : [value]).map((child) => isVNode(child) ? child
@@ -873,7 +874,7 @@ export function useChildEntry(): ChildRecord | undefined {
  * \`prefix\` begins each warning, as live's do.
  */
 export function useChildList<List>(
-  slot: string, accepted: readonly ChildKind[], presets: Record<string, string>, prefix: string, named: string, listed: string,
+  slot: string, accepted: readonly ChildKind[], presets: Record<string, string>, prefix: string, named: string, listed: string, retain = false,
 ): readonly [Readonly<Ref<List>>, Readonly<Ref<VNode[]>>] {
   const slots = useSlots();
   const instance = getCurrentInstance()!;
@@ -1007,8 +1008,13 @@ export function useChildList<List>(
   } } satisfies ChildOwner);
   onMounted(() => { filling = false; if (joined.length > 0) reread(); });
   onUpdated(() => { if (joined.length > 0) reread(); });
-  onBeforeUnmount(() => { observer?.disconnect(); for (const record of [...records.values(), ...joined]) for (const frame of record.plain.values()) frame.dispose(); });
-  return [list as unknown as Readonly<Ref<List>>, computed(() => state.value.nodes)];
+  const projection = retain ? new PlainFrame(() => childNodes(state.value.nodes)) : undefined;
+  onBeforeUnmount(() => { observer?.disconnect(); projection?.dispose(); for (const record of [...records.values(), ...joined]) for (const frame of record.plain.values()) frame.dispose(); });
+  return [list as unknown as Readonly<Ref<List>>, computed(() => {
+    const nodes = state.value.nodes;
+    if (projection !== undefined && slots[TEMPLATE_SLOT + slotKey(slot)] === undefined) projectionFrames.set(nodes, projection);
+    return nodes;
+  })];
 }
 
 /** A component type's tag, as a warning names it. */
@@ -1020,7 +1026,7 @@ const outletChild = (instance: ComponentInternalInstance): ComponentInternalInst
   for (let up = instance.parent; up !== null; up = up.parent) {
     const type: unknown = up.type;
     if (type === ChildNodes) break;
-    if (type !== KeyedBoundary) top = up;
+    if (type !== KeyedBoundary && type !== PlainPlacement) top = up;
   }
   return top;
 };
@@ -1042,7 +1048,11 @@ function childNodes(nodes: readonly VNode[]): VNode[] {
 export const ChildNodes = /* @__PURE__ */ defineComponent({
   props: { nodes: { type: Array as PropType<VNode[]>, required: true } },
   setup(props, { slots }) {
-    return () => props.nodes.some((node) => node.type !== Comment) ? h(Fragment, childNodes(props.nodes)) : slots.default?.();
+    return () => {
+      const frame = projectionFrames.get(props.nodes);
+      return frame !== undefined ? h(PlainPlacement, { frame }, slots)
+        : plainFilled(props.nodes) ? h(Fragment, childNodes(props.nodes)) : slots.default?.();
+    };
   },
 });
 

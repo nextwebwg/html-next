@@ -1638,6 +1638,7 @@ interface ChildRecord {
 }
 const childRecords = new WeakMap<object, ChildRecord>()
 const vnodeRecords = new WeakMap<object, ChildRecord>()
+const projectionFrames = /* @__PURE__ */ new WeakMap<object, PlainFrame>()
 
 interface PlainSite {
   vnode?: VNode
@@ -2026,6 +2027,7 @@ export function useChildList<List>(
   prefix: string,
   named: string,
   listed: string,
+  retain = false,
 ): readonly [Readonly<Ref<List>>, Readonly<Ref<VNode[]>>] {
   const slots = useSlots()
   const instance = getCurrentInstance()!
@@ -2252,15 +2254,26 @@ export function useChildList<List>(
   onUpdated(() => {
     if (joined.length > 0) reread()
   })
+  const projection = retain ? new PlainFrame(() => childNodes(state.value.nodes)) : undefined
   onBeforeUnmount(() => {
     observer?.disconnect()
+    projection?.dispose()
     for (const record of [...records.values(), ...joined]) {
       for (const frame of record.plain.values()) {
         frame.dispose()
       }
     }
   })
-  return [list as unknown as Readonly<Ref<List>>, computed(() => state.value.nodes)]
+  return [
+    list as unknown as Readonly<Ref<List>>,
+    computed(() => {
+      const nodes = state.value.nodes
+      if (
+        projection !== undefined && slots[TEMPLATE_SLOT + slotKey(slot)] === undefined
+      ) projectionFrames.set(nodes, projection)
+      return nodes
+    }),
+  ]
 }
 
 /** A component type's tag, as a warning names it. */
@@ -2275,7 +2288,7 @@ const outletChild = (instance: ComponentInternalInstance): ComponentInternalInst
   for (let up = instance.parent; up !== null; up = up.parent) {
     const type: unknown = up.type
     if (type === ChildNodes) break
-    if (type !== KeyedBoundary) top = up
+    if (type !== KeyedBoundary && type !== PlainPlacement) top = up
   }
   return top
 }
@@ -2308,10 +2321,14 @@ function childNodes(nodes: readonly VNode[]): VNode[] {
 export const ChildNodes = /* @__PURE__ */ defineComponent({
   props: { nodes: { type: Array as PropType<VNode[]>, required: true } },
   setup(props, { slots }) {
-    return () =>
-      props.nodes.some((node) => node.type !== Comment)
+    return () => {
+      const frame = projectionFrames.get(props.nodes)
+      return frame !== undefined
+        ? h(PlainPlacement, { frame }, slots)
+        : plainFilled(props.nodes)
         ? h(Fragment, childNodes(props.nodes))
         : slots.default?.()
+    }
   },
 })
 

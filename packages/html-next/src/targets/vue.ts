@@ -1,6 +1,6 @@
 import { entryTags } from "../entry-origin.js";
 import { literalValueSource } from "./shared.js";
-import { repeatedSlotNames, templateForwardsAttributes } from "../template.js";
+import { retainedSlotNames, templateForwardsAttributes } from "../template.js";
 import { invocationSchema } from "./invocation-attributes.js";
 import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { ITERATION_INDEX } from "../expression.js";
@@ -427,7 +427,7 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
   const accepted = [...context.componentGraph?.values() ?? []].some((definition) =>
     Object.values(definition.contract.slots ?? {}).some((declared) => declared.as !== undefined && declared.accepts?.includes(tag) === true));
   const target = context.componentGraph?.get(tag);
-  const shared = accepted || target !== undefined && repeatedSlotNames(target).size > 0;
+  const shared = accepted || target !== undefined && retainedSlotNames(target).size > 0;
   const markers = !shared ? [] : [...groups].filter(([, children]) => children.some(isSlotTemplate))
     .map(([slot]) => `<template #html-next-template-${slot || "default"} />`);
   const loose = renderChildren(nodes.filter((child) => !groups.has(assignedSlot(child))), names, context);
@@ -1205,8 +1205,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   }]);
   for (const list of childLists) define(list.as, list.name, `${list.name}.value`, list.type);
   const accepted = [...options.componentGraph?.values() ?? []].some(other => Object.values(other.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(contract.tag)));
-  const sharedSlots = new Set(repeatedSlotNames(definition));
+  const sharedSlots = new Set(retainedSlotNames(definition));
   if (accepted) for (const name of [...Object.keys(contract.slots ?? {}), ...(definition.slots ?? []).map(slot => slot.name ?? "")]) sharedSlots.add(name);
+  for (const list of childLists) sharedSlots.delete(list.slot);
   for (const name of sharedSlots) if (Object.keys(contract.slots?.[name]?.props ?? {}).length > 0 ||
     definition.slots?.some(slot => (slot.name ?? "") === name && (slot.props?.length ?? 0) > 0)) sharedSlots.delete(name);
   const plainSlots = sharedSlots.size === 0 ? undefined : { state: identifiers.take("plainSlots", ""), names: sharedSlots };
@@ -1774,5 +1775,5 @@ function childListSource(list: { readonly slot: string; readonly accepts: readon
   const named = `\`${tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
   const file = context.definition.source.file;
   const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
-  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))})`;
+  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))}${retainedSlotNames(context.definition).has(list.slot) ? ", true" : ""})`;
 }
