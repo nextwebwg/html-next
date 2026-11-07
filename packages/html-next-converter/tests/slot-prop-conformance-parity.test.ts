@@ -15,6 +15,7 @@ import { chromium, firefox, webkit, type BrowserType } from "playwright";
 import { generateComponent, parseComponentResource, type ComponentDefinition } from "@nextwebwg/html-next";
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
+import { ownedEntryFiles, ownedEntryInvocation, ownedEntryInitial, ownedEntryChanged } from "../../html-next/tests/fixtures/owned-entry-expressions.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 /**
@@ -31,7 +32,7 @@ const list = (tag: string, row: string, later?: string) => `<template component=
   ${later === undefined ? "" : `<handler name="change"><set name="rows" expr:value="[{ id: 'a', label: 'A' }, ${later}]"></set></handler>`}</defs>
   <div><ul class="${tag}"><slot $each="r, index of $rows" $key="$index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
 const cases = { extra: "{ id: 'b', label: 'B', index: 1 }", missing: "{ id: 'b' }", wrong: "{ id: 2, label: 'B' }", later: "{ id: 'b', label: 'B' }" } as const;
-const page = `${[...Object.keys(cases), "defaults", "finite", "optional"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
+const page = `${[...Object.keys(cases), "defaults", "finite", "optional", "entries"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
 <template component="x-page" status="early" summary="Page."><defs><state name="label" type="string" value="Outer"></state><state name="count" type="number" value="99"></state><state name="empty" type="number" value="98"></state>
 <state name="loop" type="string" value="declared"></state><state name="index" type="string" value="named"></state>
 <state name="values" type="list(number)" from="[4, 5]"></state><state name="position" type="length" value="8px"></state><state name="edits" type="list(object({ label: string }))" from="[{ label: 'A' }, { label: 'B' }]"></state><handler name="change-aliases"><set name="values" expr:value="[5, 4, 3]"></set></handler></defs><main>${Object.keys(cases).map((name) =>
@@ -42,7 +43,7 @@ const page = `${[...Object.keys(cases), "defaults", "finite", "optional"].map((n
 <div data-dimension><p $each="position of $values" $where="round($position, 1) > 3">{round($position, 1)}</p><b $each="value, position of $values">{round($position, 1)}</b><i>{$position}</i></div>
 <div data-edits><label $each="entry of $edits" $key="$entry.label"><input bind:value="entry.label"><span>{$entry.label}</span></label></div>
 <div data-classes><b class="one two" class:one two="$values.length > 2"></b><i class:one two="$values.length > 2"></i></div>
-<button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
+${ownedEntryInvocation}<button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
 // A default fills a rejected value and a null or missing one, typed or `unknown`.
 const defaults = `<template component="x-defaults" status="early" summary="Defaults."><defs>
   <slot name="row"><prop name="label" type="string" default="Fallback">Label.</prop><prop name="note" type="unknown" default="n">Note.</prop></slot>
@@ -57,7 +58,7 @@ const finite = `<template component="x-finite"><defs>
 </defs><div><ul class="x-finite"><slot name="row" $each="offset, index of [0, 1]" $key="$index" from:count="1 / ($denominator + $offset)" from:empty="1 / ($denominator + $offset)" from:missing="$record.absent" from:__proto__="1 / ($denominator + $offset)"></slot></ul>
 <button id="finite-valid" on:click="valid">Valid</button><button id="finite-invalid" on:click="invalid">Invalid</button><button id="finite-recover" on:click="recover">Recover</button></div></template>`;
 const optional = `<template component="x-optional"><defs><slot name="row"><prop name="label" type="string">Label.</prop></slot></defs><div><ul class="x-optional"><slot name="row"></slot></ul></div></template>`;
-const files: Readonly<Record<string, string>> = { "optional.html": optional, "finite.html": finite, "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
+const files: Readonly<Record<string, string>> = { ...ownedEntryFiles, "optional.html": optional, "finite.html": finite, "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const htmlNextSource = fileURLToPath(new URL("../../html-next/src/", import.meta.url));
@@ -169,9 +170,11 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             }
             const rows = () => page.evaluate(() => Array.from(document.querySelectorAll("ul"), (list) => [list.className, Array.from(list.children, (row) => row.textContent)]));
             const filled = ["x-defaults", ["Ax", "Fallbackn", "Fallbackn"]];
-            await page.waitForFunction(() => document.querySelectorAll("li").length === 14);
+            await page.waitForFunction(() => document.querySelectorAll("li").length === 14).catch(error => { throw new Error(`${error}\n${errors.join("\n")}`); });
             assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", "B"]], filled, ["x-finite", ["7::true:9", "1:1:true:1"]], ["x-optional", ["Outer"]]]);
-            assert.equal(warnings.length, 4);
+            assert.equal(warnings.length, 4, warnings.join("\n"));
+            const ownedEntries = () => page.locator("[data-owned]").allTextContents();
+            assert.deepEqual(await ownedEntries(), ownedEntryInitial);
             const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));
             assert.deepEqual(await iteration(), [["declared:named:0:5:2", true, false], ["declared:named:1:4:2", false, true]]);
             const classes = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-classes] > *'), element => [...element.classList]));
@@ -187,6 +190,7 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             await page.waitForFunction(() => document.querySelector('[data-iteration] p')?.textContent === "declared:named:0:5:3");
             assert.deepEqual(await iteration(), [["declared:named:0:5:3", true, false], ["declared:named:1:4:3", false, true]]);
             assert.deepEqual(await classes(), [["one\u00a0two"], ["one\u00a0two"]]);
+            assert.deepEqual(await ownedEntries(), ownedEntryChanged);
             assert.equal((await shadows()).replace(/\s/g, ""), "5:14:23:3declared:named");
             assert.deepEqual(await dimensions(), { items: ["5", "4"], indices: ["0", "1", "2"], outer: "8px" });
             await page.click("button");

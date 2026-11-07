@@ -548,8 +548,8 @@ describe("parseComponent", () => {
     assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$column"></slot></td>`)), /HT008: A `<slot of>` outlet names the child's slot it places/);
     assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot from:of="$column" name="cell"></slot></td>`)), /HT008: /);
     assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$column" name="cell" size="1" from:size="2"></slot></td>`)), /HT008: .*`size` more than once/);
-    // An entry of the list, not an expression reaching one.
-    assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$columns[0]" name="cell"></slot></td>`)), /HT008: `of` takes an entry/);
+    // Indexed expressions preserve the identity of their own accepted entry.
+    assert.equal(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$columns[0]" name="cell"></slot></td>`)), "");
   });
 
   it("parses repeated scoped slots and exposes their row bindings", () => {

@@ -17,12 +17,12 @@ internal sealed class AcceptedChildEntry(ExpressionValue value, string tag, obje
     }
 }
 
-internal sealed record BorrowedSlotOutlet(ValueExpression Of, IReadOnlyDictionary<string, SlotOutlet> Outlets, string Source) : RenderOperation
+internal sealed record BorrowedSlotOutlet(ValueExpression Of, IReadOnlyDictionary<string, SlotOutlet> Outlets, SlotOutlet Missing, string Source) : RenderOperation
 {
     public override bool HasNodes(object?[] values, RenderContext? context, CancellationToken cancellation)
     {
         var value = Of.Evaluate(values);
-        if (value.IsNull || value.IsAbsent) return AnyNodes(Outlets.Values.First().Fallback, values, context, cancellation);
+        if (value.IsNull || value.IsAbsent) return AnyNodes(Missing.Fallback, values, context, cancellation);
         var entry = context?.Entry(value, values) ?? throw ValueType.Error(Source, "of requires an entry of this component's own as list.");
         var previous = context!.EnterBorrowedProjection(entry);
         try { return Outlet(entry).HasNodes(values, context, cancellation); }
@@ -40,7 +40,7 @@ internal sealed record BorrowedSlotOutlet(ValueExpression Of, IReadOnlyDictionar
         var value = Of.Evaluate(values);
         if (value.IsNull || value.IsAbsent)
         {
-            Outlets.Values.First().WriteMissing(ref writer, values, cancellation, deferred);
+            Missing.WriteMissing(ref writer, values, cancellation, deferred);
             return;
         }
         var context = writer.Context ?? throw ValueType.Error(Source, "of requires a component render context.");

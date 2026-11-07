@@ -363,7 +363,25 @@ internal sealed class ExpressionCompiler(string text, string source, IReadOnlyDi
         return a.Kind != "object" || a.Fields!.Length == b.Fields!.Length && a.Fields.All(field =>
             b.Fields!.Any(other => other.Name == field.Name && Compatible(field.Type, other.Type)));
     }
-    private static ValueType Common(ValueType a, ValueType b) => a.Kind is "null" or "absent" ? b : b.Kind is "null" or "absent" ? a : Compatible(a, b) ? a : Unknown;
+    private static ValueType Common(ValueType a, ValueType b)
+    {
+        if (a.Kind is "null" or "absent") return b;
+        if (b.Kind is "null" or "absent") return a;
+        if (a.Kind == "list" && b.Kind == "list")
+        {
+            var item = Common(a.Item!, b.Item!);
+            if (item.ChildSources is not null) return new("list", item, Reference: a.Reference && b.Reference);
+            if (Compatible(a, b)) return ReferenceEquals(item, a.Item) && a.Reference == b.Reference ? a
+                : a with { Item = item, Reference = a.Reference && b.Reference };
+            return Unknown;
+        }
+        var result = Compatible(a, b) ? a : Unknown;
+        // Both branches must preserve provenance. A structurally identical copied record cannot
+        // inherit ownership from the other branch merely because their field types are compatible.
+        if (a.ChildSources is null || b.ChildSources is null) return result.ChildSources is null ? result : result with { ChildSources = null };
+        var sources = a.ChildSources.Concat(b.ChildSources).Distinct<ScopedSlotContract>(ReferenceEqualityComparer.Instance).ToArray();
+        return result with { ChildSources = sources };
+    }
     private static ValueExpression Fold(ValueExpression expression)
     {
         if (!expression.Constant) return expression;

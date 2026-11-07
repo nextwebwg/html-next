@@ -283,9 +283,10 @@ export interface SlotNode {
   readonly fallback?: readonly TemplateNode[];
   /**
    * `<slot of>`: the outlet places this slot of a child the component reads through `as`, rather than
-   * its own. `list` is the `as` list whose entry `expression` names.
+   * its own. `list` is the sole source or the first candidate. When present, `lists` contains all
+   * candidate own `as` lists; an empty array represents a null-only expression.
    */
-  readonly of?: { readonly expression: string; readonly expressionPlan: CompiledExpression; readonly list: string };
+  readonly of?: { readonly expression: string; readonly expressionPlan: CompiledExpression; readonly list: string; readonly lists?: readonly string[] };
 }
 
 export type TemplateAttribute =

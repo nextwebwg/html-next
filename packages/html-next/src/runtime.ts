@@ -1,3 +1,4 @@
+import { ownedEntryIndex } from "./entry-origin.js";
 import { COMPONENT_ROOT_SELECTOR, componentIdentity, componentOwnerSelector } from "./component-identity.js";
 import type { ComponentModule, ControllerModule } from "./controller.js";
 import { activateModule } from "./module-connection.js";
@@ -1409,6 +1410,7 @@ function ownedContext(context: RuntimeRenderContext, owned: RenderOwned): Runtim
 
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
+  readonly asScope?: ReactiveScope;
   readonly attributeInputs?: InvocationAttributeInputs;
   owned: RenderOwned;
   readonly refs: Record<string, Element | Element[]>;
@@ -3001,6 +3003,7 @@ function renderScopedTemplate(
   // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
   const projectionContext = authored === undefined ? context : Object.create(context, {
     definition: { value: authored.context.definition, enumerable: true },
+    asScope: { value: authored.context.asScope, enumerable: true },
     refs: { value: authored.context.refs, enumerable: true },
     attributeInputs: { value: authored.context.attributeInputs, enumerable: true },
     projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
@@ -3360,8 +3363,9 @@ function renderChildSlot(
   ownEffect(context, scope, () => {
     const value = evalConforming(of.expressionPlan, scope, context.definition);
     if (value === NONCONFORMING) return;
-    const list = scope.read(of.list);
-    index = value !== null && typeof value === "object" && Array.isArray(list) ? list.indexOf(value) : -1;
+    const owner = context.asScope ?? scope;
+    const list = of.lists === undefined ? owner.read(of.list) : of.lists.map(name => owner.read(name));
+    index = ownedEntryIndex(value, list);
     const entry = index < 0 ? null : childEntries.get(value as object) ?? null;
     if (entry !== shown) place(shown = entry);
     mark();
@@ -3887,6 +3891,7 @@ function prepareRuntimeInvocation(
   }
   const context: RuntimeRenderContext = {
     definition,
+    ...((lists?.length ?? 0) === 0 ? {} : { asScope: scope }),
     attributeInputs,
     owned: instance.owned,
     refs: instance.refs,

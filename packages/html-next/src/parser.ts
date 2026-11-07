@@ -4,6 +4,7 @@ import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBou
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
 import { ITERATION_INDEX, checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, NONCONFORMING, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
 import { parseDuration } from "./duration.js";
+import { componentEntryOrigins, entryOrigin, type EntryOrigin } from "./entry-origin.js";
 import { deepFreeze } from "./freeze.js";
 import {
   isReservedElement,
@@ -289,20 +290,22 @@ interface ParseScope {
   readonly loops?: number;
   /** Among table-structure or SVG-container children, where whitespace-only text never renders. */
   readonly discardsWhitespace?: boolean;
-  /** `$each` items that stand for an entry of one of the component's `as` lists: item name to list name. */
-  readonly entries?: ReadonlyMap<string, string>;
+  /** Bindings whose values preserve the identity of this component's accepted entries. */
+  readonly entries?: ReadonlyMap<string, EntryOrigin | undefined>;
 }
 
-/** The names a structural directive binds for its subtree, recording which stand for an `as` list's entries. */
-function withEntries(scope: ParseScope, flow: Flow | undefined, contract: ComponentContract): ParseScope {
+/** Propagate identity through structural aliases, removing names they shadow. */
+function withEntries(scope: ParseScope, flow: Flow | undefined): ParseScope {
   if (flow === undefined) return scope;
   const bound = flow.kind === "each" ? [flow.item, flow.index] : flow.kind === "with" || flow.kind === "match" ? [flow.alias] : [];
-  const source = flow.kind === "each" ? flow.listPlan?.ast : undefined;
-  const list = source?.kind === "id" && Object.values(contract.slots ?? {}).some((slot) => slot.as === source.name) ? source.name : undefined;
-  if (list === undefined && !bound.some((name) => name !== undefined && scope.entries?.has(name) === true)) return scope;
+  if (bound.every(name => name === undefined)) return scope;
+  const expression = flow.kind === "each" ? flow.listPlan?.ast : flow.kind === "with" || flow.kind === "match" ? flow.expressionPlan?.ast : undefined;
+  const origin = expression === undefined ? undefined : entryOrigin(expression, scope.entries ?? new Map());
+  if (origin === undefined && !bound.some(name => name !== undefined && scope.entries?.get(name) !== undefined)) return scope;
   const entries = new Map(scope.entries);
   for (const name of bound) if (name !== undefined) entries.delete(name);
-  if (list !== undefined) entries.set((flow as Extract<Flow, { kind: "each" }>).item, list);
+  if (flow.kind === "each" && origin?.kind === "list") entries.set(flow.item, { kind: "entry", lists: origin.lists });
+  else if ((flow.kind === "with" || flow.kind === "match") && flow.alias !== undefined && origin !== undefined) entries.set(flow.alias, origin);
   return { ...scope, entries };
 }
 
@@ -1911,7 +1914,7 @@ function parseElementAtSource(
         ? withRoots(scope, flow.alias)
         : scope,
     flow,
-  ), flow, contract);
+  ), flow);
   // The receiving component declares these names, so a standalone consumer definition cannot
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   // A <template> renders its children among its parent's; a projected one, wherever its slot is.
@@ -2001,10 +2004,10 @@ function parseElementAtSource(
       const place = (node: TemplateNode): void => {
         children.push(condition === undefined ? node : { kind: "element", name: "template", attributes: [], children: [node], flow: condition });
       };
-      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index), flow), flow, contract);
+      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index), flow), flow);
       const ofPlan = ofSource === undefined ? undefined : compileScopedExpression(ofSource, slotScope, source);
-      const ofList = ofPlan?.ast.kind === "id" ? slotScope.entries?.get(ofPlan.ast.name) : undefined;
-      if (ofPlan !== undefined && ofList === undefined) {
+      const origin = ofPlan === undefined ? undefined : entryOrigin(ofPlan.ast, slotScope.entries ?? new Map());
+      if (ofPlan !== undefined && (origin === undefined || origin.kind === "list")) {
         const list = Object.values(contract.slots ?? {}).find((slot) => slot.as !== undefined)?.as ?? "columns";
         fail("HT008", `\`of\` takes an entry of this component's \`as\` list, such as \`$item\` from \`$each="item of $${list}"\`; \`${ofSource}\` is not one.`, source);
       }
@@ -2078,7 +2081,7 @@ function parseElementAtSource(
           flow?: Extract<Flow, { kind: "each" }>;
           props?: readonly { name: string; expression: string; expressionPlan: CompiledExpression }[];
           fallback: TemplateNode[];
-          of?: { expression: string; expressionPlan: CompiledExpression; list: string };
+          of?: { expression: string; expressionPlan: CompiledExpression; list: string; lists?: readonly string[] };
         } = {
           kind: "slot",
           fallback,
@@ -2086,7 +2089,7 @@ function parseElementAtSource(
         if (name !== undefined) slot.name = name;
         if (flow !== undefined) slot.flow = flow;
         if (props.length > 0) slot.props = props;
-        if (ofPlan !== undefined) slot.of = { expression: ofSource!, expressionPlan: ofPlan, list: ofList! };
+        if (ofPlan !== undefined) slot.of = { expression: ofSource!, expressionPlan: ofPlan, list: origin!.lists[0] ?? "", ...(origin!.lists.length === 1 ? {} : { lists: origin!.lists }) };
         place(slot);
       }
       continue;
@@ -2403,7 +2406,7 @@ function parseComponentNodesAtSource(
     ...(requests === undefined ? {} : { requests }),
     ...(scripts === undefined ? {} : { scripts: scripts.map(({ load: _load, error: _error, ...script }) => script) }),
   });
-  let scope: ParseScope = { ...declarationScope, bindings: new Set([
+  let scope: ParseScope = { ...declarationScope, entries: componentEntryOrigins(contract, declarations), bindings: new Set([
     ...Object.keys(contract.props),
     ...declarations.flatMap(declaration => declaration.kind === "context" ? [declaration.as ?? declaration.name]
       : declaration.kind === "state" || declaration.kind === "computed" || declaration.kind === "data" ? [declaration.name] : []),

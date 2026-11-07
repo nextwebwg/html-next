@@ -8,6 +8,8 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { renderComponents } from "../src/server.js";
 import { parseComponent, parseComponentResource } from "../src/source-parser.js";
+import { ownedEntryFiles, ownedEntryInvocation, ownedEntryInitial, ownedEntryChanged } from "./fixtures/owned-entry-expressions.js";
+import { launchParityBrowser } from "./pixel-parity.js";
 import { compiledFixtures } from "./hydration-fixtures.js";
 
 // Columns as markup (components#columns-as-markup) in the live runtime. The column template starts
@@ -112,6 +114,40 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
   const pageHost = `window.HtmlRuntime.getComponentHost(document.querySelector("main"))`;
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const hydrate of [false, true]) it(`${engine} preserves owned entry expressions and updates (${hydrate ? "hydrated" : "fresh"})`, async () => {
+      const source = Object.values(ownedEntryFiles).join("") + `<template component="x-page"><defs>
+        <state name="values" type="list(number)" from="[4, 5]"></state>
+        <handler name="change"><set name="values" expr:value="$values.length = 2 ? [5, 4, 3] : [4, 5]"></set></handler>
+        </defs><main><button data-owned-change on:click="change">Change</button>${ownedEntryInvocation}</main></template>`;
+      const definitions = parseComponentResource(source, "owned-entries.html").definitions;
+      const html = hydrate ? (await renderComponents("<x-page></x-page>", { definitions })).html : "<x-page></x-page>";
+      const browser = await launchParityBrowser(browserType);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [], warnings: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(html);
+        const before = hydrate ? await page.locator('[data-owned="indexed"]').elementHandle() : undefined;
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(definitions => {
+          const api = (window as any).HtmlRuntime;
+          api.registerComponentDefinitions(JSON.parse(definitions));
+          api.observeDocument(document);
+        }, JSON.stringify(definitions));
+        await page.waitForFunction(() => document.querySelectorAll("[data-owned]").length === 11);
+        assert.deepEqual(await page.locator("[data-owned]").allTextContents(), ownedEntryInitial);
+        if (before !== undefined) assert.ok(await before!.evaluate(node => node === document.querySelector('[data-owned="indexed"]')));
+        for (const expected of [ownedEntryChanged, ownedEntryInitial]) {
+          await page.locator("[data-owned-change]").click();
+          await page.waitForFunction(value => document.querySelector('[data-owned="indexed"]')?.textContent === value, expected[0]);
+          assert.deepEqual(await page.locator("[data-owned]").allTextContents(), expected);
+        }
+        assert.deepEqual(warnings, []);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     for (const hydrate of [false, true]) it(`${engine} filters accepted content without as through forwarded fallbacks (${hydrate ? "hydrated" : "fresh"})`, async () => {
       const source = `<template component="x-accepted"><defs><prop name="label" type="string">Label.</prop></defs><b>{$label}</b></template>
         <template component="x-rejected"><defs><prop name="required" type="string" required>Required.</prop></defs><i>Wrong</i></template>

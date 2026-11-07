@@ -1,3 +1,4 @@
+import { ownedEntryIndex } from "./entry-origin.js";
 import { isUrlAttribute } from "./sanitize.js";
 import { forwardedAttributes } from "./dom-attributes.js";
 export { activateModule } from "./module-connection.js";
@@ -222,6 +223,7 @@ export function invoke(
   // A placeholder that is its block's own node has no parent yet; the block takes the root instead.
   if (placeholder.parentNode !== null) placeholder.replaceWith(root);
   // A projected invocation's projection entry follows its root, so a slot that renders again inserts it.
+  if (placeholder.nodeType === 1) invocationSlots.set(root, invocationSlots.get(placeholder) ?? (placeholder as Element).getAttribute("slot") ?? "");
   follows(placeholder, root);
   const child = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
   let current = root;
@@ -300,9 +302,9 @@ export function projected(fragment: Node): { children: Node[]; slots: Record<str
   let region: readonly [string, Node] | undefined;
   for (const node of Array.from(fragment.childNodes)) {
     region ??= regionSlots.get(node);
-    const name = region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") : null);
+    const name = region?.[0] ?? invocationSlots.get(node) ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") : null);
     if (node === region?.[1]) region = undefined;
-    if (name === null) children.push(node);
+    if (name === null || name === "") children.push(node);
     else (slots[name] ??= []).push(node);
   }
   return { children, slots };
@@ -1522,6 +1524,8 @@ export type Projection = readonly [node: Node, slot: string][];
 
 /** Each top-level projected node's projection entry, which follows an invoked component's root. */
 const projectedEntries = new WeakMap<Node, [Node, string]>();
+/** Invocation routing stays with a replaced root independently of its rendered attributes. */
+const invocationSlots = new WeakMap<Node, string>();
 /** Components invoked in projected content no slot has placed yet, by the top-level projected node holding them. */
 const waiting = new WeakMap<Node, Map<Node, () => void>>();
 /** How deeply generated renders are nested, and what runs once the outermost one has inserted what it built. */
@@ -1529,6 +1533,8 @@ let rendering = 0;
 let afterRender: (() => void) | undefined;
 
 function follows(previous: Node, root: Node): void {
+  const slot = invocationSlots.get(previous);
+  if (slot !== undefined) invocationSlots.set(root, slot);
   const entry = projectedEntries.get(previous);
   if (entry === undefined) return;
   entry[0] = root;
@@ -2049,7 +2055,7 @@ export function childOutlet(
   const update = (value: unknown, list: unknown, props: Record<string, unknown>, changed: number, dirty: Map<unknown, 1 | 2>): void => {
     if (value === NONCONFORMING) return;
     for (const key in props) if (props[key] === NONCONFORMING) delete props[key];
-    const index = value !== null && typeof value === "object" && Array.isArray(list) ? list.indexOf(value) : -1;
+    const index = ownedEntryIndex(value, list);
     const entry = index < 0 || !entryChildren.has(value as object) ? null : value as object;
     if (entry !== shown) {
       const server = shown === undefined && adopt === true ? serverMark(open) : undefined;

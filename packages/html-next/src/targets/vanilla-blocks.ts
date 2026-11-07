@@ -1,3 +1,4 @@
+import { entryLists } from "../entry-origin.js";
 import { ITERATION_INDEX } from "../expression.js";
 /**
  * The direct-extend Vanilla planner: components with a controller, declared state, `$if` and keyed
@@ -182,7 +183,7 @@ interface Region {
   readonly of?: Lowered;
   /** `<slot of>`: each static prop's text, which converts by the type the child's slot declares. */
   readonly propRaws?: readonly (string | undefined)[];
-  readonly listRoot?: number;
+  readonly listRoots?: readonly number[];
   /** A consumer region at the top of content for a slot with `accepts`: that slot's list follows it. */
   readonly listed?: boolean;
 }
@@ -1444,7 +1445,7 @@ class Planner {
         // A static prop is given as its text; the child's slot declaration converts it (`outletProps`).
         const given = (node.props ?? []).map((prop) => prop.raw !== undefined ? none(`raw:${prop.raw}`, JSON.stringify(prop.raw)) : this.checked(prop.expressionPlan, scope));
         block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
-          of: this.checked(node.of.expressionPlan, scope), listRoot: this.roots.findIndex((root) => root.name === node.of!.list),
+          of: this.checked(node.of.expressionPlan, scope), listRoots: entryLists(node.of).map(name => this.roots.findIndex(root => root.name === name)),
           props: given, propNames: (node.props ?? []).map((prop) => prop.name), propRaws: (node.props ?? []).map((prop) => prop.raw) });
         return 4;
       }
@@ -1862,7 +1863,7 @@ function regionOuter(block: Block, level: number): number {
   for (const region of block.regions) {
     for (const value of [region.test, region.list, region.key, region.of, ...region.props ?? []]) if (value !== undefined) mask |= outerOf(value, level);
     // A `<slot of>` range carries its entry's index in the list.
-    if (region.listRoot !== undefined) mask |= region.listRoot < 29 ? rootBit(region.listRoot) : OVERFLOW;
+    for (const root of region.listRoots ?? []) mask |= root < 29 ? rootBit(root) : OVERFLOW;
     // Rows below follow the same outer changes: a sweep reaches them through each row between.
     for (const body of [region.block, ...region.arms ?? []]) mask |= blockOuter(body, level);
   }
@@ -1923,7 +1924,7 @@ export function emitBlocks(
     const name = region.slot!;
     const names = region.propNames ?? [];
     const outlet = `<slot of name="${name}">`;
-    const shapes = (plan.roots[region.listRoot!]?.list?.accepts ?? []).flatMap((tag) => {
+    const shapes = ([...new Set((region.listRoots ?? []).flatMap(root => plan.roots[root]?.list?.accepts ?? []))]).flatMap((tag) => {
       const declared = plan.accepted?.[tag]?.contract.slots?.[name]?.props ?? {};
       if (plan.accepted?.[tag] === undefined || names.length + Object.keys(declared).length === 0) return [];
       const warn = (prop: string, message: string): string => `warnOnce(S, ${JSON.stringify(`of:${name}:${prop}`)}, ${JSON.stringify(message)}); `;
@@ -2292,7 +2293,7 @@ export function emitBlocks(
           // `<slot of>` places an accepted child's slot, and renders again when `of` names another entry.
           lines.push(
             `  if (r.f${index} === undefined) r.f${index} = childOutlet(r, r.a${region.site}, r.e${index}, ${name}, OF, S, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}, ${(props?.length ?? 0) > 0}, ${outletPropsSource(region)}${hydrate ? `, ${body} === ADOPT` : ""});`,
-            `  r.f${index}(${convertible(region.of)}, v[${region.listRoot}], { ${(props ?? []).map((prop, at) => `${JSON.stringify(region.propNames![at])}: ${convertible(prop)}`).join(", ")} }, c, d);`,
+            `  r.f${index}(${convertible(region.of)}, ${region.listRoots?.length === 1 ? `v[${region.listRoots[0]}]` : `[${(region.listRoots ?? []).map(root => `v[${root}]`).join(", ")}]`}, { ${(props ?? []).map((prop, at) => `${JSON.stringify(region.propNames![at])}: ${convertible(prop)}`).join(", ")} }, c, d);`,
           );
           return;
         }

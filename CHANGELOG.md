@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Preserve accepted-child entry identity through indexed, computed and structural aliases, conditional selection across lists, and null fallbacks in Node, native C# and generated targets. Select slot-prop conversion from every possible accepted tag. Keep Angular computed references intact, Vue slot props clear of generated helpers, and compiled Vanilla slot routing independent of root attributes.
+
 - Render native accepted-child `as` lists and borrowed slots with caller scope, stable prop snapshots, preset resolution and shared plain-content ownership. Preserve aliases through structural collection, keep collection state specific to explicit lists, and support implicit slot declarations and repeated ordinary outlets.
 - Preserve native controller changes to input names and types through React updates. Keep native input ownership in one component, retain dirty value/default behavior and StrictMode ref lifecycles, and avoid replacing style refs when no important declaration needs applying.
 - Preserve non-ASCII case in public prop names, reflected attributes, invocation matching and style name resolution across Node, C# and generated targets. Allocate distinct React locals and emit valid JSX for Unicode prop inputs.

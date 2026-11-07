@@ -34,6 +34,72 @@ public sealed class AcceptedChildListTests
         })));
     }
 
+    public static IEnumerable<object[]> EntryExpressions()
+    {
+        static string Outlet(string expression) => $"<slot of=\"{expression}\" name=\"cell\" text=\"7\"><em>Empty</em></slot>";
+        yield return [Outlet("$columns[$position]"), "", false, "C:7:true"];
+        yield return [Outlet("$chosen"), "<computed name=\"chosen\" from=\"$columns[$position]\"></computed>", false, "C:7:true"];
+        yield return [$"<template $with=\"$columns[1] as chosen\">{Outlet("$chosen")}</template>", "", false, "C:7:true"];
+        yield return [$"<template $match=\"$columns[1] as chosen\"><template $when=\"true\">{Outlet("$chosen")}</template></template>", "", false, "C:7:true"];
+        foreach (var choose in new[] { false, true })
+        {
+            yield return [Outlet("$chosen"), "<computed name=\"chosen\" from=\"$choose ? $columns[1] : $actions[0]\"></computed>", choose, choose ? "C:7:true" : "A:7:8"];
+            yield return [$"<template $each=\"entry of $chosen\">{Outlet("$entry")}</template>", "<computed name=\"chosen\" from=\"$choose ? $columns : $actions\"></computed>", choose, choose ? "C:7:trueC:7:true" : "A:7:8"];
+        }
+        yield return [$"<template $each=\"columns of $columns\">{Outlet("$columns")}</template>", "", false, "C:7:trueC:7:true"];
+        yield return [$"<template $each=\"entry of [$columns[1], null, $actions[0]]\">{Outlet("$entry")}</template>", "", false, "C:7:true<em>Empty</em>A:7:8"];
+        yield return [Outlet("$columns[99]"), "", false, "<em>Empty</em>"];
+        yield return [Outlet("null"), "", false, "<em>Empty</em>"];
+        yield return [Outlet("default($columns[99], $actions[0])"), "", false, "A:7:8"];
+    }
+
+    [Theory]
+    [MemberData(nameof(EntryExpressions))]
+    public void PreservesEntryIdentityThroughExpressions(string body, string declarations, bool choose, string expected)
+    {
+        var source = """
+            <template component="x-column"><defs><slot name="cell"><prop name="text" type="string">Cell text.</prop></slot></defs><span>Column</span></template>
+            <template component="x-action"><defs><slot name="cell"><prop name="text" type="integer">Cell number.</prop></slot></defs><span>Action</span></template>
+            <template component="x-list"><defs><prop name="choose" type="boolean" default="false">Choose columns.</prop><prop name="position" type="integer" default="1">Index.</prop>
+            <slot accepts="x-column" as="columns"></slot><slot name="actions" accepts="x-action" as="actions"></slot>
+            """ + declarations + "</defs><section>" + body + "</section></template>" +
+            $"<template component=\"x-page\"><main><x-list choose=\"{choose.ToString().ToLowerInvariant()}\">" + """
+            <x-column><template slot="cell">C:{$text}:{$text = '7'}</template></x-column>
+            <x-column><template slot="cell">C:{$text}:{$text = '7'}</template></x-column>
+            <x-action slot="actions"><template slot="cell">A:{$text}:{$text + 1}</template></x-action></x-list></main></template>
+            """;
+        var template = HtmlNextCompiler.CompileResource(source).Template("x-page");
+        var html = template.Render();
+        using var writer = new StringWriter(); template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        using var document = new HtmlParser().ParseDocument(html);
+        var root = document.Body!.FirstElementChild!;
+        foreach (var carrier in root.QuerySelectorAll("template[carrier]")) carrier.Remove();
+        RemoveMarks(root);
+        Assert.Equal("<main><section>" + expected + "</section></main>", root.OuterHtml);
+    }
+
+    [Theory]
+    [InlineData("$choose ? $columns[0] : {}")]
+    [InlineData("[$columns[0], {}][1]")]
+    [InlineData("($choose ? $columns : [{}])[0]")]
+    public void ACompatibleCopiedRecordDoesNotAcquireEntryProvenance(string expression)
+    {
+        Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.CompileResource("""
+            <template component="x-column"><defs><slot name="cell"></slot></defs><span></span></template>
+            <template component="x-page"><defs><prop name="choose" type="boolean">Choice.</prop><slot accepts="x-column" as="columns"></slot></defs>
+            """ + $"<main><slot of=\"{expression}\" name=\"cell\"></slot></main></template>"));
+    }
+
+    [Fact]
+    public void AConstantNullOutletNeedsNoAcceptedList()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-page"><main><slot of="null" name="cell">Empty</slot></main></template>
+            """).Template("x-page");
+        Assert.Contains(">Empty<", template.Render());
+    }
+
     [Theory]
     [InlineData("<slot as=\"columns\"></slot>")]
     [InlineData("<slot accepts=\"x-column\" as=\"\"></slot>")]

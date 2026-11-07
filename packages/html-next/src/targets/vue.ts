@@ -1,3 +1,4 @@
+import { entryTags } from "../entry-origin.js";
 import { literalValueSource } from "./shared.js";
 import { templateForwardsAttributes } from "../template.js";
 import { invocationSchema } from "./invocation-attributes.js";
@@ -409,9 +410,9 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
     const carrier = children.find(isSlotTemplate);
     const contract = contractOf(slot);
     const props = carrier === undefined ? [] : contract?.props ?? projectedNames(carrier.children, names.template);
-    const alias = contract !== undefined && props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
+    const alias = props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
     const local = alias === undefined ? withLocal(names, props.map((name) => [name, UNKNOWN] as const))
-      : withSlotProps(names, props, alias, contract?.declared);
+      : withSlotProps(names, props, alias, contract?.declared ?? context.componentGraph?.get(tag)?.contract.slots?.[slot]?.props);
     // Without `slot`, the carrier renders as a plain `<template>`: its children, under its own flow.
     const content = carrier === undefined ? renderChildren(children, names, context)
       : renderNode({ ...carrier, attributes: carrier.attributes.filter((attribute) => !(attribute.kind === "literal" && attribute.name === "slot")) }, local, context);
@@ -458,7 +459,7 @@ function outletPropsSource(node: SlotNode, context: Context): string | undefined
   const outlet = `<slot of name="${name}">`;
   const file = context.definition.source.file;
   const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
-  const accepts = Object.values(context.definition.contract.slots ?? {}).find((declared) => declared.as === node.of!.list)?.accepts ?? [];
+  const accepts = entryTags(context.definition.contract, node.of!);
   const shapes = accepts.flatMap((tag) => {
     const accepted = context.componentGraph?.get(tag);
     const declared = accepted?.contract.slots?.[name]?.props ?? {};

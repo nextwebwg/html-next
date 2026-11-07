@@ -595,8 +595,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       `<section><x-row-list><template slot="row"><b $value="$item.name"></b><i $value="$heading"></i></template></x-row-list></section></template>`)
       .get("vue/XConsumer.vue")!;
     compileVue(vue, "XConsumer.vue");
-    assert.match(vue, /<template #row="\{ item \}">/);
-    assert.match(vue, /\{\{\s*text\(referenceMember\(item, 'name'\)\)\s*\}\}/);
+    assert.match(vue, /<template #row="slotProps">/);
+    assert.match(vue, /Object\.hasOwn\(slotProps, 'item'\)/);
+    assert.match(vue, /slotProps\['item'\]/);
+    assert.match(vue, /text\(referenceMember\(/);
     // A conforming state's own value needs no read check, so the consumer's text reads it directly.
     assert.match(vue, /<i>\{\{ heading \}\}<\/i>/);
   });

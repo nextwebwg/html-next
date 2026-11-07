@@ -192,7 +192,7 @@ public static partial class HtmlNextCompiler
                         fields[prop.Name] = new(prop.Name, type, Optional: true);
                     }
                 }
-                var listType = new ValueType("list", new("object", Fields: fields.Values.ToArray(), ChildSource: contract), Reference: true).AsReference();
+                var listType = new ValueType("list", new("object", Fields: fields.Values.ToArray(), ChildSources: [contract]), Reference: true).AsReference();
                 bindings[name] = (contract.ListSlot, listType);
                 childLists.Add(new(contract.Name, contract.ListSlot, listType, contract.Accepts!));
             }
@@ -470,18 +470,19 @@ public static partial class HtmlNextCompiler
                 if (element.GetAttribute("of") is { } borrowed)
                 {
                     var entry = Expression(borrowed, scope);
-                    var origin = entry.Type.ChildSource;
-                    if (origin is null || !slotContracts.Values.Any(contract => ReferenceEquals(contract, origin)))
+                    var origins = entry.Type.ChildSources;
+                    if (entry.Type.Kind is not ("null" or "absent") &&
+                        (origins is null || origins.Any(origin => !slotContracts.Values.Any(contract => ReferenceEquals(contract, origin)))))
                         throw ValueType.Error(source, "of requires an entry of this component's own as list.");
                     var outlets = new Dictionary<string, SlotOutlet>(StringComparer.Ordinal);
                     var fallback = ProjectedBody(element, scope);
-                    foreach (var tag in origin.Accepts!)
+                    foreach (var tag in (origins ?? []).SelectMany(origin => origin.Accepts!).Distinct(StringComparer.Ordinal))
                     {
                         if (!components[tag].Slots.TryGetValue(name, out var childSlot))
                             throw ValueType.Error(source, $"'{tag}' does not declare slot '{name}'.");
                         outlets.Add(tag, new(name, fallback, SlotArguments(element, name, scope, fragment, childSlot)));
                     }
-                    return Wrap([new BorrowedSlotOutlet(entry, outlets, source)], condition, each, localSlot, where, iteration);
+                    return Wrap([new BorrowedSlotOutlet(entry, outlets, outlets.Values.FirstOrDefault() ?? new(name, fallback), source)], condition, each, localSlot, where, iteration);
                 }
                 var arguments = SlotArguments(element, name, scope, fragment);
                 return Wrap([new SlotOutlet(name, ProjectedBody(element, scope), arguments)], condition, each, localSlot, where, iteration);

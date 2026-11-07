@@ -3,6 +3,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/browser-source.ts",
     "packages/html-next/src/contract.ts",
     "packages/html-next/src/diagnostics.ts",
+    "packages/html-next/src/entry-origin.ts",
     "packages/html-next/src/head-rules.ts",
     "packages/html-next/src/language.ts",
     "packages/html-next/src/names.ts",

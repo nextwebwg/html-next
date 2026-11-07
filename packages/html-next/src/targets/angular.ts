@@ -1,3 +1,4 @@
+import { entryTags } from "../entry-origin.js";
 import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { literalValueSource as sourceValue } from "./shared.js";
 import { ITERATION_INDEX } from "../expression.js";
@@ -440,7 +441,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       });
       if (node.of !== undefined) {
         // `<slot of>` places an accepted child's slot: the consumer's template for it, with this outlet's props, or the fallback.
-        const accepts = Object.values(names.definition.contract.slots ?? {}).find(item => item.as === node.of!.list)?.accepts ?? [];
+        const accepts = entryTags(names.definition.contract, node.of!);
         // The props each accepted tag's template receives, as live's `childSlotProps` checks them against that
         // tag's slot declaration: a static prop converts by its declared type, a bound one is checked in full,
         // null, rejected and left-out props take the declared default, and undeclared or missing required props warn.
@@ -1129,7 +1130,7 @@ export function retainedComputed(evaluate: () => { value: unknown; status: Input
     const next = evaluate();
     if (next.status.ready && next.value !== undefined && acceptsBindingResult(next.value)) {
       const checked = checkPropInput(next.value, type, false);
-      if (checked.ok) accepted = checked.value;
+      if (checked.ok) accepted = next.value;
     }
     return { value: next.value === undefined ? null : accepted, status: next.status };
   });

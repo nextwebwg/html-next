@@ -1,3 +1,4 @@
+import { entryTags } from "../entry-origin.js";
 import { literalValueSource } from "./shared.js";
 import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
@@ -585,7 +586,7 @@ function outletPropsSource(node: SlotNode, context: RenderContext): string | und
   const given = node.props ?? [];
   const outlet = `<slot of name="${name}">`;
   const file = context.definition.source.file;
-  const accepts = Object.values(context.definition.contract.slots ?? {}).find((slot) => slot.as === node.of!.list)?.accepts ?? [];
+  const accepts = entryTags(context.definition.contract, node.of!);
   const warn = (prop: string, message: string): string =>
     `warnUnless(false, ${quote(`${file}#${context.definition.contract.tag}:of:${name}:${prop}`)}, ${quote(`${file}: HR007: ${message}`)}); `;
   const shapes = accepts.flatMap((tag) => {
