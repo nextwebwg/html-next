@@ -1503,7 +1503,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
       <prop name="count" type="integer" default="0">Count.</prop><prop name="label" type="string">Label.</prop>
       <prop name="open" type="boolean" default="false">Open.</prop></defs>
-    <span class="badge" from:data-tone="$tone"><b>{$count}</b><i $if="$open">{$label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
+    <span class="badge" $attributes from:data-tone="$tone"><b>{$count}</b><i $if="$open">{$label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
   const parent = (body: string, defs = ""): string => propsShape(`
     <prop name="flag" type="boolean" default="false">Flag.</prop>
     <state name="label" type="string" value="L"></state><state name="count" type="integer" value="1"></state>
@@ -1574,7 +1574,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("follows an invoked component's root switch with the parent's bindings", async () => {
     const action = `<template component="x-action" status="early" summary="Action.">
       <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
-      <template $match><a $when="$as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
+      <template $match><a $when="$as = 'a'" $attributes href="#"><slot></slot></a><button $else $attributes type="button"><slot></slot></button></template></template>`;
     await same([parent(`
       <section><x-action from:as="$flag ? 'a' : 'button'" class:hot="$count > 1" from:title="$label" on:click="bump" $ref="action">Go {$count}</x-action></section>`), action], [
       (host) => { host.root.querySelector("button").click(); },
@@ -1854,7 +1854,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("writes is=, content directives and two-way bindings on invocations like live", async () => {
     const field = `<template component="x-field" status="early" summary="Field.">
-      <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="$value"></template>`;
+      <defs><prop name="value" type="string" default="">Value.</prop></defs><input $attributes .value="$value"></template>`;
     await same([parent(`
       <section><button is="x-fancy" from:title="$label">is</button>
         <x-badge $value="$label" from:count="$count"></x-badge><x-badge $html="'<b>' + $label + '</b>'"></x-badge>
@@ -1881,7 +1881,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   });
 
   it("applies projected row component attributes only after its placeholder is placed", async () => {
-    const leaf = `<template component="x-leaf"><defs><prop name="text" type="string" default="">Visible text.</prop></defs><button $value="$text"></button></template>`;
+    const leaf = `<template component="x-leaf"><defs><prop name="text" type="string" default="">Visible text.</prop></defs><button $attributes $value="$text"></button></template>`;
     const host = `<template component="x-host"><div><slot></slot></div></template>`;
     const page = `<template component="x-page"><defs>
       <state name="items" type="list(object({ id: integer, label: string }))" value="[{ id: 1, label: 'First' }]"></state>

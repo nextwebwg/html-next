@@ -60,7 +60,7 @@ export async function fixture(): Promise<string> {
     return { props: { brand: 'HTMLKit' }, data: { owner: 'kit' } };
   }`);
   await write(root, "app/pages/index.html", `<meta name="hk:page" content="home-page">
-    <template component="home-button"><defs><prop name="count" type="number" default="0">Count</prop></defs><button type="button"><slot></slot><span>{$count}</span></button></template>
+    <template component="home-button"><defs><prop name="count" type="number" default="0">Count</prop></defs><button $attributes type="button"><slot></slot><span>{$count}</span></button></template>
     <template component="home-label"><strong>Shared-file helper</strong><style>:host { color: rgb(90, 80, 70); }</style></template>
     <template component="home-page" controller="./home.js"><defs>
     <prop name="asset" type="string" required>Asset URL</prop>

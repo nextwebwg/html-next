@@ -10,6 +10,12 @@ component that another bundle defined ([one registry for each document](https://
 `@nextwebwg/html-next`, `/runtime`, `/live`, `/browser` and `/generated-runtime` export the same
 `componentRegistry`. Importing it reads no document.
 
+Framework adapters supply typed inputs to `attachComponent(root, definition, { props, attributes })`.
+The `attributes` record holds logical invocation inputs for the definition's authored `$attributes`
+destinations; it is separate from the framework's rendered root. Native factories that use
+`manageComponentLifecycle` pass the same attachment options. The public proposal defines
+[which inputs are forwarded and how their order applies](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
+
 ## Live runtime
 
 The live runtime is `@nextwebwg/html-next/browser`, `/live`, and `/runtime` with registered definitions.
@@ -37,6 +43,13 @@ Compiled Vanilla DOM is the output of `generateComponent`, `html-next build` and
 | [`create(tag, init)`](https://nextwebwg.org/declarative-components/javascript#component-registry-create) | Supported. Each content element goes to the slot its `slot` attribute names. Every other node goes to the default slot. Inserting the root connects it. A [`<template slot>`](https://nextwebwg.org/declarative-components/components#content-that-renders-on-demand) given as content renders only while its slot renders, as an authored one does. When the live runtime is on the page, the live runtime renders it, with its bindings reading the slot's props. Compiled output alone has no parser: it renders a template with no HTML Next syntax as a copy of its content, and throws `HR007` for one with bindings. |
 | [`update(element, props)`](https://nextwebwg.org/declarative-components/javascript#component-registry-update) | Supported. |
 | [Types](https://nextwebwg.org/declarative-components/javascript#component-registry-types) | Supported. Each generated `.d.ts` adds its tag to the global `ComponentTagMap`. |
+
+Adapters update a generated instance's HTML inputs with
+`setInvocationAttributes(root, attributes)` from `/generated-runtime`. Supply the complete current
+record: omitted keys are removed. The helper replays the template's authored `$attributes`
+destinations in source order, including destinations inside the root. Declared prop names and their
+HTML aliases are consumed; update those values through `componentRegistry.update`. Direct writes
+owned by the surrounding page remain on the rendered root.
 
 A compiled module registers only if the bundle keeps it:
 

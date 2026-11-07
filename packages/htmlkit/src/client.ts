@@ -142,13 +142,14 @@ async function render(runtime: Runtime, payload: Payload): Promise<Rendered> {
     const { component: tag, attributes: authored, props, state } = payload.layers[index]!;
     const component = components.get(tag);
     if (component === undefined) throw new Error(`HTMLKit cannot render <${tag}>: no page module defines it.`);
-    const attributes: Record<string, string> = { id: `hk-layer-${index}`, "data-hk-layer": String(index), ...index === 0 ? {} : { slot: "page" } };
+    const attributes: Record<string, string> = index === 0 ? {} : { slot: "page" };
     const html: Record<string, string> = {};
     for (const [name, value] of Object.entries(authored)) {
       const prop = component[1][name];
       if (prop === undefined) attributes[name] = value; else if (props === undefined) html[prop] = value;
     }
     const root = component[0]({ ...props, attributes, ...layers.length === 0 ? {} : { slots: { page: [layers[0]] } } }, props === undefined ? html : undefined);
+    root.setAttribute("data-hk-layer", String(index));
     if (state !== undefined) {
       const host = runtime.generatedHost(root);
       if (host === undefined) throw new Error(`HTMLKit cannot give layer ${index} its state.`);

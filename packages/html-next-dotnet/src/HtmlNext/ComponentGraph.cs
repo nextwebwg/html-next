@@ -42,7 +42,7 @@ internal sealed class ComponentReference
     public IReadOnlyDictionary<string, ScopedSlotContract> Slots { get; set; } = EmptySlots;
     public Prop[] Props { get; set; } = [];
     public string? DelegatedTag { get; init; }
-    public bool ReceivesAttributes { get; set; }
+    public bool ForwardsAttributes { get; init; }
     public CompiledTemplate Template { get; set; } = null!;
 }
 
@@ -119,7 +119,7 @@ public static partial class HtmlNextCompiler
             {
                 var compiler = new Compiler(carrier, resource.Source.Id, references, assets, hash);
                 compiler.ReadContract();
-                var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots, DelegatedTag = compiler.DelegatedTag };
+                var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots, DelegatedTag = compiler.DelegatedTag, ForwardsAttributes = compiler.ForwardsAttributes };
                 if (!references.TryAdd(compiler.Tag, reference)) throw ValueType.Error(resource.Source.Id, $"Duplicate component '{compiler.Tag}'.");
                 compilers.Add((compiler, reference));
             }
@@ -127,18 +127,6 @@ public static partial class HtmlNextCompiler
                 hash,
                 Array.AsReadOnly(resource.Dependencies.ToArray())));
         }
-        foreach (var (compiler, _) in compilers) compiler.FindInvocationAttributes();
-        bool changed;
-        do
-        {
-            changed = false;
-            foreach (var (compiler, reference) in compilers)
-                if (reference.ReceivesAttributes && compiler.DelegatedTag is { } tag && references.TryGetValue(tag, out var delegated) && !delegated.ReceivesAttributes)
-                {
-                    delegated.ReceivesAttributes = true;
-                    changed = true;
-                }
-        } while (changed);
         foreach (var (compiler, reference) in compilers)
         {
             cancellation.ThrowIfCancellationRequested();

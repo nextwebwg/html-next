@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, watchSyncEffect } from 'vue'
 import type { PropType } from 'vue'
-import { checkHydratedRoot, nativeAttrs, useReflectedProp } from './host'
+import { checkHydratedRoot, nativeAttrs, rootMetadata, useReflectedProp } from './host'
 import {
   BINDING_INPUTS_PROP,
   checkedProp,
@@ -15,6 +15,7 @@ import {
   vuePropInputs,
 } from './props'
 
+import { forwardedAttributes } from './attributes'
 defineOptions({ inheritAttrs: false })
 
 const propValidityContract = {
@@ -105,16 +106,14 @@ const hostState = computed(() =>
 <template>
   <button
     class="x-button"
-    v-bind="nativeAttrs($attrs)"
     data-hn
     data-hn-x-button
+    v-bind="{ ...rootMetadata($attrs), ...forwardedAttributes(nativeAttrs($attrs)) }"
     v-prop-validity="{ contract: propValidityContract, values: { ...props } }"
     :data-x-button-prop-size="reflectedProp('size', 'size', checkedProps.size, undefined, false)"
     :data-x-button-prop-variant="reflectedProp('variant', 'variant', checkedProps.variant, undefined, false)"
     :data-x-button-state="hostState || undefined"
-  >
-    <slot />
-  </button>
+  ><slot /></button>
 </template>
 
 <style scoped>

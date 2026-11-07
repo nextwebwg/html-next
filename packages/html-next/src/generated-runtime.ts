@@ -1,3 +1,5 @@
+import { isUrlAttribute } from "./sanitize.js";
+import { forwardedAttributes } from "./dom-attributes.js";
 export { activateModule } from "./module-connection.js";
 export { generatedInputs, awaitInput, bindInput } from "./generated-inputs.js";
 export { stateInitializers } from "./generated-state.js";
@@ -40,7 +42,7 @@ import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 import { ask, hostListener, responderCheck, type RequestChecks, type RequestOptions } from "./requests.js";
 import { headInstance, instanceScripts, type DeclaredScript, type HeadEntry, type ScriptStatus } from "./head.js";
 import { DataResource, type DataState } from "./data.js";
-import { propAttribute } from "./names.js";
+import { asciiLowerCase, kebabCase, propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
 import type { boundFailures } from "./value-constraints.js";
 import { manageDerivedValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
@@ -668,13 +670,23 @@ function replaceInstances(tag: string, previous: GeneratedFactory, next: Generat
     // ponytail: the component that owns its root rebuilds; one it delegates its root to keeps its definition.
     if (old?.S.g !== tag || old.e !== element || !element.isConnected || record!.disconnect === undefined) continue;
     const arm = roots?.find((candidate) => candidate[0] === element.localName);
-    const attributes: Record<string, string> = {};
-    // Without a record of its root, every attribute but the component's own outputs carries over.
-    for (const { name, value } of (arm === undefined ? element : armElement(element, arm, [element.localName, {}, [], "", [], []])).attributes) {
-      if (!name.startsWith(`data-${tag}-`) && name !== "component" && name !== "data-component" && name !== "data-html-next-instance") attributes[name] = value;
+    const empty: ArmRoot = [element.localName, {}, [], "", [], []];
+    let carried = arm === undefined ? element : armElement(element, arm, empty);
+    const attributes: Record<string, unknown> = Object.assign(Object.create(null), old.F?.values);
+    if (old.F !== undefined) {
+      const inputs: Record<string, string> = Object.fromEntries(Object.entries(attributes).flatMap(([name, value]) => {
+        const text = toAttribute(value as Value, name);
+        return text === null ? [] : [[name, text]];
+      }));
+      carried = armElement(carried, [element.localName, inputs, (inputs.class ?? "").split(/\s+/), inputs.style ?? "", [], []], empty);
+    }
+    const output: Record<string, string> = Object.create(null);
+    for (const { name, value } of carried.attributes) {
+      if (name.startsWith(`data-${tag}-`) || name === "component" || name === "data-component" || name === "data-html-next-instance") continue;
+      if (old.F === undefined) attributes[name] = value; else output[name] = value;
     }
     const options: Record<string, unknown> = { attributes, children: [], slots: {} };
-    const html: Record<string, string> = {};
+    const html: Record<string, string> = Object.create(null);
     for (const name of props) {
       const input = old.B?.i[name];
       if (input?.present !== true) continue;
@@ -688,6 +700,10 @@ function replaceInstances(tag: string, previous: GeneratedFactory, next: Generat
     const rendered = renderedHandles(element, old);
     documentState(document).lifecycle!.remove(element, record!);
     const root = next(options, html);
+    for (const [name, value] of Object.entries(output)) {
+      const own = name === "class" || name === "style" ? root.getAttribute(name) : null;
+      root.setAttribute(name, own === null || own === "" ? value : own + (name === "class" ? " " : "; ") + value);
+    }
     const handle = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
     carryState(old, handle);
     // Each component instance the template renders, at any depth, keeps its state too: the new
@@ -704,6 +720,7 @@ function replaceInstances(tag: string, previous: GeneratedFactory, next: Generat
     for (const holder of holders) {
       const was = holder.e;
       (holder as { B?: GeneratedPropRecord | undefined }).B = handle.B;
+      (holder as { F?: GeneratedInstance["F"] }).F = handle.F;
       holder.e = root;
       notifyPropertySet(holder, "e", was, root, undefined);
     }
@@ -838,7 +855,7 @@ export function acceptProps(
   const raw = new Set<string>();
   for (const name of names) {
     const prop = props[name]!;
-    const value = input[name];
+    const value = Object.hasOwn(input, name) ? input[name] : undefined;
     if (value === undefined || value === null || prop.select !== undefined && props[prop.select.from] === undefined) continue;
     raw.add(name);
   }
@@ -851,8 +868,8 @@ export function acceptProps(
     const name = names.find((candidate) => attribute.name === propAttribute(D.g, candidate));
     if (name !== undefined) incoming[name] = { value: attribute.value, source: "html", present: true };
   }
-  for (const name of names) if (input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
-  const accepted: Record<string, unknown> = {};
+  for (const name of names) if (Object.hasOwn(input, name) && input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
+  const accepted: Record<string, unknown> = Object.create(null);
   const at = (name: string): number => {
     const index = names.indexOf(name);
     return index < 0 ? n.indexOf(name) : n.length + index;
@@ -1019,7 +1036,7 @@ export function manageProps(instance: GeneratedInstance): void {
   const update = (input: Readonly<Record<string, unknown>>, availability?: Readonly<Record<string, InputStatus>>): void => {
     checkProps(names, input, D.g);
     const element = instance.e;
-    const next: Record<string, unknown> = {};
+    const next: Record<string, unknown> = Object.create(null);
     const acceptedNames = new Set<string>();
     for (const name of names) {
       next[name] = v[at(name)];
@@ -1456,6 +1473,7 @@ export interface GeneratedChannel {
 
 /** The instance internals generated handlers, listeners and refs use; each is imported only when used. */
 export interface GeneratedInstance {
+  readonly F?: { readonly values: Record<string, unknown>; readonly draw: () => void };
   /** Creation depth, retained only by graphs with recursive invocation edges. */
   readonly nd?: number;
   readonly U?: GeneratedStateInitializers;
@@ -2684,4 +2702,130 @@ export function attachGeneratedController(
     return deactivate === undefined ? disconnect : () => { disconnect(); deactivate(); };
   }, handle);
   return handle;
+}
+
+/** Fold initial input forms before a child initializes state from its effective props. */
+export function initialInvocationInputs(writes: readonly (Readonly<Record<string, unknown>> | readonly [string, unknown, ("value" | "class" | "style")?, string?])[], names: readonly (readonly [string, string])[]): {
+  readonly html: Record<string, string>; readonly props: Record<string, unknown>; readonly attributes: Record<string, unknown>;
+} {
+  const html: Record<string, string> = Object.create(null), props: Record<string, unknown> = Object.create(null), attributes: Record<string, unknown> = Object.create(null);
+  let probe: HTMLElement | undefined;
+  const put = (name: string, value: unknown, kind?: "value" | "class" | "style", fallback?: string): void => {
+    if (value === NONCONFORMING) { if (fallback === undefined) return; value = fallback; }
+    const prop = names.find(([attribute]) => asciiLowerCase(attribute) === asciiLowerCase(name))?.[1];
+    if (kind === "value" && prop !== undefined) { props[prop] = value; delete html[prop]; return; }
+    if (kind === "class" || kind === "style") {
+      const attribute = kind;
+      const targetProp = names.find(([name]) => name === attribute)?.[1];
+      const current = targetProp === undefined ? attributes[attribute] : Object.hasOwn(props, targetProp) ? props[targetProp] : html[targetProp];
+      probe ??= document.createElement("i");
+      if (current == null) probe.removeAttribute(attribute); else probe.setAttribute(attribute, String(current));
+      if (kind === "class") probe.classList.toggle(name, truthy(value as Value));
+      else probe.style.setProperty(name, toText(value as Value));
+      put(attribute, probe.getAttribute(attribute));
+      return;
+    }
+    let text = toAttribute(value as Value, name);
+    if (text !== null && isUrlAttribute(name) && hasExecutableUrl(text)) text = null;
+    if (prop !== undefined) {
+      delete props[prop];
+      if (text === null) delete html[prop]; else html[prop] = text;
+    } else if (text === null) delete attributes[name]; else attributes[name] = text;
+  };
+  for (const write of writes) {
+    if (Array.isArray(write)) put(write[0], write[1], write[2], write[3]);
+    else for (const [name, value] of Object.entries(write)) if (toAttribute(value as Value, name) !== null) put(name, value);
+  }
+  return { html, props, attributes };
+}
+
+/** Replace a generated instance's unclaimed HTML inputs and replay its authored destinations. */
+export function setInvocationAttributes(element: Element, attributes: Readonly<Record<string, unknown>>): void {
+  const instance = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  const input = instance?.F;
+  if (instance === undefined || input === undefined) return;
+  const props = Object.keys(instance.B?.D.props ?? {});
+  const next = Object.fromEntries(Object.entries(forwardedAttributes(attributes)).flatMap(([name, value]) => {
+    const normalized = asciiLowerCase(name);
+    if (props.some(prop => asciiLowerCase(prop) === normalized || kebabCase(prop) === normalized)) return [];
+    const text = forwardedAttributeText(name, value);
+    return text === null ? [] : [[name, text]];
+  }));
+  let changed = false;
+  for (const name of Object.keys(input.values)) if (!Object.hasOwn(next, name)) { delete input.values[name]; changed = true; }
+  for (const [name, value] of Object.entries(next)) if (!Object.is(input.values[name], value)) { input.values[name] = value; changed = true; }
+  if (changed) input.draw();
+}
+
+/** Update the receiving component's attribute inputs; authored destinations own the DOM writes. */
+export function writeInvocationAttribute(child: GeneratedInstance, name: string, value: string | null): void {
+  const record = child.B;
+  const propName = record === undefined ? undefined : Object.keys(record.D.props).find(prop => kebabCase(prop) === name);
+  if (record !== undefined && propName !== undefined) {
+    const prop = record.D.props[propName]!;
+    const from = prop.select?.from;
+    const checks = chosen(record.D.props, prop, from === undefined ? {} : { [from]: record.v[record.n.length + Object.keys(record.D.props).indexOf(from)] });
+    const accepted = taken(checks, value, "html", prop.default);
+    if (accepted !== undefined) record.u!({ [propName]: accepted });
+    record.i[propName] = { value, source: "html", present: value !== null, provided: value !== null };
+    return;
+  }
+  const input = child.F;
+  if (input === undefined || Object.is(input.values[name], value)) return;
+  if (value === null) delete input.values[name]; else input.values[name] = value;
+  input.draw();
+}
+
+const invocationAttributeProbes = /* @__PURE__ */ new WeakMap<GeneratedInstance, HTMLElement>();
+
+/** A keyed class/style input composes on the logical invocation before its destination renders. */
+export function writeInvocationModifier(child: GeneratedInstance, target: "class" | "style", name: string, value: string | boolean): void {
+  const record = child.B;
+  const prop = record === undefined ? undefined : Object.keys(record.D.props).find(prop => kebabCase(prop) === target);
+  if (prop === undefined && child.F === undefined) return;
+  const current = prop === undefined ? child.F!.values[target] : record!.v[record!.n.length + Object.keys(record!.D.props).indexOf(prop)];
+  let probe = invocationAttributeProbes.get(child);
+  if (probe === undefined) { probe = document.createElement("i"); invocationAttributeProbes.set(child, probe); }
+  const before = toAttribute(current as Value, target);
+  if (before === null) probe.removeAttribute(target); else probe.setAttribute(target, before);
+  if (target === "class") probe.classList.toggle(name, value as boolean);
+  else probe.style.setProperty(name, value as string);
+  const after = probe.getAttribute(target);
+  if (after !== before) writeInvocationAttribute(child, target, after);
+}
+
+function forwardedAttributeText(name: string, value: unknown): string | null {
+  const text = toAttribute(value as Value, name);
+  return text !== null && isUrlAttribute(name) && hasExecutableUrl(text) ? null : text;
+}
+
+export function resetForwardedInvocationAttributes(child: GeneratedInstance, inputs: Readonly<Record<string, unknown>>, previous?: readonly string[]): void {
+  for (const name of previous ?? []) if (forwardedAttributeText(name, inputs[name]) === null) writeInvocationAttribute(child, name, null);
+}
+
+/** Remove keys that stopped being forwarded before replaying the destination's authored writes. */
+export function resetForwardedAttributes(element: Element, inputs: Readonly<Record<string, unknown>>, previous?: readonly string[]): void {
+  for (const name of previous ?? []) if (forwardedAttributeText(name, inputs[name]) === null) writeAttribute(element, name, null);
+}
+
+/** Apply only authored forwarding, through the existing attribute and URL policies. */
+export function forwardAttributes(element: Element, inputs: Readonly<Record<string, unknown>>): string[] {
+  const names: string[] = [];
+  for (const [name, value] of Object.entries(inputs)) {
+    const text = forwardedAttributeText(name, value);
+    if (text === null) continue;
+    names.push(name);
+    if (isUrlAttribute(name)) writeUrlAttribute(element, name, text); else writeAttribute(element, name, text);
+  }
+  return names;
+}
+
+export function forwardInvocationAttributes(child: GeneratedInstance, inputs: Readonly<Record<string, unknown>>): string[] {
+  const names: string[] = [];
+  for (const [name, value] of Object.entries(inputs)) {
+    const text = forwardedAttributeText(name, value);
+    if (text === null) continue;
+    names.push(name); writeInvocationAttribute(child, name, text);
+  }
+  return names;
 }

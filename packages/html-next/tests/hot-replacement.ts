@@ -15,13 +15,13 @@ import { parseComponent } from "../src/source-parser.js";
 const source = fileURLToPath(new URL("../src/", import.meta.url));
 
 const count = `<template component="x-count"><defs><state name="n" type="number" value="0"></state>
-  <handler name="add"><set name="n" expr:value="$n + 1"></set></handler></defs><button on:click="add">{$n}</button></template>`;
+  <handler name="add"><set name="n" expr:value="$n + 1"></set></handler></defs><button $attributes on:click="add">{$n}</button></template>`;
 const panel = (root: string, extra: string) => `<template component="ui-panel"><defs>
   <prop name="title" type="string" default="Untitled">Title.</prop>
   <state name="count" type="number" value="0"></state>${extra}</defs>${root}</template>`;
-const before = panel(`<section class="panel" title="Old"><h2>{$title}</h2><x-count></x-count><slot></slot></section>`,
+const before = panel(`<section $attributes class:panel="true" title="Old"><h2>{$title}</h2><x-count></x-count><slot></slot></section>`,
   '<state name="open" type="boolean" value="false"></state>');
-const after = panel(`<article class="panel2"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><slot></slot></article>`,
+const after = panel(`<article $attributes class:panel2="true"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><slot></slot></article>`,
   '<state name="label" type="string" value="new"></state>');
 const outer = `<template component="ui-outer"><defs><state name="label" type="string" value="one"></state></defs>
   <div><ui-panel id="p" class="mine" from:title="$label"><x-count data-slotted=""></x-count></ui-panel></div></template>`;
@@ -85,7 +85,7 @@ export async function hotReplacementFiles(): Promise<Record<string, string>> {
 
 /** What `run` reports when the replacement keeps state, props, attributes, slotted children and bindings. */
 export const hotReplacementResult = {
-  replaced: { tag: "article", className: "panel2 mine", title: null, heading: "one: 5 new", slotted: true, counts: ["1", "2"], open: undefined },
+  replaced: { tag: "article", className: "mine panel2", title: null, heading: "one: 5 new", slotted: true, counts: ["1", "2"], open: undefined },
   counts: ["2", "3"],
   heading: "two: 5 new",
 };

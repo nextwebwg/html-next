@@ -33,7 +33,7 @@ import { attributeNamespace } from "../dom-attributes.js";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
 import { fail } from "../diagnostics.js";
 import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
@@ -118,9 +118,13 @@ interface Lowered {
   readonly key: string;
 }
 
-type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range" | "hoststate";
+type BindingKind = "forward" | "prop" | "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range" | "hoststate";
 
 interface Binding {
+  readonly receiver?: number;
+  readonly ordered?: boolean;
+  readonly fallback?: string;
+  readonly prop?: { readonly index: number; readonly name: string; readonly input: boolean };
   readonly site: number;
   readonly kind: BindingKind;
   readonly name: string;
@@ -236,6 +240,8 @@ const inProjection = (block: Block | undefined): boolean =>
  * live lowering puts the component's root in place of the invocation.
  */
 interface Invocation {
+  readonly ordered: boolean;
+  readonly names: readonly (readonly [string, string])[];
   readonly site: number;
   readonly factory: string;
   /** Literal prop attributes, which the component reads as HTML input. */
@@ -244,6 +250,7 @@ interface Invocation {
   readonly attributes: readonly (readonly [string, string])[];
   /** Bound props: each starts as its attribute text, then applies as its value whenever what it read changes. */
   readonly props: readonly { readonly name: string; readonly attribute: string; readonly expression: Lowered; readonly record: string;
+    readonly fallback?: string;
     readonly availability?: string;
     readonly snapshot?: boolean;
     /** The prop's compact type, as source, which a bound value must satisfy to be written (none, 0, for a select prop). */
@@ -504,7 +511,7 @@ function valueSource(value: unknown): string {
   if (typeof value === "number") return numberSource(value);
   if (Array.isArray(value)) return `[${value.map(valueSource).join(", ")}]`;
   return `{ ${Object.entries(value as Record<string, unknown>)
-    .map(([key, item]) => `${JSON.stringify(key)}: ${valueSource(item)}`).join(", ")} }`;
+    .map(([key, item]) => `${objectKey(key)}: ${valueSource(item)}`).join(", ")} }`;
 }
 
 /** A local name: a row's item, index, or a `$with`/`$match` alias. */
@@ -1143,7 +1150,7 @@ class Planner {
     block.transitions = true;
   }
 
-  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] | 5 {
+  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean, ordered = false): unknown[] | 5 {
     if (EXCLUDED.has(node.name)) unreachable("a <template> without a flow renders as its content");
     // A component the graph compiles renders through its factory; any other custom element is an
     // element, as an unregistered one is to live lowering.
@@ -1164,7 +1171,18 @@ class Planner {
     let content: Lowered | undefined;
     let html: Lowered | undefined;
     const selectValue = (name: string): boolean => node.name === "select" && name === "value";
+    const forwards = ordered || orderedAttributeWrites(node.attributes);
+    const bindingStart = block.bindings.length;
     for (const attribute of node.attributes) {
+      if (attribute.kind === "forward") {
+        block.bindings.push({ site: this.site(block, path), kind: "forward", name: "", expression: none("attribute-inputs", "attributes"), initial: "undefined", ordered: true });
+        continue;
+      }
+      if (attribute.kind === "literal" && forwards) {
+        if (node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+        block.bindings.push({ site: this.site(block, path), kind: "attribute", name: attribute.name, expression: none(`literal:${attribute.name}:${attribute.value}`, JSON.stringify(attribute.value)), initial: "undefined", ordered: true });
+        continue;
+      }
       if (attribute.kind === "literal") continue;
       // A property (a bound control's value included) is written with each new result, as the element
       // may have changed it; every other binding writes only a result that differs from its last.
@@ -1230,6 +1248,10 @@ class Planner {
       return spec;
     }
     spec.push(...this.children(block, node, node.children, path, 0, scope, svg && node.name !== "foreignObject"));
+    if (forwards) for (let index = bindingStart; index < block.bindings.length; index += 1) {
+      const binding = block.bindings[index]!;
+      if (binding.site === this.site(block, path)) block.bindings[index] = { ...binding, ordered: true, ...(!node.attributes.some(attribute => attribute.kind === "forward") || literal(binding.name) === undefined ? {} : { fallback: JSON.stringify(literal(binding.name)) }) };
+    }
     if (node.name === "select" && block.bindings.some((binding) => binding.site === this.site(block, path) && binding.select === true)) {
       block.selects.push(this.site(block, path));
     }
@@ -1237,25 +1259,30 @@ class Planner {
   }
 
   /**
-   * Plans an invocation as live lowering treats one: literal props are the component's HTML input,
-   * other literals and every non-prop binding go to its root, bound props apply as values, listeners
-   * and the ref follow its root, and the children are this template's content projected into it.
+   * Plans invocation inputs separately from the rendered root. Declared props use their receiving
+   * contract; remaining attributes reach authored forwarding destinations. Listeners and refs follow
+   * the rendered root, and children retain this template's projection scope.
    */
   invocation(block: Block, node: ElementNode, path: readonly number[], scope: Scope, invoked: Invoked, svg: boolean): 5 {
     const site = this.site(block, path);
     const contract = invoked.definition.contract;
-    const propOf = (name: string): string | undefined =>
-      Object.keys(contract.props).find((prop) => kebabCase(prop) === asciiLowerCase(name));
+    const forwards = orderedAttributeWrites(node.attributes, true);
+    const modified = new Set(node.attributes.flatMap(attribute => attribute.kind === "attribute" && attribute.target !== undefined ? [attribute.target] : []));
+    const propOf = (name: string): string | undefined => modified.has(name as "class" | "style") ? undefined
+      : Object.keys(contract.props).find((prop) => kebabCase(prop) === asciiLowerCase(name));
     const html: [string, string][] = [];
     const attributes: [string, string][] = [];
-    const props: { name: string; attribute: string; expression: Lowered; record: string; type: string; availability?: string; snapshot?: boolean }[] = [];
+    const props: { name: string; attribute: string; expression: Lowered; record: string; type: string; availability?: string; snapshot?: boolean; fallback?: string }[] = [];
     const controls: string[] = [];
     let content: Invocation["content"];
     const rest: ElementNode["attributes"][number][] = [];
     for (const attribute of node.attributes) {
       const prop = attribute.kind === "property" || attribute.kind === "directive" || attribute.kind === "attribute" && attribute.target !== undefined
         ? undefined : propOf(attribute.name);
-      if (attribute.kind === "literal") (prop === undefined ? attributes : html).push([prop ?? attribute.name, attribute.value]);
+      if (attribute.kind === "literal") {
+        (prop === undefined ? attributes : html).push([prop ?? attribute.name, attribute.value]);
+        if (forwards) rest.push(attribute);
+      }
       else if (attribute.kind === "directive") {
         // Live writes it into the invocation before lowering, so it is what the component is given.
         content = { kind: attribute.name === "html" ? "html" : "value", expression: this.checked(attribute.expressionPlan!, scope) };
@@ -1288,13 +1315,34 @@ class Planner {
           ...(availability === undefined ? {} : { availability }),
           ...(snapshot ? { snapshot: true } : {}),
           type: contract.select === undefined ? compactSource(compactType(normalizeType(contract.type))) : "0" });
+        if (forwards) rest.push(attribute);
       } else rest.push(attribute);
     }
     const order = new Map(propInputOrder(Object.entries(invoked.definition.contract.props).map(([name, contract]) => ({ name, contract })))
       .map((prop, index) => [prop.name, index]));
     props.sort((left, right) => order.get(left.name)! - order.get(right.name)!);
-    // Every other binding targets the component's root, which the site holds once it is created.
-    this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg);
+    if (forwards) for (const prop of props) {
+      const literal = html.find(([name]) => name === prop.name);
+      if (literal === undefined) continue;
+      const value = invocationValue(invoked.definition.contract.props[prop.name]!, literal[1], "html", true);
+      if (value !== undefined) prop.fallback = JSON.stringify(value);
+    }
+    // Attribute bindings use the child's logical invocation; properties and controls use its root.
+    const restStart = block.bindings.length;
+    this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg, forwards);
+    for (let index = restStart; index < block.bindings.length; index += 1) {
+      const binding = block.bindings[index]!;
+      if (binding.kind !== "property" && binding.kind !== "control") {
+        const receiver = block.invocations.length;
+        const propIndex = props.findIndex(prop => prop.attribute === binding.name && (binding.kind === "attribute" || binding.kind === "url"));
+        if (propIndex >= 0) {
+          const prop = props[propIndex]!;
+          const cache = `r.t${receiver}_${propIndex}`;
+          block.bindings[index] = { ...binding, receiver, kind: "prop", prop: { index: propIndex, name: prop.name, input: prop.snapshot === true || prop.availability !== undefined },
+            expression: { ...binding.expression, source: `${cache} === undefined ? NONCONFORMING : ${cache}.value`, key: `invocation-prop:${receiver}:${propIndex}`, fails: true } };
+        } else block.bindings[index] = { ...binding, receiver };
+      }
+    }
     let projection: Block | undefined;
     if (node.children.length > 0 && content === undefined) {
       const outer = this.projecting;
@@ -1305,7 +1353,7 @@ class Planner {
       this.projecting = outer;
     }
     block.invocations.push({
-      site, factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined, controls, content,
+      site, ordered: forwards, names: Object.keys(contract.props).flatMap(name => [[name, name], [kebabCase(name), name]] as const), factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined, controls, content,
       ...(block.projection === true ? path.length === 1 : block.listing === true && path.length <= 1) && this.accepts(node).length > 0 ? { accepted: true } : {},
       events: (node.events ?? []).map((event) => ({ site, name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers })),
       ref: node.ref === undefined ? undefined : { name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) },
@@ -1933,6 +1981,7 @@ export function emitBlocks(
     block.bindings.forEach((binding, index) => {
       // An adopted block's first render writes every binding, as live hydration's effects run once each.
       entries.push(`v${index}: ${hydrate && binding.initial !== "undefined" ? `z ? undefined : ${binding.initial}` : binding.initial}`);
+      if (binding.ordered && binding.kind !== "prop" && binding.expression.fails) entries.push(`g${index}: ${binding.fallback ?? "NONCONFORMING"}`);
       // A nonconforming segment keeps the text it last accepted.
       binding.parts?.forEach((part, segment) => {
         if (typeof part !== "string" && part.fails) entries.push(`m${index}_${segment}: ""`);
@@ -1942,7 +1991,7 @@ export function emitBlocks(
     block.invocations.forEach((invocation, index) => {
       if (block.sites[invocation.site]!.length > 0 && !written.has(invocation.site)) entries.push(`a${invocation.site}: ${sites[invocation.site]}`);
       entries.push(`h${index}: undefined`, ...invocation.projection === undefined ? [] : [`j${index}: undefined`],
-        ...invocation.props.map((_, at) => `q${index}_${at}: undefined`));
+        ...invocation.props.flatMap((prop, at) => [`q${index}_${at}: undefined`, ...invocation.ordered ? [`t${index}_${at}: ${prop.fallback === undefined ? "undefined" : `{ value: ${prop.fallback}${prop.snapshot || prop.availability !== undefined ? ", status: READY_INPUT" : ""} }`}`] : []]));
     });
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
@@ -1969,6 +2018,28 @@ export function emitBlocks(
    * root in its invocation's place, then applies their bound props whenever those re-run.
    */
   const invoke = (block: Block): string[] => block.invocations.flatMap((invocation, index) => {
+    const cacheProp = (prop: Invocation["props"][number], at: number, value: string, status?: string): string[] => !invocation.ordered ? [] : [
+      `{ const accepted = propValue(${prop.type}, ${value}); if (${status === undefined ? "" : `!${status}.ready || `}accepted !== NONCONFORMING) r.t${index}_${at} = { value: accepted${status === undefined ? "" : `, status: ${status}`} }; }`,
+    ];
+    const initialExpressions = new Map<string, string>();
+    const initialDefaults = [...invocation.attributes, ...invocation.html].filter(([name]) => name === "class" || name === "style")
+      .map(([name, value]) => `[${JSON.stringify(name)}, ${JSON.stringify(value)}]`);
+    const initialWrites = !invocation.ordered ? [] : [...initialDefaults, ...block.bindings.flatMap((binding, at) => {
+      if (binding.receiver !== index) return [];
+      if (binding.kind === "forward") return ["attributes"];
+      if (!["prop", "attribute", "url", "class", "style"].includes(binding.kind)) return [];
+      let value = convertible(binding.expression);
+      if (binding.kind !== "prop" && !binding.expression.key.startsWith("literal:")) {
+        const cached = initialExpressions.get(binding.expression.key);
+        if (cached !== undefined) value = `${cached}.value`;
+        else {
+          const cache = `r.o${at}`;
+          initialExpressions.set(binding.expression.key, cache);
+          value = `(${cache} = { value: ${value} }).value`;
+        }
+      }
+      return [`[${JSON.stringify(binding.name)}, ${value}, ${binding.kind === "prop" ? '"value"' : binding.kind === "class" || binding.kind === "style" ? JSON.stringify(binding.kind) : "undefined"}${binding.fallback === undefined ? "" : `, ${binding.fallback}`}]`];
+    })];
     const site = field(block, invocation.site);
     const projection = invocation.projection;
     // A hydrating block adopts the server's root of the component, and the content it projected there.
@@ -1996,7 +2067,7 @@ export function emitBlocks(
       waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, -1, new Map()))) {` : `  if (r.h${index} === undefined) {`,
       ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.matches(':is([component]:not(template), [data-component]:not([component]))');`] : [],
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
-      `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
+      `    const H = { ${invocation.html.map(([name, value]) => `${objectKey(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
       ...hydrate && invocation.props.length > 0 ? ["    const V = {};"] : [],
       // Adoption reads typed current inputs before comparing prepared producer identities.
       ...invocation.props.flatMap((prop, at) => [
@@ -2004,15 +2075,17 @@ export function emitBlocks(
           : prop.availability === undefined ? `    const ${prop.record} = [], y${at} = ${convertible(prop.expression)};`
           : `    const ${prop.record} = [], s${at} = rec(${prop.record}, ${prop.availability}), y${at} = s${at}.ready ? ${convertible(prop.expression)} : undefined;`,
         `    r.q${index}_${at} = ${prop.record};`,
+        ...cacheProp(prop, at, `y${at}`, prop.snapshot || prop.availability !== undefined ? `s${at}` : undefined),
         hydrate ? `    { const t = propValue(${prop.type}, y${at}); if (${prop.snapshot || prop.availability !== undefined ? `s${at}.ready && ` : ""}t !== NONCONFORMING) V[${JSON.stringify(prop.name)}] = t; }`
           : `    { const t = propText(${prop.type}, y${at}, ${JSON.stringify(prop.attribute)}); if (t !== null) H[${JSON.stringify(prop.name)}] = t; }`,
       ]),
+      ...invocation.ordered ? [`    const W = initialInvocationInputs([${initialWrites.join(", ")}], ${JSON.stringify(invocation.names)});`] : [],
       ...invocation.content === undefined ? [] : [
         `    const k = document.createElement("div"), y = ${convertible(invocation.content.expression)};`,
         `    if (y !== NONCONFORMING) ${invocation.content.kind === "html" ? "writeHtml(k, toText(y))" : "k.textContent = toText(y)"};`,
       ],
-      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? adoptInvoke : invoke)` : "invoke"}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
-        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
+      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? adoptInvoke : invoke)` : "invoke"}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.ordered ? "W.attributes" : `{ ${invocation.attributes.map(([name, value]) => `${objectKey(name)}: ${JSON.stringify(value)}`).join(", ")} }`}${
+        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${invocation.ordered ? ", ...W.props" : hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, ${invocation.ordered ? "W.html" : "H"}, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
       `    ${site} = r.h${index}.e;`,
       // The shared root carries both markers, and this component's lifecycle rides its owner's.
       ...invocation.root ? [
@@ -2022,7 +2095,7 @@ export function emitBlocks(
         hydrate ? `    { const t = I.e.getAttribute("component") ?? I.e.getAttribute("data-component") ?? ""; if (!t.split(/\\s+/).includes(${JSON.stringify(contract.tag)})) I.e.setAttribute("component", \`${contract.tag} \${t}\`); }`
           : `    I.e.setAttribute("component", \`${contract.tag} \${I.e.getAttribute("component") ?? I.e.getAttribute("data-component")}\`);`,
       ] : [],
-      ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (${prop.snapshot ? `!s${at}.ready || ` : ""}y${at} !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
+      ...invocation.ordered ? [] : invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (${prop.snapshot ? `!s${at}.ready || ` : ""}y${at} !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
         ? `bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at});`
         : `bindInput(r.h${index}, ${JSON.stringify(prop.name)}, { value: y${at}, status: s${at} });`}`),
       ...ref === undefined ? [] : [ref.iterated ? `    (I.r[${refKey}] ??= []).push(${site});` : `    I.r[${refKey}] = ${site};`],
@@ -2044,9 +2117,10 @@ export function emitBlocks(
         // A nested write anywhere in the value re-applies it, as live's parse at the destination reads it all.
         `      if (c === -1${rootsWritten(prop.expression)} || readsChanged(r.q${index}_${at}, ${prop.record}) || touches(x, d)) {`,
         `        r.q${index}_${at} = ${prop.record};`,
-        `        ${prop.expression.fails ? `if (${prop.snapshot ? "!s.ready || " : ""}x !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
+        ...cacheProp(prop, at, "x", prop.snapshot || prop.availability !== undefined ? "s" : undefined),
+        ...invocation.ordered ? [] : [`        ${prop.expression.fails ? `if (${prop.snapshot ? "!s.ready || " : ""}x !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
           ? `bindProp(r.h${index}, ${JSON.stringify(prop.name)}, x);`
-          : `bindInput(r.h${index}, ${JSON.stringify(prop.name)}, { value: x, status: s });`}`,
+          : `bindInput(r.h${index}, ${JSON.stringify(prop.name)}, { value: x, status: s });`}`],
         "      }",
         "    }",
       ]),
@@ -2058,11 +2132,13 @@ export function emitBlocks(
     const lines: string[] = [...invoke(block)];
     // One group per mask, except that writes to one element's attributes and classes keep their
     // authored order (it decides the order attributes and class tokens are created in).
-    const groups: Array<{ readonly mask: number; readonly bindings: Binding[] }> = [];
+    const groups: Array<{ mask: number; readonly bindings: Binding[] }> = [];
     const ordered = (binding: Binding): boolean =>
-      binding.kind === "attribute" || binding.kind === "url" || binding.kind === "class" || binding.kind === "style";
+      binding.kind === "forward" || binding.kind === "attribute" || binding.kind === "url" || binding.kind === "class" || binding.kind === "style";
     for (const binding of block.bindings) {
       const mask = maskOf(finalExpression(binding));
+      const orderedGroup = binding.ordered ? groups.find(group => group.bindings.some(other => other.site === binding.site && other.ordered)) : undefined;
+      if (orderedGroup !== undefined) { orderedGroup.mask |= mask; orderedGroup.bindings.push(binding); continue; }
       const at = groups.findLastIndex((group) => group.mask === mask);
       const later = ordered(binding) && groups.slice(at + 1).some((group) =>
         group.bindings.some((other) => other.site === binding.site && ordered(other)));
@@ -2077,10 +2153,20 @@ export function emitBlocks(
       lines.push(`  if (${guard(mask)}) {`);
       if (reset && mask === NESTED && group === groups[0]!.bindings) lines.push("    r.w = 0;");
       const shared = new Map<string, string>();
+      for (const binding of group) if (binding.kind === "forward") {
+        const index = block.bindings.indexOf(binding);
+        lines.push(binding.receiver === undefined ? `    resetForwardedAttributes(${field(block, binding.site)}, attributes, r.v${index});`
+          : `    resetForwardedInvocationAttributes(r.h${binding.receiver}, attributes, r.v${index});`);
+      }
       for (const binding of group) {
         const index = block.bindings.indexOf(binding);
         const last = `r.v${index}`;
         const site = field(block, binding.site);
+        if (binding.kind === "forward") {
+          const forward = binding.receiver === undefined ? `forwardAttributes(${site}` : `forwardInvocationAttributes(r.h${binding.receiver}`;
+          lines.push(`    ${last} = ${forward}, attributes);`);
+          continue;
+        }
         const output = `s${index}`;
         if (binding.kind === "mixed") {
           const pieces = binding.parts!.map((part, segment) => {
@@ -2111,27 +2197,41 @@ export function emitBlocks(
           continue;
         }
         let value = shared.get(binding.expression.key);
+        const initial = binding.receiver === undefined || !binding.ordered || binding.kind === "prop" || binding.expression.key.startsWith("literal:") ? -1
+          : block.bindings.findIndex(other => other.receiver === binding.receiver && other.expression.key === binding.expression.key);
         if (value === undefined) {
           value = `x${temporary++}`;
           shared.set(binding.expression.key, value);
           // Every binding sharing an expression converts it, so an item-reached container is flagged here.
-          lines.push(`    const ${value} = ${convertible(binding.expression)};`);
+          if (initial < 0) lines.push(`    const ${value} = ${convertible(binding.expression)};`);
+          else lines.push(`    const first${temporary} = r.o${initial}; r.o${initial} = undefined;`, `    const ${value} = first${temporary} === undefined ? ${convertible(binding.expression)} : first${temporary}.value;`);
+        }
+        else if (initial >= 0) lines.push(`    r.o${initial} = undefined;`);
+        if (binding.ordered && binding.kind !== "prop" && binding.expression.fails) {
+          const kept = `r.g${block.bindings.indexOf(binding)}`;
+          lines.push(`    if (${value} !== NONCONFORMING) ${kept} = ${value};`);
+          value = kept;
         }
         // A nonconforming result leaves what the binding last wrote, as the live runtime does.
         const fails = finalExpression(binding).fails;
         if (fails) lines.push(`    if (${value} !== NONCONFORMING) {`);
         const start = lines.length;
         switch (binding.kind) {
+          case "prop":
+            lines.push(binding.prop!.input
+              ? `    bindInput(r.h${binding.receiver}, ${JSON.stringify(binding.prop!.name)}, r.t${binding.receiver}_${binding.prop!.index});`
+              : `    bindProp(r.h${binding.receiver}, ${JSON.stringify(binding.prop!.name)}, ${value});`);
+            break;
           case "attribute":
           case "url": {
             // A bound style attribute would drop the transition's own properties, written once.
             const namespace = attributeNamespace(binding.name);
-            const write = namespace !== undefined ? `writeNamespaced${binding.kind === "url" ? "Url" : ""}Attribute(${site}, ${JSON.stringify(namespace)}, ${JSON.stringify(binding.name)}, ${JSON.stringify(binding.name.slice(binding.name.indexOf(":") + 1))}, `
+            const write = binding.receiver !== undefined ? `writeInvocationAttribute(r.h${binding.receiver}, ${JSON.stringify(binding.name)}, ` : namespace !== undefined ? `writeNamespaced${binding.kind === "url" ? "Url" : ""}Attribute(${site}, ${JSON.stringify(namespace)}, ${JSON.stringify(binding.name)}, ${JSON.stringify(binding.name.slice(binding.name.indexOf(":") + 1))}, `
               : binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
               : binding.name === "style" && transitioned(block, binding.site) ? `writeTransitionStyle(${site}, `
               : `writeAttribute(${site}, ${JSON.stringify(binding.name)}, `;
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
-              `    if (${output} !== ${last}) ${write}${last} = ${output});`);
+              `    ${binding.ordered ? "" : `if (${output} !== ${last}) `}${write}${last} = ${output});`);
             break;
           }
           case "value":
@@ -2151,11 +2251,11 @@ export function emitBlocks(
             break;
           case "style":
             lines.push(`    const ${output} = toText(${value});`,
-              `    if (${output} !== ${last}) ${site}.style.setProperty(${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    ${binding.ordered ? "" : `if (${output} !== ${last}) `}${binding.receiver === undefined ? `${site}.style.setProperty(${JSON.stringify(binding.name)}, ${last} = ${output})` : `writeInvocationModifier(r.h${binding.receiver}, "style", ${JSON.stringify(binding.name)}, ${last} = ${output})`};`);
             break;
           case "class":
             lines.push(`    const ${output} = ${binding.expression.boolean ? value : `truthy(${value})`};`,
-              `    if (${output} !== ${last}) ${site}.classList.toggle(${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    ${binding.ordered ? "" : `if (${output} !== ${last}) `}${binding.receiver === undefined ? `${site}.classList.toggle(${JSON.stringify(binding.name)}, ${last} = ${output})` : `writeInvocationModifier(r.h${binding.receiver}, "class", ${JSON.stringify(binding.name)}, ${last} = ${output})`};`);
             break;
         }
         if (fails) {
@@ -2586,7 +2686,9 @@ export function emitBlocks(
   // A component that declares requests gives its controller a host with `host.request`, which reads the instance.
   const scripted = (definition.scripts ?? []).some((script) => script.name !== undefined);
   const asks = (definition.module ?? definition.controller) !== undefined && (Object.keys(contract.requests ?? {}).length > 0 || scripted);
-  const instance = asks || hydrate || provides || contextStart >= 0 || lists.length > 0 || plan.seeds.length > 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const forwards = blocks.some(block => block.bindings.some(binding => binding.kind === "forward"));
+  const tracksAttributes = forwards || hot;
+  const instance = tracksAttributes || asks || hydrate || provides || contextStart >= 0 || lists.length > 0 || plan.seeds.length > 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
     transitionMask !== 0 || headed || plan.scripts.length > 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
@@ -2632,6 +2734,7 @@ export function emitBlocks(
     ],
     ...headed ? ["  const HK = [];", "  let HU;"] : [],
     // A context provider tells its readers after each render.
+    ...tracksAttributes ? [`  I.F = { values: attributes, draw: () => ${update}(-1) };`] : [],
     `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : asks ? "(host) => C(host, I)" : "C"}${
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...transitionMask === 0 ? [] : [`  holdTransitions(I, ${transitionMask});`],
@@ -2674,10 +2777,6 @@ export function emitBlocks(
       name === "svg"
         ? `${indent}${declare}element = document.createElementNS("http://www.w3.org/2000/svg", "svg");`
         : `${indent}${declare}element = document.createElement(${JSON.stringify(name)});`,
-      `${indent}for (const [name, value] of Object.entries(attributes)) {`,
-      `${indent}  if (value === null || value === undefined || value === false) continue;`,
-      `${indent}  element.setAttribute(name, value === true ? "" : String(value));`,
-      `${indent}}`,
       ...literals,
       `${indent}element.setAttribute("component", ${JSON.stringify(contract.tag)});`,
     ];
@@ -2688,9 +2787,7 @@ export function emitBlocks(
       if (attribute.kind !== "literal") return [];
       const name = JSON.stringify(attribute.name);
       const value = JSON.stringify(attribute.value);
-      return [attribute.name === "class" || attribute.name === "style"
-        ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${JSON.stringify(attribute.name === "class" ? " " : "; ")}));`
-        : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
+      return [`  element.setAttribute(${name}, ${value});`];
     });
   }
   /** The prop inputs: the factory's, or an adopted root's restored ones. */
@@ -2703,12 +2800,13 @@ export function emitBlocks(
   const factory = [
     // `html` is an invocation's literal props, which a compiled parent passes as HTML input.
     `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}${propNames.length > 0 || hydrate ? ", html" : ""}${hydrate ? ", h" : ""}) {`,
-    propNames.length === 0 && !slotted && !delegated ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
+    propNames.length === 0 && !slotted && !delegated ? `  const { attributes: ${tracksAttributes ? "authoredAttributes" : "attributes"} = {} } = options;` : `  const { attributes: ${tracksAttributes ? "authoredAttributes" : "attributes"} = {}, children = [], slots = {}, ...componentProps } = options;`,
     // An adopted root's props, prop inputs and state are the server instance's, and its controls keep what a reader typed.
     // Its projection is what the server rendered in its slot ranges and carried, read before its content is adopted,
     // except each slot its caller gives content.
     ...hydrate ? [`  const Z = h && renderedInstanceRecord(h, ${JSON.stringify(contract.tag)}), W = h && holdControls(h)${
       slotted ? `, Y = h && serverProjection(h, ${JSON.stringify(contract.tag)}, children, slots)` : ""};`] : [],
+    ...tracksAttributes ? [`  const attributes = Object.fromEntries([...${hydrate ? "Z?.attributes ?? []" : "[]"}, ...Object.entries(authoredAttributes)].filter(([name]) => !${JSON.stringify(propNames.map(kebabCase))}.includes(name)));`] : [],
     ...delegated ? [
       // The root is the invoked component's, created when the root block first renders.
       hydrate ? "  const element = h ?? document.createTextNode(\"\");" : "  const element = document.createTextNode(\"\");",
@@ -2811,7 +2909,7 @@ export function emitBlocks(
       const data = JSON.stringify(rule).slice(1, -1);
       const typed = select === undefined ? propChecks(type)
         : `select: { from: ${JSON.stringify(select.from)}, options: [${select.options.map((option) => `{ value: ${JSON.stringify(option.value)}, ${propChecks(option.type)} }`).join(", ")}] }`;
-      return `${JSON.stringify(name)}: { ${data}${data === "" ? "" : ", "}${typed}${hasBounds(prop) ? ", k: boundFailures" : ""} }`;
+      return `${objectKey(name)}: { ${data}${data === "" ? "" : ", "}${typed}${hasBounds(prop) ? ", k: boundFailures" : ""} }`;
     }).join(", ")} } };`;
   const helpers = ["attachGeneratedController", "checkedReferenceValue", "referenceSchemaAt", "equalValue", "stateInitializers", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
@@ -2829,7 +2927,7 @@ export function emitBlocks(
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
     "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots",
-    "transitionStyles", "writeTransitionStyle"]
+    "transitionStyles", "writeTransitionStyle", "forwardAttributes", "resetForwardedAttributes", "writeInvocationAttribute", "forwardInvocationAttributes", "initialInvocationInputs", "writeInvocationModifier", "resetForwardedInvocationAttributes"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${plan.referenceSchemas.join("\n")}\n${outletProps.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");

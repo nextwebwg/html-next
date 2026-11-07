@@ -109,7 +109,7 @@
   },
   {
     "name": "named-slot",
-    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b>{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot name=\"items\" accepts=\"x-column\"></slot></defs><section><header><slot name=\"items\">Empty</slot></header><slot></slot></section></template><template component=\"x-page\"><main><x-list><x-column slot=\"items\"></x-column><p>Free</p></x-list></main></template>",
+    "source": "<template component=\"x-column\"><defs><prop name=\"label\" type=\"string\" default=\"Column\">Label.</prop></defs><b $attributes >{$label}<slot></slot></b></template><template component=\"x-other\"><i>Other</i></template><template component=\"x-list\"><defs><slot name=\"items\" accepts=\"x-column\"></slot></defs><section><header><slot name=\"items\">Empty</slot></header><slot></slot></section></template><template component=\"x-page\"><main><x-list><x-column slot=\"items\"></x-column><p>Free</p></x-list></main></template>",
     "expected": "<main><section><header><b slot=\"items\">Column</b></header><p>Free</p></section></main>",
     "diagnostics": 0
   },

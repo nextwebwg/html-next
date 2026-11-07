@@ -315,6 +315,14 @@ export function checkedProp<T>(value: unknown, type: TypeNode, _required: boolea
 }
 
 export function checkPropInput(value: unknown, type: TypeNode, htmlBoolean = true, optional = true): Parsed {
+  if (value !== null && typeof value === "object" && Object.hasOwn(value, "__htmlNextPropInput")) {
+    const input = value as { __htmlNextPropInput: unknown; readHtml: (value: unknown, type: TypeNode) => Parsed };
+    return input.readHtml(input.__htmlNextPropInput, type);
+  }
+  if (value !== null && typeof value === "object" && Object.hasOwn(value, HTML_ATTRIBUTE_INPUT)) {
+    const input = value as { [HTML_ATTRIBUTE_INPUT]: unknown; readHtml: (value: unknown, type: TypeNode) => Parsed };
+    return input.readHtml(input[HTML_ATTRIBUTE_INPUT], type);
+  }
   if (optional && value === null) return { ok: true, value: null };
   // Vue passes a bare boolean attribute as an empty string. HTML reads its presence as true.
   if (htmlBoolean && value === "" && type.kind === "terminal" && type.name === "boolean") value = true;
@@ -508,6 +516,170 @@ export function mountPropValidity(el: Element, value: PropValidityBinding): () =
 export function updatePropValidity(el: Element, value: PropValidityBinding): void {
   vPropValidity.updated(el, { value });
 }
+// CSS Syntax's ident-start code points, without CSS escapes or the tokenizer's leading-dash
+// rules. Continuations add digits only: '-' remains subtraction and '$' marks a reference.
+export const IDENTIFIER_START = "[A-Za-z_\\u00B7\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u037D\\u037F-\\u1FFF\\u200C\\u200D\\u203F\\u2040\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD\\u{10000}-\\u{10FFFF}]";
+export const IDENTIFIER = /* @__PURE__ */ (() => `${IDENTIFIER_START}(?:${IDENTIFIER_START}|[0-9])*`)();
+const identifier = /* @__PURE__ */ (() => new RegExp(`^${IDENTIFIER}$`, "u"))();
+
+export function isIdentifier(value: string): boolean {
+  return identifier.test(value);
+}
+
+/** Attribute literals share expression spelling, without loading an expression parser/evaluator. */
+
+const LITERAL_TOKEN = new RegExp(String.raw`\s*(?:("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|(\d+(?:\.\d+|\.(?!${IDENTIFIER_START}|[\d$]))?|\.\d+)(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%(?!${IDENTIFIER_START}|[\d$.]|\s*(?:\d|\.\d|\$)))?|(${IDENTIFIER})|([\[\]{},:()\-])|$)`, "uy");
+const LITERAL_ESCAPE = /\\([\s\S])/g;
+
+export function parseHtmlLiteral(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const source = value;
+  let offset = 0;
+  let kind = "";
+  let token: string | number = "";
+  const invalid: () => never = () => { throw new SyntaxError("Structured attributes must contain literal values."); };
+  const next = (): void => {
+    LITERAL_TOKEN.lastIndex = offset;
+    const match = LITERAL_TOKEN.exec(source);
+    if (match === null) invalid();
+    offset = LITERAL_TOKEN.lastIndex;
+    if (match[1] !== undefined) { kind = "string"; token = match[1].slice(1, -1).replace(LITERAL_ESCAPE, "$1"); }
+    else if (match[2] !== undefined) {
+      kind = match[3] === undefined ? "number" : "dimension";
+      token = match[3] === undefined ? Number(match[2]) : match[2] + match[3];
+    } else if (match[4] !== undefined) { kind = "keyword"; token = match[4]; }
+    else { kind = match[5] === undefined ? "end" : "punctuation"; token = match[5] ?? ""; }
+  };
+  const eat = (expected: string): boolean => {
+    if (kind !== "punctuation" || token !== expected) return false;
+    next();
+    return true;
+  };
+  const expect = (expected: string): void => { if (!eat(expected)) invalid(); };
+  const read = (): unknown => {
+    if (eat("-")) { const operand = read(); return typeof operand === "number" ? -operand : invalid(); }
+    if (eat("(")) { const item = read(); expect(")"); return item; }
+    if (eat("[")) {
+      const items: unknown[] = [];
+      if (!eat("]")) {
+        do { if (kind === "punctuation" && token === "]") break; items.push(read()); } while (eat(","));
+        expect("]");
+      }
+      return items;
+    }
+    if (eat("{")) {
+      const pairs: [string, unknown][] = [];
+      if (!eat("}")) {
+        do {
+          if (kind === "punctuation" && token === "}") break;
+          if (kind !== "keyword" && kind !== "string") invalid();
+          const key = String(token);
+          next(); expect(":"); pairs.push([key, read()]);
+        } while (eat(","));
+        expect("}");
+      }
+      return Object.fromEntries(pairs);
+    }
+    const current = token;
+    if (kind === "number" || kind === "string" || kind === "dimension") { next(); return current; }
+    if (kind === "keyword" && current !== "not") {
+      next();
+      return current === "true" ? true : current === "false" ? false : current === "null" ? null : current;
+    }
+    return invalid();
+  };
+  try {
+    next();
+    const result = read();
+    if (kind !== "end") invalid();
+    return result;
+  } catch { return Symbol.for("html-next.bad-literal"); }
+}
+
+/** Apply HTML input coercions before the shared strict validator. */
+function parseHtmlProp(value: unknown, type: TypeNode, structured?: (value: unknown) => unknown): Parsed {
+  if (type.kind === "union") {
+    for (const member of type.members) { const result = parseHtmlProp(value, member, structured); if (result.ok) return result; }
+    return issue("$", "Must match the selected type.");
+  }
+  if (type.kind === "constrained") {
+    const result = parseHtmlProp(value, type.base, structured);
+    return result.ok ? parse(result.value, type, "$") : result;
+  }
+  if (type.kind === "terminal" && typeof value === "string") {
+    if (type.name === "boolean") value = value === "" || value === "true" ? true : value === "false" ? false : value;
+    else if (type.name === "number" || type.name === "integer") {
+      const valid = type.name === "integer" ? /^-?\d+$/.test(value) : /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value);
+      if (valid) value = Number(value);
+    }
+  }
+  if (structured !== undefined && ["list", "record", "object"].includes(type.kind)) value = structured(value);
+  return parse(value, type, "$");
+}
+
+export function htmlPropValue(value: unknown, type: TypeNode | null, structured?: (value: unknown) => unknown): unknown {
+  if (type === null) return value;
+  const result = parseHtmlProp(value, type, structured);
+  return result.ok ? result.value : value;
+}
+
+const HTML_ATTRIBUTE_INPUT = Symbol.for("html-next.html-attribute-input");
+/** Preserve a typed prop while a framework normalizes its native style input. */
+export function preservePropInput(input: Record<string, unknown>, name: string): Record<string, unknown> {
+  if (!Object.hasOwn(input, name) || input[name] == null) return input;
+  return { ...input, [name]: { __htmlNextPropInput: input[name], readHtml: (value: unknown, type: TypeNode) => parse(value, type, "$") } };
+}
+
+function readHtmlAttributeInput(value: unknown, type: TypeNode): Parsed {
+  return parseHtmlProp(value, type, parseHtmlLiteral);
+}
+type InvocationInputSchema = Readonly<Record<string, { readonly attributes: readonly string[]; readonly default: unknown;
+  readonly type: TypeNode | { readonly kind: "selected"; readonly from: string; readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[] } }>>;
+
+/** Preserve the HTML form of forwarded prop inputs until all ordered writes have been folded. */
+export function htmlAttributeInputs(input: Readonly<Record<string, unknown>>, schema: InvocationInputSchema): Record<string, unknown> {
+  const lower = (value: string): string => value.replace(/[A-Z]/g, letter => letter.toLowerCase());
+  return Object.fromEntries(Object.entries(input).map(([attribute, value]) => {
+    const normalized = lower(attribute);
+    const prop = Object.keys(schema).find(name => schema[name]!.attributes.includes(normalized));
+    return prop === undefined ? [attribute, value] : [prop, { [HTML_ATTRIBUTE_INPUT]: value, readHtml: readHtmlAttributeInput }];
+  }));
+}
+
+/** Resolve HTML inputs using the receiving prop's final selector and declared HTML conversion. */
+export function invocationProps(input: Record<string, unknown>, schema: InvocationInputSchema, records: readonly string[] = [BINDING_INPUTS_PROP]): Record<string, unknown> {
+  let result = input;
+  for (const [name, prop] of Object.entries(schema)) {
+    const value = input[name];
+    if (value === null || typeof value !== "object" || !Object.hasOwn(value, HTML_ATTRIBUTE_INPUT)) continue;
+    if (result === input) result = { ...input };
+    for (const key of records) {
+      const record = result[key];
+      if (record !== null && typeof record === "object" && Object.hasOwn(record, name)) {
+        result[key] = Object.fromEntries(Object.entries(record).filter(([key]) => key !== name));
+      }
+    }
+    let type: TypeNode;
+    if (prop.type.kind === "selected") {
+      const selector = schema[prop.type.from];
+      const supplied = result[prop.type.from] ?? selector?.default;
+      const effective = selector === undefined || selector.type.kind === "selected" || parse(supplied, selector.type, "$").ok ? supplied : selector.default;
+      type = selectedPropNode(effective, prop.type.options);
+    } else type = prop.type;
+    result[name] = htmlPropValue((value as Record<symbol, unknown>)[HTML_ATTRIBUTE_INPUT], type, parseHtmlLiteral);
+    result[BINDING_INPUTS_PROP] = { ...(result[BINDING_INPUTS_PROP] as object | undefined),
+      [name]: () => ({ value, status: READY_INPUT }) };
+  }
+  return result;
+}
+
+/** Composed targets pass the HTML input to the receiver's existing accepted-value check. */
+export function invocationInput(input: Record<string, unknown>, name: string, fallback: unknown = input[name]): unknown {
+  const bindings = input[BINDING_INPUTS_PROP] as InputBindings | undefined;
+  return bindings?.[name]?.().value ?? fallback;
+}
+
+
 
 /** Controller writes use immediate destination checks, including declared nested paths. */
 export function acceptsControllerWrite(value: unknown, type: TypeNode | undefined, keys: readonly string[]): boolean {

@@ -50,7 +50,7 @@ import {
   readItems,
   registerReactiveAlias,
   untracked,
-  type ReactiveEffect,
+  ReactiveEffect,
   type ReactiveOwner,
   type ReactiveSignal,
 } from "./reactivity.js";
@@ -95,7 +95,7 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
+import { orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes } from "./template.js";
 import { ITERATION_INDEX, type WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
@@ -166,6 +166,7 @@ interface PropInput {
 
 interface RuntimeInstance {
   inputPort?: ComponentInputs;
+  readonly attributeInputs: InvocationAttributeInputs;
   inputRevisions?: Map<string, number>;
   controllerInitialized?: boolean;
   element?: Element;
@@ -248,6 +249,7 @@ interface InvocationBinding {
   readonly effects: ReactiveEffect[];
   /** Typed inputs survive lowering even when their values have no HTML attribute form. */
   readonly inputs: Map<string, InputSnapshot>;
+  readonly attributes: InvocationAttributeInputs;
   /** Set while those runs re-apply every value, in order, even one a binding already wrote. */
   reapplying?: boolean;
 }
@@ -271,13 +273,50 @@ function followComponent(binding: InvocationBinding, component: RuntimeInstance)
   });
 }
 
-/**
- * Where bound values go. Until its component lowers, an invocation's attributes are that component's
- * inputs (a hydrating root is already the component's root); afterwards they go to its current root.
- */
-function valueTarget(element: Element, invocation: InvocationBinding | undefined): Element | undefined {
-  const component = invocation?.component;
-  return component === undefined ? element : untracked(() => component.rootElement.get()) ?? component.element;
+/** The original invocation remains the native storage for its attribute inputs after lowering. */
+interface InvocationAttributeInputs {
+  readonly element: Element;
+  revision?: ReactiveSignal<number>;
+}
+const invocationAttributeInputs = new WeakMap<Element, Map<string, InvocationAttributeInputs>>();
+
+function attributeInputsFor(element: Element, tag: string): InvocationAttributeInputs {
+  let byTag = invocationAttributeInputs.get(element);
+  if (byTag === undefined) invocationAttributeInputs.set(element, byTag = new Map());
+  let inputs = byTag.get(tag);
+  if (inputs === undefined) {
+    const source = element.localName === tag ? element : element.ownerDocument.createElement(tag);
+    if (source !== element) for (const [name, value] of renderedInstanceRecord(element, tag)?.attributes ?? []) {
+      setLiteralAttribute(source, name, value);
+    }
+    inputs = { element: source };
+    byTag.set(tag, inputs);
+  }
+  return inputs;
+}
+
+function notifyAttributeInputs(inputs: InvocationAttributeInputs): void {
+  if (inputs.revision !== undefined) inputs.revision.set(untracked(() => inputs.revision!.get()) + 1);
+}
+
+/** Attribute values belong to the logical invocation; refs and properties follow its rendered root. */
+function valueTarget(element: Element, invocation: InvocationBinding | undefined): Element {
+  return invocation?.attributes.element ?? element;
+}
+
+const attributeForwarding = new WeakMap<ComponentDefinition, boolean>();
+function forwardsAttributes(definition: ComponentDefinition): boolean {
+  let result = attributeForwarding.get(definition);
+  if (result === undefined) {
+    result = templateForwardsAttributes(definition.template);
+    attributeForwarding.set(definition, result);
+  }
+  return result;
+}
+
+function remainingAttributes(inputs: InvocationAttributeInputs, definition: ComponentDefinition): readonly RootAttribute[] {
+  const names = propAttributeNames(definition, false);
+  return Array.from(inputs.element.attributes).filter(attribute => names[asciiLowerCase(attribute.name)] === undefined && attribute.name !== PROJECTED_ATTRIBUTE && attribute.name !== COMPONENT_ATTRIBUTE && attribute.name !== INSTANCE_ATTRIBUTE);
 }
 
 /**
@@ -335,6 +374,7 @@ function runtimeInstance(element: Element): RuntimeInstance | undefined {
 
 /** What a compiled root registers on its lifecycle record: its state spec, raw values and host. */
 interface CompiledHandle {
+  readonly F?: { readonly values: Readonly<Record<string, unknown>> };
   readonly U?: { all(): void; initialized(): readonly string[] };
   readonly S: { readonly n: readonly string[]; readonly g: string; readonly k?: number };
   readonly v: readonly unknown[];
@@ -367,6 +407,7 @@ function compiledRecord(handle: CompiledHandle): RenderedInstanceRecord {
   handle.U?.all();
   const names = Object.keys(handle.B?.D.props ?? {});
   return {
+    ...(handle.F === undefined ? {} : { attributes: Object.entries(handle.F.values).flatMap(([name, value]) => { const text = toAttribute(value as Value, name); return text === null ? [] : [[name, text] as const]; }) }),
     explicit: [...handle.B?.x ?? []],
     inputs: { ...handle.B?.i },
     ...(handle.B?.a === undefined ? {} : { availability: { ...handle.B.a } }),
@@ -561,7 +602,9 @@ function registerDefinition(root: Document, registry: DocumentRegistry, tag: str
   warnUnsupportedTransitions(definition.definition);
   const replace = registry.definitions.has(tag);
   registry.definitions.set(tag, definition);
-  if (!replace && registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
+  if (!replace && registry.discoverySelector !== undefined && registry.discoverySelector !== "*") {
+    registry.discoverySelector = boundedDiscoverySelector(`${registry.discoverySelector},${tag}`);
+  }
   registerEntry(root, {
     d: Object.freeze({ tag }),
     p: Object.keys(definition.definition.contract.props),
@@ -605,9 +648,8 @@ function replaceInstances(root: Document, registry: DocumentRegistry, tag: strin
     // A component whose root is the replaced one's rebuilds as a whole, with its own definition.
     const definition = registry.definitions.get(previous.definition.contract.tag)!.definition;
     const invocation = root.createElement(definition.contract.tag);
-    for (const { name, value } of carriedAttributes(previous, element)) {
-      if (name !== COMPONENT_ATTRIBUTE && name !== "data-component") setLiteralAttribute(invocation, name, value);
-    }
+    const carried = carriedAttributes(previous, element);
+    for (const { name, value } of previous.attributeInputs.element.attributes) setLiteralAttribute(invocation, name, value);
     const props: Record<string, unknown> = {};
     for (const name of Object.keys(definition.contract.props)) {
       const input = previous.propInputs[name] === undefined ? undefined : untracked(() => previous.propInputs[name]!.get());
@@ -622,6 +664,14 @@ function replaceInstances(root: Document, registry: DocumentRegistry, tag: strin
     element.replaceWith(invocation);
     invocation.append(...previous.projection?.nodes ?? []);
     const prepared = [prepareRuntimeInvocation(invocation, definition, false, undefined, undefined, false, previous.parent, props)];
+    if (carried.length > 0) {
+      let written: Element | undefined;
+      prepared[0]!.instance.followers.push(next => {
+        if (next === written) return;
+        written = next;
+        carryRootAttributes(next, carried);
+      });
+    }
     commitRuntimeInvocations(registry, prepared);
     lowerRenderedComponents(root, registry, prepared);
     const next = prepared[0]!.instance;
@@ -791,13 +841,19 @@ function liveChannel(element: Element): PropChannel | undefined {
   };
 }
 
+function boundedDiscoverySelector(selector: string): string {
+  // JSDOM's selector engine accepts at most 2048 characters. A large catalog uses native
+  // universal discovery; collect still selects registered tags and rendered roots in DOM order.
+  return selector.length > 2048 ? "*" : selector;
+}
+
 function discoverySelector(registry: DocumentRegistry): string {
   return registry.discoverySelector ??=
-    [
+    boundedDiscoverySelector([
       "template[component]",
       COMPONENT_ROOT_SELECTOR,
       ...Array.from(registry.definitions.keys()),
-    ].join(",");
+    ].join(","));
 }
 
 /**
@@ -1044,7 +1100,6 @@ function readInvocation(
   frameworkProps?: Readonly<Record<string, unknown>>,
 ): {
   readonly scope: ReactiveScope;
-  readonly passThrough: readonly RootAttribute[];
   readonly effects: ReactiveOwner[];
   readonly explicit: Set<string>;
   readonly propInputs: Readonly<Record<string, ReactiveSignal<PropInput>>>;
@@ -1055,13 +1110,9 @@ function readInvocation(
     ? renderedInstanceRecord(invocation, contract.tag) : undefined;
   const names = propAttributeNames(definition, hydration);
   const incoming = Object.create(null) as Record<string, IncomingProp>;
-  const passThrough: Attr[] = [];
   for (const attribute of Array.from(invocation.attributes)) {
     const propName = restored === undefined ? names[asciiLowerCase(attribute.name)] : undefined;
-    if (propName === undefined) {
-      if (!hydration) passThrough.push(attribute);
-      continue;
-    }
+    if (propName === undefined) continue;
     incoming[propName] = { value: attribute.value, source: "html", attributePresent: !hydration };
   }
   if (restored !== undefined) {
@@ -1181,7 +1232,7 @@ function readInvocation(
       untracked(() => resource.update(parameters));
     }, 0, active));
   }
-  return { scope, passThrough, effects, explicit, propInputs,
+  return { scope, effects, explicit, propInputs,
     ...(restored?.revisions === undefined ? {} : { inputRevisions: new Map(Object.entries(restored.revisions)) }) };
 }
 
@@ -1358,6 +1409,7 @@ function ownedContext(context: RuntimeRenderContext, owned: RenderOwned): Runtim
 
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
+  readonly attributeInputs?: InvocationAttributeInputs;
   owned: RenderOwned;
   readonly refs: Record<string, Element | Element[]>;
   readonly selection?: {
@@ -2014,7 +2066,7 @@ function renderEachRegion(
         if (root !== undefined && root !== flow.index) {
           // Keep one scheduler group when another binding on this element reads the same root;
           // otherwise routing only the class effect would change authored attribute creation order.
-          const shared = element.attributes.some((other) => other.kind !== "literal" &&
+          const shared = element.attributes.some((other) => other.kind !== "literal" && other.kind !== "forward" &&
             other.expressionPlan?.dependencies.some((path) => path === root || path.startsWith(`${root}.`)) === true &&
             (other.kind !== "attribute" || other.target !== "class" ||
               keyedEquality(other.expressionPlan.ast, flow.keyPlan!.ast, flow.item) !== root));
@@ -2242,7 +2294,7 @@ function bindInvocation(
   awaitsLowering: boolean,
 ): InvocationBinding {
   const invocation: InvocationBinding = {
-    tag: node.name, awaitsLowering, component: committedComponent(element, node.name), effects: [], inputs: new Map(),
+    tag: node.name, awaitsLowering, attributes: attributeInputsFor(element, node.name), component: committedComponent(element, node.name), effects: [], inputs: new Map(),
   };
   if (node.ref !== undefined) {
     const ref = node.ref;
@@ -2283,6 +2335,29 @@ function claimInvocationBindings(element: Element, component: RuntimeInstance): 
   return claimed.length > 0;
 }
 
+/** A forwarded or literal HTML input still passes through the receiving component's prop contract. */
+function writeInvocationAttribute(element: Element, invocation: InvocationBinding | undefined, name: string, value: string | null): void {
+  const target = valueTarget(element, invocation);
+  const previous = target.getAttribute(name);
+  setAttribute(target, name, value);
+  if (invocation === undefined) return;
+  const child = invocation.component;
+  const definition = child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
+  const propName = definition === undefined ? undefined : propAttributeNames(definition, false)[asciiLowerCase(name)];
+  if (propName !== undefined) {
+    invocation.inputs.delete(propName);
+    if (child !== undefined) {
+      const prop = definition!.contract.props[propName]!;
+      const selected = selectedPropType(definition!.contract, prop, { [prop.select?.from ?? propName]: untracked(() => child.scope.get(prop.select?.from ?? propName)) });
+      const parsed = invocationValue(prop, value, "html", value !== null, selected);
+      if (parsed !== undefined) applyComponentProps(child, { [propName]: parsed });
+      child.propInputs[propName]!.set({ value, source: "html", present: value !== null, provided: value !== null });
+    }
+  } else if (previous !== target.getAttribute(name)) notifyAttributeInputs(invocation.attributes);
+}
+
+const orderedRootOutputs = new WeakMap<Element, Map<string, string | null>>();
+
 /** Install the existing attribute/property bindings on an element, or on an invocation's component. */
 function bindElementAttributes(
   element: Element,
@@ -2291,24 +2366,75 @@ function bindElementAttributes(
   context: RuntimeRenderContext,
   invocation?: InvocationBinding,
 ): void {
+  const forwarded = node.attributes.some(attribute => attribute.kind === "forward");
+  const ordered = orderedAttributeWrites(node.attributes, invocation !== undefined);
+  let modified = 0;
+  if (invocation !== undefined) for (const attribute of node.attributes) {
+    if (attribute.kind === "attribute" && attribute.target !== undefined) modified |= attribute.target === "class" ? 1 : 2;
+  }
+  const runs: Array<() => void | (() => void)> = [];
+  const resets: Array<() => void> = [];
+  const rootOutputs = ordered && node === context.rootNode ? new Map<string, string | null>() : undefined;
+  let generation = 0;
+  const group = ordered ? new ReactiveEffect(scope.scheduler, () => {
+    context.attributeInputs?.revision?.get();
+    generation += 1;
+    for (const reset of resets) reset();
+    for (const run of runs) run();
+    if (rootOutputs !== undefined) {
+      rootOutputs.clear();
+      for (const attribute of node.attributes) {
+        if (attribute.kind === "literal" || attribute.kind === "attribute") {
+          const name = attribute.kind === "attribute" ? attribute.target ?? attribute.name : attribute.name;
+          rootOutputs.set(name, valueTarget(element, invocation).getAttribute(name));
+        } else if (attribute.kind === "forward") {
+          for (const { name } of context.attributeInputs === undefined ? [] : remainingAttributes(context.attributeInputs, context.definition)) {
+            rootOutputs.set(name, valueTarget(element, invocation).getAttribute(name));
+          }
+        }
+      }
+      orderedRootOutputs.set(element, rootOutputs);
+    }
+  }, 1) : undefined;
+  if (group !== undefined) { context.owned.add(group); invocation?.effects.push(group); }
   const own = (run: () => void | (() => void), priority?: number): ReactiveEffect => {
+    if (group !== undefined && priority === undefined) { runs.push(run); return group; }
     const effect = ownEffect(context, scope, run, priority);
     invocation?.effects.push(effect);
     return effect;
   };
   for (const attribute of node.attributes) {
-    if (attribute.kind === "attribute") {
+    if (attribute.kind === "forward") {
+      let previous = new Set<string>();
+      resets.push(() => {
+        const current = new Set(context.attributeInputs === undefined ? [] : remainingAttributes(context.attributeInputs, context.definition).map(attribute => attribute.name));
+        for (const name of previous) if (!current.has(name)) writeInvocationAttribute(element, invocation, name, null);
+      });
+      own(() => {
+        const given = context.attributeInputs === undefined ? [] : remainingAttributes(context.attributeInputs, context.definition);
+        const current = new Set(given.map(attribute => attribute.name));
+        for (const attribute of given) writeInvocationAttribute(element, invocation, attribute.name, attribute.value);
+        previous = current;
+      });
+    } else if (attribute.kind === "literal" && ordered) {
+      if (node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+      own(() => writeInvocationAttribute(element, invocation, attribute.name, attribute.value));
+    } else if (attribute.kind === "attribute") {
       const selection = invocation === undefined && attribute.target === "class" &&
         scope.parent === context.selection?.scope ? context.selection : undefined;
       const root = attribute.expressionPlan === undefined ? undefined : selection?.bindings.get(attribute.expressionPlan);
       // What this binding last wrote, and where: a component's root switch gives it a new target.
       let written: Element | undefined;
       let last: unknown;
+      let lastRevision: number | undefined;
+      const fallback = attribute.target === undefined ? node.attributes.find(other => other.kind === "literal" && other.name === attribute.name) : undefined;
+      let accepted: Value | typeof NONCONFORMING = forwarded && fallback?.kind === "literal" ? fallback.value : NONCONFORMING;
       const effect = own(() => {
+        const currentRevision = ordered ? generation : undefined;
         const child = invocation?.component;
         const definition = invocation === undefined ? undefined
           : child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
-        const propName = definition === undefined || attribute.target !== undefined
+        const propName = definition === undefined || attribute.target !== undefined || attribute.name === "class" && (modified & 1) !== 0 || attribute.name === "style" && (modified & 2) !== 0
           ? undefined : propAttributeNames(definition, false)[asciiLowerCase(attribute.name)];
         const expression = attribute.expressionPlan ?? compileExpression(attribute.expression);
         const evaluated = propName !== undefined && expression.ast.kind !== "id" && expression.dependencies.length > 0
@@ -2346,7 +2472,10 @@ function bindElementAttributes(
         }
         // A reference that broke its declared type writes nothing, so this binding keeps whatever
         // it last rendered rather than showing a value the declaration forbids.
-        if (value === NONCONFORMING) return;
+        if (value === NONCONFORMING) {
+          if (!ordered || accepted === NONCONFORMING) return;
+          value = accepted;
+        } else accepted = value;
         // A component owns its props: write them through the same channel framework adapters use,
         // so the component re-parses the declared type and reflects the value itself.
         if (propName !== undefined) {
@@ -2373,14 +2502,20 @@ function bindElementAttributes(
         // Attribute, class and style bindings write only a result that differs from their last.
         const output = attribute.target === "class" ? truthy(value)
           : attribute.target === "style" ? toText(value) : toAttribute(value, attribute.name);
-        if (target === written && output === last && invocation?.reapplying !== true) return;
+        if (target === written && output === last && currentRevision === lastRevision && invocation?.reapplying !== true) return;
         written = target;
         last = output;
+        lastRevision = currentRevision;
+        const before = invocation === undefined ? undefined : target.getAttribute(attribute.target ?? attribute.name);
         if (attribute.target === "class") target.classList.toggle(attribute.name, output as boolean);
         else if (attribute.target === "style") (target as HTMLElement).style.setProperty(attribute.name, output as string);
         else setAttribute(target, attribute.name, output as string | null);
+        if (invocation !== undefined && before !== target.getAttribute(attribute.target ?? attribute.name)) {
+          if (attribute.target !== undefined) writeInvocationAttribute(element, invocation, attribute.target, target.getAttribute(attribute.target));
+          notifyAttributeInputs(invocation.attributes);
+        }
       });
-      if (root !== undefined) indexedSelections.set(effect, selectedRoot(root));
+      if (root !== undefined && !ordered) indexedSelections.set(effect, selectedRoot(root));
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         own(() => {
           const target = rootTarget(element, invocation);
@@ -2411,6 +2546,7 @@ function bindElementAttributes(
     }
     // Content directives are handled by the renderer.
   }
+  group?.execute();
 }
 
 /** Bind one authored text node, retaining nonconforming segments exactly as before. */
@@ -2508,7 +2644,7 @@ function nativeTemplatePlan(
     for (const attribute of elementNode.attributes) {
       if (attribute.kind === "literal") setLiteralAttribute(element, attribute.name, attribute.value);
     }
-    if (elementNode.attributes.some((attribute) => attribute.kind === "attribute")) {
+    if (elementNode.attributes.some((attribute) => attribute.kind === "attribute" || attribute.kind === "forward")) {
       actions.push({ kind: "attributes", path, node: elementNode });
     }
     const directive = elementNode.attributes.find((attribute): attribute is DirectiveAttribute => attribute.kind === "directive");
@@ -2545,10 +2681,7 @@ function instantiateNativeTemplate(
     return target;
   });
   if (node === context.rootNode) context.root = element;
-  for (const attribute of passThrough) {
-    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
-    setLiteralAttribute(element, attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
-  }
+  carryRootAttributes(element, passThrough);
   for (let index = 0; index < plan.actions.length; index += 1) {
     const action = plan.actions[index]!;
     const target = sites[index]!;
@@ -2720,12 +2853,7 @@ function renderInstance(
       element.removeAttribute("selected");
     }
   }
-  // The invocation's attributes win over the template's literals; class and style combine. Bound
-  // attributes, applied next, are the component's own output.
-  for (const attribute of passThrough) {
-    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
-    setLiteralAttribute(element, attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
-  }
+  carryRootAttributes(element, passThrough);
   // A component may lower onto any custom-element name. Lowering replaces a registered component's
   // invocation, so nothing attaches to it; an unregistered one keeps its bindings until claimed.
   const invocation = elementName.includes("-") && document.defaultView?.customElements.get(elementName) === undefined
@@ -2874,6 +3002,7 @@ function renderScopedTemplate(
   const projectionContext = authored === undefined ? context : Object.create(context, {
     definition: { value: authored.context.definition, enumerable: true },
     refs: { value: authored.context.refs, enumerable: true },
+    attributeInputs: { value: authored.context.attributeInputs, enumerable: true },
     projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
     projectedSlotNames: { value: authored.context.projectedSlotNames, enumerable: true },
     hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
@@ -3362,6 +3491,7 @@ function instanceRecord(instance: RuntimeInstance): RenderedInstanceRecord {
     .filter(([, status]) => !status.ready || status.pending || status.error !== null || status.stale));
   return {
     explicit: [...instance.explicit],
+    ...(forwardsAttributes(instance.definition) ? { attributes: remainingAttributes(instance.attributeInputs, instance.definition).map(attribute => [attribute.name, attribute.value] as const) } : {}),
     inputs: Object.fromEntries(Object.entries(instance.propInputs).map(([name, signal]) => [name, signal.get()])),
     ...(Object.keys(availability).length === 0 ? {} : { availability }),
     ...(instance.inputRevisions === undefined ? {} : { revisions: Object.fromEntries(instance.inputRevisions) }),
@@ -3630,6 +3760,7 @@ function prepareRuntimeInvocation(
   frameworkOwned = false,
   parent?: RuntimeInstance,
   frameworkProps?: Readonly<Record<string, unknown>>,
+  frameworkAttributes?: Readonly<Record<string, unknown>>,
 ): PreparedInvocation {
   const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
     ? invocation.ownerDocument.activeElement
@@ -3640,7 +3771,16 @@ function prepareRuntimeInvocation(
   // An accepted child its list already read keeps that prop scope, so its entry and instance agree.
   const early = frameworkProps === undefined ? earlyInvocations.get(invocation) : undefined;
   if (early !== undefined) earlyInvocations.delete(invocation);
-  const { scope, passThrough, effects, explicit, propInputs, inputRevisions } = early ?? readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  const { scope, effects, explicit, propInputs, inputRevisions } = early ?? readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  const attributeInputs = attributeInputsFor(invocation, definition.contract.tag);
+  if (frameworkAttributes !== undefined) {
+    for (const { name } of Array.from(attributeInputs.element.attributes)) attributeInputs.element.removeAttribute(name);
+    for (const [name, value] of Object.entries(frameworkAttributes)) {
+      const text = toAttribute(value as Value, name);
+      if (text !== null) setAttribute(attributeInputs.element, name, text);
+    }
+  }
+  if (forwardsAttributes(definition)) attributeInputs.revision ??= createSignal(0);
   const rootNode = elementMatchRoot(componentRoot(definition, scope));
   const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
   const renderScope = rootWith === undefined ? scope : scope.fork();
@@ -3706,7 +3846,7 @@ function prepareRuntimeInvocation(
       const index = nodes.indexOf(current);
       if (index >= 0) nodes[index] = next;
     }
-    const slot = projectedSlotNames.get(current);
+    const slot = projectedSlotNames.get(current) ?? (current instanceof Element ? current.getAttribute("slot") ?? "" : undefined);
     if (slot !== undefined) projectedSlotNames.set(next, slot);
   };
   // A projected component invocation lowers to its own root, perhaps only once a slot renders it.
@@ -3722,6 +3862,7 @@ function prepareRuntimeInvocation(
   }
   const instance: RuntimeInstance = {
     definition,
+    attributeInputs,
     ...(parent === undefined ? {} : { parent }),
     scope,
     propInputs,
@@ -3746,6 +3887,7 @@ function prepareRuntimeInvocation(
   }
   const context: RuntimeRenderContext = {
     definition,
+    attributeInputs,
     owned: instance.owned,
     refs: instance.refs,
     projectedNodes: children,
@@ -3785,7 +3927,7 @@ function prepareRuntimeInvocation(
     renderRootNode,
     renderScope,
     invocation.ownerDocument,
-    passThrough,
+    [],
     context,
     hydration ? invocation : undefined,
   );
@@ -3942,6 +4084,14 @@ function invocationParent(element: Element, pending: WeakMap<Element, RuntimeIns
 /** An attribute a root receives from outside its template: the invocation, a factory, or page code. */
 type RootAttribute = Pick<Attr, "name" | "value">;
 
+/** Preserve direct page writes when replacing an existing root. */
+function carryRootAttributes(element: Element, attributes: readonly RootAttribute[]): void {
+  for (const { name, value } of attributes) {
+    const own = name === "class" || name === "style" ? element.getAttribute(name) : null;
+    setLiteralAttribute(element, name, own === null || own === "" ? value : `${own}${name === "class" ? " " : "; "}${value}`);
+  }
+}
+
 /**
  * Ties an instance to its root element. Lowering and every later replacement of the root come here,
  * and the effects tied to the root read `rootElement`, so they move to the new element too.
@@ -4016,6 +4166,12 @@ function carriedAttributes(instance: RuntimeInstance, previous: Element): RootAt
       // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
       written.add(attribute.name === "htmlFor" ? "for" : asciiLowerCase(attribute.name));
     }
+  }
+  for (const [name, value] of orderedRootOutputs.get(previous) ?? []) {
+    if (name === "class") {
+      for (const token of value?.split(/\s+/) ?? []) ownClasses.add(token);
+    } else if (name === "style") ownStyle.cssText += `;${value ?? ""}`;
+    else if (value !== null) literals.set(name, value);
   }
   const ownStyles = new Set(Array.from(ownStyle));
   const carried: RootAttribute[] = [];
@@ -4158,12 +4314,19 @@ function commitRuntimeInvocations(
  * Otherwise nested components stay inert until something else observes the document, which a build
  * -time delivery has no reason to do.
  */
+/** Application output writes use the existing root follower, independently of template inputs. */
+function followApplicationAttributes(instance: RuntimeInstance, attributes: Readonly<Record<string, string>> | undefined): void {
+  if (attributes === undefined) return;
+  instance.followers.push(root => { for (const [name, value] of Object.entries(attributes)) setAttribute(root, name, value); });
+}
+
 function lowerRenderedComponents(
   root: Document,
   registry: DocumentRegistry,
   committed: readonly PreparedInvocation[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
   props?: DocumentRenderingOptions["props"],
+  rootAttributes?: DocumentRenderingOptions["rootAttributes"],
 ): Element[] {
   const lowered: Element[] = [];
   let batch = committed;
@@ -4197,6 +4360,7 @@ function lowerRenderedComponents(
       const values = props?.get(element);
       if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
       const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners), values);
+      followApplicationAttributes(invocation.instance, rootAttributes?.get(element));
       prepared.push(invocation);
       pendingOwners.set(element, invocation.instance);
       recordUnrendered(invocation, unrendered);
@@ -4234,6 +4398,10 @@ function alreadyLowered(element: Element, tag: string): boolean {
 function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
   instance.element = root;
   const owner = runtimeInstances.get(root);
+  const identity = root.hasAttribute("component") || !root.hasAttribute("data-component") ? COMPONENT_ATTRIBUTE : "data-component";
+  const tokens = componentIdentity(root).split(/\s+/).filter(Boolean);
+  const tag = instance.definition.contract.tag;
+  if (!tokens.includes(tag)) root.setAttribute(identity, (owner === undefined ? [tag, ...tokens] : [...tokens, tag]).join(" "));
   if (owner === undefined) {
     attachRoot(instance, root);
     installPropReflection(instance);
@@ -4275,6 +4443,7 @@ function lowerScopes(
   scopes: readonly QueryRoot[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
   props?: DocumentRenderingOptions["props"],
+  rootAttributes?: DocumentRenderingOptions["rootAttributes"],
 ): LoweredScopes {
   const registry = registryFor(root);
   const discovered = new Set<Element>();
@@ -4328,6 +4497,7 @@ function lowerScopes(
     const values = props?.get(element);
     if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
     const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners), values);
+    followApplicationAttributes(invocation.instance, rootAttributes?.get(element));
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
     if (!hydration) recordUnrendered(invocation, unrendered);
@@ -4358,10 +4528,10 @@ function lowerScopes(
   collect(existingDefinitions, discovered);
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
-    const pendingSelector = [
+    const pendingSelector = boundedDiscoverySelector([
       COMPONENT_ROOT_SELECTOR,
       ...Array.from(newDefinitions.keys()),
-    ].join(",");
+    ].join(","));
     const existing = new Set<Element>();
     collectWithin(root, pendingSelector, existing);
     collect(newDefinitions, existing);
@@ -4381,7 +4551,7 @@ function lowerScopes(
     lowered.push(element);
     roots.add(element);
   }
-  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower, props)) {
+  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower, props, rootAttributes)) {
     lowered.push(element);
     roots.add(element);
   }
@@ -4399,13 +4569,15 @@ export interface DocumentRenderingOptions {
   readonly connect?: boolean;
   /** Typed caller inputs for invocations in this pass, before one-time state initialization. */
   readonly props?: ReadonlyMap<Element, Readonly<Record<string, unknown>>>;
+  /** Attributes the application explicitly writes on a lowered root, followed through root replacement. */
+  readonly rootAttributes?: ReadonlyMap<Element, Readonly<Record<string, string>>>;
 }
 
 export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
   const state = documentState(root);
   const wasStatic = state.staticRendering;
   state.staticRendering = options.connect === false;
-  const result = lowerScopes(root, [root], undefined, options.props);
+  const result = lowerScopes(root, [root], undefined, options.props, options.rootAttributes);
   if (wasStatic && !state.staticRendering) {
     for (const element of result.roots) {
       const instance = runtimeInstance(element);
@@ -4417,6 +4589,8 @@ export function lowerDocument(root: Document = document, options: DocumentRender
 
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
+  /** Logical invocation attributes for authored forwarding, separately from the framework's root output. */
+  readonly attributes?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
   readonly module?: ComponentModule;
   /**
@@ -4655,7 +4829,7 @@ function attachRuntimeComponent(
       }
     }
     const attaching = [
-      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, frameworkOwned, invocationParent(element, new WeakMap()), options.props),
+      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, frameworkOwned, invocationParent(element, new WeakMap()), options.props, options.attributes),
     ];
     commitRuntimeInvocations(registry, attaching);
     // Generated output attaches its own root, so nothing else will lower the components this

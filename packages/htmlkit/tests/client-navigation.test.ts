@@ -128,7 +128,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await page.waitForFunction(() => document.querySelector('[component="site-shell"]')?.getAttribute("data-connections") === "1");
     await mark(page);
     await page.getByRole("button", { name: "Menu" }).click();
-    await page.evaluate(() => { (window as unknown as { shell: Element }).shell = document.getElementById("hk-layer-0")!; });
+    await page.evaluate(() => { (window as unknown as { shell: Element }).shell = document.querySelector<HTMLElement>('[data-hk-layer="0"]')!; });
     expect(await page.locator('nav a[href="/kit/"]').getAttribute("aria-current")).toBe("page");
     expect(await head(page)).toEqual({ titles: 1, descriptions: ["Home page"], schema: [], widgets: 0, runs: 0 });
     if (built) expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(9, 9, 9)");
@@ -165,11 +165,11 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     expect(await marked(page)).toBe(true);
     expect(page.url()).toBe(url + "guide/");
     expect(await page.evaluate(() => {
-      const shell = document.getElementById("hk-layer-0")!;
+      const shell = document.querySelector<HTMLElement>('[data-hk-layer="0"]')!;
       return { kept: shell === (window as unknown as { shell: Element }).shell, connections: shell.dataset.connections,
-        expanded: shell.querySelector("button")!.getAttribute("aria-expanded"), page: document.getElementById("hk-layer-1")!.getAttribute("component"),
-        ready: document.getElementById("hk-layer-1")!.dataset.ready, color: getComputedStyle(document.getElementById("hk-layer-1")!).color,
-        shared: getComputedStyle(document.querySelector("#hk-layer-1 h1")!).borderBottomColor,
+        expanded: shell.querySelector("button")!.getAttribute("aria-expanded"), page: document.querySelector<HTMLElement>('[data-hk-layer="1"]')!.getAttribute("component"),
+        ready: document.querySelector<HTMLElement>('[data-hk-layer="1"]')!.dataset.ready, color: getComputedStyle(document.querySelector<HTMLElement>('[data-hk-layer="1"]')!).color,
+        shared: getComputedStyle(document.querySelector('[data-hk-layer="1"] h1')!).borderBottomColor,
         current: [...document.querySelectorAll("nav a")].map(link => [link.getAttribute("href"), link.getAttribute("aria-current")]),
         description: document.querySelector('meta[name="description"]')?.getAttribute("content"), announced: document.getElementById("hk-announcer")!.textContent,
         focus: document.activeElement === document.body, background: getComputedStyle(document.body).backgroundColor };
@@ -191,7 +191,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     expect([await marked(page), count("/kit/guide/install/", "fetch")]).toEqual([true, 1]);
     expect(page.url()).toBe(url + "guide/install/#deep");
     expect(await head(page)).toEqual({ titles: 1, descriptions: [], schema: [], widgets: 1, runs: 1 });
-    expect(await page.locator("#hk-layer-1 h1").evaluate(heading => getComputedStyle(heading).borderBottomColor)).toBe("rgb(7, 8, 9)");
+    expect(await page.locator('[data-hk-layer="1"] h1').evaluate(heading => getComputedStyle(heading).borderBottomColor)).toBe("rgb(7, 8, 9)");
     await poll(() => page.evaluate(() => [Math.abs(Math.round(document.getElementById("deep")!.getBoundingClientRect().top)), scrollY > 2000])).toEqual([0, true]);
     await page.evaluate(() => scrollTo(0, 1234));
     await page.evaluate(() => document.querySelector<HTMLAnchorElement>('nav a[href="/kit/guide/"]')!.click());
@@ -210,12 +210,12 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     await page.locator("#items").click();
     await settled(page, "one");
     expect(count(payloadPath("items/one/"))).toBe(1);
-    expect(await page.evaluate(() => [document.getElementById("hk-layer-0")!.getAttribute("component"), document.getElementById("hk-layer-0") === (window as unknown as { shell: Element }).shell]))
+    expect(await page.evaluate(() => [document.querySelector<HTMLElement>('[data-hk-layer="0"]')!.getAttribute("component"), document.querySelector<HTMLElement>('[data-hk-layer="0"]') === (window as unknown as { shell: Element }).shell]))
       .toEqual(["items-shell", false]);
     await page.locator("#home").click();
     await settled(page, "Home");
-    expect(await page.evaluate(() => [document.getElementById("hk-layer-0")!.getAttribute("component"), document.querySelector(".shell button")!.getAttribute("aria-expanded"),
-      document.getElementById("hk-layer-1")!.dataset.ready])).toEqual(["site-shell", "false", "home"]);
+    expect(await page.evaluate(() => [document.querySelector<HTMLElement>('[data-hk-layer="0"]')!.getAttribute("component"), document.querySelector(".shell button")!.getAttribute("aria-expanded"),
+      document.querySelector<HTMLElement>('[data-hk-layer="1"]')!.dataset.ready])).toEqual(["site-shell", "false", "home"]);
     expect(await marked(page)).toBe(true);
 
     // Native behavior: fragments, downloads, other browsing contexts, and modified clicks.
@@ -312,7 +312,7 @@ async function layers(page: Page) {
   await page.getByText("Loaded data", { exact: true }).waitFor();
   return page.evaluate(() => ({
     markup: [0, 1].map(index => {
-      const copy = document.getElementById(`hk-layer-${index}`)!.cloneNode(true) as Element;
+      const copy = document.querySelector<HTMLElement>(`[data-hk-layer="${index}"]`)!.cloneNode(true) as Element;
       for (const element of [copy, ...copy.querySelectorAll("*")]) {
         const wirePrefixes = (element.getAttribute("component") ?? "").split(/\s+/).filter(Boolean).map(tag => `data-${tag}-prop-`);
         const original = [...element.attributes];
@@ -323,7 +323,7 @@ async function layers(page: Page) {
       }
       return copy.outerHTML.replace(/ data-html-next-instance="[^"]*"/g, "");
     }),
-    connections: document.getElementById("hk-layer-1")!.dataset.connections, value: document.querySelector("input")!.value,
+    connections: document.querySelector<HTMLElement>('[data-hk-layer="1"]')!.dataset.connections, value: document.querySelector("input")!.value,
   }));
 }
 
@@ -450,15 +450,15 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
       try {
         const { page, errors } = await open(await browser.newContext());
         await page.goto(preview.url + "docs/a/");
-        await page.waitForFunction(() => document.getElementById("hk-layer-1")?.dataset.connections === "1");
+        await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-hk-layer="1"]')?.dataset.connections === "1");
         await mark(page);
-        await page.evaluate(() => { (window as unknown as { docs: Element }).docs = document.getElementById("hk-layer-1")!; });
+        await page.evaluate(() => { (window as unknown as { docs: Element }).docs = document.querySelector<HTMLElement>('[data-hk-layer="1"]')!; });
         await page.locator("#to-b").click();
         await settled(page, "B");
         expect(await page.evaluate(() => {
-          const docs = document.getElementById("hk-layer-1")!;
+          const docs = document.querySelector<HTMLElement>('[data-hk-layer="1"]')!;
           return [docs === (window as unknown as { docs: Element }).docs, docs.dataset.connections, docs.querySelector("aside")!.dataset.section,
-            document.getElementById("hk-layer-2")!.getAttribute("component")];
+            document.querySelector<HTMLElement>('[data-hk-layer="2"]')!.getAttribute("component")];
         })).toEqual([true, "1", "/docs/b/", "b-page"]);
         const tree = () => page.evaluate(() => [document.querySelector<HTMLDetailsElement>("nav details")!.open, document.querySelector("nav summary")!.textContent,
           document.querySelector('nav a[aria-current="page"]')?.textContent ?? null]);
@@ -470,7 +470,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation th
         // Leaving the folder drops its layout, and its folder closes in the tree.
         await page.locator("#to-home").click();
         await settled(page, "Home");
-        expect(await page.evaluate(() => [document.getElementById("hk-layer-1")!.getAttribute("component"), document.getElementById("hk-layer-2")])).toEqual(["home-page", null]);
+        expect(await page.evaluate(() => [document.querySelector<HTMLElement>('[data-hk-layer="1"]')!.getAttribute("component"), document.querySelector<HTMLElement>('[data-hk-layer="2"]')])).toEqual(["home-page", null]);
         expect(await tree()).toEqual([false, "docs", "Home"]);
         expect([await marked(page), errors]).toEqual([true, []]);
       } finally { await browser.close(); }

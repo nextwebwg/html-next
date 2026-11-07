@@ -49,6 +49,18 @@ interface InputStatus {
 
 const READY_INPUT: InputStatus = { ready: true, pending: false, error: null, stale: false }
 
+const ROOT_METADATA = ['data-slotted', 'data-html-next-bindings', 'data-html-next-preparation']
+
+/** Renderer records belong to the component root, independently of authored forwarding. */
+export function rootMetadata(
+  input: Readonly<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  if (!ROOT_METADATA.some(name => input[name] !== undefined)) return undefined
+  return Object.fromEntries(
+    ROOT_METADATA.flatMap(name => input[name] === undefined ? [] : [[name, input[name]]]),
+  )
+}
+
 /** Browser activation shared by live, native-compiled and framework component hosts. */
 export interface ConnectionContext {
   readonly signal: AbortSignal
@@ -1316,6 +1328,10 @@ export function createDispatch(
  * `constructor`, as a DOM property; capitalized, it stays an attribute, which HTML lowercases.
  */
 export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const style = attrs.style
+  if (style !== null && typeof style === 'object' && Object.hasOwn(style, '__htmlNextPropInput')) {
+    attrs = { ...attrs, style: (style as { __htmlNextPropInput: unknown }).__htmlNextPropInput }
+  }
   const names = Object.keys(attrs)
   if (!names.some((name) => Object.hasOwn(Object.prototype, name))) return attrs
   return Object.fromEntries(names.map((name) => [
@@ -1327,10 +1343,10 @@ export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unkn
 }
 
 /** Hydrating server markup needs its root to be the element this component renders. */
-export function checkHydratedRoot(expected: string | undefined, tag: string): void {
+export function checkHydratedRoot(expected: string | null | undefined, tag: string): void {
   const node = getCurrentInstance()?.vnode.el
   if (
-    typeof window === 'undefined' || node == null
+    expected === null || typeof window === 'undefined' || node == null
     || node instanceof Element && node.localName === expected
   ) return
   const message = `Server markup for <${tag}> has an incompatible root.`
@@ -2063,9 +2079,14 @@ export function classText(
   let tokens = new Set((base ?? '').split(/[ \t\r\n\f]+/).filter(Boolean))
   let value = base
   for (const decoration of decorations) {
-    if (decoration.kind === 'style') continue
+    if (
+      decoration.kind === 'style' || decoration.kind === 'attribute' && decoration.name === 'style'
+    ) continue
     const candidate = decoration.read()
-    if (candidate === Symbol.for('html-next.invalid-result')) continue
+    if (
+      candidate === Symbol.for('html-next.invalid-result')
+      || candidate === Symbol.for('html-next.no-attribute')
+    ) continue
     if (decoration.kind === 'attribute') {
       value = candidate == null ? undefined : String(candidate)
       tokens = new Set((value ?? '').split(/[ \t\r\n\f]+/).filter(Boolean))

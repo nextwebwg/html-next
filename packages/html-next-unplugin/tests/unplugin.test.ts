@@ -996,8 +996,8 @@ describe("HTML Next unplugin", () => {
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname } },
       build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
     });
-    // `label` is not one of x-child's props, so it is an attribute the parent keeps writing on its root.
-    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b[\s\S]*writeAttribute\(r\.a\d+, "label"/);
+    // The parent updates the child's invocation inputs; its template controls forwarding.
+    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b[\s\S]*writeInvocationAttribute\(r\.h\d+, "label"/);
   });
 
   it("carries a literal prop named like a factory option as HTML input", async () => {

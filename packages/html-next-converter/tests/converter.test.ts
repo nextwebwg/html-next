@@ -129,7 +129,7 @@ describe("framework converter", () => {
     temporary.push(root);
     await mkdir(join(root, "components", "nested"), { recursive: true });
     await writeFile(join(root, "components", "app.html"), `<link rel="component" href="./nested/card.html">
-      <template component="x-app" status="early" summary="App."><main><x-card label="Hello"></x-card></main></template>`);
+      <template component="x-app" status="early" summary="App."><main $attributes><x-card label="Hello"></x-card></main></template>`);
     await writeFile(join(root, "components", "nested", "card.html"), `<template component="x-card" status="early" summary="Card.">
       <props><prop name="label" type="string">Label.</prop></props>
       <article class="card" style="border-radius: 2px" class:ready="true" style:color="'red'" from:aria-label="$label"><slot></slot></article>
@@ -140,7 +140,7 @@ describe("framework converter", () => {
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
     assert.deepEqual(manifest.package, {
-      dependencies: {},
+      dependencies: { cssstyle: "^6.2.0", "css-tree": "^3.2.1" },
       peerDependencies: { react: "^19.3.0" },
     });
     assert.deepEqual(manifest.components.map(({ artifact }) => artifact), [
@@ -619,7 +619,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       // A slot's elements share one Vue slot, in authored order; its `<template slot>` replaces them.
       assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in guarded"[\s\S]*slot="leading"/);
       assert.equal(slots.get("#trailing"), "<b>!</b>");
-      assert.match(invocation, /<template #action="(\w+)"><button type="button" class="act">\s*\{\{ Object\.hasOwn\(\1, 'value'\)/);
+      assert.match(invocation, /<template #action="(\w+)"\s*>\s*<button\s+type="button"\s+class="act"\s*>\s*\{\{\s*Object\.hasOwn\(\1, 'value'\)/);
       // Only default content stays outside a named slot.
       assert.match(invocation, /^<p>Body text<\/p>\n\s*<template #prefix>/);
     }
@@ -892,12 +892,12 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("converts a delegated React root into the child's native root", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-base-button.html"), `<template component="x-base-button" status="early" summary="Base button.">
-      <button type="button" class="base"><slot></slot></button>
+      <button type="button" class="base" $attributes><slot></slot></button>
       <style>:host { border: 1px solid blue; }</style>
     </template>`);
     await writeFile(join(root, "x-primary.html"), `<link rel="component" href="./x-base-button.html">
       <template component="x-primary" status="early" summary="Primary button.">
-        <x-base-button class="primary"><slot></slot></x-base-button>
+        <x-base-button $attributes class="primary"><slot></slot></x-base-button>
         <style>:host { color: red; }</style>
       </template>`);
     const outDirectory = join(root, "out-react-delegated");
@@ -911,7 +911,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     const markup = renderToStaticMarkup(createElement(module.exports.XPrimary!, { id: "case", children: "Projected" }));
     assert.match(markup, /^<button\b/);
-    assert.match(markup, /class="base primary"/);
+    assert.match(markup, /class="primary"/);
     assert.match(markup, /component="x-primary x-base-button"/);
     assert.match(markup, />Projected<\/button>$/);
   });
@@ -921,8 +921,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await writeFile(join(root, "x-switch.html"), `<template component="x-switch" status="early" summary="Polymorphic root."><defs>
       <state type="boolean" name="linked" value="false"></state>
       <handler name="switch"><set name="linked" expr:value="$linked = false"></set></handler>
-    </defs><template $match><a $when="$linked" href="#next" on:click="switch">Link</a>
-      <button $else type="button" on:click="switch">Button</button></template>
+    </defs><template $match><a $when="$linked" $attributes href="#next" on:click="switch">Link</a>
+      <button $else $attributes type="button" on:click="switch">Button</button></template>
     <style>:host { color: blue; }</style></template>`);
     const outDirectory = join(root, "out-react-polymorphic");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-switch.html"] });

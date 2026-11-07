@@ -4,7 +4,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "paths": {
-      "@nextwebwg/html-next": ["./packages/html-next/src/index.ts"]
+      "@nextwebwg/html-next": ["./packages/html-next/src/index.ts"],
+      "@nextwebwg/html-next/server": ["./packages/html-next/src/server.ts"]
     },
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"],

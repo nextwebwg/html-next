@@ -166,5 +166,17 @@
     "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(object({ value: integer }))\" from=\"[{ value: 1.5 }, { value: 3 }, 4]\"></state></defs><main><x-unused><x-leaf $each=\"row of $rows\" value=\"7\" from:value=\"$row.value\"></x-leaf></x-unused></main></template>",
     "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf><x-leaf value=\"3\"></x-leaf><x-leaf></x-leaf></template></section></main>",
     "carrier": "<x-leaf value=\"7\"></x-leaf><x-leaf value=\"3\"></x-leaf><x-leaf></x-leaf>"
+  },
+  {
+    "name": "forwarded-deferred-before-literal",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template component=\"x-subject\"><section><x-unused><x-leaf $attributes title=\"Template\"></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "native": "<main><section><aside><template carrier=\"x-unused\"><x-leaf title=\"Template\"></x-leaf></template></aside></section></main>",
+    "carrier": "<x-leaf title=\"Template\"></x-leaf>"
+  },
+  {
+    "name": "forwarded-deferred-after-literal",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template component=\"x-subject\"><section><x-unused><x-leaf title=\"Template\" $attributes></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "native": "<main><section><aside><template carrier=\"x-unused\"><x-leaf title=\"Caller\"></x-leaf></template></aside></section></main>",
+    "carrier": "<x-leaf title=\"Caller\"></x-leaf>"
   }
 ]

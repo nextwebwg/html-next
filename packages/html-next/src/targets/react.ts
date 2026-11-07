@@ -1,3 +1,4 @@
+import { literalValueSource } from "./shared.js";
 import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { namespacedAttributeSource } from "./shared.js";
@@ -12,10 +13,12 @@ import { parseDuration } from "../duration.js";
 import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
-import { formatReact } from "./vue-format.js";
+import { formatReact, jsxAttributeRecord } from "./vue-format.js";
+import { invocationSchema } from "./invocation-attributes.js";
+import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { compileComponentStylesForConversion, componentStateNames } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { propInputOrder, targetComponent } from "./backend.js";
@@ -43,7 +46,7 @@ const REACT_RESERVED = new Set([
   "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
-  "applyNamespacedAttributes", "namespacedAttributeProps", "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "styleObject", "styleBinding", "styleText", "applyNamespacedAttributes", "namespacedAttributeProps", "htmlNextPrepared", "props", "renderedIdentity", "rootMetadata", "htmlAttributeInputs", "invocationProps", "forwardedAttributes", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "ownedRootRef", "propValidityContract", "propValidityElement",
   "applyClassBindingRef", "classText", "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
@@ -95,9 +98,10 @@ function pascal(name: string): string {
 
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
+const STYLE_IMPORT = "\u0000style-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
 const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextValueInput", "HtmlNextValueTextarea", "HtmlNextValueSelect", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
-  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle",
+  "rootMetadata", "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle",
   "identityKey", "useChildLists", "useChildEntry", "ChildSlot", "ChildEntries"] as const;
 
 export interface ReactConversionOptions {
@@ -119,6 +123,7 @@ export interface ReactConversionOptions {
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
   readonly attributesSpecifier?: string;
+  readonly styleSpecifier?: string;
   readonly eventsSpecifier?: string;
   readonly controlSpecifier?: string;
   readonly dataSpecifier?: string;
@@ -137,7 +142,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("attributes" | "bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
+  readonly helpers: readonly ("attributes" | "bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head" | "style")[];
 }
 
 interface RootAttributes {
@@ -158,6 +163,7 @@ interface EventAttachment {
   readonly bindings: readonly EventBinding[];
   readonly forward: boolean;
   readonly ref?: string;
+  readonly orderedClasses?: boolean;
   readonly properties: readonly { readonly name: string; readonly value: string; readonly accepts?: string; readonly namespace?: string; readonly url?: boolean; readonly target?: "class" | "attribute" }[];
   readonly importantStyles: readonly { readonly name: string; readonly value: string }[];
   readonly genericWrites: readonly { readonly state: string; readonly path: string; readonly dynamic: boolean }[];
@@ -198,6 +204,8 @@ interface RenderState {
   usesPlainSlots: boolean;
   usesScopedSlots: boolean;
   usesSlotPropChecks?: boolean;
+  usesHtmlInputs?: boolean;
+  usesStyle?: boolean;
   usesKeyedLists: boolean;
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
@@ -611,7 +619,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const literals: string[] = [];
   const bindings: string[] = [];
   const inputBindings: string[] = [];
-  const retainedBindings: Array<{ readonly alias: string; readonly value: string; readonly accepts?: string; readonly propName?: string }> = [];
+  const retainedBindings: Array<{ readonly alias: string; readonly value: string; readonly accepts?: string; readonly propName?: string; readonly initial?: string; readonly ready?: string }> = [];
   const classes: string[] = [];
   const classRules: string[] = [];
   const literalStyles: string[] = [];
@@ -622,20 +630,52 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   // DOM-property lookup for attributes whose property has different behavior (output.value, constructor).
   const nativeAttribute = (name: string): boolean => state.preact && !component && !svg &&
     (name === "constructor" || name === "value" || name === "draggable");
+  const serializedAttribute = (name: string): boolean => isEnumeratedBoolean(name) ||
+    !component && (name === "type" || isNativeBooleanAttribute(name));
   const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string =>
     lowering.attribute(node, valueScope, name, { enumeratedBooleanTokens: state.preact });
   // Serialized HTML attributes may have values outside JSX's ARIA enums. Keep their
   // DOM string representation without narrowing the public component prop types.
   const attributeBinding = (name: string, value: string): string => nativeAttribute(name)
     ? `{...{ ${quote(name.toUpperCase())}: ${value} }}`
-    : state.preact && isEnumeratedBoolean(name)
+    : serializedAttribute(name)
       ? `{...({ ${quote(reactAttribute(name, svg))}: ${value} } as Record<string, unknown>)}`
       : `${reactAttribute(name, svg)}={${value}}`;
   const genericWrites: Array<{ readonly state: string; readonly path: string; readonly dynamic: boolean }> = [];
   let scopedAttachment: { readonly attachment: EventAttachment; readonly ref: string; readonly paths: readonly string[] } | undefined;
   let control: EventAttachment["control"];
   let content: string | undefined;
+  const forwards = node.attributes.some(attribute => attribute.kind === "forward");
+  const componentStyle = component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  const htmlInputs = component && (forwards || componentStyle) && Object.keys(componentContracts ?? {}).length > 0 ? invocationSchema(componentContracts!, reactAttribute) : undefined;
+  if (htmlInputs !== undefined) state.usesHtmlInputs = true;
+  const orderedClasses = forwards && node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class"));
+  const boundStyle = !component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.name === "style" && attribute.target === undefined && !attribute.twoWay);
+  const orderedStyles = !component && forwards;
+  if (componentStyle || boundStyle || forwards && !component) state.usesStyle = true;
+  let orderedStyleValue = "undefined";
+  const addStyle = (property: string): void => {
+    if (orderedStyles) orderedStyleValue = `{ ...(${orderedStyleValue}), ${property} }`;
+    else reactiveStyles.push(property);
+  };
+  const ordered: string[] = [];
+  let capturedBindings = 0;
   for (const attribute of node.attributes) {
+    const literalStart = literals.length, bindingStart = bindings.length;
+    try {
+    if (attribute.kind === "forward") {
+      importantStyles.length = 0;
+      if (orderedStyles) orderedStyleValue = `(Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : ${orderedStyleValue})`;
+      if (orderedClasses) {
+        const read = "Object.hasOwn(forwardedAttributes(nativeAttrs), 'className') ? nativeAttrs.className : Symbol.for('html-next.no-attribute')";
+        properties.push({ name: "class", value: read, target: "attribute" });
+        classRules.push(`{ kind: "attribute", name: "class", read: () => ${read} }`);
+      }
+      const forwarded = `forwardedAttributes(${state.preact && !svg ? "nativeAttributes" : "nativeAttrs"}${component ? "" : ", [\"style\"]"})`;
+      literals.push(`{...${htmlInputs === undefined ? forwarded : `htmlAttributeInputs(${forwarded}, ${htmlInputs})`}}`);
+      continue;
+    }
+    if (componentStyle && isStyleWrite(attribute)) continue;
     if (!component && attribute.kind === "attribute" && !attribute.twoWay && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class")) {
       const plan = attribute.expressionPlan!;
       const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
@@ -654,10 +694,25 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       continue;
     }
     if (attribute.kind === "literal") {
+      if (forwards && node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
       const componentProp = component ? Object.entries(componentContracts ?? {})
         .find(([name]) => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       if (projected && attribute.name === "data-slotted") continue;
-      if (attribute.name === "class") classes.push(quote(attribute.value));
+      if (componentProp !== undefined && attribute.name === "style") {
+        const [name, contract] = componentProp;
+        const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
+        const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
+        literals.push(componentPropAttribute(name, accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`));
+      }
+      else if (component && attribute.name === "style") literals.push(`style={${quote(attribute.value)} as any}`);
+      else if (attribute.name === "class" && orderedClasses) {
+        properties.push({ name: "class", value: quote(attribute.value), target: "attribute" });
+        classRules.push(`{ kind: "attribute", name: "class", read: () => ${quote(attribute.value)} }`);
+      }
+      else if (attribute.name === "class" && forwards) literals.push(`className=${quote(attribute.value)}`);
+      else if (attribute.name === "style" && orderedStyles) orderedStyleValue = `{ ${literalStyle(attribute.value, importantStyles).join(", ")} }`;
+      else if (attribute.name === "style" && forwards) literals.push(`style={{ ${literalStyle(attribute.value, importantStyles).join(", ")} }}`);
+      else if (attribute.name === "class") classes.push(quote(attribute.value));
       else if (attribute.name === "style") literalStyles.push(...literalStyle(attribute.value, importantStyles));
       else if (controlledNames.has(attribute.name)) continue;
       else if (nativeValueAttribute && attribute.name === "value") literals.push(state.preact ? attributeBinding(attribute.name, quote(attribute.value)) : `htmlNextValue=${quote(attribute.value)}`);
@@ -667,6 +722,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
         literals.push(componentPropAttribute(name, accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`));
       }
+      else if (attribute.name === "__proto__") literals.push(componentPropAttribute("__Proto__", quote(attribute.value)));
       else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) literals.push(attributeBinding(attribute.name, quote(attribute.value)));
       else if (isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
       else if (NUMERIC_ATTRIBUTES.has(attribute.name) && /^[+-]?\d+$/.test(attribute.value)) literals.push(`${reactAttribute(attribute.name, svg)}={${Number(attribute.value)}}`);
@@ -689,14 +745,14 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
         const text = lowering.text(attribute.expressionPlan.ast, scope);
-        reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: String(${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${text}) ?? ""` : text})`);
+        addStyle(`${quote(reactStyleProperty(attribute.name))}: String(${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${text}) ?? ""` : text})`);
       }
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;
         retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope), ...(guard === undefined ? {} : { accepts: `() => ${guard}` }) });
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
-        reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: ${alias} == null ? undefined : String(${lowering.text({ kind: "id", name: alias }, aliasScope)})`);
+        addStyle(`${quote(reactStyleProperty(attribute.name))}: ${alias} == null ? undefined : String(${lowering.text({ kind: "id", name: alias }, aliasScope)})`);
       }
       const overridden = importantStyles.findIndex((style) => style.name === attribute.name);
       if (overridden >= 0) importantStyles.splice(overridden, 1);
@@ -782,15 +838,36 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           if (prop || computed && read?.endsWith(".get()")) inputBindings.push(`${quote(componentPropName!)}: () => ({ value: ${alias}, status: ${prop ? `propInputs.status(${quote(expression.name)})` : read!.replace(/\.get\(\)$/, ".status()")} })`);
         }
       }
+      else if (!component && attribute.name === "style") {
+        let rendered = nativeValue;
+        if (sourceGuard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
+          const alias = `__retained${state.nextRetainedAlias++}`;
+          const fallback = node.attributes.find(binding => binding.kind === "literal" && binding.name === "style");
+          state.usesRetainedValue = true;
+          retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope),
+            ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }),
+            ...(fallback?.kind === "literal" ? { initial: quote(fallback.value) } : {}) });
+          rendered = alias;
+        }
+        importantStyles.length = 0;
+        if (orderedStyles) orderedStyleValue = `styleObject(${rendered})`;
+        else bindings.push(`style={styleObject(${rendered})}`);
+      }
       else if (!component && (sourceGuard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope))) {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;
+        const fallback = node.attributes.find(binding => binding.kind === "literal" && binding.name === attribute.name);
+        const initial = forwards && fallback?.kind === "literal" ? quote(fallback.value) : undefined;
+        const ready = forwards && initial === undefined ? `${alias}Ready` : undefined;
         retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope),
-          ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }) });
+          ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }), ...(initial === undefined ? {} : { initial }), ...(ready === undefined ? {} : { ready }) });
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
         const rendered = attributeValue({ kind: "id", name: alias }, aliasScope, attribute.name);
-        bindings.push(attributeBinding(attribute.name, typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered));
-      } else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
+        const serialized = typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered;
+        bindings.push(ready === undefined ? attributeBinding(attribute.name, serialized)
+          : `{...(${ready} ? { ${quote(reactAttribute(attribute.name, svg))}: ${serialized} } : {})}`);
+      } else if (attribute.name === "__proto__") bindings.push(componentPropAttribute("__Proto__", nativeValue));
+      else if (nativeAttribute(attribute.name) || serializedAttribute(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
       else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
     } else if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled property ${attribute.expression}.`);
@@ -870,6 +947,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else {
       fail("HT030", `React conversion of ${attribute.kind === "directive" ? `$${attribute.name}` : `:${attribute.name}`} is not implemented.`);
     }
+    } finally {
+      if (forwards) ordered.push(...literals.slice(literalStart), ...bindings.slice(bindingStart));
+      capturedBindings = bindings.length;
+    }
   }
   let componentChildren = node.children;
   if (component) {
@@ -920,15 +1001,38 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (site !== undefined && providesContexts(node.name, state.componentGraph)) bindings.push(`htmlNextEntry={${entryKeySource(site, state.rowKeys)}}`);
   }
   if (classRules.length > 0) {
-    const base = [...classes, ...(rootTag === undefined ? [] : ["nativeAttrs.className"])];
-    const text = classes.length === 0 ? rootTag === undefined ? "undefined" : state.preact ? "(nativeAttrs.className == null ? undefined : String(nativeAttrs.className))" : "nativeAttrs.className"
+    const base = [...classes];
+    const text = classes.length === 0 ? "undefined"
       : base.length === 1 ? base[0]! : `[${base.join(", ")}].filter(value => value != null).join(" ")`;
     const initial = `${lowering.use("classText")}(${text}, [${classRules.join(", ")}])`;
-    bindings.push(`className={${component ? initial : `typeof document === "undefined" ? ${initial} : ${text}`}}`);
-  } else if (classes.length > 0) bindings.push(`className={[${classes.join(", ")}${rootTag === undefined ? "" : ", nativeAttrs.className"}].filter(Boolean).join(" ")}`);
-  if (literalStyles.length > 0 || reactiveStyles.length > 0) bindings.push(`style={{ ${[
+    const value = component || orderedClasses ? initial : `typeof document === "undefined" ? ${initial} : ${text}`;
+    const prop = component ? findComponentPropName("class") : undefined;
+    bindings.push(prop === undefined ? `className={${value}}` : componentPropAttribute(prop, value));
+  } else if (classes.length > 0) {
+    const value = `[${classes.join(", ")}].filter(Boolean).join(" ")`;
+    const prop = component ? findComponentPropName("class") : undefined;
+    bindings.push(prop === undefined ? `className={${value}}` : componentPropAttribute(prop, value));
+  }
+  if (componentStyle) {
+    const rules = styleWriteRules(node.attributes, (attribute, fallback) => {
+      const plan = attribute.expressionPlan!;
+      const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
+      const source = attribute.target === "style" ? lowering.text(plan.ast, scope) : attributeValue(plan.ast, scope, "style");
+      if (guard === undefined && !mayProduceInvalidResult(plan.ast, scope)) return source;
+      const alias = `__retained${state.nextRetainedAlias++}`;
+      state.usesRetainedValue = true;
+      retainedBindings.push({ alias, value: guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for("html-next.invalid-result")`, initial: fallback === undefined ? 'Symbol.for("html-next.invalid-result")' : quote(fallback) });
+      return alias;
+    }, "nativeAttrs");
+    const value = `styleText("", ${rules})`;
+    bindings.push(htmlInputs === undefined ? `style={${value} as any}` : `{...htmlAttributeInputs({ style: ${value} }, ${htmlInputs})}`);
+  }
+  if (orderedStyles) {
+    importantStyles.length = 0;
+    bindings.push(`style={(${orderedStyleValue}) as React.CSSProperties}`);
+  }
+  else if (literalStyles.length > 0 || reactiveStyles.length > 0) bindings.push(`style={{ ${[
     ...literalStyles,
-    ...(rootTag === undefined ? [] : ["...nativeAttrs.style"]),
     ...reactiveStyles,
   ].join(", ")} } as unknown as React.CSSProperties}`);
   const classOnly = !component && rootTag === undefined && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0 && importantStyles.length === 0 && node.ref === undefined
@@ -937,7 +1041,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const owner = state.allocate("__htmlNextClassOwner");
     state.classOwners.push(owner);
     const values = properties.map(property => `[${property.target === "class" ? quote(property.name) : "null"}, ${property.accepts === undefined ? property.value : `(${property.accepts}) ? ${property.value} : Symbol.for("html-next.invalid-result")`}]`);
-    bindings.push(`ref={element => applyClassBindingRef(element, ${owner}, { bindings: [${values.join(", ")}] })}`);
+    bindings.push(`ref={element => applyClassBindingRef(element, ${owner}, { ${orderedClasses ? "ordered: true, " : ""}bindings: [${values.join(", ")}] })}`);
   } else if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || node.ref !== undefined) {
     for (const event of node.events ?? []) if (!handlers.has(event.handler)) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
     const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
@@ -949,7 +1053,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const forwardsOnly = rootTag !== undefined && !component && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0
       && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined && rootArms(state.definition.template) === undefined;
     const name = forwardsOnly ? "ownedRootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
-    const attachment: EventAttachment = { name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
+    const attachment: EventAttachment = { ...(orderedClasses ? { orderedClasses: true } : {}), name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
       ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
     attachments.push(attachment);
     if (scoped) {
@@ -974,12 +1078,21 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const reflections = boundReflections.length === 0 ? rootTag?.reflections ?? []
     : [`{...(Object.assign({}, reflectedAttrs, { ${boundReflections.join(", ")} }) as Record<string, unknown>)}`];
   if (inputBindings.length > 0) bindings.push(`{...{ [BINDING_INPUTS_PROP]: { ${inputBindings.join(", ")} } }}`);
-  const attributes = [...literals, ...(rootTag === undefined ? [] : [state.preact && !svg ? "{...(nativeAttributes as Record<string, unknown>)}" : "{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
+  const attributes = [...rootTag === undefined ? [] : ["{...rootMetadata(nativeAttrs)}"], ...(forwards ? [...ordered, ...bindings.slice(capturedBindings)] : [...literals, ...bindings]), ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
       `{...{ component: [renderedIdentity, ${quote(rootTag.tag)}].filter(Boolean).join(" ") }}`,
     ])];
-  const opening = `<${tag}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}`;
+  if (boundStyle || orderedStyles) {
+    const style = orderedStyles ? orderedStyleValue : bindings.find(binding => binding.startsWith("style={"))?.slice(7, -1) ?? "{}";
+    const ref = attributes.findIndex(attribute => attribute.startsWith("ref={"));
+    const previous = ref < 0 ? undefined : attributes.splice(ref, 1)[0]!.slice(5, -1);
+    const styleAttribute = attributes.findIndex(attribute => attribute.startsWith("style={"));
+    if (styleAttribute >= 0) attributes.splice(styleAttribute, 1);
+    attributes.push(`{...styleBinding((${style}) as React.CSSProperties${previous === undefined ? "" : `, ${previous}`})}`);
+  }
+  const finalAttributes = htmlInputs === undefined ? attributes : [`{...(invocationProps(${jsxAttributeRecord(attributes)}, ${htmlInputs}) as any)}`];
+  const opening = `<${tag}${finalAttributes.length === 0 ? "" : ` ${finalAttributes.join(" ")}`}`;
   const markup = component && children === "" || !component && isVoidElement(node.name)
     ? `${opening} />` : `${opening}>${children}</${tag}>`;
   const selectorNames = new Set(Object.values(componentContracts ?? {}).flatMap((contract) => contract.select === undefined ? [] : [contract.select.from]));
@@ -987,7 +1100,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     `{ name: ${quote(property.name)}, value: ${property.value}, accepted: ${property.accepts ?? "true"}${property.target === undefined ? "" : `, target: ${quote(property.target)}`}${property.namespace === undefined ? "" : `, namespace: ${quote(property.namespace)}, localName: ${quote(property.name.slice(property.name.indexOf(":") + 1))}, url: ${property.url === true}`} }`).join(", ")}]}${scopedAttachment.attachment.control === undefined ? "" :
     ` control={{ name: ${quote(scopedAttachment.attachment.control.name)}, value: ${scopedAttachment.attachment.control.value}, defaults: ${scopedAttachment.attachment.control.defaults}, nativeProperty: ${scopedAttachment.attachment.control.nativeProperty}, accepted: ${scopedAttachment.attachment.control.accepts ?? "true"} }}`} render={(${scopedAttachment.ref}) => ${markup}} />`;
   return retainedBindings.toSorted((a, b) => Number(selectorNames.has(b.propName ?? "")) - Number(selectorNames.has(a.propName ?? ""))).reduceRight((result, retained) =>
-    `<RetainedValue value={${retained.value}}${retained.accepts === undefined ? "" : ` accepts={${retained.accepts}}`} render={(${retained.alias}) => ${result}} />`, scopedMarkup);
+    `<RetainedValue value={${retained.value}}${retained.accepts === undefined ? "" : ` accepts={${retained.accepts}}`} render={(${retained.initial === undefined ? retained.alias : `${retained.alias}Read`}${retained.ready === undefined && retained.initial === undefined ? "" : `, ${retained.ready ?? `${retained.alias}Ready`}`}) => ${retained.initial === undefined ? result : `{ const ${retained.alias} = ${retained.alias}Ready ? ${retained.alias}Read : ${retained.initial}; return ${result}; }`}} />`, scopedMarkup);
 }
 
 /** A component invocation's children by the slot each is assigned to; `slot=""` names the default slot, as no `slot` does. */
@@ -1413,8 +1526,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(checksControllerWrites || initializedStates.length > 0 ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(!renderState.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(!renderState.usesStyle ? [] : [STYLE_IMPORT]),
+    ...(!renderState.usesHtmlInputs ? [] : [`import { htmlAttributeInputs, invocationProps } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(templateForwardsAttributes(definition.template) ? [`import { forwardedAttributes } from ${quote(options.attributesSpecifier ?? "./attributes")};`] : []),
     ...(!attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? [] : [`import { applyNamespacedAttributes, namespacedAttributeProps } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
-    ...(renderState.classOwners.length === 0 ? [] : [`import { applyClassBindingRef } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
+    ...(renderState.classOwners.length === 0 && !attachments.some(attachment => attachment.orderedClasses) ? [] : [`import { applyClassBindingRef } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
     ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
@@ -1621,7 +1737,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(attachments.some(attachment => attachment.forwardsOnly) ? ["  const ownedRootRef = useOwnedRootRef(rootRef);"] : []),
     ] : []),
     ...(target.props.length === 0 ? [] : [
-      `  const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { ...prop, type: validityType(prop) }])) })} as const;`,
+      `  const propValidityContract = ${literalValueSource({ props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { ...prop, type: validityType(prop) }])) })} as const;`,
       "  const propValidityElement = React.useRef<Element | null>(null);",
       "  const propValidityCleanup = React.useRef<(() => void) | null>(null);",
       "  React.useLayoutEffect(() => {",
@@ -1759,8 +1875,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    const values: unknown[] = [${attachment.properties.map((property) => property.value).join(", ")}];`,
       `    const previous = previousPropertyValues${attachment.name}.current ?? [];`,
       `    if (element !== null) {`,
-      ...attachment.properties.map((property, index) =>
-        `      if ((${property.accepts ?? "true"}) && ${property.target === undefined ? "" : `values[${index}] !== Symbol.for("html-next.invalid-result") && `}${["scrollTop", "scrollLeft"].includes(property.name) ? `previousPropertyValues${attachment.name}.current !== undefined && ` : ""}(element !== previousPropertyElement${attachment.name}.current || !Object.is(values[${index}], previous[${index}]))) ${property.target === "class" ? `element.classList.toggle(${quote(property.name)}, Boolean(values[${index}]));` : property.target === "attribute" ? `values[${index}] == null ? element.removeAttribute("class") : element.setAttribute("class", String(values[${index}]));` : property.namespace === undefined ? `(element as unknown as Record<string, unknown>)[${quote(property.name)}] = values[${index}];` : `applyNamespacedAttributes(element, [${namespacedAttributeSource(property.name, `values[${index}]`)}]);`}`),
+      ...(attachment.orderedClasses ? [`      applyClassBindingRef(element, previousPropertyElement${attachment.name}, { ordered: true, bindings: [${attachment.properties.flatMap((property, index) => property.target === undefined ? [] : [`[${property.target === "class" ? quote(property.name) : "null"}, ${property.accepts === undefined ? `values[${index}]` : `(${property.accepts}) ? values[${index}] : Symbol.for("html-next.invalid-result")`}]`]).join(", ")}] });`] : []),
+      ...attachment.properties.flatMap((property, index) => attachment.orderedClasses && property.target !== undefined ? [] : [
+        `      if ((${property.accepts ?? "true"}) && ${property.target === undefined ? "" : `values[${index}] !== Symbol.for("html-next.invalid-result") && `}${["scrollTop", "scrollLeft"].includes(property.name) ? `previousPropertyValues${attachment.name}.current !== undefined && ` : ""}(element !== previousPropertyElement${attachment.name}.current || !Object.is(values[${index}], previous[${index}]))) ${property.target === "class" ? `element.classList.toggle(${quote(property.name)}, Boolean(values[${index}]));` : property.target === "attribute" ? `values[${index}] == null ? element.removeAttribute("class") : element.setAttribute("class", String(values[${index}]));` : property.namespace === undefined ? `(element as unknown as Record<string, unknown>)[${quote(property.name)}] = values[${index}];` : `applyNamespacedAttributes(element, [${namespacedAttributeSource(property.name, `values[${index}]`)}]);`}`]),
       ...attachment.properties.map((property, index) => `      if ((${property.accepts ?? "true"})${property.target === undefined ? "" : ` && values[${index}] !== Symbol.for("html-next.invalid-result")`}) previous[${index}] = values[${index}];`),
       `    }`,
       `    previousPropertyElement${attachment.name}.current = element;`,
@@ -1947,15 +2064,18 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // The shared module's helpers this component calls: the expression helpers its lowering used,
   // and the rendering components and functions its markup and handlers name.
   const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
-  const component = formatReact(body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
+  const styledBody = !renderState.usesStyle ? body : body.replace(STYLE_IMPORT,
+    `import { ${["styleObject", "styleBinding", "styleText"].filter(helper => new RegExp(`\\b${helper}\\b`).test(body)).join(", ")} } from ${quote(options.styleSpecifier ?? "./style/style.js")};`);
+  const component = formatReact(styledBody.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
     : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`) + "\n" + lowering.referenceDeclarations().join("\n"), `${name}.tsx`);
   return {
     component,
     css: styles.css,
     helpers: [
-      ...(renderState.classOwners.length > 0 || attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? ["attributes" as const] : []),
+      ...(renderState.usesStyle ? ["style" as const] : []),
+      ...(templateForwardsAttributes(definition.template) || renderState.classOwners.length > 0 || attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? ["attributes" as const] : []),
       ...(options.modulePreparation === undefined ? [] : ["bindings" as const]),
-      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
+      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesHtmlInputs && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),

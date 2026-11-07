@@ -81,7 +81,7 @@ describe("generateComponent", () => {
     // Vue drops whitespace with a newline between elements, where a formatter may break a line, and
     // at a block's edge, so a kept space is an interpolation.
     const vue = lines(generateVueComponent(definition));
-    assert.match(vue, /<strong>Package:<\/strong>\{\{ ' ' \}\}<code>x<\/code> and <em>a<\/em>\{\{ ' ' \}\}<em>b<\/em>\n<template v-if="true">\{\{ ' ' \}\}<b>c<\/b><\/template>/);
+    assert.match(vue, /<strong>Package:<\/strong>\{\{ ' ' \}\}<code\s*>x<\/code> and <em>a<\/em>\{\{ ' ' \}\}<em>b<\/em>\n<template v-if="true"\s*>\{\{ ' ' \}\}<b>c<\/b><\/template>/);
     assert.match(vue, /<li>a<\/li>\n<li>b<\/li>/);
     assert.match(vue, /<pre><b>1<\/b>\n<b>2<\/b><\/pre>/);
     // Check rendered whitespace so formatting changes cannot alter inline or preformatted content.
@@ -152,7 +152,7 @@ describe("generateComponent", () => {
     const vue = byPath.get("vue/XButton.vue")!;
     assert.match(vue, /<script setup lang="ts">/);
     assert.match(vue, /defineOptions\(\{ inheritAttrs: false \}\)/);
-    assert.ok(vue.lastIndexOf('v-bind="nativeAttrs($attrs)"') < vue.lastIndexOf("data-x-button"));
+    assert.ok(vue.lastIndexOf('forwardedAttributes(nativeAttrs($attrs))') < vue.lastIndexOf("data-x-button"));
 
     assert.doesNotMatch(vanilla, /<x-button\b|createElement\("x-button"\)/);
     assert.doesNotMatch(vue.slice(vue.indexOf("<template>")), /<x-button\b/);
@@ -260,6 +260,7 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
-    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio controls="" v-bind="nativeAttrs\(\$attrs\)"/);
+    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio\b[^>]*controls=""/);
+    assert.doesNotMatch(byPath.get("vue/DemoPlayer.vue")!, /forwardedAttributes\(/);
   });
 });

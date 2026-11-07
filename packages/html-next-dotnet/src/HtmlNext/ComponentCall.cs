@@ -2,9 +2,9 @@ using System.Runtime.InteropServices;
 
 namespace HtmlNext;
 
-internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant);
+internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1);
 
-internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute[]? Attributes = null) : RenderOperation
+internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute?[]? Attributes = null) : RenderOperation
 {
     private readonly Prop[] props = Target.Props;
     public override void WriteDeferred(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
@@ -40,12 +40,12 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             var child = context.NextChild();
             if (child is null)
             {
-                child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, SharedRoot ? context.InheritedAttributes : null);
+                child = Target.Template.BindInvocation(Arguments, values, cancellation, context.OnDiagnostic, Attributes, context.InvocationAttributesFor(values));
                 context.RecordChild(child);
             }
             var projected = Projection is { Length: > 0 } || SharedRoot && context.ProjectionFor(values) is not null;
             var previousProjection = projected ? context.EnterProjection(Projection ?? [], values, child, Target.Template.Tag, SharedRoot) : null;
-            var previousAttributes = context.EnterInvocationAttributes(Attributes, props, values, SharedRoot);
+            var previousAttributes = Target.ForwardsAttributes ? context.EnterInvocationAttributes(Attributes, props, values, child) : null;
             try
             {
                 if (ParentStyle is null && !context.HasRootStyles) Target.Template.WritePlan(ref writer, child, cancellation);
@@ -71,6 +71,9 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
 internal sealed record DeferredPropAttribute(string Name, ValueExpression Expression, ValueType Destination, BoundAttributeKind Kind, string Source, string? Fallback, int DeclarationContextSlot) : RenderOperation
 {
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
+        => BoundAttribute.Write(ref writer, Name, Read(values), Kind, Source, Fallback);
+
+    public ExpressionValue Read(object?[] values)
     {
         var evaluation = DeclarationContextSlot < 0 ? null : (DeclarationEvaluation)values[DeclarationContextSlot]!;
         var previousReady = evaluation?.Ready ?? true;
@@ -83,14 +86,13 @@ internal sealed record DeferredPropAttribute(string Name, ValueExpression Expres
             ready = evaluation?.Ready ?? true;
         }
         finally { if (evaluation is not null) evaluation.Ready = previousReady; }
-        if (!ready) { writer.Write(Fallback); return; }
+        if (!ready) return ExpressionValue.Invalid;
         var conforms = value.IsNull || value.IsAbsent || (Destination.Kind switch
         {
             "object" or "list" => value.Type.Kind == Destination.Kind,
             _ => !Destination.CheckReference(value).IsInvalid,
         });
-        if (!conforms) { writer.Write(Fallback); return; }
-        BoundAttribute.Write(ref writer, Name, value, Kind, Source, Fallback);
+        return conforms ? value : ExpressionValue.Invalid;
     }
 }
 
@@ -102,23 +104,36 @@ internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnosti
     private int rootStyleStart;
     private ProjectionState? projections;
     private InvocationAttributeState? invocationAttributes;
+    private Dictionary<string, string?>? attributeOutput;
+    private Dictionary<string, string?>? forwardedAttributeOutput;
+    public Dictionary<string, string?> AttributeOutput()
+    {
+        var output = attributeOutput ??= new(StringComparer.Ordinal);
+        output.Clear();
+        return output;
+    }
+    public Dictionary<string, string?> ForwardedAttributeOutput()
+    {
+        var output = forwardedAttributeOutput ??= new(StringComparer.Ordinal);
+        output.Clear();
+        return output;
+    }
     public bool HasAcceptedProjection => projections?.Accepted?.Active == true;
     public int EnterAcceptedProjection(AcceptedChildFilter? filter) => filter is null ? -1 : ((projections ??= new(children is not null)).Accepted ??= new()).Enter(filter);
     public void LeaveAcceptedProjection(int previous) { if (previous >= 0) projections!.Accepted!.Leave(previous); }
     public int PauseAcceptedProjection() => projections?.Accepted?.Pause() ?? -1;
     public void ResumeAcceptedProjection(int previous) { if (previous >= 0) projections!.Accepted!.Resume(previous); }
     public bool AcceptsProjection(ComponentReference? target, string? tag, RenderOperation[]? text, object?[] values) => projections?.Accepted?.Accepts(target, tag, text, values, OnDiagnostic) ?? true;
-    public InvocationAttributeState? InheritedAttributes => invocationAttributes;
-    public (int Start, int Count)? EnterInvocationAttributes(InvocationAttribute[]? attributes, Prop[] props, object?[] values, bool sharedRoot)
+    public InvocationAttributeFrame? InvocationAttributesFor(object?[] values) => invocationAttributes?.Find(values);
+    public int? EnterInvocationAttributes(InvocationAttribute?[]? attributes, Prop[] props, object?[] caller, object?[] receiver)
     {
         if (attributes is null && invocationAttributes is null) return null;
-        return (invocationAttributes ??= new()).Enter(attributes ?? [], props, values, sharedRoot);
+        return (invocationAttributes ??= new()).Enter(attributes ?? [], props, caller, receiver);
     }
-    public void LeaveInvocationAttributes((int Start, int Count)? previous)
+    public void LeaveInvocationAttributes(int? previous)
     {
         if (previous is { } frame) invocationAttributes!.Leave(frame);
     }
-    public void WriteInvocationAttributes(ref HtmlWriter writer, IReadOnlySet<string> owned, CancellationToken cancellation) => invocationAttributes?.Write(ref writer, owned, cancellation);
     public ProjectionFrame? EnterProjection(ProjectionGroup[] groups, object?[] caller, object?[] receiver, string tag, bool sharedRoot) =>
         (projections ??= new(children is not null)).Enter(groups, caller, receiver, tag, sharedRoot);
     public void WarnSlot(ScopedSlotArguments outlet, int prop)

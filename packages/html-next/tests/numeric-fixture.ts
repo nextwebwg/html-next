@@ -12,7 +12,7 @@ export const numericDefinition = parseComponent(`<template component="ssr-finite
   <ssr-finite-child id="child" from:value="1 / $denominator"></ssr-finite-child><ssr-finite-slot from:denominator="$denominator"><template slot="body"><b id="scoped">{$value}</b><i id="scoped-missing">{$absent = null}</i></template></ssr-finite-slot></section></template>`);
 
 export const numericDefinitions = [numericDefinition, parseComponent(`<template component="ssr-finite-child"><defs>
-  <prop name="value" type="number" default="5">Number.</prop></defs><output>{$value}</output></template>`), parseComponent(`<template component="ssr-finite-slot"><defs>
+  <prop name="value" type="number" default="5">Number.</prop></defs><output $attributes>{$value}</output></template>`), parseComponent(`<template component="ssr-finite-slot"><defs>
   <prop name="denominator" type="number" default="0">Denominator.</prop><state name="record" type="object({ ... })" value="{}"></state>
   <slot name="body"><prop name="value" type="number" default="5">Value.</prop><prop name="absent" type="unknown" required>Missing.</prop></slot>
   </defs><div><slot name="body" from:value="1 / $denominator" from:absent="$record.missing"></slot></div></template>`)];

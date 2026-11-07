@@ -1,3 +1,4 @@
+import { literalValueSource } from "./shared.js";
 import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
@@ -12,6 +13,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpressio
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
+import { templateForwardsAttributes } from "../template.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { propInputOrder, targetComponent } from "./backend.js";
@@ -21,9 +23,11 @@ import { condenseWhitespace, escapeHtml, isEdgeSpace, literalAttribute, isScript
 import { inputScope, Lowering, category, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck, increment, provenWrite, refusing, writeCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
-import { BINDING_INPUTS_PROP, DECORATIONS_PROP, ENTRY_PROP, LISTS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
+import { BINDING_INPUTS_PROP, ENTRY_PROP, LISTS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { BINDING_INPUTS_PROP as STATUS_INPUTS_PROP } from "../prop-inputs.js";
-import { formatSvelteScript } from "./vue-format.js";
+import { formatSvelteScript, jsxAttributeRecord } from "./vue-format.js";
+import { invocationSchema } from "./invocation-attributes.js";
+import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { SVELTE_CONTEXT_SPECIFIER } from "./svelte-context.js";
 
 function hasStructuredHtmlInput(type: TypeNode): boolean {
@@ -48,7 +52,6 @@ export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
   readonly rootBindings?: readonly string[] | undefined;
-  readonly rootDecorations?: { readonly classes: boolean; readonly styles: boolean } | undefined;
   readonly decorationsSpecifier?: string;
   readonly styleSpecifier?: string;
   readonly propsSpecifier?: string;
@@ -87,9 +90,6 @@ function nativeControlBinding(tag: string, name: string): boolean {
     (name === "value" || name === "checked" && tag === "input");
 }
 
-function literalValueSource(value: unknown): string {
-  return JSON.stringify(value)?.replaceAll('"__proto__":', '["__proto__"]:') ?? "undefined";
-}
 
 function componentPropAttribute(name: string, value: string): string {
   return name === "__proto__" ? `{...{ __proto__: null, ...{ ${objectKey(name)}: ${value} } }}` : `${name}={${value}}`;
@@ -99,10 +99,10 @@ function caseSensitiveAttribute(name: string): boolean {
   return name.toLowerCase() !== asciiLowerCase(name);
 }
 
-function nativeAttribute(name: string, value: string, context: RenderContext): string {
-  if (!caseSensitiveAttribute(name)) return `${name}={${value}}`;
+function nativeAttribute(name: string, value: string, context: RenderContext): readonly string[] {
+  if (!caseSensitiveAttribute(name)) return [`${name}={${value}}`];
   context.usesAttributeBinding = true;
-  return `{...(typeof document === 'undefined' ? { ${objectKey(name)}: ${value} } : {})} {@attach ${context.bindingHelperName}(${quote(name)}, () => ${value})}`;
+  return [`{...(typeof document === 'undefined' ? { ${objectKey(name)}: ${value} } : {})}`, `{@attach ${context.bindingHelperName}(${quote(name)}, () => ${value})}`];
 }
 
 /** Match native projection marking so controllers can act on rendered slot content. */
@@ -127,9 +127,9 @@ function literalPropValue(value: string, contract: PropContract): string {
 /** A missing class base differs from an authored empty class attribute. `scope` precedes the authored classes. */
 function classBaseSource(node: ElementNode, root: boolean, scope: readonly string[]): string {
   const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
-  const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.class == null || rest.class === false ? undefined : ${quote("")})` : "undefined";
+  const empty = literal?.kind === "literal" ? quote("") : "undefined";
   const authored = [...scope, ...literal?.kind === "literal" ? [literal.value] : []].join(" ");
-  return `([${quote(authored)}${root ? ", rest.class" : ""}].filter(Boolean).join(" ") || ${empty})`;
+  return `([${quote(authored)}].filter(Boolean).join(" ") || ${empty})`;
 }
 
 function checkSupported(definition: ComponentDefinition): { importedNames: ReadonlySet<string>; refs: Set<string> } {
@@ -165,6 +165,7 @@ function checkSupported(definition: ComponentDefinition): { importedNames: Reado
 }
 
 interface RenderContext {
+  usesHtmlInputs?: boolean;
   usesInputStatus?: boolean;
   usesInputExpressions?: boolean;
   readonly observe: (scope: Scope) => Scope;
@@ -210,10 +211,7 @@ interface RenderContext {
   usesProperties: boolean;
   usesDecorations: boolean;
   usesStyleDecorations: boolean;
-  usesInvocationClasses: boolean;
-  readonly initialClassName: string;
   usesDecorationAttachment: boolean;
-  readonly rootDecorations?: SvelteConversionOptions["rootDecorations"];
   readonly rootBindings?: readonly string[] | undefined;
   readonly initialBindingsName: string;
   readonly initialBindingReadName: string;
@@ -847,23 +845,39 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       slotBindings.push(`${objectKey(slot)}: ${present === undefined ? snippet : `${present} ? ${snippet} : undefined`}`);
     }
   }
-  const decorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style" || !component && entry.target === undefined && entry.name === "class" && !entry.twoWay));
-  const ownsClasses = decorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined));
-  const ownsStyles = decorations.some((entry) => entry.kind === "attribute" && entry.target === "style");
-  const decoratesClasses = ownsClasses || root && context.rootDecorations?.classes === true;
-  const decoratesStyles = ownsStyles || root && context.rootDecorations?.styles === true;
+  const forwards = node.attributes.some(attribute => attribute.kind === "forward");
+  const componentStyle = component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  const htmlInputs = component && (forwards || componentStyle) && Object.keys(childProps ?? {}).length > 0 ? invocationSchema(childProps!) : undefined;
+  if (htmlInputs !== undefined) context.usesHtmlInputs = true;
+  const authoredDecorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style" || !component && entry.target === undefined && (entry.name === "class" || entry.name === "style" && (forwards || node.attributes.some(write => write.kind === "attribute" && write.target === "style"))) && !entry.twoWay));
+  const ownsClasses = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined && entry.name === "class"));
+  const ownsStyles = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "style" || entry.target === undefined && entry.name === "style"));
+  const decoratesClasses = ownsClasses;
+  const decoratesStyles = ownsStyles && !componentStyle;
   const hasDecorations = decoratesClasses || decoratesStyles;
-  const ownedRules = decorations.map((entry) => {
+  const decorations = forwards && (ownsClasses || ownsStyles) ? node.attributes.filter(entry => entry.kind === "forward"
+    || entry.kind === "literal" && (entry.name === "class" && ownsClasses || entry.name === "style" && ownsStyles) && !node.attributes.some(write => write.kind === "attribute" && write.target === undefined && write.name === entry.name)
+    || authoredDecorations.includes(entry as never)) : authoredDecorations;
+  const ownedRules = decorations.flatMap((entry) => {
+    if (entry.kind === "forward") return [...ownsClasses ? ["class"] : [], ...ownsStyles ? ["style"] : []].map(name =>
+      `{ kind: "attribute" as const, name: ${quote(name)}, read: () => Object.hasOwn(forwardedAttributes(rest), ${quote(name)}) ? rest[${quote(name)}] : Symbol.for('html-next.no-attribute') }`);
+    if (entry.kind === "literal") return `{ kind: "attribute" as const, name: ${quote(entry.name)}, read: () => ${quote(entry.value)} }`;
     if (entry.kind !== "attribute" || entry.expressionPlan === undefined) fail("HT030", "An uncompiled decoration cannot be converted.");
     const plan = entry.expressionPlan;
+    if (entry.target === undefined && entry.name === "style") {
+      const read = conformingRead(plan, scope, context, lowering.attribute(plan.ast, scope, "style"));
+      const literal = node.attributes.find(write => write.kind === "literal" && write.name === "style");
+      const initial = literal?.kind === "literal" ? quote(literal.value) : "Symbol.for('html-next.invalid-result')";
+      const value = read.invalid ? retained(context, read.source, initial) : read.source;
+      return `{ kind: "attribute" as const, name: "style", read: () => ${value} }`;
+    }
     const guard = declaredReadGuard(plan, scope, context);
-    const source = entry.target === "class" ? lowering.condition(plan.ast, scope) : entry.target === undefined ? lowering.attribute(plan.ast, scope, "class") : lowering.text(plan.ast, scope);
+    const source = entry.target === "class" ? lowering.condition(plan.ast, scope) : entry.target === undefined ? lowering.attribute(plan.ast, scope, entry.name) : lowering.text(plan.ast, scope);
     return `{ kind: ${quote(entry.target ?? "attribute")} as const, name: ${quote(entry.name)}, read: () => (${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}) }`;
   });
-  if (root && context.rootDecorations !== undefined) ownedRules.push(`...((rest[${quote(DECORATIONS_PROP)}] as readonly Decoration[] | undefined) ?? [])`);
   const rules = `[${ownedRules.join(", ")}]`;
   if (hasDecorations) context.usesDecorations = true;
-  if (!component && decoratesStyles) context.usesStyleDecorations = true;
+  if (decoratesStyles || componentStyle) context.usesStyleDecorations = true;
   const literals: string[] = [];
   const selectedBindings: string[] = [];
   const statusBindings: string[] = [];
@@ -975,7 +989,19 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
     bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
   }
+  const ordered: string[] = [];
+  let capturedBindings = 0;
   for (const attribute of node.attributes) {
+    const literalStart = literals.length, bindingStart = bindings.length;
+    try {
+    if (attribute.kind === "forward") {
+      const forwarded = "forwardedAttributes(rest)";
+      literals.push(`{...${htmlInputs === undefined ? forwarded : `htmlAttributeInputs(${forwarded}, ${htmlInputs})`}}`);
+      continue;
+    }
+    if (componentStyle && isStyleWrite(attribute)) continue;
+    if (forwards && attribute.kind === "literal" && node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+    if (forwards && attribute.kind === "literal" && (attribute.name === "style" || attribute.name === "class" && !ownsClasses)) { literals.push(`${attribute.name}={${quote(attribute.value)}}`); continue; }
     if (attribute.kind === "literal" && !component && attributeNamespace(attribute.name) !== undefined) {
       context.usesAttributeBinding = true; context.usesNamespacedAttributes = true;
       literals.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name)}: ${quote(attribute.value)} } : {})}`);
@@ -993,7 +1019,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }
       if (controlledNames.has(attribute.name) && childProp(attribute.name)?.[1].select === undefined ||
         !component && node.name === "input" && ["value", "checked"].includes(attribute.name) && node.attributes.some((entry) => entry.kind === "attribute" && entry.name === attribute.name && entry.target === undefined) ||
-        (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
+        (ownsClasses && attribute.name === "class" || ownsStyles && attribute.name === "style")) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
         bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? {} : { selected: true })}`);
@@ -1016,9 +1042,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       // content, which may be conditional or repeated, spreads it.
       if (declared === undefined && attribute.name === "slot" && !component &&
         node.attributes.some((entry) => entry.kind === "literal" && entry.name === "data-slotted")) literals.push(`{...{ slot: ${quote(attribute.value)} }}`);
-      else if (declared === undefined) literals.push(!component && caseSensitiveAttribute(attribute.name)
-        ? nativeAttribute(attribute.name, quote(attribute.value), context)
-        : !component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
+      else if (declared === undefined && Object.hasOwn(Object.prototype, attribute.name)) literals.push(componentPropAttribute(attribute.name === "__proto__" ? "__Proto__" : attribute.name[0]!.toUpperCase() + attribute.name.slice(1), quote(attribute.value)));
+      else if (declared === undefined && !component && caseSensitiveAttribute(attribute.name)) literals.push(...nativeAttribute(attribute.name, quote(attribute.value), context));
+      else if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && PLAIN_ATTRIBUTE.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
         literals.push(componentPropAttribute(prop, literalPropValue(attribute.value, contract)));
@@ -1103,14 +1129,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
       }
-      else if (attribute.target === "class" || attribute.target === "style") continue;
+      else if (attribute.target === "class" || attribute.target === "style" || !component && ownsStyles && attribute.target === undefined && attribute.name === "style") continue;
       else {
         const declared = childProp(attribute.name);
         if (declared?.[1].select !== undefined) { selectedBindingInput(declared[0], attribute); continue; }
         const read = conformingRead(attribute.expressionPlan, scope, context, declared === undefined
           ? lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name) : lowering.value(attribute.expressionPlan.ast, scope));
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === attribute.name);
-        const initial = literal?.kind === "literal" ? declared === undefined ? quote(literal.value) : `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
+        const initial = literal?.kind === "literal" ? declared === undefined ? quote(literal.value) : `${literalPropValue(literal.value, declared[1])} as any` : forwards ? "Symbol.for('html-next.invalid-result')" : "undefined as any";
         let value: string;
         if (declared !== undefined && declared[1].select === undefined) {
           if (literal?.kind === "literal") value = boundLiteralInput(declared[0], declared[1], lowering.value(attribute.expressionPlan.ast, scope), declaredReadGuard(attribute.expressionPlan, scope, context), literal.value);
@@ -1141,9 +1167,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           context.usesAttributeBinding = true;
           bindings.push(`{...(typeof document === 'undefined' ? ${optionAttribute(value, context)} : {})}`);
           bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source}, undefined, true)}`);
-        } else bindings.push(component
-          ? componentPropAttribute(declared?.[0] ?? attribute.name, value)
-          : nativeAttribute(svgAttributeName(attribute.name), value, context));
+        } else if (forwards && !component && read.invalid) bindings.push(`{...((candidate: unknown) => candidate === Symbol.for('html-next.invalid-result') ? {} : { ${objectKey(svgAttributeName(attribute.name))}: candidate })(${value})}`);
+        else if (component) bindings.push(componentPropAttribute(declared?.[0] ?? attribute.name, value));
+        else bindings.push(...nativeAttribute(svgAttributeName(attribute.name), value, context));
       }
     }
     if (attribute.kind === "property") {
@@ -1180,6 +1206,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         }
         if (root) { context.rootAttributeBindings.add(attribute.name); context.rootAttributeBindings.add(asciiLowerCase(attribute.name)); }
       }
+    }
+    } finally {
+      if (forwards) ordered.push(...literals.slice(literalStart), ...bindings.slice(bindingStart));
+      capturedBindings = bindings.length;
     }
   }
   if (nativeBindings.length > 0) bindings.push(`{...{ ${quote(NATIVE_BINDINGS_PROP)}: { ${nativeBindings.join(", ")} } }}`);
@@ -1257,7 +1287,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     // ponytail: an invocation that binds `class` keeps its binding and leaves the scope unlimited there.
     literals.push(`class={${quote(scopeClasses.join(" "))}}`);
   }
-  const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
+  const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...(forwards ? ordered : literals)];
   if (!component && (node.attributes.some(attribute => caseSensitiveAttribute(attribute.name)) ||
     root && rootScope!.props.some(prop => caseSensitiveAttribute(propAttribute(rootScope!.tag, prop)))) &&
     !node.attributes.some(attribute => attribute.name === "is")) {
@@ -1276,8 +1306,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : component
       ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
       : "bind:this={rootElement}");
-    if (authoredClass?.kind === "literal" && !decoratesClasses) {
-      const base = classBaseSource(node, root, scopeClasses);
+    if (!forwards && authoredClass?.kind === "literal" && !decoratesClasses) {
+      const base = forwards && ownsClasses ? "undefined" : classBaseSource(node, root, scopeClasses);
       if (component) attributes.push(`class={${base}}`);
       else {
         context.usesAttributeBinding = true;
@@ -1286,9 +1316,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         attributes.push(`{@attach ${context.bindingHelperName}("class", () => ${base})}`);
       }
     }
-    else if (!decoratesClasses && scopeClasses.length > 0) context.rootScope = scopeClasses.join(" ");
-    if (authoredStyle?.kind === "literal" && (component || !decoratesStyles)) {
-      attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
+    else if (!forwards && !decoratesClasses && scopeClasses.length > 0) context.rootScope = scopeClasses.join(" ");
+    if (!forwards && authoredStyle?.kind === "literal" && !decoratesStyles) {
+      attributes.push(`style={${quote(authoredStyle.value)}}`);
     }
     if ((scope as RootScope).stateNames.length > 0) attributes.push(`data-${(scope as RootScope).tag}-state={hostState || undefined}`);
     for (const prop of rootScope!.props) {
@@ -1302,21 +1332,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const serialized = separator === undefined
         ? `${context.reflectedPropName}(${quote(prop)}, ${value})`
         : `Array.isArray(${value}) ? ${value}.join(${separator}) : String(${value})`;
-      attributes.push(nativeAttribute(name, `${!bound ? `${context.inputNames.get(prop)} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})`, context));
+      attributes.push(...nativeAttribute(name, `${!bound ? `${context.inputNames.get(prop)} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})`, context));
     }
   }
   if (hasDecorations) {
     if (component) {
       if (decoratesClasses) {
-        context.usesInvocationClasses = true;
-        const base = classBaseSource(node, root, scopeClasses);
-        attributes.push(`class={${context.initialClassName}(${base}, ${rules})}`);
+        const base = forwards && ownsClasses ? "undefined" : classBaseSource(node, root, scopeClasses);
+        attributes.push(componentPropAttribute(childProp("class")?.[0] ?? "class", `classText(${base}, ${rules})`));
       }
-      attributes.push(`{...{ ${quote(DECORATIONS_PROP)}: ${rules} }}`);
+      if (decoratesStyles) {
+        const literal = node.attributes.find(entry => entry.kind === "literal" && entry.name === "style");
+        attributes.push(componentPropAttribute(childProp("style")?.[0] ?? "style", `styleText(${!forwards && literal?.kind === "literal" ? quote(literal.value) : quote("")}, ${rules})`));
+      }
     } else {
       context.usesDecorationAttachment = true;
       if (decoratesClasses) {
-        const base = classBaseSource(node, root, scopeClasses);
+        const base = forwards && ownsClasses ? "undefined" : classBaseSource(node, root, scopeClasses);
         context.usesAttributeBinding = true;
         if (root) context.rootAttributeBindings.add("class");
         attributes.push(`{...(typeof document === 'undefined' ? { class: classText(${base}, ${rules}, ${quote(scopeClasses.join(" "))}) } : {})}`);
@@ -1326,12 +1358,31 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "style");
         const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.style" : ""}].filter(Boolean).join("; ")`;
         const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.style == null || rest.style === false ? undefined : ${quote("")})` : "undefined";
-        attributes.push(`style={(typeof document === 'undefined' ? styleText(${base}, ${rules}) : ${base}) || ${empty}}`);
+        attributes.push(`style={(typeof document === 'undefined' ? styleText(${forwards ? quote("") : base}, ${rules}) : ${base}) || ${empty}}`);
       }
-      attributes.push(`{@attach decorate(${rules}, { scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
+      attributes.push(`{@attach decorate(${rules}, { ${forwards ? "ordered: true, " : ""}scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
     }
   }
-  attributes.push(...bindings);
+  attributes.push(...(forwards ? bindings.slice(capturedBindings) : bindings));
+  if (componentStyle) {
+    const styleRules = styleWriteRules(node.attributes, (attribute, fallback) => {
+      const plan = attribute.expressionPlan!;
+      const source = attribute.target === "style" ? lowering.text(plan.ast, scope) : lowering.attribute(plan.ast, scope, "style");
+      const read = conformingRead(plan, scope, context, source);
+      return read.invalid ? retained(context, read.source, fallback === undefined ? "Symbol.for('html-next.invalid-result')" : quote(fallback)) : read.source;
+    }, "rest");
+    const value = `styleText("", ${styleRules})`;
+    attributes.push(htmlInputs === undefined ? `style={${value}}` : `{...htmlAttributeInputs({ style: ${value} }, ${htmlInputs})}`);
+  }
+
+  if (forwards && !component && !decoratesClasses && scopeClasses.length > 0) {
+    const attachments = attributes.filter(attribute => attribute.startsWith("{@attach") || attribute.startsWith("bind:"));
+    const inputs = attributes.filter(attribute => !attachments.includes(attribute));
+    const input = context.freshIdentifier("htmlNextAttributes");
+    attributes.splice(0, attributes.length,
+      `{...((${input}: Record<string, any>) => ({ ...${input}, class: [${quote(scopeClasses.join(" "))}, ${input}.class] }))(${jsxAttributeRecord(inputs)})}`,
+      ...attachments);
+  }
   if (node.ref !== undefined) {
     context.refs.add(node.ref);
     attributes.push(`{@attach ${context.refAttachmentName}(${quote(node.ref)})}`);
@@ -1344,6 +1395,20 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     context.usesEvents = true;
     attributes.push(`{@attach (element: Element) => attachNativeEvents(element, [${nativeEvents.map((event) =>
       `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: ${context.handlerNames.get(event.handler) ?? event.handler} }`).join(", ")}])}`);
+  }
+  if (htmlInputs !== undefined) {
+    const attachments = attributes.filter(attribute => attribute.startsWith("{@attach") || attribute.startsWith("bind:"));
+    const inputs = attributes.filter(attribute => !attachments.includes(attribute)).map(attribute => {
+      if (!attribute.includes("\0") || attribute.startsWith("{")) return attribute;
+      const equals = attribute.indexOf("=");
+      return `{...{ ${quote(attribute.slice(0, equals))}: ${attribute.slice(equals + 2, -1)} }}`;
+    });
+    attributes.splice(0, attributes.length, `{...invocationProps(${jsxAttributeRecord(inputs)}, ${htmlInputs}, ${JSON.stringify([STATUS_INPUTS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP])})}`, ...attachments);
+  }
+  if (!component && (forwards || node.attributes.some(attribute => Object.hasOwn(Object.prototype, attribute.name)))) {
+    const attachments = attributes.filter(attribute => attribute.startsWith("{@attach") || attribute.startsWith("bind:"));
+    const inputs = attributes.filter(attribute => !attachments.includes(attribute));
+    attributes.splice(0, attributes.length, `{...nativeAttributes(${jsxAttributeRecord(inputs)})}`, ...attachments);
   }
   if (!component && isVoidElement(node.name)) return layoutElement(name, attributes);
   const previousBoundSelect = context.boundSelect;
@@ -1387,6 +1452,7 @@ function svelteImport(names: readonly string[]): string[] {
 /** The options `rootAttributes` takes, only those that differ from its defaults. */
 function rootAttributeOptions(scope: string | undefined, nativeRoot: boolean, omit: readonly string[], clientOmit: readonly string[], server: string | undefined): string {
   const options = [
+    "metadataOnly: true",
     ...(scope === undefined ? [] : [`scope: ${quote(scope)}`]),
     ...(nativeRoot ? [] : ["forwardBindings: true"]),
     ...(omit.length === 0 ? [] : [`omit: ${JSON.stringify(omit)}`]),
@@ -1452,7 +1518,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "applyNamespacedAttributes htmlNextPrepared htmlNextPreparationId htmlNextPlaced htmlNextAccepted checkListedProp retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext getAllContexts HtmlNextContextScope rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets reflectedProp retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "applyNamespacedAttributes htmlNextPrepared htmlNextPreparationId htmlNextPlaced htmlNextAccepted checkListedProp retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost useLifecycle propValidityState getContext setContext getAllContexts HtmlNextContextScope rootElement rootFocusPending event children slots rest rootAttrs rootMetadata nativeAttributes htmlAttributeInputs invocationProps forwardedAttrs forwardedAttributes next guard detail warnUnless write isString isNumber isInteger isBoolean rootAttributes publishState injectContext writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets reflectedProp retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of ["PropInputs", "InputBindings", "propInputs", "statusInputs", "inputVersion", "inputStatus", "inputReads", "checkPropInput", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "inputComputed", "inputRead", "inputDefault", "evaluateInput", "initializedState", "copyStateSeed"]) reserved.add(name);
   for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
@@ -1550,7 +1616,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(styles.hashed === true ? { styleOwner: definition.contract.tag } : {}),
     hostClass: styles.components !== undefined, styledComponents: new Set(styles.components ?? []),
     htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesDecorationAttachment: false, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
@@ -1757,7 +1823,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     `import type { HTMLAttributes${nativeAttributes === "HTMLAttributes" ? "" : ` as ${nativeAttributes}`} } from "svelte/elements";`,
     ...(options.modulePreparation === undefined ? [] : [`import { usePreparedModule } from ${quote(options.bindingsSpecifier ?? "./bindings.svelte")};`]),
-    ...svelteImport([...(nestedDepthLimit !== undefined || context.imports.size > 0) ? ["getContext", "setContext"] : [], ...accepted ? ["getAllContexts"] : [], ...(hasProps || usesController || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesInvocationClasses || scope.preservesRootFocus) ? ["untrack"] : []]),
+    ...svelteImport([...(nestedDepthLimit !== undefined || context.imports.size > 0) ? ["getContext", "setContext"] : [], ...accepted ? ["getAllContexts"] : [], ...(hasProps || usesController || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || scope.preservesRootFocus) ? ["untrack"] : []]),
     RENDER_IMPORT,
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(requestProps.length === 0 ? [] : [
@@ -1771,6 +1837,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(!headed ? [] : ["/* html-next head imports */"]),
     ...(computed.length > 0 || seeded.length > 0 ? [`import { cycleCheckedComputed${seeded.length > 0 ? ", initializedState" : ""} } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
+    ...(templateForwardsAttributes(definition.template) ? [`import { forwardedAttributes } from ${quote(options.attributesSpecifier ?? "./attributes")};`] : []),
     ...(!context.usesNamespacedAttributes ? [] : [`import { applyNamespacedAttributes } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, prepareHydrationControls, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared" + (usesTargetDispatch ? ", dispatchDeclaredTargets" : "")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
@@ -1779,6 +1846,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...((context.usesComponentBindings || context.usesDeclaredFormats) ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(!context.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(!context.usesHtmlInputs ? [] : [`import { htmlAttributeInputs, invocationProps } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(!context.usesEntryChecks ? [] : [`import { checkPropInput as checkListedProp } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(usesControllerTypeChecks ? [`import { acceptsControllerWrite } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps || context.usesInputStatus || computed.length > 0 || seeded.length > 0 || contexts.length > 0 ? [`import { ${hasProps ? "PropInputs, type InputBindings, checkPropInput, mountPropValidity, updatePropValidity, " : ""}requireInputStatus, READY_INPUT, UNRESOLVED_INPUT${computed.length === 0 ? "" : ", inputComputed"}${computed.length === 0 && seeded.length === 0 && !context.usesInputExpressions ? "" : ", inputRead, inputDefault"}${context.usesInputExpressions || seeded.length > 0 ? ", evaluateInput" : ""}${seeded.length === 0 ? "" : ", copyStateSeed"}${usesController && hasProps ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"}${structuredInputs.size > 0 ? ", parseHtmlLiteral" : ""} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
@@ -1849,11 +1917,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       "    const stop = observeOptions ? observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); }) : undefined;",
       "    return () => { dispose?.(); stop?.(); };",
       "  };",
-      "}",
-    ] : []),
-    ...(context.usesInvocationClasses ? [
-      `function ${context.initialClassName}(base: string | undefined, decorations: readonly Decoration[]): string | undefined {`,
-      "  return untrack(() => classText(base, decorations));",
       "}",
     ] : []),
     ...(context.usesAttributeBinding ? [
@@ -2062,9 +2125,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n${style}`;
   return { component, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(context.usesNamespacedAttributes ? ["attributes" as const] : []),
+      ...(templateForwardsAttributes(definition.template) || context.usesNamespacedAttributes ? ["attributes" as const] : []),
       ...(options.modulePreparation === undefined ? [] : ["bindings" as const]),
-      ...(hasProps || context.usesSlotPropChecks || context.usesInputStatus || computed.length > 0 || seeded.length > 0 || contexts.length > 0 || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
+      ...(hasProps || context.usesSlotPropChecks || context.usesHtmlInputs || context.usesInputStatus || computed.length > 0 || seeded.length > 0 || contexts.length > 0 || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ||
         (usesController && requestProps.length > 0) ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),

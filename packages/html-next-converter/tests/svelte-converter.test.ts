@@ -44,7 +44,7 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
   temporary.push(root);
   await writeFile(join(root, "card.html"), `<template component="x-card" status="early" summary="Card.">
     <props><prop name="label" type="string" default="Ready">Label.</prop></props>
-    <article class="card" from:aria-label="$label"><slot></slot></article>
+    <article class="card" $attributes from:aria-label="$label"><slot></slot></article>
     <style>:host { display: block; }</style>
   </template>`);
 
@@ -66,9 +66,10 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.match(html, /aria-label="Hello"/);
     assert.match(html, /id="case"/);
     // Only the root is styled, so Svelte gives no element its hash class.
-    assert.match(html, /class="x-card card outside"/);
+    assert.match(html, /class="x-card outside"/);
     const defaulted = await serverHtml(outDirectory, "XCard", source);
     assert.match(defaulted, /aria-label="Ready"/);
+    assert.match(defaulted, /class="x-card card"/);
     assert.doesNotMatch(defaulted, /data-label=/);
   }
 });

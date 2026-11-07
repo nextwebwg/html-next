@@ -21,8 +21,9 @@ Author once. Use native DOM, Vue, React, Preact, Svelte, or Angular.
 ---
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
-`@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
-converter and unplugin adapt it to other build workflows.
+`@nextwebwg/html-next` supplies component tooling; the converter and unplugin adapt it to other
+build workflows. [MarkupKit](https://github.com/threadlabs-studio/markupkit), published as
+`@threadlabs/markupkit`, provides application routing, layouts, and server rendering.
 The four HTML Next packages share one version and publish together. Shared policy and verification
 live at the repository root.
 
@@ -35,7 +36,7 @@ The command supports native, Vue, React, Preact, Svelte, and Angular targets and
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, Preact, Svelte, and Angular conversion |
-| [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
+| [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application tooling in this checkout | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
 
 Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
 
@@ -288,6 +289,10 @@ const { html, css } = await renderComponents('<x-counter id="counter"></x-counte
   state: { "#counter": { count: 5 } },
 });
 ```
+
+The counter's template uses `$attributes` on its root to forward `id="counter"`.
+Choose an explicit destination for unclaimed invocation attributes, following the
+[proposal's attribute forwarding rules](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
 
 Serve the returned markup and styles. In the browser, register the same definitions through
 `registerComponentDefinitions()` and call `lowerDocument()` or `observeDocument()` from the runtime

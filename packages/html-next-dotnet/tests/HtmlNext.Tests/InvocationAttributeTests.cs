@@ -11,7 +11,7 @@ public sealed class InvocationAttributeTests
     {
         var template = HtmlNextCompiler.CompileResource("""
             <template component="x-leaf"><defs><prop name="é" type="string">Lower.</prop><prop name="É" type="string">Upper.</prop></defs><b>{$é}:{$É}</b></template>
-            <template component="x-wrap"><x-leaf></x-leaf></template>
+            <template component="x-wrap"><x-leaf $attributes></x-leaf></template>
             <template component="x-page"><main><x-wrap é="lower" É="upper"></x-wrap></main></template>
             """).Template("x-page");
         Assert.Equal("<main><b>lower:upper</b></main>", template.Render());
@@ -21,7 +21,7 @@ public sealed class InvocationAttributeTests
     public async Task SnapshotsForwardedCallerDataOnceAndIsolatesConcurrentRenders()
     {
         var template = HtmlNextCompiler.CompileResource("""
-            <template component="x-leaf"><b>Leaf</b></template>
+            <template component="x-leaf"><b $attributes>Leaf</b></template>
             <template component="x-page"><defs><prop name="row" type="object({ label: string, id: integer })">Row.</prop></defs><main><x-leaf from:title="$row.label" from:data-id="$row.id"></x-leaf></main></template>
             """).Template("x-page");
         await Task.WhenAll(Enumerable.Range(0, 16).Select(index => Task.Run(() =>

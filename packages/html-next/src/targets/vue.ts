@@ -1,3 +1,7 @@
+import { literalValueSource } from "./shared.js";
+import { templateForwardsAttributes } from "../template.js";
+import { invocationSchema } from "./invocation-attributes.js";
+import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { ITERATION_INDEX } from "../expression.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { namespacedAttributeSource } from "./shared.js";
@@ -62,14 +66,15 @@ import { category, inputScope, Lowering, mayProduceInvalidResult, present, prove
 import { destinationTypeCheck, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
-const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "shallowRef", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
+const VUE_APIS = ["normalizeStyle", "computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "shallowRef", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
+  "CSSProperties",
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "classText", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
-  "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
-  "vClassBindings", "classBindingsState", "classBindingText", "ClassBindingInput", "initializeClassBindings", "applyClassBindings", "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
+  "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "rootMetadata", "htmlAttributeInputs", "invocationProps", "preservePropInput", "styleText", "forwardedAttributes", "checkHydratedRoot",
+  "vAttributeBindings", "attributeBindingsState", "writeAttributeBindings", "AttributeBinding", "attributeBindingProps", "AttributeWriteState", "applyOrderedAttributes", "vClassBindings", "classBindingsState", "classBindingText", "ClassBindingInput", "initializeClassBindings", "applyClassBindings", "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
@@ -154,6 +159,9 @@ function writableTarget(path: readonly WritablePathSegment[], scope: Scope, lowe
 }
 
 interface Context {
+  usesHtmlInputs?: boolean;
+  usesPreservedProps?: boolean;
+  usesStyle?: boolean;
   readonly modulePreparation: boolean;
   readonly availability: ReadonlyMap<string, string>;
   readonly observe: (scope: Scope) => Scope;
@@ -210,7 +218,7 @@ interface Context {
 }
 
 /** Retain a refused result in Vue's existing computed owner. */
-function guardedBinding(plan: CompiledExpression, names: Names, context: Context, emit: (scope: Scope) => string, structural = false): string | undefined {
+function guardedBinding(plan: CompiledExpression, names: Names, context: Context, emit: (scope: Scope) => string, structural = false, initial = "null"): string | undefined {
   if (plan.dependencies.some(dependency => {
     const root = dependency.split(".")[0]!;
     return !context.globals.has(root) || names.locals?.has(root);
@@ -221,7 +229,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
   if (structural) {
     context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { const value: any = ${output}; if (!${accepts}(value)) return ${name}Previous; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
   } else {
-    context.guarded.push(`let ${name}Previous: any = null;`, `const ${name} = computed(() => { const value: any = ${output}; return ${accepts}(value) ? (${name}Previous = value) : ${name}Previous; });`);
+    context.guarded.push(`let ${name}Previous: any = ${initial};`, `const ${name} = computed(() => { const value: any = ${output}; return ${accepts}(value) ? (${name}Previous = value) : ${name}Previous; });`);
   }
   return name;
 }
@@ -320,7 +328,7 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
       for (const child of node.fallback ?? []) visit(child, known);
       return;
     }
-    for (const attribute of node.attributes) if (attribute.kind !== "literal") dependencies(attribute.expressionPlan, known);
+    for (const attribute of node.attributes) if (attribute.kind !== "literal" && attribute.kind !== "forward") dependencies(attribute.expressionPlan, known);
     for (const child of node.children) visit(child, known);
   };
   const known = new Set(scope.code.keys());
@@ -632,6 +640,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const literals: string[] = [];
   const attributes: string[] = [];
   const namespacedAttributes: string[] = [];
+  const retainedAttributes: string[] = [];
   const nativeControl = !component && ["input", "textarea", "select"].includes(node.name);
   const authoredDefault = (bindingName: "value" | "checked"): string => {
     if (bindingName === "checked") {
@@ -663,6 +672,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const literalClass = node.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "class");
   const styles: string[] = [];
   const bindingInputs: string[] = [];
+  const attributeInputs: string[] = [];
   const inputSnapshots: { readonly name: string; readonly source: string }[] = [];
   const reflected = isRoot && !component
     ? Object.entries(context.definition.contract.props).map(([propName]) => {
@@ -673,8 +683,49 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     })
     : [];
   const reflectedNames = new Set(reflected.map(({ attributeName }) => attributeName));
+  const forwards = node.attributes.some(attribute => attribute.kind === "forward");
+  const componentStyle = component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  if (componentStyle) context.usesStyle = true;
+  const declaredStyle = component && Object.hasOwn(context.propContractsByTag?.get(node.name) ?? {}, "style");
+  const preservedStyle = component && (forwards || node.attributes.some(write => write.name === "style" || write.kind === "attribute" && write.target === "style"));
+  if (preservedStyle) context.usesPreservedProps = true;
+  const orderedStyles = forwards && !component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  let orderedStyleValue = "{}";
+  const htmlInputs = component && (forwards || componentStyle) && Object.keys(context.propContractsByTag?.get(node.name) ?? {}).length > 0
+    ? invocationSchema(context.propContractsByTag!.get(node.name)!) : undefined;
+  if (htmlInputs !== undefined) context.usesHtmlInputs = true;
+  const ordered: string[] = [];
   let content: string | undefined;
   for (const attribute of node.attributes) {
+    if (attribute.kind === "forward") {
+      if (keyedClasses) classes.push(`[null, $attrs.class == null ? Symbol.for('html-next.no-attribute') : $attrs.class]`);
+      const omitted = [...keyedClasses ? ["class"] : [], ...orderedStyles ? ["style"] : []];
+      const native = context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)";
+      if (orderedStyles) orderedStyleValue = `(Object.hasOwn(forwardedAttributes(${native}), "style") ? (normalizeStyle([${native}.style]) as CSSProperties) : ${orderedStyleValue})`;
+      const forwarded = `forwardedAttributes(${native}${omitted.length === 0 ? "" : `, ${JSON.stringify(omitted)}`})`;
+      ordered.push(`...${htmlInputs === undefined ? forwarded : `htmlAttributeInputs(${forwarded}, ${htmlInputs})`}`);
+      continue;
+    }
+    if (componentStyle && isStyleWrite(attribute)) continue;
+    if (forwards && attribute.kind === "literal" && node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+    if (preservedStyle && attribute.kind === "literal" && attribute.name === "style") {
+      const contract = context.propContractsByTag?.get(node.name)?.style;
+      const parsed = contract === undefined ? undefined : parseTypedValue(attribute.value, contract.type, "$", "html");
+      ordered.push(`style: ${parsed?.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}`);
+      continue;
+    }
+    if (orderedStyles && attribute.kind === "literal" && attribute.name === "style") {
+      orderedStyleValue = `(normalizeStyle([${quote(attribute.value)}]) as CSSProperties)`;
+      continue;
+    }
+    if (forwards && keyedClasses && attribute.kind === "literal" && attribute.name === "class") { classes.push(`[null, ${quote(attribute.value)}]`); continue; }
+    if (forwards && attribute.kind === "literal" && !(keyedClasses && attribute.name === "class")) {
+      const contracts = component ? context.propContractsByTag?.get(node.name) : undefined;
+      const prop = Object.keys(contracts ?? {}).find(name => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name);
+      const parsed = prop === undefined ? undefined : parseTypedValue(attribute.value, contracts![prop]!.type, "$", "html");
+      ordered.push(`${objectKey(prop ?? (Object.hasOwn(Object.prototype, attribute.name) ? attribute.name === "__proto__" ? "__Proto__" : attribute.name[0]!.toUpperCase() + attribute.name.slice(1) : svgAttributeName(attribute.name)))}: ${parsed?.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}`);
+      continue;
+    }
     if (!component && attribute.kind === "attribute" && !attribute.twoWay && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class")) {
       const value = attribute.expressionPlan!.ast;
       classes.push(`[${attribute.target === "class" ? quote(attribute.name) : "null"}, ${attribute.target === "class" ? lowering.condition(value, names.template) : lowering.attribute(value, names.template, "class")}]`);
@@ -690,6 +741,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         node.attributes.some((candidate) => candidate.kind === "property" && candidate.name === attribute.name);
       const typed = component ? literalPropBinding(attribute.name, attribute.value, context.propContractsByTag?.get(node.name)) : undefined;
       if (typed !== undefined) literals.push(typed);
+      else if (attribute.name === "__proto__") attributeInputs.push(`${objectKey(component ? "__Proto__" : attribute.name)}: ${quote(attribute.value)}`);
       else if (!reflectedNames.has(attribute.name) && !propertyOwnsControl) literals.push(`${attribute.name}=${attributeValue(attribute.value)}`);
     } else if (attribute.kind === "attribute" && reflectedNames.has(attribute.name) && attribute.twoWay !== true) {
       // The runtime's prop reflection is the final writer for this data-* attribute.
@@ -724,7 +776,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       // Vue types a style value as never null. A number is the text the DOM stores, and TypeScript
       // reads `?? undefined` after arithmetic as dead code.
       const styleType = typeOf(value, names.template);
-      styles.push(`${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`);
+      const property = `${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`;
+      if (orderedStyles) orderedStyleValue = `{ ...(${orderedStyleValue}), ${property} }`;
+      else styles.push(property);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
       const available = attribute.writablePath.slice(0, -1).map((_, index) => `${writableTarget(attribute.writablePath!.slice(0, index + 1), names.template, lowering)} != null && `).join("");
@@ -776,8 +830,10 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         continue;
       }
       const namespaced = !component && attributeNamespace(attribute.name) !== undefined;
+      const fallback = node.attributes.find(binding => binding.kind === "literal" && binding.name === attribute.name);
+      const initial = !forwards ? "null" : fallback?.kind === "literal" ? quote(fallback.value) : "Symbol.for('html-next.invalid-result')";
       const guarded = plan === undefined || namespaced ? undefined : guardedBinding(plan, names, context, (scope) =>
-        component ? lowering.value(value, scope) : attributeValueFor(scope));
+        component ? lowering.value(value, scope) : attributeValueFor(scope), false, initial);
       const adjusted = component ? attribute.name : svgAttributeName(attribute.name);
       if (propName !== undefined && value.kind === "id") {
         const read = names.template.code.get(value.name);
@@ -788,20 +844,41 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       }
       const rendered = guarded ?? (component ? lowering.value(value, names.template) : attributeValueFor(names.template));
       if (namespaced) namespacedAttributes.push(namespacedAttributeSource(adjusted, rendered));
+      else if (!component && !forwards && guarded === undefined && plan !== undefined && mayProduceInvalidResult(plan.ast, names.template)) {
+        retainedAttributes.push(`[${quote(adjusted)}, ${rendered}${fallback?.kind === "literal" ? `, ${quote(fallback.value)}` : ""}]`);
+      }
+      else if (component && propName === undefined && (adjusted === "class" || adjusted === "style" || adjusted === "__proto__")) attributeInputs.push(`...(${rendered} == null ? {} : { ${objectKey(adjusted === "__proto__" && component ? "__Proto__" : adjusted)}: ${rendered} })`);
+      else if (orderedStyles && attribute.name === "style") orderedStyleValue = `(${rendered} === Symbol.for('html-next.invalid-result') ? ${orderedStyleValue} : (normalizeStyle([${rendered}]) as CSSProperties))`;
+      else if (forwards || declaredStyle && attribute.name === "style") ordered.push(guarded === undefined ? `${objectKey(adjusted === "__proto__" && component ? "__Proto__" : adjusted)}: ${rendered}` : `...(${rendered} === Symbol.for('html-next.invalid-result') ? {} : { ${objectKey(adjusted === "__proto__" && component ? "__Proto__" : adjusted)}: ${rendered} })`);
       else attributes.push(`:${adjusted}${nativeAttribute || adjusted !== attribute.name ? ".attr" : ""}=${bound(rendered)}`);
     }
   }
+  if (componentStyle) {
+    const rules = styleWriteRules(node.attributes, (attribute, fallback) => {
+      const plan = attribute.expressionPlan!;
+      const read = (scope: Scope) => attribute.target === "style" ? lowering.text(plan.ast, scope) : lowering.attribute(plan.ast, scope, "style");
+      return guardedBinding(plan, names, context, read, false, fallback === undefined ? "Symbol.for('html-next.invalid-result')" : quote(fallback)) ?? read(names.template);
+    }, context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)");
+    const value = `styleText("", ${rules})`;
+    ordered.push(htmlInputs === undefined ? `style: ${value}` : `...htmlAttributeInputs({ style: ${value} }, ${htmlInputs})`);
+  }
   if (namespacedAttributes.length > 0) attributes.push(`v-namespaced-attributes=${bound(`[${namespacedAttributes.join(", ")}]`)}`);
+  if (retainedAttributes.length > 0) attributes.push(`v-attribute-bindings=${bound(`[${retainedAttributes.join(", ")}]`)}`);
   const inputs = bindingInputs.length === 0 ? undefined : `[BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} }`;
   // A delegated root's inputs join its consumer's attributes: Vue rejects a second object `v-bind`.
-  if (inputs !== undefined && !isRoot) attributes.push(`v-bind=${bound(`{ ${inputs} }`)}`);
+  if (forwards || isRoot || ordered.length > 0 || attributeInputs.length > 0 || inputs !== undefined) {
+    const record = `{ ${[...isRoot ? [`...rootMetadata(${context.modulePreparation ? "moduleBindings.attributes($attrs)" : "$attrs"})`] : [], ...ordered, ...attributeInputs, ...inputs === undefined ? [] : [inputs]].join(", ")} }`;
+    const values = htmlInputs === undefined ? record : `invocationProps(${record}, ${htmlInputs})`;
+    attributes.push(`v-bind=${bound(preservedStyle ? `preservePropInput(${values}, "style")` : values)}`);
+  }
   if (classes.length > 0) {
     if (component) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
     else {
-      attributes.push(`v-class-bindings=${bound(`{ base: ${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
+      attributes.push(`v-class-bindings=${bound(`{ ${forwards ? "ordered: true, " : ""}base: ${forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
     }
   }
-  if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
+  if (orderedStyles) attributes.push(`:style=${bound(orderedStyleValue)}`);
+  else if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
   for (const event of node.events ?? []) {
     const handler = context.handlers.get(event.handler);
     if (handler === undefined) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
@@ -821,11 +898,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     attributes.push(`ref=${quote(context.refs.get(node.ref)!)}`);
   }
   if (isRoot) {
-    // The consumer's attributes win over the template's literals and lose to its bindings, as in
-    // the runtime; Vue combines class and style itself.
     const tag = context.definition.contract.tag;
-    const rootAttrs = context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)";
-    literals.push(inputs === undefined ? `v-bind=${bound(rootAttrs)}` : `v-bind=${bound(`{ ...${rootAttrs}, ${inputs} }`)}`);
     if (context.validityValues !== undefined) {
       attributes.push(`v-prop-validity=${bound(`{ contract: propValidityContract, values: ${context.validityValues} }`)}`);
     }
@@ -1000,7 +1073,7 @@ export interface VueConversionOptions {
   readonly guardNestedDepth?: boolean;
   /** Public graph output can relocate components into nested source-mirrored directories. */
   readonly importSpecifier?: (tag: string) => string;
-  readonly helperSpecifier?: (name: "attributes" | "host" | "html" | "control" | "props" | "requests" | "head" | "bindings") => string;
+  readonly helperSpecifier?: (name: "attributes" | "host" | "html" | "control" | "props" | "requests" | "head" | "bindings" | "style") => string;
   /**
    * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
@@ -1211,13 +1284,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return renderElement(arm, names, context, true, [directive]);
     }).join("\n")
     : renderElement(elementMatchRoot(template), rootNames, context, true);
-  const hydrationExpectedTag = arms === undefined ? quote(elementMatchRoot(template).name)
+  // A delegated component checks its own selected native root during setup.
+  const hydrationRoot = (element: ElementNode): string => options.componentGraph?.has(element.name) === true ? "null" : quote(element.name);
+  const hydrationExpectedTag = arms === undefined ? hydrationRoot(elementMatchRoot(template))
     : arms.reduceRight((fallback, arm) => {
       const flow = arm.flow!;
-      if (flow.kind === "else") return quote(arm.name);
+      if (flow.kind === "else") return hydrationRoot(arm);
       if (flow.kind !== "when") fail("HT018", `A root $match child in <${contract.tag}> must be a $when or $else arm.`);
       const test = lowering.condition(ast(flow.testPlan, flow.test), names.script);
-      return `(${test}) ? ${quote(arm.name)} : (${fallback})`;
+      return `(${test}) ? ${hydrationRoot(arm)} : (${fallback})`;
     }, "undefined");
   const hydrationInstanceName = identifiers.take("hydrationInstance", "");
   const nestedDepthName = options.guardNestedDepth ? identifiers.take("nestedDepth", "") : undefined;
@@ -1353,7 +1428,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(target.props.length > 0 || requestPropDefinitions.length === 0 ? [] : ["const props = defineProps({", ...requestPropDefinitions, "});"]),
     ...(target.props.length === 0 ? [] : [
-      `const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })} as const;`,
+      `const propValidityContract = ${literalValueSource({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })} as const;`,
       "const props = defineProps({",
       ...propDefinitions,
       ...requestPropDefinitions,
@@ -1473,11 +1548,11 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   // The shared module holds what every component's host and dispatcher do the same way.
   const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
-    "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
+    "nativeAttrs", "rootMetadata", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
     "inlineTextSegment", "RetainedInlineText", "RetainedSlotValues", "ScopedSlotOutlet", "KeyedBoundary", "useChildList", "useChildEntry", "ChildNodes", "ChildSlot", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)),
     ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks || context.outletProps.length > 0 ? ["warnUnless"] : []])].sort();
-  const vueTypes = target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"];
+  const vueTypes = [...(target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"]), ...apis.includes("normalizeStyle") ? ["CSSProperties"] : []];
   const requestHelpers = (definition.module ?? definition.controller) === undefined ? [] : REQUEST_HELPERS.filter((name) => new RegExp(`\\b${name}\\(`).test(code));
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
@@ -1499,6 +1574,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       `import type { ${REQUEST_TYPES.join(", ")} } from ${quote(options.helperSpecifier?.("requests") ?? VUE_REQUESTS_SPECIFIER)};`,
     ]),
     ...(!rootMarkup.includes("v-namespaced-attributes=") ? [] : [`import { applyNamespacedAttributes, namespacedAttributeProps, type NamespacedAttribute } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
+    ...(!rootMarkup.includes("v-attribute-bindings=") ? [] : [`import { applyOrderedAttributes, attributeBindingProps, type AttributeBinding, type AttributeWriteState } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
     ...(!headed ? [] : [
       `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\(`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
@@ -1513,6 +1589,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(!rootMarkup.includes("v-class-bindings=") ? [] : [`import { classBindingText, initializeClassBindings, applyClassBindings, type ClassBindingInput } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.vue`)};`),
     "",
+    ...(!rootMarkup.includes("v-attribute-bindings=") ? [] : [
+      'const attributeBindingsState = new WeakMap<Element, AttributeWriteState>();',
+      'const writeAttributeBindings = (element: Element, binding: { value: readonly AttributeBinding[] }): void => {',
+      '  let state = attributeBindingsState.get(element);',
+      '  if (state === undefined) { state = { values: [], forwarded: [] }; attributeBindingsState.set(element, state); }',
+      '  applyOrderedAttributes(element, binding.value.map(([name, value, fallback]) => [name, value, undefined, fallback] as const), state);',
+      '};',
+      'const vAttributeBindings = { getSSRProps: (binding: { value: readonly AttributeBinding[] }) => attributeBindingProps(binding.value), mounted: writeAttributeBindings, updated: writeAttributeBindings };',
+    ]),
     ...(!rootMarkup.includes("v-namespaced-attributes=") ? [] : [
       'const vNamespacedAttributes = {',
       '  getSSRProps: (binding: { value: readonly NamespacedAttribute[] }) => namespacedAttributeProps(binding.value),',
@@ -1528,6 +1613,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       '  updated: (element: Element, binding: { value: ClassBindingInput }) => applyClassBindings(element, binding.value, classBindingsState.get(element)!),',
       '};',
     ]),
+    ...(templateForwardsAttributes(definition.template) ? [`import { forwardedAttributes } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`] : []),
+    ...(!context.usesStyle ? [] : [`import { styleText } from ${quote(options.helperSpecifier?.("style") ?? "./style/style.js")};`]),
+    ...(!context.usesPreservedProps ? [] : [`import { preservePropInput } from ${quote(options.helperSpecifier?.("props") ?? "./props")};`]),
+    ...(!context.usesHtmlInputs ? [] : [`import { htmlAttributeInputs, invocationProps } from ${quote(options.helperSpecifier?.("props") ?? "./props")};`]),
     "defineOptions({ inheritAttrs: false });",
     "",
     ...body,

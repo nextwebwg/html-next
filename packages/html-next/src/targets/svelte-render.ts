@@ -5,6 +5,7 @@
  * only the ones a component imports. It is a `.svelte.ts` module because its attachments use runes.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { ROOT_METADATA_SOURCE } from "../generated/dom-attributes-source.js";
 import { INPUT_STATUS_SOURCE } from "./shared-generated.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 import { formatSvelteScript } from "./vue-format.js";
@@ -18,22 +19,22 @@ export const SVELTE_RENDER_SPECIFIER = "./render.svelte";
 // authored HTML attribute or a declared public prop name.
 export const SLOTS_PROP = "\0html-next:slots";
 export const ROOT_OWNER_PROP = "\0html-next:root-owner";
-export const DECORATIONS_PROP = "\0html-next:decorations";
 export const BINDING_INPUTS_PROP = "\0html-next:binding-inputs";
 export const LITERAL_INPUTS_PROP = "\0html-next:literal-inputs";
 export const NATIVE_BINDINGS_PROP = "\0html-next:native-bindings";
 /** A component's `as` lists, by slot (`childList`), and an accepted child's place in one (`ownChild`). */
 export const LISTS_PROP = "\0html-next:lists";
 export const ENTRY_PROP = "\0html-next:entry";
-const INTERNAL_PROPS = [ROOT_OWNER_PROP, DECORATIONS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP, SLOTS_PROP, LISTS_PROP, ENTRY_PROP];
+const INTERNAL_PROPS = [ROOT_OWNER_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP, SLOTS_PROP, LISTS_PROP, ENTRY_PROP];
 
 /** Helpers a component calls by these names; the expression helpers come from its lowering. */
 export const SVELTE_RENDER_COMPONENTS = ["formatValue", "isString", "isNumber", "isInteger", "isBoolean", "rootAttributes",
-  "retainedValue", "retainedStructuralValue", "writePath", "checkedSlot", "setProperty",
+  "rootMetadata", "nativeAttributes", "retainedValue", "retainedStructuralValue", "writePath", "checkedSlot", "setProperty",
   "decorate", "hostStateTokens", "publishState", "injectContext", "reflectedProp", "childList", "childSlot", "ownChild", "acceptChildren"] as const;
 
 const SOURCE = `import { getContext, setContext, untrack, type Snippet } from "svelte";
 ${INPUT_STATUS_SOURCE}
+${ROOT_METADATA_SOURCE}
 import { createAttachmentKey } from "svelte/attachments";
 
 /** Structured metadata retains its initial serialization while rendered bindings stay live. */
@@ -50,23 +51,25 @@ export function reflectedProp(): (name: string, value: unknown) => string | unde
 ${expressionHelpersSource()}
 
 /**
- * The root's attributes, as one spread: the consumer's, without the props converted components pass
- * each other, and \`scope\`, the classes that scope the component's styles and its parent's, before
- * the consumer's. A root that is another component forwards its native bindings to it. An
- * attachment registers the root and writes \`constructor\` and \`__proto__\`, which Svelte's spread
- * reads through the prototype.
+ * Compose an authored attribute spread or the root's renderer records. Root records include
+ * programmatic Svelte attachments and delegated native bindings. An authored spread can carry
+ * style-scope classes and HTML attribute spellings safe for Svelte's property lookup.
  */
-export function rootAttributes(rest: () => Record<string, unknown>, options: { scope?: string; forwardBindings?: boolean; omit?: readonly string[]; clientOmit?: readonly string[]; server?: () => Record<string, unknown> } = {}): () => Record<string, unknown> {
+export function rootAttributes(rest: () => Record<string, unknown>, options: { metadataOnly?: boolean; scope?: string; forwardBindings?: boolean; omit?: readonly string[]; clientOmit?: readonly string[]; server?: () => Record<string, unknown> } = {}): () => Record<string, unknown> {
   const attach = createAttachmentKey();
-  const prototype = prototypeAttributes(rest);
+  const prototype = (element: Element) => { if (options.metadataOnly) roots.add(element); };
   const attrs = $derived.by(() => {
     const props = rest();
-    const attrs = Object.assign(Object.create(null) as Record<string | symbol, unknown>, props);
+    const attrs = Object.assign(Object.create(null) as Record<string | symbol, unknown>, options.metadataOnly ? rootMetadata(props) : props);
+    if (options.metadataOnly) {
+      for (const key of Object.getOwnPropertySymbols(props)) if (key.description === attach.description) attrs[key] = Reflect.get(props, key);
+      if (options.forwardBindings && Object.hasOwn(props, ${JSON.stringify(NATIVE_BINDINGS_PROP)})) attrs[${JSON.stringify(NATIVE_BINDINGS_PROP)}] = props[${JSON.stringify(NATIVE_BINDINGS_PROP)}];
+    }
     for (const name of [...${JSON.stringify(INTERNAL_PROPS)}, ...(options.forwardBindings ? [] : [${JSON.stringify(NATIVE_BINDINGS_PROP)}]), ...(options.omit ?? [])]) Reflect.deleteProperty(attrs, name);
     if (typeof document === "undefined") {
       for (const [name, value] of Object.entries(options.server?.() ?? {})) if (value !== undefined) attrs[name] = value;
     } else {
-      for (const name of [...(options.clientOmit ?? []), "constructor", "__proto__"]) Reflect.deleteProperty(attrs, name);
+      for (const name of options.clientOmit ?? []) Reflect.deleteProperty(attrs, name);
     }
     if (options.scope !== undefined) attrs.class = [options.scope, props.class];
     attrs[attach] = prototype;
@@ -76,29 +79,41 @@ export function rootAttributes(rest: () => Record<string, unknown>, options: { s
   return () => attrs;
 }
 
+const prototypeAttachment = createAttachmentKey();
+
+/** Svelte's attribute alias table inherits prototype names; write those through the DOM after folding. */
+export function nativeAttributes(input: Record<string, unknown>): Record<string, unknown> {
+  let special: Map<string, unknown> | undefined;
+  let attrs: Record<string | symbol, unknown> | undefined;
+  for (const name in input) {
+    if (!Object.hasOwn(input, name)) continue;
+    const lower = name.toLowerCase();
+    if (lower !== "constructor" && lower !== "__proto__") continue;
+    special ??= new Map();
+    attrs ??= Object.assign(Object.create(null) as Record<string | symbol, unknown>, input);
+    special.set(lower, input[name]);
+    Reflect.deleteProperty(attrs, name);
+  }
+  if (special === undefined || attrs === undefined) return input;
+  const values = special;
+  if (typeof document === "undefined") {
+    for (const [name, value] of values) attrs[name] = value;
+  } else attrs[prototypeAttachment] = (element: Element) => {
+    for (const [name, value] of values) {
+      if (value == null || value === false) element.removeAttribute(name);
+      else element.setAttribute(name, value === true ? "" : String(value));
+    }
+    return () => { for (const name of values.keys()) element.removeAttribute(name); };
+  };
+  return attrs;
+}
+
 const roots = new WeakSet<Element>();
 
 /** The root of the converted component an element is part of: the element or its nearest ancestor that is one. */
 export function componentRoot(element: Element | null): Element | null {
   while (element !== null && !roots.has(element)) element = element.parentElement;
   return element;
-}
-
-function prototypeAttributes(rest: () => Record<string, unknown>) {
-  return (element: Element) => {
-    roots.add(element);
-    for (const name of ["constructor", "__proto__"]) {
-      let written = false;
-      $effect(() => {
-        const props = rest();
-        const value: unknown = props[name];
-        const present = Object.keys(props).includes(name) && value != null && value !== false;
-        if (present) element.setAttribute(name, String(value));
-        else if (written) element.removeAttribute(name);
-        written = present;
-      });
-    }
-  };
 }
 
 /** A value that keeps its last accepted value while an expression is invalid. */
@@ -384,9 +399,30 @@ export function setProperty(name: string, read: () => unknown) {
 }
 
 /** An attachment that toggles classes and sets style properties from their values, writing only a result that differs from its last. */
-export function decorate(decorations: readonly { readonly kind: "class" | "style" | "attribute"; readonly name: string; readonly read: () => unknown }[], options: { scope?: string; hashed?: boolean } = {}) {
+export function decorate(decorations: readonly { readonly kind: "class" | "style" | "attribute"; readonly name: string; readonly read: () => unknown }[], options: { scope?: string; hashed?: boolean; ordered?: boolean } = {}) {
   return (element: Element) => {
     const scope = [options.scope, options.hashed ? element.getAttribute("class") : null].filter(Boolean).join(" ");
+    if (options.ordered) {
+      const previous: unknown[] = [];
+      $effect(() => {
+        const candidates = decorations.map(decoration => decoration.read());
+        for (const [index, candidate] of candidates.entries()) if (candidate === Symbol.for("html-next.no-attribute") && index in previous) { element.removeAttribute(decorations[index]!.name === "style" ? "style" : "class"); delete previous[index]; }
+        for (const [index, decoration] of decorations.entries()) {
+          const candidate = candidates[index];
+          if (candidate === Symbol.for("html-next.no-attribute")) continue;
+          const value = candidate === Symbol.for("html-next.invalid-result") && index in previous ? previous[index] : candidate;
+          if (value === Symbol.for("html-next.invalid-result")) continue;
+          previous[index] = value;
+          if (decoration.kind === "class") element.classList.toggle(decoration.name, Boolean(value));
+          else if (decoration.kind === "attribute") {
+            const attribute = decoration.name === "style" ? "style" : "class";
+            const text = attribute === "style" || scope === "" ? value == null ? null : String(value) : value == null ? scope : String(value) + " " + scope;
+            if (text == null) element.removeAttribute(attribute); else element.setAttribute(attribute, text);
+          } else (element as HTMLElement).style.setProperty(decoration.name, value == null ? "" : String(value));
+        }
+      });
+      return;
+    }
     for (const decoration of decorations) {
       let last: unknown;
       $effect(() => {

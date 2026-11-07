@@ -18,6 +18,22 @@ const checker = require.resolve("vue-tsc/bin/vue-tsc.js");
 const modules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const shell = process.platform === "win32";
 
+it("checks row-local native bindings and forwarded style modifiers", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "html-next-vue-local-attributes-"));
+  try {
+    await symlink(modules, join(directory, "node_modules"), "dir");
+    await writeFile(join(directory, "rows.html"), `<template component="x-rows"><defs>
+      <state name="rows" type="list(number)" value="[1]"></state><state name="divisor" type="number" value="1"></state>
+      </defs><section $attributes style:--local="concat($divisor, 'px')"><button $each="row of $rows" from:aria-selected="$row / $divisor = 1">Row</button></section></template>`);
+    await convertComponents({ target: "vue", mode: "application", root: directory, outDirectory: directory, entries: ["rows.html"] });
+    await writeFile(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, skipLibCheck: true, module: "ESNext",
+      moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true, noEmit: true },
+      include: ["vue/**/*.vue", "vue/**/*.ts"] }));
+    try { await run(process.execPath, [checker, "-p", join(directory, "tsconfig.json")], { cwd: directory }); }
+    catch (error) { assert.fail((error as { stdout: string }).stdout); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 it("infers selected props from an independently installed Vue library's declarations", async () => {
   const directory = await mkdtemp(join(tmpdir(), "html-next-installed-vue-types-"));
   try {
@@ -83,7 +99,7 @@ it("types an invocation's literal props as the values the live runtime parses", 
     await convertComponents({ target: "vue", mode: "application", root: directory, outDirectory: directory, entries: ["editor.html"] });
     const editor = await readFile(join(directory, "vue", "XEditor.vue"), "utf8");
     // A bare boolean attribute is `true`, as HTML presence reads; a string prop stays an attribute.
-    assert.match(editor, /<XToolbar :floating="true" :docked="false" :count="3" label="Tools" \/>/);
+    assert.match(editor, /<XToolbar\s+:floating="true"\s+:docked="false"\s+:count="3"\s+label="Tools"\s*\/>/);
     await writeFile(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, skipLibCheck: true, module: "ESNext",
       moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true, noEmit: true },
       include: ["vue/**/*.vue", "vue/**/*.ts"] }));

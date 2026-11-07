@@ -292,7 +292,20 @@ export type TemplateAttribute =
   | LiteralAttribute
   | AttributeBinding
   | PropertyBinding
+  | ForwardAttributes
   | DirectiveAttribute;
+
+/** Whole presentation bindings and their keyed writes share one authored-order update. */
+export function orderedAttributeWrites(attributes: readonly TemplateAttribute[], invocation = false): boolean {
+  return attributes.some(attribute => attribute.kind === "forward"
+    || attribute.kind === "attribute" && attribute.target !== undefined && (invocation || attributes.some(binding =>
+      binding.kind === "attribute" && binding.target === undefined && !binding.twoWay && binding.name === attribute.target)));
+}
+
+export interface ForwardAttributes {
+  readonly kind: "forward";
+  readonly name: "attributes";
+}
 
 /** A `$`-directive that sets an element's content: `$value` (escaped text) or `$html` (sanitized). */
 export interface DirectiveAttribute {
@@ -368,4 +381,11 @@ export function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<s
   walk(definition.template, false);
   iteratedRefs.set(definition, names);
   return names;
+}
+
+/** Whether any authored destination forwards inputs, including destinations in future branches. */
+export function templateForwardsAttributes(node: TemplateNode): boolean {
+  return node.kind === "element"
+    ? node.attributes.some(attribute => attribute.kind === "forward") || node.children.some(templateForwardsAttributes)
+    : node.kind === "slot" && (node.fallback?.some(templateForwardsAttributes) ?? false);
 }

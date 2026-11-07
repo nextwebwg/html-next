@@ -13,6 +13,16 @@ import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeSc
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
+describe("explicit attribute forwarding destinations", () => {
+  for (const body of ['<button $attributes="attrs">Save</button>', '<section><template $attributes>Body</template></section>',
+    '<section><slot $attributes></slot></section>', '<section><template $slot $attributes></template></section>']) {
+    it(`rejects a forwarding directive without a rendered destination: ${body}`, () => {
+      assert.throws(() => parseComponent(`<template component="x-forward">${body}</template>`),
+        (error: unknown) => error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT012");
+    });
+  }
+});
+
 describe("head content outside <defs>", () => {
   it("rejects a head element placed directly in a carrier", () => {
     const source = '<template component="page-products"><defs><prop name="label" type="string">Label</prop></defs>' +
@@ -661,6 +671,7 @@ describe("parseComponent", () => {
       if (attribute.kind !== "attribute") return attribute;
       return { kind: attribute.kind, name: attribute.name, expression: attribute.expression };
     }), [
+      { kind: "forward", name: "attributes" },
       { kind: "literal", name: "data-x-button", value: "" },
       { kind: "attribute", name: "data-variant", expression: "$variant" },
       { kind: "attribute", name: "data-size", expression: "$size" },

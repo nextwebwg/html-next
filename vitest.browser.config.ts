@@ -18,6 +18,7 @@ const config = mergeConfig(baseConfig, {
 config.test!.include = [
   "packages/html-next-unplugin/tests/hydration-browser.test.ts",
   "packages/html-next/tests/await-browser.test.ts",
+  "packages/html-next/tests/attribute-forwarding-browser.test.ts",
   "packages/htmlkit/tests/browser.test.ts",
   "packages/htmlkit/tests/client-navigation.test.ts",
   "packages/html-next/tests/browser-loader.test.ts",

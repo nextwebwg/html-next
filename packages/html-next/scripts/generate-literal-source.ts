@@ -72,8 +72,11 @@ const sanitizer = await readFile(new URL("../src/sanitize.ts", import.meta.url),
 const urlCheck = sanitizer.match(/export function hasExecutableUrl\(value: string\): boolean \{[\s\S]*?\n\}/)?.[0];
 if (urlCheck === undefined) throw new Error("Cannot find executable URL detection in sanitize.ts.");
 const attributesOutput = new URL("../src/generated/dom-attributes-source.ts", import.meta.url);
+const metadataStart = attributeOwner.indexOf("const ROOT_METADATA =");
+const metadataEnd = attributeOwner.indexOf("/** Remaining HTML inputs", metadataStart);
+if (metadataStart < 0 || metadataEnd < 0) throw new Error("Cannot find root metadata ownership in dom-attributes.ts.");
 const attributesContent = "/** Generated from src/dom-attributes.ts and src/sanitize.ts. */\nexport const DOM_ATTRIBUTES_SOURCE = "
-  + JSON.stringify(urlCheck + "\n" + attributeOwner) + ";\n";
+  + JSON.stringify(urlCheck + "\n" + sanitizer.match(/export const URL_ATTRIBUTES:[^\n]+/)![0] + "\n" + sanitizer.match(/export function isUrlAttribute\(name: string\): boolean \{[\s\S]*?\n\}/)![0] + "\n" + attributeOwner) + ";\nexport const ROOT_METADATA_SOURCE = " + JSON.stringify(attributeOwner.slice(metadataStart, metadataEnd)) + ";\n";
 if (process.argv.includes("--check")) {
   if (await readFile(attributesOutput, "utf8").catch(() => "") !== attributesContent) throw new Error("DOM attribute source is stale; run pnpm exec tsx scripts/generate-literal-source.ts.");
 } else await writeFile(attributesOutput, attributesContent);

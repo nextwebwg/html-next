@@ -108,12 +108,12 @@ describe("componentRegistry in the live runtime", () => {
   it("replaces a registered definition: each connected instance re-renders with its state, props, attributes and slotted children", async () => {
     const { document, registry, runtime } = await live();
     const counter = (tag: string) => `<template component="${tag}"><defs><state name="n" type="number" value="0"></state>
-      <handler name="add"><set name="n" expr:value="$n + 1"></set></handler></defs><button on:click="add">{$n}</button></template>`;
+      <handler name="add"><set name="n" expr:value="$n + 1"></set></handler></defs><button $attributes on:click="add">{$n}</button></template>`;
     const panel = (root: string, extra = "") => `<template component="ui-panel"><defs>
       <prop name="title" type="string" default="Untitled">Title.</prop>
       <state name="count" type="number" value="0"></state>${extra}</defs>${root}</template>`;
     registry.define(carrier(document, counter("x-count")));
-    registry.define(carrier(document, panel(`<section class="panel" title="Old"><h2>{$title}</h2><x-count></x-count><slot></slot></section>`,
+    registry.define(carrier(document, panel(`<section $attributes class:panel="true" title="Old"><h2>{$title}</h2><x-count></x-count><slot></slot></section>`,
       '<state name="open" type="boolean" value="false"></state>')));
     const main = document.querySelector("main")!;
     main.innerHTML = '<ui-panel id="p" class="mine" title="Hello"><x-count id="slotted"></x-count></ui-panel>';
@@ -126,13 +126,13 @@ describe("componentRegistry in the live runtime", () => {
     runtime.getComponentHost(before)!.state.count = 5;
     await settle();
     assert.equal(slotted.textContent, "2");
-    registry.define(carrier(document, panel(`<article class="panel2"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><x-count class="extra"></x-count><slot></slot></article>`,
+    registry.define(carrier(document, panel(`<article $attributes class:panel2="true"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><x-count class="extra"></x-count><slot></slot></article>`,
       '<state name="label" type="string" value="new"></state>')));
     await settle();
     const after = main.firstElementChild!;
     assert.equal(after.localName, "article", "the new definition's root");
     assert.equal(after.id, "p", "the invocation's attributes carry over");
-    assert.equal(after.getAttribute("class"), "panel2 mine", "the old template's class token goes, the invocation's stays");
+    assert.equal(after.getAttribute("class"), "mine panel2", "the old template's class token goes, the invocation's stays");
     assert.equal(after.hasAttribute("title"), false, "the old template's literal goes");
     assert.equal(after.querySelector("h3")!.textContent, "Hello: 5 new", "props, kept state, and a new state's default");
     assert.equal(document.getElementById("slotted"), slotted, "the slotted instance is the same element");
@@ -145,7 +145,7 @@ describe("componentRegistry in the live runtime", () => {
     await settle();
     assert.deepEqual([nested.textContent, slotted.textContent], ["5", "3"], "both connected");
     assert.equal(runtime.getComponentHost(after)!.state.open, undefined, "a removed state is gone");
-    registry.define(carrier(document, panel(`<article class="panel2"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><x-count class="extra"></x-count><slot></slot></article>`,
+    registry.define(carrier(document, panel(`<article $attributes class:panel2="true"><h3>{$title}: {$count} {$label}</h3><x-count></x-count><x-count class="extra"></x-count><slot></slot></article>`,
       '<state name="label" type="string" value="new"></state>')));
     assert.equal(main.firstElementChild, after, "the same definition again changes nothing");
   });

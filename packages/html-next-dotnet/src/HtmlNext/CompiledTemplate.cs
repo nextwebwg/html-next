@@ -140,17 +140,27 @@ public sealed class CompiledTemplate
         return values;
     }
 
-    internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, InvocationAttributeState? inherited = null)
+    internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, InvocationAttribute?[]? attributes = null, InvocationAttributeFrame? inherited = null)
     {
         var values = CreateValues();
+        var marker = -1;
+        var classModifiers = false;
+        if (attributes is not null) for (var index = 0; index < attributes.Length; index++)
+        {
+            if (attributes[index] is null) marker = index;
+            else if (attributes[index]!.Target == "class") classModifiers = true;
+        }
         for (var index = 0; index < props.Length; index++)
         {
             cancellation.ThrowIfCancellationRequested();
             var prop = props[index];
             var argument = arguments[index];
-            var inheritedText = inherited?.Read(props, index);
-            if (argument is not null && inheritedText is not null)
-                throw ValueType.Error(source, "Inherited prop collisions are not implemented.");
+            string? inheritedText = null;
+            var forwarded = marker >= 0 && (argument is null || argument.Position < marker) && inherited is not null &&
+                (inherited.Read(prop.AttributeName, out inheritedText) || inherited.Read(prop.Name, out inheritedText));
+            if (classModifiers && InvocationAttributeFrame.Matches("class", prop))
+                forwarded = InvocationAttributeFrame.Read(attributes!, parent, inherited, "class", out inheritedText);
+            if (forwarded) argument = null;
             var failed = false;
             values[index] = prop.Default;
             if (argument?.Expression is { } expression)
@@ -173,7 +183,7 @@ public sealed class CompiledTemplate
                 }
             }
             else if (argument is not null) values[index] = argument.Constant;
-            else if (inheritedText is { } text)
+            else if (forwarded && inheritedText is { } text)
             {
                 try { values[index] = HtmlNextCompiler.AttributeInput(text, prop.Type, source, cancellation); }
                 catch (HtmlNextException error) when (error.Code == "HNCS001")

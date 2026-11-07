@@ -36,6 +36,7 @@ export {
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
   svelteStyleArtifacts,
+  inlineStyleArtifacts,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

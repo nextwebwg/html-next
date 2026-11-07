@@ -548,13 +548,15 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /modelValue: \{ type: null as unknown as PropType<string \| null \| undefined> \}/);
     assert.match(vue, /'update:modelValue': \[value: string\]\n/);
     // An unstyled root is the native control itself, marked by nothing but its own attributes.
-    assert.match(vue, /<input\s+v-bind="nativeAttrs\(\$attrs\)"/);
+    assert.match(vue, /<input\b/);
+    assert.doesNotMatch(vue, /forwardedAttributes\(/);
     assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(vue, /@input="model = readBoundControl\(/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
     // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
     const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="$value"><slot></slot></select>')).get("vue/XChoice.vue")!;
-    assert.match(select, /<select\s+v-bind="nativeAttrs\(\$attrs\)"/);
+    assert.match(select, /<select\b/);
+    assert.doesNotMatch(select, /forwardedAttributes\(/);
     assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(select, /@change="model = readBoundControl\(/);
     assert.match(select, /<SelectedOptions\s+:value="model"\s+:multiple="false"\s+:native-property="false"/);
@@ -594,7 +596,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       .get("vue/XConsumer.vue")!;
     compileVue(vue, "XConsumer.vue");
     assert.match(vue, /<template #row="\{ item \}">/);
-    assert.match(vue, /\{\{ text\(referenceMember\(item, 'name'\)\) \}\}/);
+    assert.match(vue, /\{\{\s*text\(referenceMember\(item, 'name'\)\)\s*\}\}/);
     // A conforming state's own value needs no read check, so the consumer's text reads it directly.
     assert.match(vue, /<i>\{\{ heading \}\}<\/i>/);
   });
@@ -666,7 +668,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /v-class-bindings="\{ base: 'panel', scope: 'x-feature', bindings: \[\['compact', checkedProps\.size === 'sm'\]\] \}"/);
     assert.match(vue, /:style="\{ '--gap': checkedProps\.size \}"/);
     assert.match(vue, /<XBadge\s+class="x-badge"\s+:tone="checkedProps\.size"\s*><slot name="badge">none<\/slot><\/XBadge>/);
-    assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
+    assert.match(vue, /<small\s+v-if="checkedProps\.size === 'sm'"\s*>small<\/small>\s*<span v-else\s*>regular<\/span>/);
     assert.doesNotMatch(vue, /defineExpose|installMethods/);
     assert.match(vue, /useComponentHost\(\(\) => import\('\.\/x-feature\.js'\), \{\n  root,\n  dispatch,/);
     assert.match(vue, /props: checkedProps,/);
@@ -692,7 +694,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
-    assert.match(vue, /<span v-if="truthy\(hovered\)" :title="referenceMember\(hovered, 'label'\)"/);
+    assert.match(vue, /<span\s+v-if="truthy\(hovered\)"\s+:title="referenceMember\(hovered, 'label'\)"/);
     assert.match(vue, /<p v-if="!referenceMember\(issues, 'length'\)">Valid<\/p>/);
     assert.doesNotMatch(vue, /function truthy\(/);
   });
@@ -734,7 +736,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       `<select from:disabled="$disabled"><option value="">None</option><slot></slot></select></template>`,
     ).get("vue/XChoice.vue")!;
     compileVue(vue, "XChoice.vue");
-    assert.match(vue, /<select[^>]*>\n\s+<option value="">None<\/option>\n\s+<slot \/>\n\s+<\/select>/);
+    assert.match(vue, /<select[^>]*>\s*<option value=""\s*>None<\/option>\s*<slot\s*\/>\s*<\/select>/);
   });
 
   it("types optional nullable props once", () => {
@@ -798,7 +800,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(listed, /data-x-action-prop-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
     assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-hn data-hn-x-action data-x-action-prop-as="a" data-x-action-prop-disabled="true" data-x-action-prop-href="/next">Go</a>');
-    assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
+    assert.doesNotMatch(await render({ constructor: "safe" }), / constructor=/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
     await transform(vanilla, { loader: "js", format: "esm" });
@@ -1100,7 +1102,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("marks a slotless Vue component's root and gives it the live runtime's selectors", () => {
     const vue = generated(componentSource("demo-plain", "", `<article><h2>Card</h2></article><style>:host { display: block; } h2 { margin: 0; }</style>`)).get("vue/DemoPlain.vue")!;
     // Nothing is projected without slots, so only the root carries the converted-root marker.
-    assert.match(vue, /<article class="demo-plain" v-bind="nativeAttrs\(\$attrs\)" data-hn>/);
+    assert.match(vue, /<article\b[^>]*class="demo-plain"[^>]*data-hn/);
+    assert.doesNotMatch(vue, /forwardedAttributes\(/);
     assert.doesNotMatch(vue, /data-hn-demo-plain/);
     assert.match(vue, /@scope \(\.demo-plain\) to \(\[data-hn\]\) \{\s+:global\(:scope\) \{\s+display: block;\s+\}\s+:global\(h2\) \{/);
   });

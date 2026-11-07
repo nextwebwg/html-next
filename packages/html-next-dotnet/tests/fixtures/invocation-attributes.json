@@ -1,166 +1,166 @@
 [
   {
     "name": "literal-ordinary",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\" title=\"A &amp; B\" data-value=\"&quot;quoted&quot;\" aria-label=\"Label\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\" title=\"A &amp; B\" data-value=\"&quot;quoted&quot;\" aria-label=\"Label\"></x-leaf></main></template>",
     "expected": "<main><b id=\"leaf\" title=\"A &amp; B\" data-value=\"&quot;quoted&quot;\" aria-label=\"Label\">Leaf</b></main>"
   },
   {
     "name": "dynamic-string",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-leaf from:title=\"$label\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-leaf from:title=\"$label\"></x-leaf></main></template>",
     "expected": "<main><b title=\"Ready\">Leaf</b></main>"
   },
   {
     "name": "dynamic-number",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><main><x-leaf from:title=\"12\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf from:title=\"12\"></x-leaf></main></template>",
     "expected": "<main><b title=\"12\">Leaf</b></main>"
   },
   {
     "name": "dynamic-list",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><main><x-leaf from:data-values=\"[1, 2, 3]\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf from:data-values=\"[1, 2, 3]\"></x-leaf></main></template>",
     "expected": "<main><b data-values=\"1 2 3\">Leaf</b></main>"
   },
   {
     "name": "removes-false",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><main><x-leaf title=\"fallback\" from:title=\"false\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf title=\"fallback\" from:title=\"false\"></x-leaf></main></template>",
     "expected": "<main><b>Leaf</b></main>"
   },
   {
     "name": "removes-null",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><main><x-leaf title=\"fallback\" from:title=\"null\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf title=\"fallback\" from:title=\"null\"></x-leaf></main></template>",
     "expected": "<main><b>Leaf</b></main>"
   },
   {
     "name": "invalid-keeps-literal",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"zero\" type=\"number\" value=\"0\"></state></defs><main><x-leaf title=\"fallback\" from:title=\"1 / $zero\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"zero\" type=\"number\" value=\"0\"></state></defs><main><x-leaf title=\"fallback\" from:title=\"1 / $zero\"></x-leaf></main></template>",
     "expected": "<main><b title=\"fallback\">Leaf</b></main>"
   },
   {
     "name": "invalid-without-literal",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"zero\" type=\"number\" value=\"0\"></state></defs><main><x-leaf from:title=\"1 / $zero\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"zero\" type=\"number\" value=\"0\"></state></defs><main><x-leaf from:title=\"1 / $zero\"></x-leaf></main></template>",
     "expected": "<main><b>Leaf</b></main>"
   },
   {
     "name": "boolean-and-enumerated",
-    "source": "<template component=\"x-leaf\"><button>Leaf</button></template><template component=\"x-page\"><main><x-leaf from:disabled=\"true\" from:draggable=\"false\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><button $attributes>Leaf</button></template><template component=\"x-page\"><main><x-leaf from:disabled=\"true\" from:draggable=\"false\"></x-leaf></main></template>",
     "expected": "<main><button disabled=\"\" draggable=\"false\">Leaf</button></main>"
   },
   {
     "name": "safe-url",
-    "source": "<template component=\"x-leaf\"><a>Leaf</a></template><template component=\"x-page\"><main><x-leaf from:href=\"'/safe?q=a&amp;b'\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><a $attributes>Leaf</a></template><template component=\"x-page\"><main><x-leaf from:href=\"'/safe?q=a&amp;b'\"></x-leaf></main></template>",
     "expected": "<main><a href=\"/safe?q=a&amp;b\">Leaf</a></main>"
   },
   {
     "name": "unsafe-url-removes-literal",
-    "source": "<template component=\"x-leaf\"><a>Leaf</a></template><template component=\"x-page\"><main><x-leaf href=\"/safe\" from:href=\"'javascript:alert(1)'\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><a $attributes>Leaf</a></template><template component=\"x-page\"><main><x-leaf href=\"/safe\" from:href=\"'javascript:alert(1)'\"></x-leaf></main></template>",
     "expected": "<main><a>Leaf</a></main>"
   },
   {
     "name": "root-literal-then-forwarded",
-    "source": "<template component=\"x-leaf\"><b data-local=\"yes\">Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b data-local=\"yes\" $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
     "expected": "<main><b data-local=\"yes\" id=\"leaf\">Leaf</b></main>"
   },
   {
     "name": "forwarded-before-root-binding",
-    "source": "<template component=\"x-leaf\"><b from:title=\"'local'\">Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b  $attributes from:title=\"'local'\">Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
     "expected": "<main><b id=\"leaf\" title=\"local\">Leaf</b></main>"
   },
   {
     "name": "delegation",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-wrap\"><x-leaf data-middle=\"yes\"></x-leaf></template><template component=\"x-page\"><main><x-wrap id=\"leaf\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-wrap\"><x-leaf data-middle=\"yes\" $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap id=\"leaf\"></x-wrap></main></template>",
     "expected": "<main><b data-middle=\"yes\" id=\"leaf\">Leaf</b></main>"
   },
   {
     "name": "delegated-prop-consumes-forwarded",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><b>{$label}</b></template><template component=\"x-wrap\"><x-leaf></x-leaf></template><template component=\"x-page\"><main><x-wrap label=\"Caller\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><b $attributes>{$label}</b></template><template component=\"x-wrap\"><x-leaf $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap label=\"Caller\"></x-wrap></main></template>",
     "expected": "<main><b>Caller</b></main>"
   },
   {
     "name": "delegated-number-prop-converts-html",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"count\" type=\"integer\" default=\"2\">Count.</prop></defs><b>{$count + 1}</b></template><template component=\"x-wrap\"><x-leaf></x-leaf></template><template component=\"x-page\"><main><x-wrap count=\"7\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"count\" type=\"integer\" default=\"2\">Count.</prop></defs><b $attributes>{$count + 1}</b></template><template component=\"x-wrap\"><x-leaf $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap count=\"7\"></x-wrap></main></template>",
     "expected": "<main><b>8</b></main>"
   },
   {
     "name": "declared-prop-is-consumed",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"label\" type=\"string\">Label.</prop></defs><b>{$label}</b></template><template component=\"x-page\"><main><x-leaf label=\"Caller\" id=\"leaf\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"label\" type=\"string\">Label.</prop></defs><b $attributes>{$label}</b></template><template component=\"x-page\"><main><x-leaf label=\"Caller\" id=\"leaf\"></x-leaf></main></template>",
     "expected": "<main><b id=\"leaf\">Caller</b></main>"
   },
   {
     "name": "root-selection",
-    "source": "<template component=\"x-leaf\"><template $match><button $when=\"true\">Leaf</button><a $else>Link</a></template></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><template $match><button $when=\"true\" $attributes>Leaf</button><a $else $attributes>Link</a></template></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
     "expected": "<main><button id=\"leaf\">Leaf</button></main>"
   },
   {
     "name": "repeated-caller-scope",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(string)\" value=\"['A', 'B']\"></state></defs><main><x-leaf $each=\"row of $rows\" from:data-row=\"$row\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(string)\" value=\"['A', 'B']\"></state></defs><main><x-leaf $each=\"row of $rows\" from:data-row=\"$row\"></x-leaf></main></template>",
     "expected": "<main><b data-row=\"A\">Leaf</b><b data-row=\"B\">Leaf</b></main>"
   },
   {
     "name": "separate-root-ownership",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-wrap\"><section><x-leaf></x-leaf></section></template><template component=\"x-page\"><main><x-wrap id=\"outer\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-wrap\"><section $attributes><x-leaf></x-leaf></section></template><template component=\"x-page\"><main><x-wrap id=\"outer\"></x-wrap></main></template>",
     "expected": "<main><section id=\"outer\"><b>Leaf</b></section></main>"
   },
   {
     "name": "deferred-caller-attributes",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf from:title=\"$label\"></x-leaf></x-unused></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-unused\"><section $attributes></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf from:title=\"$label\"></x-leaf></x-unused></main></template>",
     "expected": "<main><section></section></main>",
     "carrier": "<x-leaf title=\"Ready\"></x-leaf>",
     "native": "<main><section><template carrier=\"x-unused\"><x-leaf title=\"Ready\"></x-leaf></template></section></main>"
   },
   {
     "name": "waiting",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"$waiting\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"$waiting\"></x-leaf></main></template>",
     "expected": "<main><b>Leaf</b></main>"
   },
   {
     "name": "waiting-computed",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"$derived\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"$derived\"></x-leaf></main></template>",
     "expected": "<main><b>Leaf</b></main>"
   },
   {
     "name": "waiting-default",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"default($waiting, 'ready')\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"default($waiting, 'ready')\"></x-leaf></main></template>",
     "expected": "<main><b title=\"ready\">Leaf</b></main>"
   },
   {
     "name": "available-absence",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"$record.missing\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"$record.missing\"></x-leaf></main></template>",
     "expected": "<main><b>Leaf</b></main>"
   },
   {
     "name": "unread-waiting",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"true ? 'ready' : $waiting\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-leaf title=\"fallback\" from:title=\"true ? 'ready' : $waiting\"></x-leaf></main></template>",
     "expected": "<main><b title=\"ready\">Leaf</b></main>"
   },
   {
     "name": "deferred-waiting-ordinary",
-    "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf title=\"fallback\" from:title=\"$waiting\"></x-leaf></x-unused></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-unused\"><section $attributes></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf title=\"fallback\" from:title=\"$waiting\"></x-leaf></x-unused></main></template>",
     "expected": "<main><section></section></main>",
     "carrier": "<x-leaf></x-leaf>",
     "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>"
   },
   {
     "name": "delegated-bracketed-list-converts-html",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"items\" type=\"list(integer)\">Items.</prop></defs><b>{$items.length}:{$items[0]}</b></template><template component=\"x-wrap\"><x-leaf></x-leaf></template><template component=\"x-page\"><main><x-wrap items=\"[7, 8]\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"items\" type=\"list(integer)\">Items.</prop></defs><b $attributes>{$items.length}:{$items[0]}</b></template><template component=\"x-wrap\"><x-leaf $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap items=\"[7, 8]\"></x-wrap></main></template>",
     "expected": "<main><b>2:7</b></main>"
   },
   {
     "name": "unicode-literal-props",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-page\"><main><x-leaf é=\"lower\" É=\"UPPER\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b  $attributes from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-page\"><main><x-leaf é=\"lower\" É=\"UPPER\"></x-leaf></main></template>",
     "expected": "<main><b data-é=\"lower\" data-É=\"UPPER\">lower:UPPER</b></main>"
   },
   {
     "name": "unicode-bound-props",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-page\"><defs><state name=\"lower\" type=\"string\" value=\"lower\"></state><state name=\"upper\" type=\"string\" value=\"UPPER\"></state></defs><main><x-leaf from:é=\"$lower\" from:É=\"$upper\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b  $attributes from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-page\"><defs><state name=\"lower\" type=\"string\" value=\"lower\"></state><state name=\"upper\" type=\"string\" value=\"UPPER\"></state></defs><main><x-leaf from:é=\"$lower\" from:É=\"$upper\"></x-leaf></main></template>",
     "expected": "<main><b data-é=\"lower\" data-É=\"UPPER\">lower:UPPER</b></main>"
   },
   {
     "name": "unicode-delegated-props",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-wrap\"><x-leaf></x-leaf></template><template component=\"x-page\"><main><x-wrap é=\"lower\" É=\"UPPER\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"é\" type=\"string\" default=\"Lower\">Lower.</prop><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b  $attributes from:data-é=\"$é\" from:data-É=\"$É\">{$é}:{$É}</b></template><template component=\"x-wrap\"><x-leaf $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap é=\"lower\" É=\"UPPER\"></x-wrap></main></template>",
     "expected": "<main><b data-é=\"lower\" data-É=\"UPPER\">lower:UPPER</b></main>"
   },
   {
     "name": "unicode-undeclared-other-case",
-    "source": "<template component=\"x-leaf\"><defs><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b>{$É}</b></template><template component=\"x-page\"><main><x-leaf é=\"caller\"></x-leaf></main></template>",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"É\" type=\"string\" default=\"Upper\">Upper.</prop></defs><b $attributes>{$É}</b></template><template component=\"x-page\"><main><x-leaf é=\"caller\"></x-leaf></main></template>",
     "expected": "<main><b é=\"caller\">Upper</b></main>"
   }
 ]

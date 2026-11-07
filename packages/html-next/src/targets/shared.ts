@@ -77,12 +77,17 @@ export function quote(value: string): string {
 }
 
 export function propKey(name: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : quote(name);
+  return name === "__proto__" ? objectKey(name) : /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : quote(name);
 }
 
 /** An object literal's authored keys must define own properties, including `__proto__`. */
 export function objectKey(name: string): string {
   return name === "__proto__" ? `[${quote(name)}]` : quote(name);
+}
+
+/** JavaScript literals retain authored __proto__ fields as own data properties. */
+export function literalValueSource(value: unknown, space?: number): string {
+  return JSON.stringify(value, null, space)?.replaceAll('"__proto__":', '["__proto__"]:') ?? "undefined";
 }
 
 export function typeSource(type: PropType): string {

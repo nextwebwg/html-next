@@ -130,7 +130,7 @@ internal sealed class ClassBinding
         HtmlOutput.Escape(ref writer, token, true); first = false;
     }
 
-    private static bool Contains(ReadOnlySpan<char> text, ReadOnlySpan<char> token)
+    internal static bool Contains(ReadOnlySpan<char> text, ReadOnlySpan<char> token)
     {
         var tokens = new ClassTokens(text);
         while (tokens.MoveNext()) if (tokens.Current.SequenceEqual(token)) return true;

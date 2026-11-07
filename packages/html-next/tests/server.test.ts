@@ -18,10 +18,48 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><section><h2 $value="$label"></h2><button type="button" on:click="increment"><span $value="$count"></span></button>
+</defs><section $attributes><h2 $value="$label"></h2><button type="button" on:click="increment"><span $value="$count"></span></button>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("discovers a large registered component catalog without a combined selector limit", async () => {
+    const definitions = Array.from({ length: 60 }, (_, index) => {
+      const tag = `x-long-component-name-for-discovery-${index}`;
+      return parseComponent(`<template component="${tag}"><b>Item ${index}</b></template>`);
+    });
+    const { html } = await renderComponents('<x-long-component-name-for-discovery-59></x-long-component-name-for-discovery-59>', { definitions });
+    const dom = new JSDOM(html);
+    try { assert.equal(dom.window.document.querySelector('b')?.textContent, 'Item 59'); }
+    finally { dom.window.close(); }
+  });
+  it("keeps an explicit application root attribute on a delegated root", async () => {
+    const definitions = [parseComponent('<template component="x-outer-output"><defs><state name="count" type="integer" value="0"></state></defs><x-inner-output><output>{$count}</output></x-inner-output></template>'),
+      parseComponent('<template component="x-inner-output"><main><slot></slot></main></template>')];
+    const { html } = await renderComponents('<x-outer-output></x-outer-output>', {
+      definitions, rootAttributes: { 'x-outer-output': { 'data-app-layer': '0' } }, state: { '[data-app-layer="0"]': { count: 3 } },
+    });
+    const dom = new JSDOM(html);
+    try {
+      assert.equal(dom.window.document.querySelector('main')?.getAttribute('data-app-layer'), '0');
+      assert.deepEqual(dom.window.document.querySelector('main')?.getAttribute('component')?.split(/\s+/).sort(), ['x-inner-output', 'x-outer-output']);
+      assert.equal(dom.window.document.querySelector('output')?.textContent, '3');
+    } finally { dom.window.close(); }
+  });
+  it("writes application root attributes independently of invocation forwarding", async () => {
+    const definition = parseComponent('<template component="x-root-output"><defs><state name="count" type="integer" value="0"></state></defs><main><b $attributes>Forwarded</b><output>{$count}</output></main></template>');
+    const { html } = await renderComponents('<x-root-output data-input="Caller"></x-root-output>', {
+      definitions: [definition], rootAttributes: { "x-root-output": { "data-app-layer": "0" } }, state: { '[data-app-layer="0"]': { count: 3 } },
+    });
+    const dom = new JSDOM(html);
+    try {
+      assert.equal(dom.window.document.querySelector("main")?.getAttribute("data-app-layer"), "0");
+      assert.equal(dom.window.document.querySelector("main")?.getAttribute("data-input"), null);
+      assert.equal(dom.window.document.querySelector("b")?.getAttribute("data-input"), "Caller");
+      assert.equal(dom.window.document.querySelector("b")?.getAttribute("data-app-layer"), null);
+      assert.equal(dom.window.document.querySelector("output")?.textContent, "3");
+    } finally { dom.window.close(); }
+  });
+
   it("checks only evaluated typed references, including computed and quoted field keys", async () => {
     const renderer = createRenderer({ workers: 1 });
     try {
@@ -54,8 +92,8 @@ describe("Node component rendering", () => {
     } finally { await renderer.close(); }
   });
   it("addresses each component host by tag when definitions share a native root", async () => {
-    const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf><span>{$ownerText}</span></named-leaf></template>');
-    const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article><b>{$leafText}</b><slot></slot></article></template>');
+    const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf $attributes><span>{$ownerText}</span></named-leaf></template>');
+    const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article $attributes><b>{$leafText}</b><slot></slot></article></template>');
     const source = `export function prepare({ document, host }) {
       const root = document.querySelector('#subject');
       const owner = host(root, 'named-owner'); const leaf = host(root, 'named-leaf');
@@ -71,7 +109,7 @@ describe("Node component rendering", () => {
   const preparation = new URL("./fixtures/server-prepare.mjs", import.meta.url).href;
   const product = parseComponent(`<template component="x-prepared"><defs>
     <prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs>
-    <section><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
+    <section $attributes><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
     <x-server-counter $await="$product" from:label="$product"></x-server-counter></section></template>`);
   it("closes one renderer's active and queued work while another renderer completes its private read", async () => {
     const first = createRenderer({ workers: 1 }); const second = createRenderer({ workers: 1 });
@@ -275,7 +313,7 @@ describe("Node component rendering", () => {
     const definition = parseComponent(`<template component="x-initial-props"><defs>
       <prop name="label" type="string" default="Default">Label.</prop>
       <state name="draft" type="string" from="$label"></state></defs>
-      <article><h1>{$label}</h1><output>{$draft}</output></article></template>`);
+      <article $attributes><h1>{$label}</h1><output>{$draft}</output></article></template>`);
     const rendered = await renderComponents('<x-initial-props id="typed" label="HTML"></x-initial-props><x-initial-props id="null" label="HTML"></x-initial-props><x-initial-props id="released" label="HTML"></x-initial-props><x-initial-props id="implicit"></x-initial-props>', {
       definitions: [definition], props: { "#typed": { label: "Typed" }, "#null": { label: null }, "#released": { label: undefined } },
     });
@@ -323,12 +361,12 @@ describe("Node component rendering", () => {
   it("records explicit props under the component's tag, leaving authored data-* attributes as written", async () => {
     const definition = parseComponent(`<template component="x-figure"><defs>
       <prop name="placement" type="keyword" values="start, end" default="start">Where the figure floats.</prop>
-      </defs><figure data-placement="figure"><slot></slot></figure></template>`);
+      </defs><figure data-placement="figure" $attributes><slot></slot></figure></template>`);
     const rendered = await renderComponents('<x-figure placement="end"></x-figure><x-figure placement="end" data-placement="wide"></x-figure>',
       { definitions: [definition] });
     const roots = [...rendered.html.matchAll(/<figure[^>]*>/g)].map(([tag]) => tag);
     assert.equal(roots.length, 2);
-    // The template's own data-placement and a consumer's pass-through keep their values; the prop has its own attribute.
+    // The explicit marker follows the literal; the prop has its own reflected attribute.
     assert.match(roots[0]!, /\sdata-placement="figure"/);
     assert.match(roots[1]!, /\sdata-placement="wide"/);
     for (const root of roots) assert.match(root, /\sdata-x-figure-prop-placement="end"/);
@@ -366,7 +404,7 @@ describe("Node component rendering", () => {
   // Conflicting requests: one tag, two definitions, each with its own state and URL.
   const conflicting = (count: number) => renderComponents('<x-server-counter id="counter" label="Visits"></x-server-counter>', {
     definitions: [count % 2 === 0 ? counter : { ...counter, css: ":host { display: inline; }",
-      template: { ...counter.template, attributes: [{ kind: "literal", name: "title", value: "odd" }] } } as typeof counter],
+      template: { ...counter.template, attributes: [{ kind: "forward", name: "attributes" }, { kind: "literal", name: "title", value: "odd" }] } } as typeof counter],
     state: { "#counter": { count } },
     url: `https://example.test/${count}/`,
   });

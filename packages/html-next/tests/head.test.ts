@@ -49,7 +49,7 @@ const pageB = `<template component="page-b"><defs>
 </defs><article>B</article></template>`;
 const card = `<template component="img-card"><defs>
   <link rel="preconnect" href="https://img.acme.example"><link rel="dns-prefetch" href="//cdn.acme.example">
-</defs><figure></figure></template>`;
+</defs><figure $attributes></figure></template>`;
 const note = `<template component="x-note"><defs><title>Note</title></defs><aside></aside></template>`;
 
 afterEach(() => {
@@ -385,7 +385,7 @@ it("parses language alternates sharing one URL and rejects only the same normali
 
 it("keeps language alternates independent of an authored link with the same URL", async () => {
   const { document, main, settle } = await page('<link rel="alternate" hreflang="EN" href="https://docs.example/">', [
-    '<template component="english-links"><defs><link rel="alternate" hreflang="en" href="https://docs.example/"></defs><div></div></template>',
+    '<template component="english-links"><defs><link rel="alternate" hreflang="en" href="https://docs.example/"></defs><div $attributes></div></template>',
     '<template component="fallback-links"><defs><link rel="alternate" hreflang="x-default" href="https://docs.example/"></defs><div></div></template>',
   ]);
   const authored = document.head.firstElementChild!;

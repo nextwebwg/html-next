@@ -1479,6 +1479,13 @@ function parseAttributes(
 ): TemplateAttribute[] {
   const parsed: TemplateAttribute[] = [];
   for (const attribute of sourceAttributes) {
+    if (attribute.name === "$attributes") {
+      if (attribute.value !== "" || tagName === "template" || tagName === "slot") {
+        fail("HT012", "`$attributes` is a valueless directive on a rendered element or component invocation.", source);
+      }
+      parsed.push({ kind: "forward", name: "attributes" });
+      continue;
+    }
     if (attribute.name.startsWith("bind:")) {
       const name = asciiLowerCase(attribute.name.slice("bind:".length));
       if (name === "" || !tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
@@ -1942,6 +1949,7 @@ function parseElementAtSource(
       continue;
     }
     if (isSlotOutlet(child)) {
+      if (attr(child, "$attributes") !== undefined) fail("HT012", "`$attributes` is a valueless directive on a rendered element or component invocation.", source);
       // `<template $slot="name">` is the same outlet as `<slot name="name">`; an empty `$slot` is the default slot.
       const templateForm = sourceTag(child) === "template";
       const name = templateForm ? attr(child, "$slot") || undefined : attr(child, "name");

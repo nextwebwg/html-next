@@ -30,7 +30,7 @@ const badge = `<template component="ui-badge">
 const list = `<template component="x-list">
   <defs><prop name="rows" type="list(string)" default="['a', 'b']">Rows.</prop>
     <slot name="row"><prop name="item" type="string" required>The row.</prop></slot></defs>
-  <ul><li $each="row of $rows"><slot name="row" from:item="$row"></slot></li><li><slot name="plain">fallback</slot></li></ul>
+  <ul $attributes><li $each="row of $rows"><slot name="row" from:item="$row"></slot></li><li><slot name="plain">fallback</slot></li></ul>
 </template>`;
 
 describe.skipIf(!enabled)("componentRegistry across bundles", () => {
@@ -88,7 +88,7 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
     files["/nested/defined.js"] = 'export default (host) => { host.root.dataset.controller = "defined"; };';
     files["/nested/inline.html"] = `<!doctype html><body>
       <template component="x-tally" controller="./tally.js"><defs><state name="n" type="number" value="0"></state></defs><b>{$n}</b></template>
-      <template component="x-inline" controller="./inline.js"><defs><state name="k" type="number" value="0"></state></defs><p>Inline <x-tally></x-tally></p></template>
+      <template component="x-inline" controller="./inline.js"><defs><state name="k" type="number" value="0"></state></defs><p $attributes>Inline <x-tally></x-tally></p></template>
       <main><x-inline id="discovered"></x-inline><x-defined id="authored"></x-defined></main>
       <script type="module">
         import { ready, componentRegistry } from "/browser.js";
@@ -270,7 +270,7 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
           const carrier = document.createElement("template");
           carrier.setAttribute("component", "x-defined");
           carrier.setAttribute("controller", "./defined.js");
-          carrier.innerHTML = "<p>Defined</p>";
+          carrier.innerHTML = "<p $attributes>Defined</p>";
           registry.define(carrier);
           const created = [registry.create("x-inline"), registry.create("x-defined")];
           main.append(...created);
@@ -317,7 +317,7 @@ describe.skipIf(!enabled)("componentRegistry across bundles", () => {
           await settle();
           // The changed definition arrives in the document, as a development server would insert it.
           document.body.insertAdjacentHTML("beforeend",
-            '<template component="x-inline" controller="./inline.js"><defs><state name="k" type="number" value="0"></state></defs><p>Replaced {$k} <x-tally></x-tally></p></template>');
+            '<template component="x-inline" controller="./inline.js"><defs><state name="k" type="number" value="0"></state></defs><p $attributes>Replaced {$k} <x-tally></x-tally></p></template>');
           await settle();
           const root = document.querySelector("#discovered") as HTMLElement;
           for (let tries = 0; tries < 100 && root.dataset.controller === undefined; tries += 1) await settle();

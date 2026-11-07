@@ -5,6 +5,7 @@
  * only the ones a component imports. Preact output reuses these with its compatibility API.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { ROOT_METADATA_SOURCE } from "../generated/dom-attributes-source.js";
 import { NATIVE_VALUE_ATTRIBUTE, nativeValueCss } from "../native-value.js";
 import { closureFreeFunctionSource } from "./format-source.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
@@ -20,6 +21,7 @@ import type { ReactNode } from "react";
 ${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 
 ${expressionHelpersSource()}
+${ROOT_METADATA_SOURCE}
 
 /** React removes a node from its declared parent even when a controller has temporarily moved it. */
 export function rememberParent(element: Element | null): () => void {

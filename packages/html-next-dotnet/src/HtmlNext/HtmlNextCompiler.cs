@@ -45,17 +45,8 @@ public static partial class HtmlNextCompiler
         public string Tag { get; private set; } = "";
         public string? DelegatedTag => root.LocalName.Contains('-') ? root.LocalName : null;
 
-        public void FindInvocationAttributes() => Visit(root);
-        private void Visit(IElement element)
-        {
-            if (components.TryGetValue(element.LocalName, out var target))
-                foreach (var attribute in element.Attributes)
-                {
-                    var name = attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? attribute.Name[5..] : attribute.Name;
-                    if (!name.StartsWith('$') && !target.Props.Any(prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name))) target.ReceivesAttributes = true;
-                }
-            foreach (var child in Children(element)) if (child is IElement nested) Visit(nested);
-        }
+        public bool ForwardsAttributes => Forwarding(root);
+        private static bool Forwarding(IElement element) => element.HasAttribute("$attributes") || Children(element).OfType<IElement>().Any(Forwarding);
         public Prop[] Props => props.ToArray();
         private HtmlNextModuleReference? module;
         private ExpressionStorage? expressionStorage;
@@ -448,6 +439,13 @@ public static partial class HtmlNextCompiler
             if (!fragment) Add(operations, "<" + element.LocalName);
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
+            if (element.HasAttribute("$attributes"))
+            {
+                if (fragment || element.GetAttribute("$attributes") != "") throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
+                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope)));
+            }
+            else
+            {
             var classInstructions = new List<ClassInstruction>();
             if (attributes.Any(attribute => attribute.Name.StartsWith("class:", StringComparison.Ordinal)))
                 for (var index = 0; index < attributes.Length; index++)
@@ -517,14 +515,11 @@ public static partial class HtmlNextCompiler
                 if (attribute.Name == "class" && classes is not null) { if (classes.At(-1) is { } operation) Append(operations, [operation]); }
                 else Append(operations, [attribute.Operation ?? bindingsByName[attribute.Name]]);
             }
-            if (!fragment && IsRoot(element) && components[Tag].ReceivesAttributes)
-                operations.Add(new ForwardedRootAttributes(attributes.Where(attribute => !attribute.Name.StartsWith('$'))
-                    .Select(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? AttributeName(element, attribute.Name[5..]) : attribute.Name)
-                    .ToHashSet(StringComparer.Ordinal)));
             var literalNames = literalOrder.Select(attribute => attribute.Name).ToHashSet(StringComparer.Ordinal);
             foreach (var attribute in bindingOrder)
                 if (attribute.Name == "class" && classes is not null) { if (classes.At(attribute.Position) is { } operation) Append(operations, [operation]); }
                 else if (!literalNames.Contains(attribute.Name)) Append(operations, [bindingsByName[attribute.Name]]);
+            }
             if (rootAttributes is not null) operations.Add(element.GetAttribute("component") is { } identity
                 ? rootAttributes with { AuthoredIdentity = Regex.Split(identity, @"\s+").Where(token => token.Length > 0).Distinct(StringComparer.Ordinal).ToArray() } : rootAttributes);
             if (!fragment) Add(operations, ">");
@@ -732,6 +727,31 @@ public static partial class HtmlNextCompiler
             return body;
         }
 
+        private InvocationAttribute?[] ForwardingAttributes(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope)
+        {
+            var result = new List<InvocationAttribute?>();
+            var bound = element.Attributes.Where(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal)).Select(attribute => attribute.Name[5..]).ToHashSet(StringComparer.Ordinal);
+            foreach (var attribute in element.Attributes)
+            {
+                var name = QualifiedAttributeName(attribute);
+                if (name == "$attributes") { result.Add(null); continue; }
+                if (name is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" or "$when" or "$else") continue;
+                if (name.StartsWith("class:", StringComparison.Ordinal))
+                {
+                    var token = name[6..];
+                    if (token.Length == 0 || token.Any(character => character is ' ' or '\t' or '\n' or '\r' or '\f')) throw ValueType.Error(source, "A class binding requires one nonempty class token.");
+                    result.Add(new(token, null, Expression(attribute.Value, scope), source, "class")); continue;
+                }
+                var dynamic = name.StartsWith("from:", StringComparison.Ordinal);
+                if (dynamic) name = AttributeName(element, name[5..]);
+                else if (bound.Contains(name)) continue;
+                if (name.StartsWith('$') || name.StartsWith("on", StringComparison.OrdinalIgnoreCase) || name is "srcdoc" or "innerhtml" or "outerhtml" or "textcontent" or "innertext" || name.Contains(':') && attribute.NamespaceUri is null) Unsupported("attribute '" + attribute.Name + "'");
+                if (!dynamic && BoundAttributeRules.IsUrl(name) && BoundAttribute.ExecutableUrl(attribute.Value)) throw ValueType.Error(source, $"Literal attribute '{name}' contains executable content.");
+                result.Add(new(name, dynamic ? element.GetAttribute(name) : attribute.Value, dynamic ? Expression(attribute.Value, scope) : null, source));
+            }
+            return result.ToArray();
+        }
+
         private ComponentCall Invocation(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope, bool matchArm)
         {
             if (!components.TryGetValue(element.LocalName, out var target)) throw ValueType.Error(source, $"Unknown component '{element.LocalName}'.");
@@ -746,13 +766,25 @@ public static partial class HtmlNextCompiler
             foreach (var attribute in element.Attributes)
             {
                 if (attribute.Name is "$if" or "$each" or "$where" or "$sort" or "$limit" or "$key" or "$ref" || matchArm && attribute.Name is "$when" or "$else") continue;
+                if (attribute.Name == "$attributes")
+                {
+                    if (attribute.Value != "") throw ValueType.Error(source, "$attributes is valueless.");
+                    continue;
+                }
+                if (attribute.Name.StartsWith("class:", StringComparison.Ordinal))
+                {
+                    var token = attribute.Name[6..];
+                    if (token.Length == 0 || token.Any(character => character is ' ' or '\t' or '\n' or '\r' or '\f')) throw ValueType.Error(source, "A class binding requires one nonempty class token.");
+                    forwarded.Add(attribute.Name, new(token, null, Expression(attribute.Value, scope), source, "class"));
+                    continue;
+                }
                 var dynamic = attribute.Name.StartsWith("from:", StringComparison.Ordinal);
                 var name = dynamic ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
                 if (index < 0)
                 {
                     name = AttributeName(element, name);
-                    if (name is "class" or "style" or "srcdoc" or "innerhtml" or "outerhtml" or "textcontent" or "innertext"
+                    if (name is "srcdoc" or "innerhtml" or "outerhtml" or "textcontent" or "innertext"
                         || name.StartsWith("on", StringComparison.OrdinalIgnoreCase) || name.StartsWith('$') || name.Contains(':')) Unsupported("invocation attribute '" + attribute.Name + "'");
                     if (!dynamic && BoundAttributeRules.IsUrl(name) && BoundAttribute.ExecutableUrl(attribute.Value))
                         throw ValueType.Error(source, $"Literal attribute '{name}' contains executable content.");
@@ -783,20 +815,34 @@ public static partial class HtmlNextCompiler
                     propAttributes.Add(index, new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index), declarationContextSlot));
                 else propAttributes.Add(index, new Literal(fallbacks[index]));
             var deferred = new List<RenderOperation>();
-            var attributes = new List<InvocationAttribute>();
+            var deferredOrdered = element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target == "class") ? new List<InvocationAttribute?>() : null;
+            var attributes = new List<InvocationAttribute?>();
             var writtenProps = new HashSet<int>();
             var writtenAttributes = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var attribute in element.Attributes.OrderBy(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal)))
+            foreach (var attribute in element.Attributes)
             {
+                if (attribute.Name == "$attributes") { attributes.Add(null); deferredOrdered?.Add(null); continue; }
                 var name = attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
-                if (index >= 0 && writtenProps.Add(index)) deferred.Add(propAttributes[index]);
+                if (!attribute.Name.StartsWith("from:", StringComparison.Ordinal) && !attribute.Name.StartsWith("class:", StringComparison.Ordinal) && (index >= 0 ? bound.Contains(index) : forwarded.GetValueOrDefault(name)?.Expression is not null)) continue;
+                if (index >= 0 && writtenProps.Add(index))
+                {
+                    deferred.Add(propAttributes[index]);
+                    deferredOrdered?.Add(new(name, element.GetAttribute(target.Props[index].AttributeName) ?? element.GetAttribute(target.Props[index].Name), null, source,
+                        Prop: propAttributes[index] as DeferredPropAttribute));
+                    // Preserve the prop write's position relative to the forwarding marker.
+                    arguments[index] = arguments[index]! with { Position = attributes.Count };
+                    attributes.Add(new(name, element.GetAttribute(target.Props[index].AttributeName) ?? element.GetAttribute(target.Props[index].Name), null, source,
+                        Prop: propAttributes[index] as DeferredPropAttribute));
+                }
                 else if (index < 0 && forwarded.TryGetValue(name, out var entry) && writtenAttributes.Add(name))
                 {
                     deferred.Add(entry);
+                    deferredOrdered?.Add(entry);
                     attributes.Add(entry);
                 }
             }
+            if (deferredOrdered is not null) { deferred.Clear(); deferred.Add(new ForwardedElementAttributes(deferredOrdered.ToArray())); }
             hasComponents = true;
             return new(target, arguments, deferred.ToArray(), IsRoot(element) ? rootStyle : null, projection.Length == 0 ? null : projection, IsRoot(element), attributes.Count == 0 ? null : attributes.ToArray());
         }

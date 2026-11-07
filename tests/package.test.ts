@@ -170,7 +170,7 @@ if (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !=
 const rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });
 if (!rendered.html.includes('component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");
 const prepared = await renderComponents('<x-prepared id="prepared"></x-prepared>', {
-  definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs><p>{$draft}</p></template>')],
+  definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs><p $attributes>{$draft}</p></template>')],
   prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Installed preparation' } }
 });
 if (!prepared.html.includes('<p') || !prepared.html.includes('>Installed preparation</p>')) throw new Error('Packaged preparation failed');
@@ -178,7 +178,7 @@ const owner = createRenderer({ workers: 1 });
 try {
   owner.setWorkers(2);
   const scoped = await owner.render('<x-prepared id="prepared"></x-prepared>', {
-    definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop></defs><p>{$product}</p></template>')],
+    definitions: [parseComponent('<template component="x-prepared"><defs><prop name="product" type="string">Product.</prop></defs><p $attributes>{$product}</p></template>')],
     prepare: { module: new URL('./prepare.mjs', import.meta.url).href, data: { product: 'Owned preparation' } }
   });
   if (!scoped.html.includes('>Owned preparation</p>')) throw new Error('Packaged renderer ownership failed');

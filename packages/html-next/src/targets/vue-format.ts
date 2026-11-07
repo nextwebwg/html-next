@@ -16,13 +16,32 @@ export function formatVue(source: string, filePath: string): string {
     // Vue's own convention (create-vue, the Vue docs): single quotes and no semicolons.
     context.addPlugin(readFileSync(require.resolve("@dprint/typescript/plugin.wasm")), { quoteStyle: "alwaysSingle", quoteProps: "asNeeded", semiColons: "asi" });
     context.addPlugin(readFileSync(require.resolve("dprint-plugin-malva/plugin.wasm")));
-    // Vue drops whitespace-only text between elements, but not around inline text; "css" keeps that.
-    context.addPlugin(readFileSync(require.resolve("dprint-plugin-markup/plugin.wasm")), { whitespaceSensitivity: "css" });
+    // Preserve authored text boundaries when formatting generated markup.
+    context.addPlugin(readFileSync(require.resolve("dprint-plugin-markup/plugin.wasm")), { whitespaceSensitivity: "strict" });
   }
   return context.formatText({ filePath, fileText: source });
 }
 
 const reactPrinter = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+
+/** Fold generated JSX inputs into one ordered object without introducing a rendering component. */
+export function jsxAttributeRecord(attributes: readonly string[]): string {
+  const file = ts.createSourceFile("attributes.tsx", `<Target ${attributes.join(" ")} />`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const element = (file.statements[0] as ts.ExpressionStatement).expression as ts.JsxSelfClosingElement;
+  const names = new Set<string>();
+  const properties: ts.ObjectLiteralElementLike[] = element.attributes.properties.map(attribute => {
+    if (ts.isJsxSpreadAttribute(attribute)) return ts.factory.createSpreadAssignment(attribute.expression);
+    const name = attribute.name.getText(file);
+    const initializer = attribute.initializer;
+    const value = initializer === undefined ? ts.factory.createTrue() : ts.isStringLiteral(initializer)
+      ? ts.factory.createStringLiteral(initializer.text) : ts.isJsxExpression(initializer) ? initializer.expression ?? ts.factory.createTrue() : initializer;
+    const property = ts.factory.createPropertyAssignment(name === "__proto__" ? ts.factory.createComputedPropertyName(ts.factory.createStringLiteral(name)) : ts.factory.createStringLiteral(name), value);
+    if (names.has(name)) return ts.factory.createSpreadAssignment(ts.factory.createObjectLiteralExpression([property]));
+    names.add(name);
+    return property;
+  });
+  return reactPrinter.printNode(ts.EmitHint.Expression, ts.factory.createObjectLiteralExpression(properties), file);
+}
 
 /** Format generated TSX without layout search over deeply nested render props. */
 export function formatReact(source: string, filePath: string): string {

@@ -648,7 +648,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
 
   /** The fallback functions the emitted code calls. */
   fallbacks(): string[] {
-    return [...Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!), referencePredicatesSource(this.#used)].filter(Boolean);
+    return [...Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!), referencePredicatesSource(this.#used).replace(/^export /gm, "")].filter(Boolean);
   }
 
   /** Stateful Intl reuse belongs to the module, outside component setup or render. */

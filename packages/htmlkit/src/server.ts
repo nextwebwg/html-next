@@ -169,8 +169,8 @@ function invocationAttributes(definition: ComponentDefinition, result: LoaderRes
 }
 
 /** The browser builds the same invocation from a page payload (client.ts). */
-function invocation(tag: string, attributes: Readonly<Record<string, string>>, index: number, child: string, nested: boolean): string {
-  return `<${tag}${Object.hasOwn(attributes, "id") ? "" : ` id="hk-layer-${index}"`} data-hk-layer="${index}"${nested ? ' slot="page"' : ""}${Object.entries(attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>${child}</${tag}>`;
+function invocation(tag: string, attributes: Readonly<Record<string, string>>, child: string, nested: boolean): string {
+  return `<${tag}${nested ? ' slot="page"' : ""}${Object.entries(attributes).map(([name, value]) => ` ${name}="${escapeHTML(value)}"`).join("")}>${child}</${tag}>`;
 }
 
 /** The request's cookies by name; the first of a repeated name wins, as the most specific path comes first. */
@@ -331,17 +331,19 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
     if (!client && names !== undefined && names.length > 0) required.push({ tag: layer.definition.contract.tag, selector: `[data-hk-layer="${index}"]`, names });
   }
   const state: Record<string, Readonly<Record<string, unknown>>> = {};
+  const rootAttributes: Record<string, Readonly<Record<string, string>>> = {};
   const props: Record<string, Readonly<Record<string, unknown>>> = {};
   const rendered: RenderedLayer[] = layers.map((layer, i) => ({ component: layer.definition.contract.tag,
     attributes: attributes[i]!, props: Object.fromEntries(Object.entries(results[i]!.props ?? {}).filter(([, value]) => value !== undefined)),
     ...(results[i]!.state === undefined ? {} : { state: results[i]!.state }) }));
   let body = "";
   for (let i = layers.length - 1; i >= 0; i--) {
-    const selector = `[data-hk-layer="${i}"]`;
+    const selector = `body > ${rendered.slice(0, i + 1).map(layer => layer.component).join(" > ")}`;
     const layer = rendered[i]!;
-    if (layer.state !== undefined) state[selector] = layer.state;
+    rootAttributes[selector] = { "data-hk-layer": String(i) };
+    if (layer.state !== undefined) state[`[data-hk-layer="${i}"]`] = layer.state;
     props[selector] = Object.fromEntries(Object.keys(layers[i]!.definition.contract.props).map(name => [name, layer.props![name]]));
-    body = invocation(layer.component, layer.attributes, i, body, i > 0);
+    body = invocation(layer.component, layer.attributes, body, i > 0);
   }
   // An alias names its page's own URL canonical, and a page in an alias page directory the same page
   // under its directory's own prefix, unless a component on the page declares one.
@@ -352,7 +354,7 @@ export async function renderRoute(input: RenderInput): Promise<Rendered> {
   const modules = input.providers ?? {};
   const bridge = Object.keys(input.privateReaders ?? {}).length === 0 ? undefined : await privateReadBridge(input.privateReaders!, contextOf(layers.at(-1)!), input.services);
   let output: Awaited<ReturnType<ServerRenderer["render"]>>;
-  try { output = await (input.render ?? renderComponents)(body, { definitions: input.definitions, url: url.href, state, props, signal,
+  try { output = await (input.render ?? renderComponents)(body, { definitions: input.definitions, url: url.href, state, props, rootAttributes, signal,
     ...Object.keys(modules).length === 0 ? {} : { prepare: { module: preparationModule,
       ...bridge === undefined ? {} : { port: bridge.port }, data: { modules, required, phase: input.request === undefined ? "build" : "request" } } },
     head: authoredHead + (canonical === undefined ? "" : `<link rel="canonical" href="${escapeHTML(canonical)}">`) }); }

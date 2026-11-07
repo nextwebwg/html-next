@@ -2,9 +2,9 @@ export const CLASS_TEXT_SOURCE = `function classText(base: string | undefined, d
   let tokens = new Set((base ?? '').split(/[ \\t\\r\\n\\f]+/).filter(Boolean));
   let value = base;
   for (const decoration of decorations) {
-    if (decoration.kind === 'style') continue;
+    if (decoration.kind === 'style' || decoration.kind === 'attribute' && decoration.name === 'style') continue;
     const candidate = decoration.read();
-    if (candidate === Symbol.for('html-next.invalid-result')) continue;
+    if (candidate === Symbol.for('html-next.invalid-result') || candidate === Symbol.for('html-next.no-attribute')) continue;
     if (decoration.kind === 'attribute') {
       value = candidate == null ? undefined : String(candidate);
       tokens = new Set((value ?? '').split(/[ \\t\\r\\n\\f]+/).filter(Boolean));
@@ -23,6 +23,7 @@ export const CLASS_BINDINGS_SOURCE = `${CLASS_TEXT_SOURCE}
 
 export interface ClassBindingInput {
   readonly base?: string;
+  readonly ordered?: boolean;
   readonly scope?: string;
   readonly bindings: readonly (readonly [token: string | null, value: unknown])[];
 }
@@ -40,8 +41,12 @@ export function initializeClassBindings(element: Element, input: ClassBindingInp
 }
 
 export function applyClassBindings(element: Element, input: ClassBindingInput, previous: unknown[]): void {
-  for (const [index, [token, value]] of input.bindings.entries()) {
-    if (value === Symbol.for('html-next.invalid-result') || index in previous && Object.is(value, previous[index])) continue;
+  if (input.ordered) for (const [index, [token, value]] of input.bindings.entries()) {
+    if (token === null && value === Symbol.for('html-next.no-attribute') && index in previous) { element.removeAttribute('class'); delete previous[index]; }
+  }
+  for (const [index, [token, candidate]] of input.bindings.entries()) {
+    const value = candidate === Symbol.for('html-next.invalid-result') && input.ordered && index in previous ? previous[index] : candidate;
+    if (value === Symbol.for('html-next.invalid-result') || value === Symbol.for('html-next.no-attribute') || !input.ordered && index in previous && Object.is(value, previous[index])) continue;
     if (token !== null) element.classList.toggle(token, Boolean(value));
     else {
       const text = input.scope ? value == null ? input.scope : String(value) + ' ' + input.scope : value == null ? null : String(value);

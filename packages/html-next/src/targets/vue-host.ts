@@ -6,6 +6,7 @@
  * depends on Vue alone.
  */
 import { formatVue } from "./vue-format.js";
+import { ROOT_METADATA_SOURCE } from "../generated/dom-attributes-source.js";
 import { MODULE_CONNECTION_SOURCE } from "../generated/module-connection-source.js";
 import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE, INPUT_STATUS_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
@@ -26,6 +27,7 @@ const SOURCE = `
 import { camelize, Comment, computed, createCommentVNode, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, isVNode, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, provide, ref, renderSlot, shallowRef, Text, useSlots, watch, watchEffect } from "vue";
 import type { ComponentInternalInstance, FunctionalComponent, PropType, Ref, Slots, VNode } from "vue";
 ${INPUT_STATUS_SOURCE}
+${ROOT_METADATA_SOURCE}
 
 ${MODULE_CONNECTION_SOURCE}
 ${CONTROLLER_STATE_SOURCE}
@@ -600,6 +602,10 @@ export function createDispatch(
  * \`constructor\`, as a DOM property; capitalized, it stays an attribute, which HTML lowercases.
  */
 export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const style = attrs.style;
+  if (style !== null && typeof style === "object" && Object.hasOwn(style, "__htmlNextPropInput")) {
+    attrs = { ...attrs, style: (style as { __htmlNextPropInput: unknown }).__htmlNextPropInput };
+  }
   const names = Object.keys(attrs);
   if (!names.some((name) => Object.hasOwn(Object.prototype, name))) return attrs;
   return Object.fromEntries(names.map((name) => [
@@ -609,9 +615,9 @@ export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unkn
 }
 
 /** Hydrating server markup needs its root to be the element this component renders. */
-export function checkHydratedRoot(expected: string | undefined, tag: string): void {
+export function checkHydratedRoot(expected: string | null | undefined, tag: string): void {
   const node = getCurrentInstance()?.vnode.el;
-  if (typeof window === "undefined" || node == null || node instanceof Element && node.localName === expected) return;
+  if (expected === null || typeof window === "undefined" || node == null || node instanceof Element && node.localName === expected) return;
   const message = \`Server markup for <\${tag}> has an incompatible root.\`;
   throw Object.assign(new Error(\`HR005: \${message}\`), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR005", message }) });
 }

@@ -1,4 +1,7 @@
+import { isStyleWrite, styleWriteRules } from "./style-writes.js";
+import { literalValueSource as sourceValue } from "./shared.js";
 import { ITERATION_INDEX } from "../expression.js";
+import { invocationSchema } from "./invocation-attributes.js";
 import { attributeNamespace } from "../dom-attributes.js";
 import { namespacedAttributeSource } from "./shared.js";
 import { referenceContext, referenceType, withReferenceTypes } from "./reference-types.js";
@@ -37,10 +40,6 @@ import { NATIVE_PATH_WRITE_SOURCE } from "./react-control.js";
 import { nativeEventsModule } from "./react-events.js";
 import { DECLARED_EVENT_TYPE_SOURCE } from "./shared-generated.js";
 
-/** JavaScript literals retain authored __proto__ fields as own data properties. */
-function sourceValue(value: unknown, space?: number): string {
-  return JSON.stringify(value, null, space)?.replaceAll('"__proto__":', '["__proto__"]:') ?? "undefined";
-}
 
 function angularPropContract(definition: ComponentDefinition) {
   return { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { type: prop.select === undefined ? normalizeType(prop.type) : { kind: "union", members: prop.select.options.map(item => item.type) }, ...(prop.select === undefined ? {} : { select: prop.select }), required: prop.required, ...Object.fromEntries(["values", "pattern", "min", "max", "minLength", "maxLength"].flatMap(key => prop[key as keyof typeof prop] === undefined ? [] : [[key, prop[key as keyof typeof prop]]])) }])) };
@@ -60,6 +59,7 @@ interface Names extends Scope {
   readonly locals: readonly string[];
   readonly statuses: Map<string, string>;
   readonly definition: ComponentDefinition;
+  readonly attributes: string;
   readonly writes: ReadonlyMap<string, string>;
   readonly handlers: ReadonlyMap<string, string>;
 }
@@ -93,7 +93,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   const generics = selectorGenerics(definition.contract.props);
   const parameters = new Map(generics.map(item => [item.from, item.parameter]));
   const lowering = new TypeScriptLowering();
-  const fields: string[] = [];
+  const fields: string[] = nativeView ? [] : ["readonly hnAttributes = input<Record<string, unknown>>({});"];
   const methods: string[] = [];
   const host: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, { [VUE_ROOT_ATTRIBUTE]: "" });
   const rootEvents: string[] = [];
@@ -204,18 +204,33 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const controls: string[] = [];
     const inputStatuses: string[] = [];
     const nativeAttributes: string[] = [];
+    let styledAttributes: string | undefined;
     const namespacedAttributes: string[] = [];
-    const keyedClasses = child === undefined && node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class" && !attribute.twoWay));
+    const keyedClasses = node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class" && !attribute.twoWay));
     const literalClass = node.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "class");
     const classRules: { name: string; read: string }[] = [];
     const childView = child !== undefined && angularHostTag(child, graph) === "ng-template";
+    const forwards = node.attributes.some(attribute => attribute.kind === "forward");
+    const componentStyle = child !== undefined && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
     if (childView) nativeAttributes.push(`${quote("data-hn-owner")}: ${quote(names.definition.contract.tag)}`);
     if (node.attributes.filter(attribute => attribute.kind === "attribute" && attribute.twoWay).length > 1) return unsupported("multiple two-way control bindings on one element require independent native control ownership.");
     const put = (key: string, source: string) => { if (root) {
       const previous = host[key];
       host[key] = previous !== undefined && (key === "class" || key === "style") ? `${source}${key === "class" ? " " : ";"}${previous}` : source;
     } else attributes.push(`${key}="${escapeHtml(source)}"`); };
+    const writes: string[] = [];
     for (const attribute of node.attributes) {
+      if (componentStyle && isStyleWrite(attribute)) continue;
+      if (attribute.kind === "forward") { writes.push(names.attributes); continue; }
+      if (forwards && child === undefined && attribute.kind === "literal") {
+        if (node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+        writes.push(`[${quote(attribute.name)}, ${quote(attribute.value)}]`); continue;
+      }
+      if (forwards && child === undefined && attribute.kind === "attribute" && !attribute.twoWay) {
+        const read = attribute.target === "class" ? lowering.condition(attribute.expressionPlan!.ast, names) : attribute.target === "style" ? lowering.text(attribute.expressionPlan!.ast, names) : lowering.attribute(attribute.expressionPlan!.ast, names, attribute.name);
+        const fallback = attribute.target === undefined ? node.attributes.find(binding => binding.kind === "literal" && binding.name === attribute.name) : undefined;
+        writes.push(`[${quote(attribute.target === undefined ? svgAttributeName(attribute.name) : attribute.name)}, ${read}, ${attribute.target === undefined ? "undefined" : quote(attribute.target)}${fallback?.kind === "literal" ? `, ${quote(fallback.value)}` : ""}]`); continue;
+      }
       if (!root && child === undefined && (attribute.kind === "literal" || attribute.kind === "attribute" && attribute.target === undefined && !attribute.twoWay) && attributeNamespace(attribute.name) !== undefined) {
         helper("attributes");
         const code = attribute.kind === "literal" ? quote(attribute.value) : lowering.attribute(attribute.expressionPlan!.ast, names, attribute.name);
@@ -234,8 +249,8 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
         if (inputName !== undefined) {
           const parsed = contract === undefined ? undefined : parseTypedValue(attribute.value, contract.type, "$", "html");
           put(`[${inputName}]`, expression(parsed?.ok ? sourceValue(parsed.value) : quote(attribute.value), names, root));
-        } else if (childView) {
-          nativeAttributes.push(`${quote(attribute.name)}: ${isNativeBooleanAttribute(attribute.name) ? "true" : quote(attribute.value)}`);
+        } else if (child !== undefined) {
+          nativeAttributes.push(`${propertyKey(attribute.name)}: ${isNativeBooleanAttribute(attribute.name) ? "true" : quote(attribute.value)}`);
           // Angular selects named projection at the template anchor before its native view exists.
           if (attribute.name === "slot") put("slot", attribute.value);
         }
@@ -290,15 +305,39 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
           rootProperties.push(`Reflect.set(this.hnRoot.nativeElement, ${quote(key)}, ${lowered});`);
           continue;
         }
-        if (childView && componentInput === undefined) nativeAttributes.push(`${quote(attribute.kind === "property" ? `.${key}` : destination.replace(/^attr\./, ""))}: ${lowered}`);
+        if (child !== undefined && componentInput === undefined && attribute.kind === "attribute") nativeAttributes.push(`${propertyKey(destination.replace(/^attr\./, ""))}: ${lowered}`);
         else put(`[${destination}]`, expression(lowered, names, root));
       }
     }
+    if (componentStyle) {
+      helper("style");
+      const rules = styleWriteRules(node.attributes, attribute => attribute.target === "style"
+        ? lowering.text(attribute.expressionPlan!.ast, names) : lowering.attribute(attribute.expressionPlan!.ast, names, "style"), names.attributes);
+      const prop = receivingProp(child!, "style");
+      const styled = expression(rules, names, false, true);
+      if (prop === undefined) styledAttributes = styled;
+      else put(`[${prop}]`, `${styled} | hnNextStyle`);
+    }
+    if (forwards) {
+      helper("attributes");
+      const input = `[${writes.join(", ")}]`;
+      if (root) {
+        helper("forward-root");
+        const previous = field(); fields.push(`private readonly ${previous}: AttributeWriteState = { values: [], forwarded: [] };`);
+        rootProperties.push(`applyOrderedAttributes(this.hnRoot.nativeElement, ${input}, this.${previous});`);
+      } else attributes.push(`[hnNextAttributes]="${expression(input, names)}"`);
+    }
     if (classRules.length > 0) {
       helper("attributes");
-      const initial = literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined";
-      const input = `{ base: ${initial}, bindings: [${classRules.map(rule => `[${rule.name}, ${rule.read}]`).join(", ")}] }`;
-      if (root) {
+      const initial = forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined";
+      const input = `{ ${forwards ? "ordered: true, " : ""}base: ${initial}, bindings: [${classRules.map(rule => `[${rule.name}, ${rule.read}]`).join(", ")}] }`;
+      if (child !== undefined) {
+        helper("class-input");
+        const classInput = `classBindingText(${input})`;
+        const prop = receivingProp(child, "class");
+        if (prop === undefined) nativeAttributes.push(`${quote("class")}: ${classInput}`);
+        else put(`[${prop}]`, expression(classInput, names));
+      } else if (root) {
         helper("class-root");
         const previous = field();
         fields.push(`private ${previous}: unknown[] | undefined;`);
@@ -307,7 +346,10 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     }
     if (namespacedAttributes.length > 0) attributes.push(`[hnNextNamespaces]="${expression(`[${namespacedAttributes.join(", ")}]`, names)}"`);
     if (inputStatuses.length > 0) attributes.push(`[hnInputStates]="${expression(`{ ${inputStatuses.join(", ")} }`, names)}"`);
-    if (nativeAttributes.length > 0) attributes.push(`[hnAttributes]="${expression(`{ ${nativeAttributes.join(", ")} }`, names)}"`);
+    if (nativeAttributes.length > 0 || styledAttributes !== undefined) {
+      const input = expression(`{ ${nativeAttributes.join(", ")} }`, names);
+      attributes.push(`[hnAttributes]="${styledAttributes === undefined ? input : `${styledAttributes} | hnNextStyle:(${input})`}"`);
+    }
     if (controls.length > 0) attributes.push(`[hnNextControl]="${expression(`[${controls.join(", ")}]`, names)}"`);
     if (node.ref !== undefined) {
       const id = ref(node.ref, root, names.definition.contract.tag);
@@ -595,7 +637,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const open = `<${tag}${attributes.length === 0 ? "" : " " + attributes.join(" ")}>`;
     return templates + (isVoidElement(tag) ? open : `${open}${content}</${tag}>`);
   };
-  const compose = (current: ComponentDefinition, supplied?: ReadonlyMap<string, string>, projection?: Projection, suppliedStatuses?: ReadonlyMap<string, string>): string => {
+  const compose = (current: ComponentDefinition, supplied?: ReadonlyMap<string, string>, projection?: Projection, suppliedStatuses?: ReadonlyMap<string, string>, invocation?: { readonly attributes: string; readonly html: boolean }): string => {
     chain.push(current);
 
     const source = current.controller === undefined && current.module === undefined ? undefined : field();
@@ -608,7 +650,11 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     const writes = new Map<string, string>();
     const handlers = new Map<string, string>();
     const statuses = new Map<string, string>();
-    const names: Names = { ...referenceContext(current, options.publicState), code, types, writes, handlers, statuses, locals: [], definition: current };
+    helper("attributes");
+    const attributeId = field();
+    const consumed = Object.keys(current.contract.props).flatMap(name => [name, kebabCase(name)]);
+    fields.push(`readonly ${attributeId} = computed(() => Object.fromEntries(Object.entries(forwardedAttributes(${invocation?.attributes ?? (current === definition ? nativeView ? "this.hnForwardedAttributes()" : "this.hnAttributes()" : "{}")})).filter(([name]) => !(${sourceValue(consumed)} as string[]).includes(name))));`);
+    const names: Names = { ...referenceContext(current, options.publicState), code, types, writes, handlers, statuses, locals: [], definition: current, attributes: `this.${attributeId}()` };
     if (current === definition) ownNames = names;
     const declarationIds = new Map<string, string>();
     for (const declaration of current.declarations ?? []) {
@@ -641,7 +687,8 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       const candidate = `this.${id}() !== undefined ? this.${id}() : ${source === undefined ? initial : `this.${source}()[${quote(name)}] === undefined ? ${initial} : this.${source}()[${quote(name)}]!.value`}`;
       const incoming = `(${candidate}) ?? ${initial === "undefined" ? "null" : initial}`;
       inputs.set(name, incoming);
-      fields.push(`readonly ${checked} = computed<${valueType}>(() => ${status}.ready ? checkedInput<${type}>(${incoming}, ${runtimeSource}, ${prop.required}, ${quote(name)}, this.${accepted}) as ${valueType} : ${prop.required ? `(this.${accepted}[${quote(name)}] ?? ${initial === "undefined" ? "null" : initial})` : initial === "undefined" ? "null" : initial} as ${valueType});`);
+      const checkedIncoming = invocation?.html !== true ? incoming : `invocationInput(${invocation.attributes}, ${quote(name)}, ${incoming})`;
+      fields.push(`readonly ${checked} = computed<${valueType}>(() => ${status}.ready ? checkedInput<${type}>(${checkedIncoming}, ${runtimeSource}, ${prop.required}, ${quote(name)}, this.${accepted}) as ${valueType} : ${prop.required ? `(this.${accepted}[${quote(name)}] ?? ${initial === "undefined" ? "null" : initial})` : initial === "undefined" ? "null" : initial} as ${valueType});`);
       statuses.set(name, status);
       contexts.set(`${current.contract.tag}:${name}`, `this.${checked}`);
       code.set(name, `this.${checked}()`); types.set(name, { ...present(normalizeType(prop.type)), nullable: propValueIsNullable(prop), null: propValueIsNullable(prop) });
@@ -810,16 +857,39 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
       if (root.ref !== undefined) ref(root.ref, true, current.contract.tag);
       const childProps = new Map<string, string>();
       const childStatuses = new Map<string, string>();
+      const parts: string[] = [];
+      const componentStyle = root.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+      const htmlInputs = (componentStyle || root.attributes.some(attribute => attribute.kind === "forward")) && Object.keys(child.contract.props).length > 0 ? invocationSchema(child.contract.props) : undefined;
+      if (htmlInputs !== undefined) { helpers.add("html-inputs"); helpers.add("state"); }
       for (const attribute of root.attributes) {
-        const key = attribute.kind === "property" ? attribute.key : attribute.kind !== "directive" ? attribute.name : "";
-        const inputName = receivingProp(child, key);
-        if (inputName !== undefined) {
-          childProps.set(inputName, attribute.kind === "literal" ? quote(attribute.value) : value(attribute.expressionPlan, names));
-          childStatuses.set(inputName, attribute.kind === "literal" ? "READY_INPUT" : `evaluateInput(() => ${value(attribute.expressionPlan, inputScope(names, name => names.statuses.get(name)))}).status`);
-        }
+        if (componentStyle && isStyleWrite(attribute)) continue;
+        if (attribute.kind === "forward") { parts.push(`...${htmlInputs === undefined ? names.attributes : `htmlAttributeInputs(${names.attributes}, ${htmlInputs})`}`); continue; }
+        if (attribute.kind !== "literal" && attribute.kind !== "attribute") continue;
+        if (attribute.kind === "literal" && root.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+        if (attribute.kind === "attribute" && attribute.target !== undefined) continue;
+        const inputName = receivingProp(child, attribute.name);
+        const contract = inputName === undefined ? undefined : child.contract.props[inputName];
+        const parsed = attribute.kind !== "literal" || contract === undefined ? undefined : parseTypedValue(attribute.value, contract.type, "$", "html");
+        const read = attribute.kind === "literal" ? parsed?.ok ? sourceValue(parsed.value) : quote(attribute.value)
+          : inputName === undefined ? lowering.attribute(attribute.expressionPlan!.ast, names, attribute.name) : value(attribute.expressionPlan, names);
+        parts.push(`${propertyKey(inputName ?? attribute.name)}: ${read}`);
       }
-      const markup = compose(child, childProps, { nodes: root.children, names, ...(projection === undefined ? {} : { parent: projection }) }, childStatuses);
-      const outer = { ...root, attributes: root.attributes.filter(attribute => attribute.kind !== "directive" && receivingProp(child, attribute.kind === "property" ? attribute.key : attribute.name) === undefined), events: [], ref: undefined } as unknown as ElementNode;
+      if (componentStyle) {
+        helper("style");
+        const rules = styleWriteRules(root.attributes, attribute => attribute.target === "style"
+          ? lowering.text(attribute.expressionPlan!.ast, names) : lowering.attribute(attribute.expressionPlan!.ast, names, "style"), names.attributes);
+        const previous = field(); fields.push(`private readonly ${previous}: unknown[] = [];`);
+        const source = `styleText("", ${rules}, this.hnStyleDocument, this.${previous})`;
+        parts.push(htmlInputs === undefined ? `style: ${source}` : `...htmlAttributeInputs({ style: ${source} }, ${htmlInputs})`);
+      }
+      const record = `{ ${parts.join(", ")} }`;
+      const invocation = field(); fields.push(`readonly ${invocation} = computed<Record<string, unknown>>(() => (${htmlInputs === undefined ? record : `invocationProps(${record}, ${htmlInputs})`}));`);
+      for (const name of Object.keys(child.contract.props)) {
+        const key = kebabCase(name);
+        childProps.set(name, `this.${invocation}()[${quote(key)}] ?? this.${invocation}()[${quote(name)}]`);
+      }
+      const markup = compose(child, childProps, { nodes: root.children, names, ...(projection === undefined ? {} : { parent: projection }) }, childStatuses, { attributes: `this.${invocation}()`, html: htmlInputs !== undefined });
+      const outer = { ...root, attributes: root.attributes.filter(attribute => attribute.kind === "property"), events: [], ref: undefined } as unknown as ElementNode;
       bindings(outer, names, true);
       reflect();
       return markup;
@@ -944,13 +1014,14 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
   if (usesValue || helpers.has("state") || lowering.helpers().some(name => name.startsWith("decimal"))) helper("expressions");
   const rootBindings = rootControls.length === 0 && rootHtml === undefined && rootProperties.length === 0 ? "" : `hnRootBindings(): string { ${rootProperties.join(" ")} ${rootControls.length === 0 ? "" : `this.hnControl.bindings = [${rootControls.join(", ")}];`} ${rootHtml === undefined ? "" : `this.hnHtml.binding = ${rootHtml};`} return ""; }`;
   if (rootBindings !== "") host[`[attr.${VUE_ROOT_ATTRIBUTE}]`] = "hnRootBindings()";
+  if (helpers.has("style")) fields.push("private readonly hnStyleDocument = inject(DOCUMENT);");
   const helperPath = (name: string) => quote(options.helperSpecifier?.(name) ?? `./${name}`);
-  const attributeImports = [...(template.includes("hnNextNamespaces") ? ["HtmlNextNamespacedAttributes"] : []), ...(template.includes("hnNextClasses") ? ["HtmlNextClasses"] : []), ...(helpers.has("class-root") ? ["initializeClassBindings", "applyClassBindings"] : [])];
-  const component = `// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${attributeImports.length > 0 ? `import { ${attributeImports.join(", ")} } from ${helperPath("attributes")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}${helpers.has("children") ? `\nimport { contentChildren } from "@angular/core";\nimport { ACCEPTED_CHILD, acceptedChild, acceptedChildren, connectChild, childSlot, childTag, HtmlNextCapture, HtmlNextChildSlot, HtmlNextPlain } from ${helperPath("children")};` : ""}\n${lowering.helpers().some(name => name.startsWith("decimal")) ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.referenceDeclarations().join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
+  const attributeImports = ["forwardedAttributes", ...(helpers.has("class-input") ? ["classBindingText"] : []), ...(helpers.has("forward-root") ? ["applyOrderedAttributes", "type AttributeWriteState"] : []), ...(template.includes("hnNextAttributes") ? ["HtmlNextAttributes"] : []), ...(template.includes("hnNextNamespaces") ? ["HtmlNextNamespacedAttributes"] : []), ...(template.includes("hnNextClasses") ? ["HtmlNextClasses"] : []), ...(helpers.has("class-root") ? ["initializeClassBindings", "applyClassBindings"] : [])];
+  const component = `${helpers.has("style") ? `import { DOCUMENT } from "@angular/common";\nimport { styleText, HtmlNextStyle } from ${helperPath("style")};\n` : ""}// Generated Angular component by HTML Next ${version}. Do not edit.\nimport { Component, ChangeDetectionStrategy, ViewEncapsulation, ElementRef, inject, input, signal, computed, viewChildren, contentChild, Directive, TemplateRef, ViewContainerRef, forwardRef, type EmbeddedViewRef, type Signal } from "@angular/core";\n${[...imports].filter(([tag]) => tag !== definition.contract.tag).map(([tag, name]) => `import ${name}${slotImports.has(tag) ? `, { ${[...slotImports.get(tag)!].join(", ")} }` : ""} from ${quote(options.importSpecifier?.(tag) ?? `./${name}`)};`).join("\n")}\n${helpers.has("state") ? `import { nativeBooleanAttribute, checkedInput, checkedProp, checkPropInput, updatePath, stateTokens, revertValue, evaluateInput, inputRead, requireInputStatus, READY_INPUT, UNRESOLVED_INPUT, initializedState, retainedComputed, reflectedInputs, inputDefault, type TrackedSignal, type InitializedSignal, type InputSnapshot, type InputStatus, acceptsControllerWrite, copyStateSeed, warnUnless, finiteResult, acceptsDeclaredEvent, acceptsDeclaredEvent as acceptsSlotProp, selectedPropNode${helpers.has("html-inputs") ? ", htmlAttributeInputs, invocationProps, invocationInput" : ""} } from ${helperPath("state")};` : ""}\n${usesSlots ? `import { NgTemplateOutlet } from "@angular/common";` : ""}\n${usesHead ? `import { HtmlNextHead, headText, headAttribute, headAttributes, headJson, type HeadEntry, type HeadScript, type DeclaredScript, type ScriptStatus } from ${helperPath("head")};` : ""}\n${usesRequests ? `import { frameworkRequest, propResponder, type RequestEvent, type Responder } from ${helperPath("requests")};` : ""}\n${usesHtml ? `import { HtmlNextHtml${usesHtmlFragment ? ", HtmlNextHtmlFragment, HtmlNextHtmlAttributes" : ""} } from ${helperPath("html")};` : ""}\n${attributeImports.length > 0 ? `import { ${attributeImports.join(", ")} } from ${helperPath("attributes")};` : ""}\n${usesData ? `import { createDataRead } from ${helperPath("data")};` : ""}\n${usesValidity ? `import { HtmlNextValidity, type ValidityBinding } from ${helperPath("validity")};` : ""}\n${usesHost ? `import { HtmlNextHost } from ${helperPath("host")};` : ""}\n${helpers.has("bindings") ? `import { preparedModule } from ${helperPath("bindings")};` : ""}\n${usesNativeControls ? `import { HtmlNextNativeControls } from ${helperPath("native-controls")};` : ""}\n${usesValue ? `import { HtmlNextValue${helpers.has("region") ? ", HtmlNextRegion" : ""}${usesSlots ? ", HtmlNextSlotValues" : ""} } from ${helperPath("value")};` : ""}\n${usesControl ? `import { HtmlNextControl } from ${helperPath("control")};` : ""}\n${usesProjection ? `import { HtmlNextProjection } from ${helperPath("projection")};` : ""}\n${usesEvents ? `import { HtmlNextEvents, dispatchDeclaredTargets } from ${helperPath("events")};` : ""}\n${hasContext ? `import { contextToken } from ${helperPath("context")};` : ""}${helpers.has("children") ? `\nimport { contentChildren } from "@angular/core";\nimport { ACCEPTED_CHILD, acceptedChild, acceptedChildren, connectChild, childSlot, childTag, HtmlNextCapture, HtmlNextChildSlot, HtmlNextPlain } from ${helperPath("children")};` : ""}\n${lowering.helpers().some(name => name.startsWith("decimal")) ? `import { ${lowering.helpers().filter(name => name.startsWith("decimal")).join(", ")} } from ${helperPath("expressions")};` : ""}\n${helpers.has("depth") ? `import { NESTED_DEPTH, checkNestedDepth } from ${helperPath("depth")};` : ""}\n${[...controllerImports].map(([specifier, name]) => `import * as ${name} from ${quote(specifier)};`).join("\n")}\n${lowering.referenceDeclarations().join("\n")}\n${lowering.moduleFallbacks().join("\n")}\n${lowering.fallbacks().join("\n")}\n${targetComponent(definition).events.length === 0 ? "" : `export interface ${definition.contract.name}Events { ${targetComponent(definition).events.map(event => `readonly ${propertyKey(event.name)}: CustomEvent<${event.detailType}>;`).join(" ")} }`}\n${[...slotDirectives.values()].map(slot => `@Directive({ selector: ${quote(`ng-template[${slot.selector}]`)}, standalone: true })
 export class ${slot.name} {
   readonly template = inject<TemplateRef<${slot.type}>>(TemplateRef);
   static ngTemplateContextGuard(_directive: ${slot.name}, _context: unknown): _context is ${slot.type} { return true; }
-}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : []), ...(template.includes("hnNextNamespaces") ? ["HtmlNextNamespacedAttributes"] : []), ...(template.includes("hnNextClasses") ? ["HtmlNextClasses"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext || childProviders.length > 0 ? `providers: [${[...providers, ...childProviders].join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
+}`).join("\n")}\n@Component({\n  selector: ${quote(`${native}[${definition.contract.tag}]`)},\n  standalone: true,\n  imports: [${[...[...imports.values()].map(name => `forwardRef(() => ${name})`), ...[...slotImports.values()].flatMap(names => [...names]), ...(helpers.has("style") ? ["HtmlNextStyle"] : []), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : []), ...(template.includes("hnNextAttributes") ? ["HtmlNextAttributes"] : []), ...(template.includes("hnNextNamespaces") ? ["HtmlNextNamespacedAttributes"] : []), ...(template.includes("hnNextClasses") ? ["HtmlNextClasses"] : [])].join(", ")}],\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `hostDirectives: [${[...(rootEvents.length > 0 ? ["HtmlNextEvents"] : []), ...(usesProjection ? ["HtmlNextProjection"] : []), ...(rootControls.length > 0 ? ["HtmlNextControl"] : []), ...(usesHost ? ["HtmlNextHost"] : []), ...(usesHead ? ["HtmlNextHead"] : []), ...(usesValidity ? ["HtmlNextValidity"] : []), ...(rootHtml === undefined ? [] : ["HtmlNextHtml"])].join(", ")}],`}\n  preserveWhitespaces: true,\n  changeDetection: ChangeDetectionStrategy.OnPush,\n  encapsulation: ViewEncapsulation.None,\n  host: ${sourceValue(host, 2)},\n  ${hasContext || childProviders.length > 0 ? `providers: [${[...providers, ...childProviders].join(", ")}],` : ""}\n  template: ${quote(template)},\n  styles: [${quote(styles)}]\n})\nexport default class ${definition.contract.name}${generics.length === 0 ? "" : `<${generics.map(item => item.declaration).join(", ")}>`} {\n  readonly hnRoot = inject<ElementRef<HTMLElement>>(ElementRef);\n  ${usesHost ? "readonly hnHost = inject(HtmlNextHost);" : ""}\n  ${usesValidity ? "readonly hnValidity = inject(HtmlNextValidity);" : ""}\n  ${usesHead ? "readonly hnHead = inject(HtmlNextHead);" : ""}\n  ${rootControls.length === 0 ? "" : `readonly hnControl = inject(HtmlNextControl);`}\n  ${rootHtml === undefined ? "" : `readonly hnHtml = inject(HtmlNextHtml);`}\n  ${rootBindings}\n  ${[...slotDirectives.values()].map(slot => `readonly ${slot.query} = contentChild(${slot.name});`).join("\n  ")}\n  ${fields.join("\n  ")}\n  ${methods.join("\n  ")}\n  ${rootEvents.length === 0 ? "" : `readonly hnEvents = inject(HtmlNextEvents);`}\n  ${usesProjection ? `readonly hnProjection = inject(HtmlNextProjection);` : ""}\n  ${rootEvents.length === 0 && rootControls.length === 0 && !usesProjection && !usesHost && !usesHead && !usesValidity && rootHtml === undefined ? "" : `ngOnInit(): void { ${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""} }`}\n}\n`;
   if (nativeView) {
     helper("view");
     helper("events");
@@ -963,7 +1034,7 @@ export class ${slot.name} {
       arguments: generics.length === 0 ? "" : `<${generics.map(() => "any").join(", ")}>`,
       template, host, fields, methods: [...methods, rootBindings], styles,
       slotQueries: [...slotDirectives].map(([name, slot]) => `readonly ${slot.query} = () => { const template = this.hnSlotTemplates()[${quote(name)}]; return template ? { template } : undefined; };`),
-      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : []), ...(template.includes("hnNextNamespaces") ? ["HtmlNextNamespacedAttributes"] : []), ...(template.includes("hnNextClasses") ? ["HtmlNextClasses"] : [])],
+      dependencies: [...imports.values(), ...[...slotImports.values()].flatMap(names => [...names]), ...(helpers.has("style") ? ["HtmlNextStyle"] : []), ...(usesNativeControls ? ["HtmlNextNativeControls"] : []), ...(usesSlots ? ["NgTemplateOutlet", "HtmlNextSlotValues"] : []), ...(template.includes("hnNextChildSlot") ? ["HtmlNextChildSlot"] : []), ...(template.includes("hnNextPlain") ? ["HtmlNextPlain"] : []), ...(template.includes("hnNextCapture") ? ["HtmlNextCapture"] : []), ...(usesEvents ? ["HtmlNextEvents"] : []), ...(usesControl ? ["HtmlNextControl"] : []), ...(usesValue ? ["HtmlNextValue"] : []), ...(helpers.has("region") ? ["HtmlNextRegion"] : []), ...(usesHtml ? ["HtmlNextHtml"] : []), ...(usesHtmlFragment ? ["HtmlNextHtmlFragment", "HtmlNextHtmlAttributes"] : []), ...(template.includes("hnNextAttributes") ? ["HtmlNextAttributes"] : []), ...(template.includes("hnNextNamespaces") ? ["HtmlNextNamespacedAttributes"] : []), ...(template.includes("hnNextClasses") ? ["HtmlNextClasses"] : [])],
       providers: [...providers, ...childProviders],
       injections: [...(usesValidity ? [{ name: "hnValidity", type: "HtmlNextValidity" }] : []), ...(rootEvents.length > 0 ? [{ name: "hnEvents", type: "HtmlNextEvents" }] : []), ...(usesProjection ? [{ name: "hnProjection", type: "HtmlNextProjection" }] : []), ...(usesHost ? [{ name: "hnHost", type: "HtmlNextHost" }] : []), ...(usesHead ? [{ name: "hnHead", type: "HtmlNextHead" }] : [])],
       initialize: `${usesValidity ? `this.hnValidity.read = (): readonly ValidityBinding[] => [${validityModels.join(", ")}];` : ""} ${usesHead ? `this.hnHead.models = [${headModels.join(", ")}];` : ""} ${usesHost ? `this.hnHost.models = [${hostModels.join(", ")}];` : ""} ${rootEvents.length === 0 ? "" : `this.hnEvents.bindings = [${rootEvents.join(", ")}]; this.hnEvents.ngOnChanges();`} ${usesProjection ? `this.hnProjection.owners = ${sourceValue(chain.map(item => item.contract.tag))};` : ""}`,

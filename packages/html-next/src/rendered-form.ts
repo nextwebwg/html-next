@@ -335,6 +335,7 @@ export const FORM_DEFAULTS_ATTRIBUTE = "data-html-next-form-defaults";
 export const INSTANCE_ATTRIBUTE = "data-html-next-instance";
 
 export interface RenderedInstanceRecord {
+  readonly attributes?: readonly (readonly [string, string])[];
   readonly explicit: readonly string[];
   readonly inputs: Readonly<Record<string, {
     readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean;
@@ -390,6 +391,10 @@ export function renderedInstanceRecord(element: Element, tag: string): RenderedI
           input.provided !== undefined && typeof input.provided !== "boolean" ||
           input.producer !== undefined && typeof input.producer !== "boolean")) {
         fail("HR010", "Malformed rendered component instance record.");
+      }
+      if (record.attributes !== undefined && (!Array.isArray(record.attributes) || record.attributes.some(attribute =>
+        !Array.isArray(attribute) || attribute.length !== 2 || attribute.some(value => typeof value !== "string")))) {
+        fail("HR010", "Malformed rendered attribute inputs.");
       }
       if (record.availability !== undefined) {
         if (record.availability === null || typeof record.availability !== "object" || Array.isArray(record.availability) ||

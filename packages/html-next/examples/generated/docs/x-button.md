@@ -16,7 +16,7 @@ A native button with a themed presentation.
 | `size` | `keyword` | `sm`, `md`, `lg` | no | `"md"` | attribute `size` | Control size. |
 | `variant` | `keyword` | `outline`, `solid`, `destructive`, `ghost` | no | `"outline"` | attribute `variant` | Visual treatment. |
 
-Native attributes and framework-native event surfaces pass through to the native root. Declared prop targets and template-owned attributes take precedence.
+Invocation attributes not consumed by declared props are forwarded only at authored `$attributes` destinations. Attribute writes follow source order; later writes win. See [attribute forwarding](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
 
 ## Slots
 
