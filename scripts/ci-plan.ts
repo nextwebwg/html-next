@@ -81,6 +81,7 @@ export function createPlan(paths: readonly string[]) {
     for (const path of tests) {
       const file = `packages/${directory}/tests/${path}`;
       const source = readFileSync(`${root}${file}`, "utf8");
+      if (source.includes("HTMLNEXT_DOTNET_TEST")) continue; // Native client integration runs in the .NET job with its SDK.
       const suite = source.includes("HTMLNEXT_BROWSER_TEST") ? "browser"
         : source.includes("HTMLNEXT_TARGET_TEST") ? "targets" : "node";
       if (source.includes("HTMLNEXT_CONSUMER_TEST")) continue; // Packed contracts run separately.
@@ -118,7 +119,7 @@ export function createPlan(paths: readonly string[]) {
       files: unitFiles.slice(index, index + 20), seconds: 0,
     });
   }
-  const dotnet = packages.length === directories.length || paths.some((path) =>
+  const dotnet = packages.includes("html-next-unplugin") || paths.some((path) =>
     path.startsWith("packages/html-next-dotnet/") && !path.endsWith(".md"));
   return { packages, node, browser, corpus, dotnet };
 }

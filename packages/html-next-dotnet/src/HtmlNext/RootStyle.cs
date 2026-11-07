@@ -2,7 +2,7 @@ namespace HtmlNext;
 
 internal sealed record RootStyleState(string Name, ValueExpression Read);
 
-internal sealed record RootStyle(string Tag, RootStyleState[] States, string Source, string[]? AuthoredIdentity = null) : RenderOperation
+internal sealed record RootStyle(string Tag, RootStyleState[] States, string Source, string[]? AuthoredIdentity = null, InstanceRecordPlan? Instance = null) : RenderOperation
 {
     private readonly string stateAttribute = "data-" + Tag + "-state";
     public bool Manages(string attribute) => States.Length > 0 && attribute == stateAttribute;
@@ -19,6 +19,7 @@ internal sealed record RootStyle(string Tag, RootStyleState[] States, string Sou
         writer.Write('"');
         if (context is not null) foreach (var parent in context.RootStyles()) parent.Style.WriteStates(ref writer, parent.Values);
         WriteStates(ref writer, values);
+        if (context?.Interactive == true) Instance?.Write(ref writer, values, context, cancellationToken);
     }
 
     private static void WriteToken(ref HtmlWriter writer, string token, ref bool first)

@@ -1,8 +1,8 @@
 # HTML Next for .NET
 
-Experimental native .NET rendering slice. Compile a component once, keep the returned template, and render it repeatedly with request data. The initial implementation produces inert HTML and measures template/data-binding cost against Fluid and Node.js.
+Native .NET rendering under development. Compile a component once, keep the returned template, and render it repeatedly with request data. Render inert HTML, or supply matching built assets and select interactive output for adoption by generated browser factories.
 
-The component language is defined by the [public proposal](https://nextwebwg.org/declarative-components/). This package is tooling under development; it does not yet implement the complete language or browser hydration.
+The component language is defined by the [public proposal](https://nextwebwg.org/declarative-components/). Complete language coverage, native application preparation and full Looma qualification remain unfinished.
 
 ## Use a retained template
 
@@ -78,7 +78,7 @@ Compilation validates each component's `$ref` names, including hidden and unused
 
 The compiler currently renders component graphs whose definitions have a native root, a literal delegated component root, or native root choices in a bare `<template $match>`. It handles typed props, literal and expression-initialized state, forward-referenced computed declarations, pure expressions in text and `$value`, truthy `$if` guards, nested `$each` with `$where`, `$sort`, `$limit` and `$key`, lexical `$with` aliases, and first-matching `$match` arms. A nested `<template>` renders its children without a wrapper. A guard around an iteration tests its enclosing scope; `$where` tests each item. Text escapes apply to authored text before interpolation, so returned strings are never parsed again as expressions.
 
-An iteration can bind an index with `$each="item, index of $items"`. The optional index alias reads the row's zero-based position after filtering, stable sorting and limiting. Nested iterations retain their enclosing indices and aliases. A list's `.length` reads the size of that supplied list. Numeric sort keys compare numerically; other keys use the current .NET culture's text comparison. Align host locales when comparing with Node's default-locale sort. Keys distinguish scalar types and retain record/list identity; repeated keys fail the render. Getter snapshots and compiled plans remain reusable, and an iteration that does not read its index reserves no index slot. This inert rendering path does not yet emit keyed hydration records.
+An iteration can bind an index with `$each="item, index of $items"`. The optional index alias reads the row's zero-based position after filtering, stable sorting and limiting. Nested iterations retain their enclosing indices and aliases. A list's `.length` reads the size of that supplied list. Numeric sort keys compare numerically; other keys use the current .NET culture's text comparison. Align host locales when comparing with Node's default-locale sort. Keys distinguish scalar types and retain record/list identity; repeated keys fail the render. Getter snapshots and compiled plans remain reusable, and an iteration that does not read its index reserves no index slot. Interactive output includes the existing browser machinery's region and row markers.
 
 Expression compilation supports literals, paths and computed indices, arithmetic, dimensions, typed comparisons, boolean operators, conditional values, and the implemented `abs`, `round`, `min`, `max`, `clamp`, `default`, `concat`, and `join` functions. The current native types include `string`, `keyword`, `number`, `integer`, `boolean`, `length`, `percentage`, `duration`, and compact or expanded nested list/object declarations. Optional fields and open objects preserve their actual field presence. Unknown values in state or open fields keep shared references within a render and snapshot application getters once; declared prop types require an HTML attribute form, matching the JavaScript compiler. Props require descriptions. Inputs may be POCOs, dictionaries, structs, or `JsonElement` values. POCO getters are cached as delegates; rendering does not invoke property getters through reflection on each row.
 
@@ -96,11 +96,11 @@ Keyed `class:token` bindings toggle individual tokens on native elements, includ
 
 Invocation attributes reach rendered elements only at authored [`$attributes` destinations](https://nextwebwg.org/declarative-components/components#attribute-forwarding). Declared props consume their attribute inputs, including unused props. The destination may be a native root, an inner element, or another component invocation; each component boundary opts in separately. Attribute writes follow source order, with later writes winning. Whole class/style attributes replace earlier values, and class bindings apply in order. Literal and `from:` attributes retain caller scope, escaping, URL filtering and invalid-result fallbacks. Forwarded inputs that become declared props use the receiving prop's HTML conversion. Compilation identifies reachable forwarding so unrelated templates retain their existing rendering path. Keyed style bindings and forwarding inside deferred carriers still need qualification.
 
-The native attribute tables are generated from the JavaScript owners in `expression.ts` and `sanitize.ts`. Run `corepack pnpm exec tsx packages/html-next/scripts/generate-attribute-rules.ts` after changing those tables; `check:generated` verifies both languages. Shared attribute fixtures check full .NET `Render`/`Write` output and Node's authored attributes. Component-owned validity and hydration records remain outside this fixture comparison and still need native implementation.
+The native attribute tables are generated from the JavaScript owners in `expression.ts` and `sanitize.ts`. Run `corepack pnpm exec tsx packages/html-next/scripts/generate-attribute-rules.ts` after changing those tables; `check:generated` verifies both languages. Shared attribute fixtures check full .NET `Render`/`Write` output and Node's authored attributes. Separate client-integration tests cover native instance records and browser adoption. Component-owned validity remains implementation work.
 
 AngleSharp supplies HTML parsing, table structure, and foreign-element namespaces; a handwritten expression/type frontend checks and lowers values into reusable plans. HTML parse errors and unimplemented features produce source-associated errors. The application supplies source resolution during compilation. Rendering uses retained in-memory plans; component JavaScript execution remains separate.
 
-Full prop/type validation (including remaining structured prop interoperability, nested validity paths and additional scalar formats), state availability across preparation and hydration, additional declarations and loop modifiers, remaining invocation forwarding, accepted-child rendered-form records, CSS compilation, Intl-compatible formatting, preparation snapshots, and hydration remain implementation work. Select elements are rejected because the parser can discard their unsupported children before component validation. Trimming and Native AOT are not qualified. `graph.Modules` and `template.Module` retain declared module specifiers and canonical source IDs for client builds. Deployed-asset validation and hydration records still need integration. The .NET runtime remains separate from the JavaScript build tools that will supply client assets. Structured state seeds retain their actual field layout. Typed references check each read, so one wrong-typed field stays inert while conforming siblings remain readable; nested constraints do not refuse the whole seed. Direct prop normalization and structured child-prop interoperability still need complete qualification. The current simple benchmark fixtures do not characterize nested-component or state-initialization allocations.
+Full prop/type validation (including remaining structured prop interoperability, nested validity paths and additional scalar formats), state availability across preparation and hydration, additional declarations and loop modifiers, remaining invocation forwarding, accepted-child rendered-form records, CSS compilation, Intl-compatible formatting and preparation snapshots remain implementation work. Select elements are rejected because the parser can discard their unsupported children before component validation. Trimming and Native AOT are not qualified. `graph.Modules` and `template.Module` retain declared module specifiers and canonical source IDs for client builds. Structured state seeds retain their actual field layout. Typed references check each read, so one wrong-typed field stays inert while conforming siblings remain readable; nested constraints do not refuse the whole seed. Direct prop normalization and structured child-prop interoperability still need complete qualification. The current simple benchmark fixtures do not characterize nested-component or state-initialization allocations.
 
 ## Use built style assets
 
@@ -118,7 +118,29 @@ Resolve `graph.Stylesheets` beneath the application's deployed asset base and in
 
 The reader validates server asset version 1, unique source/component entries and emitted stylesheet availability. Compilation checks each component's source fingerprint against the manifest. A stale source or incompatible manifest raises `HNCS006`. Source identities may differ between the build and deployment; matching uses the declared component tag and the complete source-content fingerprint.
 
-Standalone CSS compilation and native validation of imported stylesheet-source fingerprints remain unfinished. This asset path does not complete native scoped projection, preparation, rendered-form or hydration support. Those features still need qualification against the public proposal and complete Looma catalog.
+Standalone CSS compilation and native validation of imported stylesheet-source fingerprints remain unfinished.
+
+## Render for browser adoption
+
+Build matching client assets with the native unplugin's `hydrate: true` option. The application's browser entry imports `hydrate` from `virtual:html-next/hydrate` and calls it after the server markup is present. Keep that browser bundle, its stylesheets and `html-next.manifest.json` together when deploying. The application owns their URLs and document assembly.
+
+Load the manifest before compiling the native graph, then select interactive output for a request:
+
+```csharp
+var assets = HtmlNextServerAssets.FromManifest(
+    await File.ReadAllTextAsync("wwwroot/html-next.manifest.json"));
+var graph = HtmlNextCompiler.CompileResource(source, assets: assets);
+var html = graph.Template("x-page").Render(model,
+    options: new HtmlNextRenderOptions { Interactive = true });
+```
+
+`graph.Client`, `template.Client` and `assets.Client` expose the same immutable compiler-owned plan: server entries, adopted components, creation factories, dependencies and retained-feature reasons. Native rendering consumes that selection. Components pruned from adoption carry no instance records. Configure `client.publicRoots` in the build when application code will update otherwise static roots through public browser APIs.
+
+Interactive rendering requires a compatible client plan and assets built with `hydrate: true`; missing or incompatible assets raise `HNCS006` before binding inputs or writing output. Component source fingerprints are checked during compilation. Inert rendering remains the default and can reuse the same compiled graph.
+
+Native output carries accepted props, input source and caller ownership, state and claimed one-time initializers in the existing version 1 instance format. Explicit null inputs retain caller ownership while the accepted prop takes its declared default. Shared roots hold a record for each owner. Explicit `$attributes` owners record only the invocation attributes not consumed by props. Tagged values preserve negative zero and shared references; cyclic or non-finite values raise `HNCS008` during interactive serialization. Request-local getter snapshots and records are reused between the buffered renderer's counting and writing passes.
+
+The native client-integration tests exercise actual generated-client adoption in Chromium, Firefox and WebKit: root and control identity, early edits, prop updates, retained state seeds, keyed and fragment rows, aliases, shared roots, nested components, scoped templates and initially carried plain content. Complete hydration qualification still requires accepted-child records, application/module preparation snapshots, the remaining native language features and the full Looma catalog.
 
 ## Verify and measure
 
@@ -126,6 +148,7 @@ Run from the repository root:
 
 ```sh
 corepack pnpm test:dotnet
+HTMLNEXT_BROWSER_TEST=1 node scripts/test-dotnet-client.ts
 corepack pnpm exec tsx packages/html-next-dotnet/benchmarks/node.ts --validate
 corepack pnpm measure:dotnet --filter '*'
 corepack pnpm measure:dotnet:node
@@ -144,4 +167,4 @@ The [low-memory measurements](benchmarks/results/2026-11-05-low-memory.md) inclu
 
 ## Ownership
 
-Native source, tests, and benchmark dependencies live in this directory. Root CI selects a separate .NET job and never packs this project as an npm package. The existing JavaScript compiler owns `analyzeClientPlan` and emits the shared client plan through the native unplugin's build manifest. HTMLKit consumes that analysis for its browser graph; this .NET slice does not yet consume the artifact or emit hydration records. Both server implementations will use the same selected client assets and existing browser runtime.
+Native source, tests, fixture host and benchmark dependencies live in this directory. The unplugin owns the JavaScript integration tests that build the shared manifest and exercise native output with generated clients. `test:dotnet` includes their Node-side checks; the native CI job also runs their three-engine browser checks. Root CI never packs this project as an npm package. The JavaScript compiler owns `analyzeClientPlan`; HTMLKit and the .NET renderer consume its selection and use the existing browser runtime.

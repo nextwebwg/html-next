@@ -28,6 +28,7 @@ internal sealed class DeclarationEvaluation(object?[] values, int count, string 
     // 0: unread, 1: evaluating, 2: available, 3: unavailable.
     private readonly byte[] status = new byte[count];
     public bool Ready { get; set; } = true;
+    public bool Initialized(LocalDeclaration declaration) => status[declaration.Index] == 2;
 
     public object? Read(LocalDeclaration declaration)
     {

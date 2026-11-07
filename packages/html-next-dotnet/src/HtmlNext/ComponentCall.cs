@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace HtmlNext;
 
-internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1);
+internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1, string? Written = null);
 
 internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute?[]? Attributes = null) : RenderOperation
 {
@@ -17,7 +17,7 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             cancellation.ThrowIfCancellationRequested();
             ExecutionStack.Check(call.Target.Template.SourceName);
             var template = call.Target.Template;
-            var child = template.BindInvocation(call.Arguments, parent, cancellation, context.OnDiagnostic, call.Attributes, context.InvocationAttributesFor(parent), initialize: false);
+            var child = template.BindInvocation(call.Arguments, parent, cancellation, context.OnDiagnostic, call.Attributes, context.InvocationAttributesFor(parent), context: context, initialize: false);
             var matched = accepts.Contains(template.Tag, StringComparer.Ordinal);
             var frame = new ProjectionFrame(call.Projection ?? [], parent, matched ? owner : child, template.Tag, call.SharedRoot);
             context.RecordCollectedInvocation(call, parent, child, frame.Claims);
@@ -133,8 +133,10 @@ internal sealed record DeferredPropAttribute(string Name, ValueExpression Expres
     }
 }
 
-internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnostic>? onDiagnostic)
+internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnostic>? onDiagnostic, bool interactive = false)
 {
+    public bool Interactive { get; } = interactive;
+    public bool Adopting { get; set; }
     private readonly List<object?[]>? children = cacheChildren ? [] : null;
     private int position = -1;
     private List<RootStyleFrame>? rootStyles;

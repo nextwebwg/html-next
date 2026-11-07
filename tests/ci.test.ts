@@ -34,6 +34,14 @@ describe("affected CI", () => {
       }).status).toBe(status);
     }
   });
+  it("runs the native client integration on compiler or manifest changes in the .NET job", () => {
+    const file = "packages/html-next-unplugin/tests/dotnet-hydration.test.ts";
+    for (const changed of ["packages/html-next-unplugin/src/index.ts", "packages/html-next/src/client-plan.ts", file]) {
+      const plan = createPlan([changed]);
+      expect(plan.dotnet).toBe(true);
+      expect([...plan.browser, ...plan.node].some(job => job.files.includes(file))).toBe(false);
+    }
+  });
   it("builds a packed consumer together with its workspace dependencies", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     const selector = /pnpm --filter '([^']+)' build/.exec(workflow)?.[1];

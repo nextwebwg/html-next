@@ -38,6 +38,8 @@ public static partial class HtmlNextCompiler
         private readonly Dictionary<string, ScopedSlotContract> slotContracts = new(StringComparer.Ordinal);
         private readonly Dictionary<int, ScopedSlotValue> projectionLocals = [];
         private readonly List<AcceptedChildListBinding> childLists = [];
+        private readonly List<(string Name, int Slot, ValueType Type)> states = [];
+        private InstanceRecordPlan? instance;
         private readonly Dictionary<int, IterationIndexBinding> indexLocals = [];
         public IReadOnlyDictionary<string, ScopedSlotContract> Slots => slotContracts;
         private IReadOnlyList<string> styleNames = [];
@@ -134,6 +136,7 @@ public static partial class HtmlNextCompiler
                         if (seed is not null) type = type.AsReference();
                         var value = literal is null ? null : type.Kind == "unknown" ? literal : Default(literal, type);
                         bindings.Add(name, (slot, type));
+                        states.Add((name, slot, type));
                         if (seed is null) initializers.Add(new(slot, value));
                         else AddDerived(name, slot, seed, type);
                     }
@@ -202,11 +205,15 @@ public static partial class HtmlNextCompiler
         {
             ReadReferences(root, new(StringComparer.Ordinal));
             foreach (var name in derived.Keys) CompileDerived(name);
+            var propDefinitions = props.ToArray();
+            if (assets?.Hydrate == true && assets.Client?.Adopts(Tag) == true)
+                instance = new(Tag, slots++, propDefinitions, states.Select(state => new HydrationState(state.Name, state.Slot, state.Type,
+                    derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes);
             if (assets is not null) rootStyle = new(Tag, styleNames.Select(name => new RootStyleState(name,
-                bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source);
+                bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
-            return new(Tag, props.ToArray(), operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), assets?.Stylesheets, childLists.ToArray());
+            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), assets?.Stylesheets, childLists.ToArray(), assets, instance);
         }
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)
@@ -400,7 +407,8 @@ public static partial class HtmlNextCompiler
                 var test = elseSeen ? null : Expression(arm.GetAttribute("$when")!, scope);
                 arms.Add(new(test, Element(arm, scope, true, projected)));
             }
-            return [new MatchChoice(arms.ToArray())];
+            RenderOperation choice = new MatchChoice(arms.ToArray());
+            return [instance is null || ReferenceEquals(element, root) ? choice : new HydrationRegion([choice])];
         }
 
         private bool IsRoot(IElement element) => ReferenceEquals(element, root) ||
@@ -608,7 +616,9 @@ public static partial class HtmlNextCompiler
                 if (IsRoot(element)) operations.Add(new ProjectionRootEnd(closing));
                 else Add(operations, closing);
             }
-            return Wrap(projected && !fragment ? [new ProjectionNode(operations.ToArray(), element.LocalName)] : operations.ToArray(), condition, each, localSlot, where, iteration);
+            var body = projected && !fragment ? [new ProjectionNode(operations.ToArray(), element.LocalName)] : operations.ToArray();
+            if (instance is not null && element.HasAttribute("$with") && !IsRoot(element)) body = [new HydrationRegion(body)];
+            return Wrap(body, condition, each, localSlot, where, iteration);
         }
 
         private ProjectionNode ProjectedText(string text, Dictionary<string, (int Slot, ValueType Type)> scope)
@@ -779,13 +789,16 @@ public static partial class HtmlNextCompiler
             _ => attribute.Name,
         };
 
-        private static RenderOperation[] Wrap(RenderOperation[] body, ValueExpression? condition, ValueExpression? each, int localSlot, ValueExpression? where, IterationPlan? iteration = null)
+        private RenderOperation[] Wrap(RenderOperation[] body, ValueExpression? condition, ValueExpression? each, int localSlot, ValueExpression? where, IterationPlan? iteration = null)
         {
+            if (instance is not null && each is not null) body = [new HydrationRegion(body, "item-")];
             if (each is not null && iteration is { NeedsPlan: true }) body = [new PlannedEach(each, localSlot, body, iteration)];
             else if (each is PathExpression { Type.Reference: false } eachPath) body = [new Each(eachPath.Path, localSlot, body, where)];
             else if (each is not null) body = [new ExpressionEach(each, localSlot, body, where)];
+            if (instance is not null && each is not null) body = [new HydrationRegion(body, "each-")];
             if (condition is not null) body = [condition is PathExpression { Type.Kind: "boolean", Type.Reference: false } testPath
                 ? new Conditional(testPath.Path, body) : new ExpressionConditional(condition, body)];
+            if (instance is not null && condition is not null) body = [new HydrationRegion(body)];
             return body;
         }
 
@@ -862,12 +875,12 @@ public static partial class HtmlNextCompiler
                 {
                     var expression = new ExpressionCompiler(attribute.Value, source, new DeclarationScope(this, ExpressionScope(scope)), Storage, declarationContextSlot).Compile();
                     if (!prop.Type.CanBindType(expression.Type)) throw ValueType.Error(source, $"Binding '{name}' has an incompatible type.");
-                    arguments[index] = new(expression, arguments[index]?.Constant);
+                    arguments[index] = new(expression, arguments[index]?.Constant, Written: arguments[index]?.Written);
                     names[index] = name;
                 }
                 else
                 {
-                    arguments[index] = new(arguments[index]?.Expression, Default(attribute.Value, prop.Type));
+                    arguments[index] = new(arguments[index]?.Expression, Default(attribute.Value, prop.Type), Written: attribute.Value);
                     fallbacks[index] = " " + name + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
                 }
             }

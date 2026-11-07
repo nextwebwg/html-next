@@ -95,6 +95,7 @@ export interface HtmlNextDynamicBoundary {
 /** Build-time styles and source identities consumed by server renderers. */
 export interface HtmlNextServerAssets {
   readonly version: 1;
+  readonly hydrate: boolean;
   readonly hasStyles: boolean;
   readonly sources: readonly { readonly source: string; readonly kind: "component" | "stylesheet"; readonly sha256: string }[];
   readonly stateNames: Readonly<Record<string, readonly string[]>>;
@@ -554,7 +555,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     hydration,
     sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...graph.stylesheetInputs.map(url => fileURLToPath(url)), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
-      server: Object.freeze({ version: 1, hasStyles: graphStyleAssets.css !== "",
+      server: Object.freeze({ version: 1, hydrate: options.hydrate === true, hasStyles: graphStyleAssets.css !== "",
         sources: Object.freeze([...sourceRecords.values()].sort((a, b) => a.source.localeCompare(b.source) || a.kind.localeCompare(b.kind))),
         stateNames: graphStyleAssets.stateNames, stylesheets: Object.freeze([]) }),
       mode: "native-application-or-library-build",

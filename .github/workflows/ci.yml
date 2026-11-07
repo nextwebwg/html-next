@@ -82,16 +82,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.dotnet == 'true'
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.changes.outputs.browser_image }}
+      options: --ipc=host --init
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
       - run: dotnet restore packages/html-next-dotnet/tests/HtmlNext.Tests --locked-mode
       - run: dotnet test packages/html-next-dotnet/tests/HtmlNext.Tests -c Release --no-restore --nologo
       - run: dotnet restore packages/html-next-dotnet/benchmarks --locked-mode
       - run: dotnet run --project packages/html-next-dotnet/benchmarks -c Release --no-restore -- --validate
+      - name: Adopt native output in Chromium, Firefox and WebKit
+        env:
+          HTMLNEXT_BROWSER_TEST: "1"
+        run: node scripts/test-dotnet-client.ts
 
   verify:
     name: Test ${{ matrix.name }}

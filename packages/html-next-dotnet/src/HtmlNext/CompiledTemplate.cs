@@ -12,7 +12,7 @@ public sealed class HtmlNextException(string code, string message, string source
 
 public sealed record HtmlNextDiagnostic(string Code, string Message, string SourceName);
 
-/// <summary>An immutable, inert rendering plan. This experimental slice does not emit hydration records.</summary>
+/// <summary>An immutable rendering plan with request-local bindings and optional built-client adoption records.</summary>
 public sealed class CompiledTemplate
 {
     private readonly Prop[] props;
@@ -25,8 +25,9 @@ public sealed class CompiledTemplate
     private readonly LocalInitializer[] initializers;
     private readonly int declarationContextSlot;
     private readonly LocalDeclaration[] declarations;
+    private readonly InstanceRecordPlan? instance;
 
-    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null)
+    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null, HtmlNextServerAssets? assets = null, InstanceRecordPlan? instance = null)
     {
         Tag = tag;
         Stylesheets = stylesheets ?? Array.Empty<string>();
@@ -41,19 +42,24 @@ public sealed class CompiledTemplate
         Module = module;
         this.declarationContextSlot = declarationContextSlot;
         this.declarations = declarations ?? [];
+        Assets = assets;
+        this.instance = instance;
     }
 
     public string Tag { get; }
     public IReadOnlyList<string> Stylesheets { get; }
     public HtmlNextModuleReference? Module { get; }
+    public HtmlNextClientPlan? Client => Assets?.Client;
+    internal HtmlNextServerAssets? Assets { get; }
     internal string SourceName => source;
     internal ComponentCall? DelegatedInvocation => operations is [ComponentCall call] ? call : null;
 
-    public string Render(object? inputs = null, CancellationToken cancellationToken = default, Action<HtmlNextDiagnostic>? onDiagnostic = null)
+    public string Render(object? inputs = null, CancellationToken cancellationToken = default, Action<HtmlNextDiagnostic>? onDiagnostic = null, HtmlNextRenderOptions? options = null)
     {
-        var values = Bind(inputs, cancellationToken, onDiagnostic);
+        var interactive = Interactive(options);
+        var values = Bind(inputs, cancellationToken, onDiagnostic, interactive: interactive);
         Initialize(values, cancellationToken, onDiagnostic);
-        var context = hasComponents ? new RenderContext(true, onDiagnostic) : null;
+        var context = hasComponents || interactive ? new RenderContext(true, onDiagnostic, interactive) : null;
         var counter = HtmlWriter.Counter(context);
         WritePlan(ref counter, values, cancellationToken);
         context?.Replay();
@@ -64,13 +70,22 @@ public sealed class CompiledTemplate
         });
     }
 
-    public void Write(TextWriter writer, object? inputs = null, CancellationToken cancellationToken = default, Action<HtmlNextDiagnostic>? onDiagnostic = null)
+    public void Write(TextWriter writer, object? inputs = null, CancellationToken cancellationToken = default, Action<HtmlNextDiagnostic>? onDiagnostic = null, HtmlNextRenderOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        var values = Bind(inputs, cancellationToken, onDiagnostic);
+        var interactive = Interactive(options);
+        var values = Bind(inputs, cancellationToken, onDiagnostic, interactive: interactive);
         Initialize(values, cancellationToken, onDiagnostic);
-        var output = new HtmlWriter(writer, hasComponents ? new RenderContext(false, onDiagnostic) : null);
+        var output = new HtmlWriter(writer, hasComponents || interactive ? new RenderContext(false, onDiagnostic, interactive) : null);
         WritePlan(ref output, values, cancellationToken);
+    }
+
+    private bool Interactive(HtmlNextRenderOptions? options)
+    {
+        if (options?.Interactive != true) return false;
+        if (Assets?.Hydrate != true || Client is null)
+            throw new HtmlNextException("HNCS006", "Interactive rendering requires matching assets built with hydrate: true and a client plan.", source);
+        return true;
     }
 
     public IReadOnlyList<HtmlNextValidationError> Validate(object? inputs = null, CancellationToken cancellationToken = default)
@@ -103,17 +118,27 @@ public sealed class CompiledTemplate
             if (declaration.SeedType is not null) evaluation.Read(declaration);
     }
 
-    private object?[] Bind(object? inputs, CancellationToken cancellationToken, Action<HtmlNextDiagnostic>? onDiagnostic, List<HtmlNextValidationError>? validation = null)
+    private object?[] Bind(object? inputs, CancellationToken cancellationToken, Action<HtmlNextDiagnostic>? onDiagnostic, List<HtmlNextValidationError>? validation = null, bool interactive = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var values = validation is null ? CreateValues() : new object?[props.Length];
+        var values = validation is null ? CreateValues(interactive) : new object?[props.Length];
+        var record = interactive ? instance?.Inputs(values) : null;
         BindingSnapshot? snapshot = null;
         for (var index = 0; index < props.Length; index++)
         {
             var prop = props[index];
             object? input;
+            object? captured = null;
             bool supplied;
-            try { supplied = ModelAccess.TryRead(inputs, prop.Name, out input); }
+            try
+            {
+                supplied = ModelAccess.TryRead(inputs, prop.Name, out input);
+                if (record is not null)
+                {
+                    snapshot ??= new(source, cancellationToken);
+                    captured = snapshot.Capture(input);
+                }
+            }
             catch (Exception error) when (error is not OperationCanceledException)
             {
                 throw new HtmlNextException("HNCS002", $"Reading input '{prop.Name}' failed.", source, error);
@@ -124,19 +149,23 @@ public sealed class CompiledTemplate
             if (validation is not null && empty) prop.ValidateValue(input, source, validation);
             if (input is null)
             {
+                record?.Add(prop.Name, captured, supplied, supplied);
                 if (prop.Required) onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
                 continue;
             }
-            if (!bindInput) continue;
+            if (!bindInput) { record?.Add(prop.Name, captured, supplied, supplied); continue; }
             try
             {
                 if (prop.Type.NeedsSnapshot) snapshot ??= new(source, cancellationToken);
-                values[index] = prop.Type.Bind(input, source, cancellationToken, snapshot);
+                values[index] = captured is ExpressionValue aggregate ? prop.Type.BindExpression(aggregate, source, cancellationToken)
+                    : prop.Type.Bind(input, source, cancellationToken, snapshot);
+                record?.Add(prop.Name, ExpressionValue.StoredValue(values[index], prop.Type), supplied, supplied);
                 if (validation is not null && !empty) prop.ValidateValue(values[index], source, validation);
             }
             catch (HtmlNextException error) when (error.Code == "HNCS001")
             {
                 values[index] = prop.Default;
+                record?.Add(prop.Name, captured, supplied, false);
                 if (validation is not null && !empty) validation.Add(new("typeMismatch", prop.Name, error.Detail, source));
                 onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
             }
@@ -148,9 +177,10 @@ public sealed class CompiledTemplate
         return values;
     }
 
-    private object?[] CreateValues()
+    private object?[] CreateValues(bool interactive = false)
     {
         var values = new object?[slots];
+        if (interactive && instance is not null) values[instance.Slot] = new InstanceInputs();
         foreach (var list in childLists) values[list.Slot] = new ExpressionValue(list.Type, Array.Empty<object?>());
         if (expressionStorage is { Length: > 0 } storage) values[storage.Slot] = new ExpressionValue[storage.Length];
         return values;
@@ -158,7 +188,8 @@ public sealed class CompiledTemplate
 
     internal object?[] BindInvocation(ComponentArgument?[] arguments, object?[] parent, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, InvocationAttribute?[]? attributes = null, InvocationAttributeFrame? inherited = null, ProjectionGroup[]? projection = null, RenderContext? context = null, bool initialize = true)
     {
-        var values = CreateValues();
+        var values = CreateValues(context?.Interactive == true);
+        var record = context?.Interactive == true ? instance?.Inputs(values) : null;
         var marker = -1;
         var classModifiers = false;
         if (attributes is not null) for (var index = 0; index < attributes.Length; index++)
@@ -178,6 +209,10 @@ public sealed class CompiledTemplate
                 forwarded = InvocationAttributeFrame.Read(attributes!, parent, inherited, "class", out inheritedText);
             if (forwarded) argument = null;
             var failed = false;
+            object? raw = forwarded ? inheritedText : argument?.Written;
+            var inputSource = "html";
+            var present = forwarded || argument?.Written is not null;
+            var producer = argument?.Expression is not null;
             values[index] = prop.Default;
             if (argument?.Expression is { } expression)
             {
@@ -185,11 +220,19 @@ public sealed class CompiledTemplate
                 if (input.IsInvalid)
                 {
                     values[index] = argument.Constant ?? prop.Default;
+                    record?.Add(prop.Name, raw, present, present, inputSource);
                     continue;
                 }
+                raw = input;
+                present = !input.IsAbsent;
+                inputSource = "value";
                 try
                 {
-                    if (!input.IsNull && !input.IsAbsent) values[index] = prop.Type.BindExpression(input, source, cancellation);
+                    if (!input.IsNull && !input.IsAbsent)
+                    {
+                        values[index] = prop.Type.BindExpression(input, source, cancellation);
+                        raw = ExpressionValue.StoredValue(values[index], prop.Type);
+                    }
                 }
                 catch (HtmlNextException error) when (error.Code == "HNCS001")
                 {
@@ -210,6 +253,7 @@ public sealed class CompiledTemplate
             }
             if (!failed && values[index] is null && prop.Required)
                 onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
+            record?.Add(prop.Name, raw, present, present && !failed && !producer, inputSource, producer);
         }
         if (initialize) InitializeInvocation(values, parent, projection, context, cancellation, onDiagnostic);
         return values;
@@ -236,7 +280,10 @@ public sealed class CompiledTemplate
 
     internal void WritePlan(ref HtmlWriter writer, object?[] values, CancellationToken cancellationToken)
     {
-        foreach (var operation in operations) operation.Write(ref writer, values, cancellationToken);
+        var previous = writer.Context?.Adopting ?? false;
+        if (writer.Context is { } context) context.Adopting = context.Interactive && instance is not null;
+        try { foreach (var operation in operations) operation.Write(ref writer, values, cancellationToken); }
+        finally { if (writer.Context is { } owner) owner.Adopting = previous; }
     }
 }
 

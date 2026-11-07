@@ -25,12 +25,14 @@ public sealed class CompiledComponentGraph
         Templates = templates.ToFrozenDictionary(StringComparer.Ordinal);
         Sources = Array.AsReadOnly(sources);
         Stylesheets = assets?.Stylesheets ?? Array.Empty<string>();
+        Client = assets?.Client;
         Modules = Array.AsReadOnly(templates.Values.Select(template => template.Module).OfType<HtmlNextModuleReference>().OrderBy(module => module.Component, StringComparer.Ordinal).ToArray());
     }
 
     public IReadOnlyDictionary<string, CompiledTemplate> Templates { get; }
     public IReadOnlyList<CompiledSource> Sources { get; }
     public IReadOnlyList<string> Stylesheets { get; }
+    public HtmlNextClientPlan? Client { get; }
     public IReadOnlyList<HtmlNextModuleReference> Modules { get; }
     public CompiledTemplate Template(string tag) => Templates.TryGetValue(tag, out var template) ? template
         : throw new KeyNotFoundException($"No component '{tag}' is defined in this graph.");

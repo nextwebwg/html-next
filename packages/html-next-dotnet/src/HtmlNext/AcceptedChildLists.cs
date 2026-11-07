@@ -22,6 +22,9 @@ internal static class AcceptedChildLists
         cancellation.ThrowIfCancellationRequested();
         switch (operation)
         {
+            case HydrationRegion region:
+                foreach (var child in region.Body) Collect(child, caller, receiver, context, cancellation, entries, accepts, capture);
+                break;
             case ComponentCall call:
                 if (context?.AcceptsProjection(call.Target, call.Target.Template.Tag, null, caller) != false)
                 {

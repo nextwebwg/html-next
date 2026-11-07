@@ -12,17 +12,21 @@ public sealed class HtmlNextServerAssets
     private readonly FrozenDictionary<string, IReadOnlyList<string>> stateNames;
 
     private HtmlNextServerAssets(HtmlNextAssetSource[] sources, Dictionary<string, HtmlNextAssetSource> components,
-        Dictionary<string, IReadOnlyList<string>> stateNames, string[] stylesheets)
+        Dictionary<string, IReadOnlyList<string>> stateNames, string[] stylesheets, bool hydrate, HtmlNextClientPlan? client)
     {
         Sources = Array.AsReadOnly(sources);
         this.components = components.ToFrozenDictionary(StringComparer.Ordinal);
         this.stateNames = stateNames.ToFrozenDictionary(StringComparer.Ordinal);
         Stylesheets = Array.AsReadOnly(stylesheets);
+        Hydrate = hydrate;
+        Client = client;
     }
 
     public IReadOnlyList<HtmlNextAssetSource> Sources { get; }
     /// <summary>Stylesheet filenames relative to the build output directory.</summary>
     public IReadOnlyList<string> Stylesheets { get; }
+    public bool Hydrate { get; }
+    public HtmlNextClientPlan? Client { get; }
 
     public static HtmlNextServerAssets FromManifest(string json, string sourceName = "<assets>")
     {
@@ -61,20 +65,22 @@ public sealed class HtmlNextServerAssets
             var stylesheets = Strings(server.GetProperty("stylesheets"));
             if (server.GetProperty("hasStyles").GetBoolean() && stylesheets.Length == 0)
                 throw Error(sourceName, "The manifest requires stylesheets but contains no emitted stylesheet files.");
-            return new(sources.ToArray(), components, states, stylesheets);
+            var hydrate = server.TryGetProperty("hydrate", out var hydrating) && hydrating.GetBoolean();
+            var client = document.RootElement.TryGetProperty("client", out var plan) ? HtmlNextClientPlan.Read(plan, components.Keys) : null;
+            return new(sources.ToArray(), components, states, stylesheets, hydrate, client);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or FormatException)
         {
             throw new HtmlNextException("HNCS006", "Invalid server asset manifest: " + error.Message, sourceName, error);
         }
+    }
 
-        static string Text(JsonElement value) => value.GetString() is { Length: > 0 } text ? text : throw new InvalidOperationException("Expected a nonempty string.");
-        static string[] Strings(JsonElement value)
-        {
-            var result = value.EnumerateArray().Select(Text).ToArray();
-            if (result.Distinct(StringComparer.Ordinal).Count() != result.Length) throw new InvalidOperationException("Duplicate asset metadata value.");
-            return result;
-        }
+    internal static string Text(JsonElement value) => value.GetString() is { Length: > 0 } text ? text : throw new InvalidOperationException("Expected a nonempty string.");
+    internal static string[] Strings(JsonElement value)
+    {
+        var result = value.EnumerateArray().Select(Text).ToArray();
+        if (result.Distinct(StringComparer.Ordinal).Count() != result.Length) throw new InvalidOperationException("Duplicate asset metadata value.");
+        return result;
     }
 
     internal IReadOnlyList<string> ForComponent(string tag, string hash, string sourceName)

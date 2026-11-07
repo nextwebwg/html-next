@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Consume the compiler-owned client plan in native .NET rendering and emit interoperable instance records on request. Preserve caller input ownership, state seeds, shared references, forwarded attributes, shared roots, structural ranges and keyed rows through generated-client adoption. Verify early control edits, hidden projection and subsequent prop updates in Chromium, Firefox and WebKit; keep native application preparation and full catalog qualification in progress.
+
 - Use shared slot lifetime analysis in React and Preact to retain ordinary content across conditional outlets. Preserve accepted roots, child-list context and borrowed content through receiving-outlet transfers, including nested receivers and StrictMode cleanup. Keep scoped templates fresh and ordinary static outlets on native paths.
 
 - Preserve the live and Vanilla plain-slot owner through whole-mount disconnect and reconnect. Keep paused claims distinct from permanently stopped effects, and release stopped claims through their existing ownership registration.

@@ -90,6 +90,7 @@ describe("HTML Next unplugin", () => {
     assert.match(bundle, /FutureLabelFactoryMarker/);
     const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8"));
     assert.deepEqual(manifest.client.adoption, ["ui-counter", "ui-label"]);
+    assert.equal(manifest.server.hydrate, true);
     const rendered = await renderComponents("<ui-poster></ui-poster><ui-counter></ui-counter>", {
       definitions: [parseComponent(poster), parseComponent(counter.replace(/^<link[^>]+>/, "")), parseComponent(label)], state: { '[component~="ui-counter"]': { count: 2 } },
     });
