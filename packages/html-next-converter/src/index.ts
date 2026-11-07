@@ -39,6 +39,7 @@ import {
   svelteDataArtifact,
   svelteReactivityArtifact,
   svelteRenderArtifact,
+  sveltePlainArtifacts,
   svelteContextArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
@@ -712,6 +713,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (options.target === "svelte" && neededHelpers.has("render")) {
     claim(svelteRenderArtifact(), "helper");
+    for (const artifact of sveltePlainArtifacts()) claim(artifact, "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("context")) {
     claim(svelteContextArtifact(), "helper");

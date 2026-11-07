@@ -39,6 +39,19 @@ async function serverHtml(outDirectory: string, name: string, source: string, pr
   return render(await serverComponent(outDirectory, name, source), { props }).body;
 }
 
+it("removes plain projection machinery from an ordinary Svelte button bundle", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-plain-pruning-"));
+  temporary.push(root);
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "dir");
+  await writeFile(join(root, "button.html"), '<template component="x-label"><button><slot name="icon"></slot><slot></slot></button></template>' +
+    '<template component="x-ordinary"><main><x-label><i slot="icon">Icon</i>Label</x-label></main></template>');
+  const out = join(root, "out");
+  const manifest = await convertComponents({ mode: "application", target: "svelte", root, outDirectory: out, entries: ["button.html"] });
+  const bundle = await build({ entryPoints: [join(out, manifest.components.find(component => component.tag === "x-ordinary")!.artifact)], bundle: true, write: false,
+    platform: "browser", format: "esm", plugins: [sveltePlugin("client")], loader: { ".css": "empty" } });
+  assert.doesNotMatch(bundle.outputFiles[0]!.text, /class PlainFrame|childPlainFrame|isPlainSnippet|plainSnippet/);
+});
+
 it("converts a simple component to compilable Svelte 5 in both graph modes", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-converter-"));
   temporary.push(root);

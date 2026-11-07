@@ -9,6 +9,8 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
+import { plainSlotFiles, plainSlotInvocations, plainSlotExpected, dynamicPlainSource, repeatedPlainSource } from "../../html-next/tests/fixtures/plain-slot-ownership.js";
 import { sveltePlugin } from "./helpers/svelte.js";
 
 /**
@@ -21,7 +23,7 @@ import { sveltePlugin } from "./helpers/svelte.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 
-const source = `<template component="x-column" status="early" summary="One column of x-datatable." controller="./column.js"><th scope="col"><slot name="header">{$header}</slot></th>
+const source = `<template component="x-column" status="early" summary="One column of x-datatable." controller="./column.js"><th $attributes scope="col"><slot name="header">{$header}</slot></th>
   <defs>
     <prop name="field" type="string">The row field a cell shows when no cell content is given.</prop>
     <prop name="header" type="string">The header text.</prop>
@@ -102,6 +104,13 @@ const source = `<template component="x-column" status="early" summary="One colum
   </defs>
   <section id="strays"><button type="button" class="flip" on:click="flip">Flip</button><x-datatable rows='[{"id":1,"name":"A","price":1}]'><x-column field="name"></x-column><p>no</p>stray<x-column-preset></x-column-preset><x-column class="stray"><span slot="cell">plain</span></x-column><template $with="$picked as first"><x-column from:field="$first" header="W"></x-column></template><template $match="$mode as m"><x-column $when="$m = 'a'" field="id" header="A"></x-column><x-column $else field="price" header="B" width="wide"></x-column></template><x-column from:field="$count" header="Bad"></x-column></x-datatable></section>
 </template>`;
+const emptyPlain = dynamicPlainSource.replaceAll("x-moving", "x-empty").replaceAll("data-moving-plain", "data-empty-list")
+  .replaceAll("data-plain-action", "data-empty-action").replace('<input slot="cell" value="Initial">', "");
+const conditionalPlain = `<template component="x-single-card"><defs><state name="open" type="boolean" value="true"></state><state name="tone" type="string" value="Owner"></state>
+<handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs><section data-single-plain><button data-single-toggle on:click="toggle">Toggle</button><p $if="$open"><slot></slot></p><footer>Tail</footer></section></template>
+<template component="x-slot-counter"><defs><context name="tone" from="x-single-card"></context><state name="count" type="number" value="0"></state><handler name="add"><set name="count" expr:value="$count + 1"></set></handler></defs><button data-slot-counter on:click="add">{$tone}:{$count}</button></template>
+<template component="x-plain-page"><main>${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page><x-empty-page></x-empty-page><x-single-card><i>Single</i><input value="Initial"><x-slot-counter></x-slot-counter></x-single-card></main></template>`;
+const plainSource = Object.values(plainSlotFiles).join("") + dynamicPlainSource + repeatedPlainSource + emptyPlain + conditionalPlain;
 const columnController = `export default function initialize(host) { (window.columnHosts ??= []).push(host); }`;
 const tableController = `export default function initialize(host) { (window.tableHosts ??= []).push(host); }`;
 
@@ -145,20 +154,20 @@ describe.skipIf(!enabled)("Svelte columns as markup parity", () => {
   let liveBundle = "";
   let svelteBundle = "";
   let serverMarkup = "";
+  let plainBundle = "";
+  let plainMarkup = "";
   const serverWarnings: string[] = [];
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-svelte-columns-"));
     await symlink(nodeModules, join(directory, "node_modules"), "dir");
     await mkdir(join(directory, "components"));
-    await writeFile(join(directory, "components/table.html"), source);
+    await writeFile(join(directory, "components/table.html"), source + plainSource);
     await writeFile(join(directory, "components/column.js"), columnController);
     await writeFile(join(directory, "components/table.js"), tableController);
     const out = join(directory, "svelte");
     const manifest = await convertComponents({ mode: "application", target: "svelte", root: directory, outDirectory: out, entries: ["components/**"] });
     const artifact = (tag: string): string => manifest.components.find((component) => component.tag === tag)!.artifact;
-    // The strays table holds text and a <p> in its header row, which the HTML parser moves out of a
-    // server-rendered table, so it mounts on the client only.
     await writeFile(join(out, "mount.ts"), `import { mount, hydrate } from "svelte"; import App from "./${artifact("page-products")}"; import Strays from "./${artifact("page-strays")}";
 const target = document.querySelector("#mount")!;
 if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });
@@ -168,6 +177,14 @@ mount(Strays, { target: document.querySelector("#strays-mount")! });`);
       target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")] });
     await writeFile(join(out, "server.ts"), `import { render } from "svelte/server"; import App from "./${artifact("page-products")}"; import Strays from "./${artifact("page-strays")}";
 export const html = () => { void render(Strays).body; return render(App).body; };`);
+    await writeFile(join(out, "plain.ts"), `import { mount, hydrate, unmount } from "svelte"; import App from "./${artifact("x-plain-page")}";
+const target = document.querySelector("#mount")!; const app = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, { target }); window.finishPlain = () => unmount(app);`);
+    await build({ entryPoints: [join(out, "plain.ts")], outfile: plainBundle = join(directory, "plain.js"), bundle: true, format: "iife", platform: "browser",
+      target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")] });
+    await writeFile(join(out, "plain-server.ts"), `import { render } from "svelte/server"; import App from "./${artifact("x-plain-page")}"; export const html = () => render(App).body;`);
+    const plainServer = join(directory, "plain-server.mjs");
+    await build({ entryPoints: [join(out, "plain-server.ts")], outfile: plainServer, bundle: true, format: "esm", platform: "node", packages: "external", plugins: [sveltePlugin("server")] });
+    plainMarkup = (await import(pathToFileURL(plainServer).href) as { html(): string }).html();
     const serverBundle = join(directory, "server.mjs");
     await build({ entryPoints: [join(out, "server.ts")], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
       packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
@@ -212,9 +229,71 @@ export const html = () => { void render(Strays).body; return render(App).body; }
   };
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} preserves plain slot nodes and state through SSR hydration, transfers and conditional outlets`, async () => {
+      const browser = await launchParityBrowser(browserType);
+      try {
+        for (const hydrated of [false, true]) {
+          const page = await browser.newPage(), errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          page.on("console", message => { if (message.type() === "error" || message.type() === "warning") errors.push(message.text()); });
+          await page.setContent(`<div id="mount">${hydrated ? plainMarkup : ""}</div>`);
+          const read = () => page.locator("[data-plain-case] > section").evaluateAll(nodes => nodes.map(section => Array.from(section.children, node => [node.localName, node.textContent])));
+          if (hydrated) assert.deepEqual(await read(), plainSlotExpected);
+          await page.evaluate(() => { (window as any).plainNodes = Array.from(document.querySelectorAll("i, input")); });
+          if (hydrated) for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input", "[data-single-plain] input"]) await page.locator(selector).fill("Edited");
+          await page.addScriptTag({ path: plainBundle });
+          const frames = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+          await frames(); assert.deepEqual(await read(), plainSlotExpected); assert.deepEqual(errors, []);
+          if (hydrated) assert.ok(await page.evaluate(() => (window as any).plainNodes.every((node: Node) => node.isConnected)));
+          const moving = await page.locator("[data-moving-plain] input").elementHandle(), repeated = await page.locator("[data-repeated-plain] input").elementHandle();
+          const single = await page.locator("[data-single-plain] input").elementHandle(), counter = await page.locator("[data-slot-counter]").elementHandle();
+          if (!hydrated) for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input", "[data-single-plain] input"]) await page.locator(selector).fill("Edited");
+          const kept = async () => {
+            assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input"]) assert.equal(await page.locator(selector).inputValue(), "Edited", `${selector}, hydrated=${hydrated}`);
+            assert.deepEqual(errors, []);
+          };
+          for (const action of ["borrowed", "borrowed", "root", "root"]) {
+            await page.locator(`[data-plain-action="${action}"]`).click(); await frames(); await kept();
+            for (const expected of [0, 1]) {
+              await page.locator('[data-plain-action="content"]').click(); await frames();
+              assert.equal(await page.locator("[data-moving-plain] i").count(), expected); await kept();
+            }
+          }
+          await page.locator('[data-plain-action="first"]').click(); await frames(); await kept();
+          assert.ok(await page.locator("[data-repeated-plain] footer").evaluate(node => node.matches(":last-child")));
+          assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
+          assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
+          const empty = () => page.locator("[data-empty-list] > p, [data-empty-list] > b").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
+          assert.deepEqual(await empty(), [["p", "Plain"], ["b", "OwnFallback"]]);
+          await page.locator('[data-empty-action="content"]').click(); await frames();
+          assert.deepEqual(await empty(), [["p", "BorrowedFallback"], ["b", "OwnFallback"]]);
+          await page.locator('[data-empty-action="content"]').click(); await frames();
+          assert.deepEqual(await empty(), [["p", "Plain"], ["b", "OwnFallback"]]);
+          await page.locator("[data-slot-counter]").click(); await frames();
+          assert.equal(await page.locator("[data-slot-counter]").textContent(), "Owner:1");
+          await page.locator("[data-single-toggle]").click(); await frames();
+          assert.equal(await page.locator("[data-single-plain] input").count(), 0);
+          await page.locator("[data-single-toggle]").click(); await frames();
+          assert.ok(await single!.evaluate(node => node === document.querySelector("[data-single-plain] input")));
+          assert.ok(await counter!.evaluate(node => node === document.querySelector("[data-slot-counter]")));
+          assert.equal(await page.locator("[data-single-plain] input").inputValue(), "Edited");
+          assert.equal(await page.locator("[data-slot-counter]").textContent(), "Owner:1");
+          await page.locator("[data-slot-counter]").click(); await frames(); assert.equal(await page.locator("[data-slot-counter]").textContent(), "Owner:2");
+          await page.evaluate(async () => { const root = document.querySelector("#mount")!, parent = root.parentNode!, next = root.nextSibling;
+            root.remove(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); parent.insertBefore(root, next); });
+          await frames(); await kept(); assert.deepEqual(await read(), plainSlotExpected);
+          await page.evaluate(() => (window as any).finishPlain()); await frames();
+          assert.equal(await page.locator("#mount").textContent(), ""); assert.deepEqual(errors, []);
+          await page.close();
+        }
+      } finally { await browser.close(); }
+    });
+
     for (const hydrate of [false, true]) {
       it(`${engine} ${hydrate ? "hydrates" : "mounts"} the data table as live renders it, following $if, keyed $each and context`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const live = await browser.newPage();
           const svelte = await browser.newPage();

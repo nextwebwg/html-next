@@ -31,6 +31,7 @@ export {
   svelteDataArtifact,
   svelteReactivityArtifact,
   svelteRenderArtifact,
+  sveltePlainArtifacts,
   svelteContextArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,

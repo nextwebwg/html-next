@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Retain Svelte plain slot content across own, borrowed, repeated and conditional outlets with server hydration, edited controls, state, context and reconnect. Keep destination identity stable through child-list updates, show fallbacks when conditional source content disappears, and keep lazy templates fresh. Filter rejected native elements and text through structural projection, preserve literal input defaults during hydration, and prune retention helpers from ordinary button bundles.
+
 - Preserve ordinary Vue slot content when a single conditional outlet closes and reopens. Place accepted roots once across repeated receiving outlets, retaining child state, injected context and edited controls through transfers and temporary absence. Select retention from shared template lifetime analysis while keeping permanent single outlets and scoped slots on native paths.
 
 - Retain Vue child-slot content through destination changes, server hydration, caller updates and reconnect, including stateful Vue children and injected context. Preserve native control edits and focus during updates, forward literal control values as attributes, and keep scoped-only slots on Vue's native outlet path. Filter rejected projected text and elements through structural fragments, and remove unused projection helpers from ordinary bundles.
