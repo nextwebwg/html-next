@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 import { transform } from "esbuild";
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 
@@ -89,6 +90,7 @@ describe("generateComponent", () => {
     const helperCode = await transform(reactRenderArtifact("test").content, { loader: "tsx", format: "cjs" });
     const helpers = { exports: {} };
     new Function("require", "module", "exports", helperCode.code)((name: string) => {
+      if (name === "react-dom") return ReactDOM;
       assert.equal(name, "react");
       return React;
     }, helpers, helpers.exports);

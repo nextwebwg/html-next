@@ -21,9 +21,9 @@ import { applyBoundControlValue, controlValue, holdControl } from "./controls.js
 import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
 import {
-  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, projectionRejected, rejectProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent, writeMark,
+  ProjectionClaims, awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, projectionRejected, rejectProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent, writeMark,
 } from "./rendered-form.js";
-import type { HydrationRange, RenderedInstanceRecord } from "./rendered-form.js";
+import type { RenderedInstanceRecord } from "./rendered-form.js";
 import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
@@ -1522,6 +1522,121 @@ export interface GeneratedInstance {
 /** Each projected node and the name of the slot it is for (`""` for the unnamed slot). */
 export type Projection = readonly [node: Node, slot: string][];
 
+type PlainFrame = { readonly instance: GeneratedInstance; claims?: ProjectionClaims; readonly deferred: boolean; readonly names?: ReadonlySet<string> };
+const plainFrames = /* @__PURE__ */ new WeakMap<Projection, PlainFrame>();
+let pendingPlainTag: string | undefined;
+type PlainPatch = (changed: number, dirty: Map<unknown, 1 | 2>) => void;
+type PlainBlock = { readonly n: Node; z?: (() => void)[] };
+type PlainSetup = (record: { z?: (() => void)[] }, make: (dirty: Map<unknown, 1 | 2>, at?: ChildNode) => PlainBlock,
+  patch: (block: never, changed: number, dirty: Map<unknown, 1 | 2>) => void) => PlainPatch;
+let plainFill: ((adopt: boolean, start: ChildNode, end: ChildNode, name: string, projected: Projection,
+  fallback: boolean, dirty: Map<unknown, 1 | 2>) => PlainSetup | undefined) | undefined;
+
+/** Shares only the repeated ordinary slots selected by the compiler. Accepted projections share all plain slots. */
+export function sharePlainSlots(instance: object, projected: Projection, names: readonly string[]): void {
+  installPlainSlots();
+  if (!plainFrames.has(projected)) plainFrames.set(projected, { instance: instance as GeneratedInstance, deferred: false, names: new Set(names) });
+}
+
+/** Creates an accepted child's projection frame without enrolling ordinary component children. */
+export function invokeAccepted(...args: [...Parameters<typeof invoke>, tag: string]): GeneratedInstance {
+  installPlainSlots();
+  const [instance, factory, site, options, html, follow, stops, tag] = args;
+  const previous = pendingPlainTag;
+  pendingPlainTag = tag;
+  try { return invoke(instance, factory, site, options, html, follow, stops); } finally { pendingPlainTag = previous; }
+}
+export function adoptAcceptedInvoke(...args: [...Parameters<typeof adoptInvoke>, tag: string]): GeneratedInstance {
+  installPlainSlots();
+  const [instance, factory, site, options, html, follow, stops, tag] = args;
+  const previous = pendingPlainTag;
+  pendingPlainTag = tag;
+  try { return adoptInvoke(instance, factory, site, options, html, follow, stops); } finally { pendingPlainTag = previous; }
+}
+export function invokeAcceptedNested(...args: Parameters<typeof invokeAccepted>): GeneratedInstance {
+  const previous = componentCreationDepth;
+  componentCreationDepth = Math.max(previous, args[0].nd ?? 0);
+  try { return invokeAccepted(...args); } finally { componentCreationDepth = previous; }
+}
+export function adoptAcceptedNestedInvoke(...args: Parameters<typeof adoptAcceptedInvoke>): GeneratedInstance {
+  const previous = componentCreationDepth;
+  componentCreationDepth = Math.max(previous, args[0].nd ?? 0);
+  try { return adoptAcceptedInvoke(...args); } finally { componentCreationDepth = previous; }
+}
+
+function installPlainSlots(): void {
+  plainFill ??= (adopt, start, end, name, projected, fallback, dirty) => {
+    const frame = plainFrames.get(projected);
+    if (frame === undefined || frame.names !== undefined && !frame.names.has(name)) return undefined;
+    const assigned = projected.filter(([node, slot]) => slot === name && !projectionRejected(node)).map(([node]) => node);
+    if (assigned.length === 0 || assigned.some(node => node.nodeType === 1 && (node as Element).localName === "template")) return undefined;
+    return (record, make, patch) => {
+      const { instance } = frame;
+      const claims = frame.claims ??= new ProjectionClaims();
+      const owner = {};
+      const doc = start.ownerDocument!;
+      let open = start, close = end, first = true, held = false;
+      let cancel: (() => void) | undefined;
+      let block: PlainBlock | undefined;
+      let stops: (() => void)[] = [];
+      let latest = dirty;
+      const server = adopt ? serverMark(start) : undefined;
+      // An adopted fallback leaves plain content at the server's other outlet until it releases it.
+      let borrowed = server?.attributes.has("fallback") === true && assigned.some(node => borrowedRanges.get(instance.e)?.includes(node));
+      const draw = (): void => {
+        cancel?.(); cancel = undefined;
+        for (const stop of stops) stop();
+        stops = [];
+        dispose(block); block = undefined;
+        const available = !borrowed && claims.take(name, owner);
+        if (available) held = true;
+        const parent = open.parentNode!, before = open.previousSibling, after = close.nextSibling;
+        if (!first) {
+          const a = doc.createComment(""), b = doc.createComment("");
+          parent.insertBefore(a, open);
+          for (let node: ChildNode | null = open; node !== null;) {
+            const next: ChildNode | null = node.nextSibling;
+            node.remove();
+            if (node === close) break;
+            node = next;
+          }
+          a.after(b); open = a; close = b;
+        }
+        const at = (first && adopt ? adoptSlot : fillSlot)(open, close, name, available ? projected : [], fallback, undefined, latest, stops);
+        open = (before?.nextSibling ?? parent.firstChild) as ChildNode;
+        close = (after?.previousSibling ?? parent.lastChild) as ChildNode;
+        if (at !== undefined && !Array.isArray(at)) {
+          block = make(latest, first && adopt ? at as ChildNode : undefined);
+          if (block.n !== at) placeFallback(at as ChildNode, block.n);
+        }
+        if (!available) cancel = claims.wait(name, open, () => { borrowed = false; draw(); });
+        first = false;
+      };
+      const effect = createEffect(instance.q, () => {
+        let active = true;
+        const activate = (): void => { if (active) draw(); };
+        if (!frame.deferred || instance.c() || adopt && open.isConnected || placed(open, activate)) draw();
+        return () => {
+          active = false;
+          cancel?.(); cancel = undefined;
+          if (held) { claims.release(name, owner); held = false; }
+        };
+      }, 2);
+      instance.o.push(effect);
+      (record.z ??= []).push(() => { release(instance, effect); dispose(block); for (const stop of stops) stop(); });
+      return (changed, dirty) => { latest = dirty; if (block !== undefined) patch(block as never, changed, dirty); };
+    };
+  };
+}
+
+/** Uses shared plain placement only for a projection whose authored features require it. */
+export function initializeSlot(...args: Parameters<typeof fillSlot>): ReturnType<typeof fillSlot> | PlainSetup {
+  return args[5] === undefined ? plainFill?.(false, args[0], args[1], args[2], args[3], args[4], args[6] ?? new Map()) ?? fillSlot(...args) : fillSlot(...args);
+}
+export function adoptPlainSlot(...args: Parameters<typeof adoptSlot>): ReturnType<typeof adoptSlot> | PlainSetup {
+  return args[5] === undefined ? plainFill?.(true, args[0], args[1], args[2], args[3], args[4], args[6] ?? new Map()) ?? adoptSlot(...args) : adoptSlot(...args);
+}
+
 /** Each top-level projected node's projection entry, which follows an invoked component's root. */
 const projectedEntries = new WeakMap<Node, [Node, string]>();
 /** Invocation routing stays with a replaced root independently of its rendered attributes. */
@@ -1666,6 +1781,16 @@ export function project(
     has: (_target, key) => typeof key === "string" && into(key).length > 0,
   });
   return instance.J = projected;
+}
+
+/** A projection whose component can be an accepted entry in the compiled graph. */
+export function projectAccepted(instance: Parameters<typeof project>[0], children: Parameters<typeof project>[1], slots: Parameters<typeof project>[2], tag: string): Projection {
+  const projected = project(instance, children, slots);
+  if (tag === pendingPlainTag) {
+    pendingPlainTag = undefined;
+    plainFrames.set(projected, { instance: instance as GeneratedInstance, deferred: true });
+  }
+  return projected;
 }
 
 /**
@@ -1868,7 +1993,12 @@ export function serverProjection<T = Node>(
       add(range.content[++index]!, region[0]);
     }
   }
-  for (const node of server?.carried ?? []) add(node, node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
+  let region: readonly [string, Node] | undefined;
+  for (const node of server?.carried ?? []) {
+    region ??= regionSlots.get(node);
+    add(node, region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : ""));
+    if (node === region?.[1]) region = undefined;
+  }
   return [givenChildren.length > 0 ? givenChildren : children, { ...slots, ...givenSlots }];
 }
 
@@ -1981,24 +2111,7 @@ export function childList(
   };
 }
 
-/**
- * The ranges in which its parent's `<slot of>` outlets rendered a server root's plain slot content
- * (rendered-form#borrowed-slot-ranges): the root's entry index is its place among the component roots
- * projected into its slot of the parent. Their content joins the root's projection (`borrowedRanges`).
- */
-export function borrowedSlots(root: Element): HydrationRange[] {
-  const parent = root.parentElement?.closest("[component]");
-  const server = parent === null || parent === undefined ? undefined : serverRanges(parent, false);
-  if (server === undefined) return [];
-  const of = (range: HydrationRange): string | undefined => serverMark(range.markers[0]!)!.attributes.get("of");
-  const slot = server.ranges.find((range) => of(range) === undefined && range.content.includes(root))?.slot ?? root.getAttribute("slot") ?? "";
-  const siblings = [...server.ranges.flatMap((range) => of(range) === undefined && !range.fallback && !range.scoped && range.slot === slot ? range.content : []),
-    ...server.carried.filter((node) => node.nodeType === 1 && ((node as Element).getAttribute("slot") ?? "") === slot)];
-  const index = String(siblings.filter((node) => node.nodeType === 1 && (node as Element).hasAttribute("component")).indexOf(root));
-  const ranges = server.ranges.filter((range) => of(range) === index && !range.fallback && !range.scoped);
-  borrowedRanges.set(root, ranges.flatMap((range) => range.content));
-  return ranges;
-}
+export { borrowedSlots } from "./rendered-form.js";
 
 /** The child whose slot a `<slot of>` outlet placed each node from: its logical parent for context. */
 const placedOwners = new WeakMap<Node, GeneratedInstance>();
@@ -2034,6 +2147,7 @@ export function childOutlet(
   let rendering: readonly [ScopedTemplate, ScopedRecord] | undefined;
   let block: ReturnType<typeof make> | undefined;
   let claimed: Node[] = [];
+  let claimFrame: PlainFrame | undefined;
   let cancel: (() => void) | undefined;
   let shape: ((props: Record<string, unknown>) => Record<string, unknown>) | undefined;
   let flags = "";
@@ -2045,6 +2159,8 @@ export function childOutlet(
     }
     dispose(block);
     block = undefined;
+    claimFrame?.claims?.release(name, open);
+    claimFrame = undefined;
     releaseContent(claimed);
     claimed = [];
     cancel?.();
@@ -2084,15 +2200,20 @@ export function childOutlet(
         scoped ||= known[1].includes(name);
         // A server range of plain content holds the child's own nodes, which no carrier copied.
         if (server !== undefined && !server.attributes.has("fallback") && !server.attributes.has("scoped")) {
-          for (const node of contents) if (node.nodeType === 1 && !child.J!.some(([given]) => given === node)) (child.J as [Node, string][]).push([node, name]);
+          for (const node of contents) if (!child.J!.some(([given]) => given === node)) (child.J as [Node, string][]).push([node, name]);
         }
-        content = withRegionContent(child.J ?? []).flatMap(([node, slot]) => slot === name && node.nodeType === 1 ? [node] : []);
-        if (content.some((node) => (node as Element).localName === "template")) mode = 1;
+        content = withRegionContent(child.J ?? []).flatMap(([node, slot]) => slot === name ? [node] : []);
+        if (content.some((node) => node.nodeType === 1 && (node as Element).localName === "template")) mode = 1;
         else if (content.length > 0 && scoped) warnOnce(spec, `of:${child.S.g}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
-        else if (content.length > 0 && !known[0].includes(name)) {
-          if (!content.some((node) => borrowedContent.has(node))) mode = 2;
-          // Another outlet placed it: this one takes it over when that one lets it go.
-          else cancel = awaitContent(content, open, () => { if (shown === entry) { shown = released; update(value, list, props, 0, new Map()); } });
+        else if (content.length > 0) {
+          const frame = plainFrames.get(child.J!);
+          const retry = (): void => { if (shown === entry) { shown = released; update(value, list, props, 0, new Map()); } };
+          if (frame !== undefined) {
+            const claims = frame.claims ??= new ProjectionClaims();
+            if (claims.take(name, open)) { mode = 2; claimFrame = frame; }
+            else cancel = claims.wait(name, open, retry);
+          } else if (!content.some(node => borrowedContent.has(node))) mode = 2;
+          else cancel = awaitContent(content, open, retry);
         }
       }
       // The server rendered the same choice: its nodes are adopted. Otherwise they go, and it renders afresh.

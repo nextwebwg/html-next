@@ -65,6 +65,7 @@ const selected = new Set([
   "ordinary two-way attributes preserve boolean, list, object, and native input semantics",
   "computed member reads stay absent as list results arrive and clear",
   "matches :host in :slotted() rules as the component root",
+  "repeated plain outlets place content at the first outlet",
   "bind: renders its initial state; declared on: bindings are consumed",
   "reactive declarations seed once: state initializes, computed evaluates, data is pending",
   ".property binding resolves through the generated DOM contract",

@@ -390,3 +390,25 @@ export function templateForwardsAttributes(node: TemplateNode): boolean {
     ? node.attributes.some(attribute => attribute.kind === "forward") || node.children.some(templateForwardsAttributes)
     : node.kind === "slot" && (node.fallback?.some(templateForwardsAttributes) ?? false);
 }
+
+const repeatedSlots = new WeakMap<ComponentDefinition, ReadonlySet<string>>();
+export function repeatedSlotNames(definition: ComponentDefinition): ReadonlySet<string> {
+  let repeated = repeatedSlots.get(definition);
+  if (repeated !== undefined) return repeated;
+  const names = new Set<string>(), many = new Set<string>();
+  const visit = (node: TemplateNode, loop = false): void => {
+    if (node.kind === "text") return;
+    loop ||= node.flow?.kind === "each";
+    if (node.kind === "slot") {
+      if (node.of === undefined) {
+        const name = node.name ?? "";
+        if (loop || names.has(name)) many.add(name);
+        names.add(name);
+      }
+      for (const child of node.fallback ?? []) visit(child, loop);
+    } else for (const child of node.children) visit(child, loop);
+  };
+  visit(definition.template);
+  repeatedSlots.set(definition, repeated = many);
+  return repeated;
+}

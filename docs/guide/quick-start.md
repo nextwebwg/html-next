@@ -90,11 +90,11 @@ import { styleObject, styleBinding } from "./style/style.js";
 import { forwardedAttributes } from "./attributes";
 import { useNativeEvents } from "./events";
 import { decimalAdd, rootMetadata, text, useLiveState, useOwnedRootRef, useRootHandle } from "./render";
-export type XCounterProps = Omit<React.ComponentPropsWithoutRef<"div">, "style"> & {
+export type XCounterProps = Omit<React.ComponentPropsWithoutRef<"div">, "style" | "children"> & {
     style?: React.CSSProperties | (React.CSSProperties & {
         [name: `--${string}`]: string | number | undefined;
     });
-    children?: ReactNode;
+    children?: ReactNode | (() => ReactNode);
     slots?: Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>;
     ref?: React.Ref<HTMLDivElement>;
     [name: string]: unknown;

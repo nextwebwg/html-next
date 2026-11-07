@@ -2030,11 +2030,8 @@ function parseElementAtSource(
         if (!isIdentifier(name!)) fail("HT008", slotNameMessage(name!), source);
       } else if (name === undefined) {
         slotState.defaults += 1;
-        if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
       } else {
-        if (name === "" || slotState.names.has(name)) {
-          fail("HT008", `Slot name \`${name}\` is empty or duplicated.`, source);
-        }
+        if (name === "") fail("HT008", "A slot name is not empty.", source);
         if (!isIdentifier(name)) fail("HT008", slotNameMessage(name), source);
         slotState.names.add(name);
       }

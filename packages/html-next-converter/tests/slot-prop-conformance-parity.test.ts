@@ -15,6 +15,7 @@ import { chromium, firefox, webkit, type BrowserType } from "playwright";
 import { generateComponent, parseComponentResource, type ComponentDefinition } from "@nextwebwg/html-next";
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
+import { plainSlotFiles, plainSlotInvocations, plainSlotExpected, dynamicPlainSource, repeatedPlainSource } from "../../html-next/tests/fixtures/plain-slot-ownership.js";
 import { ownedEntryFiles, ownedEntryInvocation, ownedEntryInitial, ownedEntryChanged } from "../../html-next/tests/fixtures/owned-entry-expressions.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
@@ -32,7 +33,7 @@ const list = (tag: string, row: string, later?: string) => `<template component=
   ${later === undefined ? "" : `<handler name="change"><set name="rows" expr:value="[{ id: 'a', label: 'A' }, ${later}]"></set></handler>`}</defs>
   <div><ul class="${tag}"><slot $each="r, index of $rows" $key="$index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
 const cases = { extra: "{ id: 'b', label: 'B', index: 1 }", missing: "{ id: 'b' }", wrong: "{ id: 2, label: 'B' }", later: "{ id: 'b', label: 'B' }" } as const;
-const page = `${[...Object.keys(cases), "defaults", "finite", "optional", "entries"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
+const page = `${[...Object.keys(cases), "defaults", "finite", "optional", "entries", ...Object.keys(plainSlotFiles).map(name => name.slice(0, -5)), "moving-plain", "repeated-plain"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
 <template component="x-page" status="early" summary="Page."><defs><state name="label" type="string" value="Outer"></state><state name="count" type="number" value="99"></state><state name="empty" type="number" value="98"></state>
 <state name="loop" type="string" value="declared"></state><state name="index" type="string" value="named"></state>
 <state name="values" type="list(number)" from="[4, 5]"></state><state name="position" type="length" value="8px"></state><state name="edits" type="list(object({ label: string }))" from="[{ label: 'A' }, { label: 'B' }]"></state><handler name="change-aliases"><set name="values" expr:value="[5, 4, 3]"></set></handler></defs><main>${Object.keys(cases).map((name) =>
@@ -43,7 +44,7 @@ const page = `${[...Object.keys(cases), "defaults", "finite", "optional", "entri
 <div data-dimension><p $each="position of $values" $where="round($position, 1) > 3">{round($position, 1)}</p><b $each="value, position of $values">{round($position, 1)}</b><i>{$position}</i></div>
 <div data-edits><label $each="entry of $edits" $key="$entry.label"><input bind:value="entry.label"><span>{$entry.label}</span></label></div>
 <div data-classes><b class="one two" class:one two="$values.length > 2"></b><i class:one two="$values.length > 2"></i></div>
-${ownedEntryInvocation}<button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
+${ownedEntryInvocation}${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page><button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
 // A default fills a rejected value and a null or missing one, typed or `unknown`.
 const defaults = `<template component="x-defaults" status="early" summary="Defaults."><defs>
   <slot name="row"><prop name="label" type="string" default="Fallback">Label.</prop><prop name="note" type="unknown" default="n">Note.</prop></slot>
@@ -58,7 +59,7 @@ const finite = `<template component="x-finite"><defs>
 </defs><div><ul class="x-finite"><slot name="row" $each="offset, index of [0, 1]" $key="$index" from:count="1 / ($denominator + $offset)" from:empty="1 / ($denominator + $offset)" from:missing="$record.absent" from:__proto__="1 / ($denominator + $offset)"></slot></ul>
 <button id="finite-valid" on:click="valid">Valid</button><button id="finite-invalid" on:click="invalid">Invalid</button><button id="finite-recover" on:click="recover">Recover</button></div></template>`;
 const optional = `<template component="x-optional"><defs><slot name="row"><prop name="label" type="string">Label.</prop></slot></defs><div><ul class="x-optional"><slot name="row"></slot></ul></div></template>`;
-const files: Readonly<Record<string, string>> = { ...ownedEntryFiles, "optional.html": optional, "finite.html": finite, "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
+const files: Readonly<Record<string, string>> = { ...ownedEntryFiles, ...plainSlotFiles, "moving-plain.html": dynamicPlainSource, "repeated-plain.html": repeatedPlainSource, "optional.html": optional, "finite.html": finite, "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const htmlNextSource = fileURLToPath(new URL("../../html-next/src/", import.meta.url));
@@ -122,7 +123,7 @@ render(h(Form, {}), document.querySelector("#mount")!);\n`);
         try { await promisify(execFile)(process.execPath, [ngc, "-p", config], { cwd: out }); }
         catch (error) { assert.fail((error as { stderr?: string }).stderr ?? String(error)); }
         await writeFile(join(out, "entry.ts"), `import "@angular/compiler"; import { bootstrapApplication } from "@angular/platform-browser"; import { App } from "./compiled/app.js";
-document.querySelector("#mount")!.append(document.createElement("app-root")); bootstrapApplication(App);\n`);
+document.querySelector("#mount")!.append(document.createElement("app-root")); bootstrapApplication(App).then(app => { window.destroyTarget = () => { app.destroy(); return app.viewCount; }; });\n`);
       } else {
         await writeFile(join(out, "entry.ts"), `import { mount } from "svelte"; import Form from "./${forms.get(target)}";
 mount(Form, { target: document.querySelector("#mount")! });\n`);
@@ -175,6 +176,57 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             assert.equal(warnings.length, 4, warnings.join("\n"));
             const ownedEntries = () => page.locator("[data-owned]").allTextContents();
             assert.deepEqual(await ownedEntries(), ownedEntryInitial);
+            const plainSlots = () => page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent])));
+            assert.deepEqual(await plainSlots(), plainSlotExpected);
+            assert.equal(await page.locator("[data-plain-case] i").count(), 4);
+            const moving = await page.locator("[data-moving-plain] input").elementHandle();
+            await page.locator("[data-moving-plain] input").fill("Edited");
+            const placed = () => page.locator("[data-moving-plain] > b, [data-moving-plain] > p").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
+            assert.deepEqual(await placed(), [["p", "Plain"], ["b", "OwnFallback"]]);
+            const toggleContent = async (owner: "p" | "b"): Promise<void> => {
+              for (const text of ["", "Plain"]) {
+                await page.locator('[data-plain-action="content"]').click();
+                await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+                assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text);
+                assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
+              }
+            };
+            await toggleContent("p");
+            for (const [action, expected] of [
+              ["borrowed", [["b", "Plain"]]],
+              ["borrowed", [["p", "BorrowedFallback"], ["b", "Plain"]]],
+              ["root", [["p", "Plain"]]],
+              ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
+            ] as const) {
+              await page.locator(`[data-plain-action="${action}"]`).click();
+              await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+              assert.deepEqual(await placed(), expected);
+              await toggleContent(expected.some(([tag, text]) => tag === "b" && text === "Plain") ? "b" : "p");
+              assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
+              assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+            }
+            const repeated = await page.locator("[data-repeated-plain] input").elementHandle();
+            await page.locator("[data-repeated-plain] input").fill("Kept");
+            await page.locator('[data-plain-action="first"]').click();
+            await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+            assert.equal(await page.locator("[data-repeated-plain] footer").textContent(), "Tail");
+            assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
+            assert.equal(await page.locator("[data-repeated-lazy] input").count(), 2);
+            assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
+            await page.evaluate(async () => {
+              const mount = document.querySelector("#mount")!, parent = mount.parentNode!, after = mount.nextSibling;
+              mount.remove();
+              await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+              parent.insertBefore(mount, after);
+              await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            });
+            assert.deepEqual(await placed(), [["p", "Plain"], ["b", "OwnFallback"]]);
+            await toggleContent("p");
+            assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
             const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));
             assert.deepEqual(await iteration(), [["declared:named:0:5:2", true, false], ["declared:named:1:4:2", false, true]]);
             const classes = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-classes] > *'), element => [...element.classList]));
@@ -191,6 +243,7 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             assert.deepEqual(await iteration(), [["declared:named:0:5:3", true, false], ["declared:named:1:4:3", false, true]]);
             assert.deepEqual(await classes(), [["one\u00a0two"], ["one\u00a0two"]]);
             assert.deepEqual(await ownedEntries(), ownedEntryChanged);
+            assert.deepEqual(await plainSlots(), plainSlotExpected);
             assert.equal((await shadows()).replace(/\s/g, ""), "5:14:23:3declared:named");
             assert.deepEqual(await dimensions(), { items: ["5", "4"], indices: ["0", "1", "2"], outer: "8px" });
             await page.click("button");
@@ -204,6 +257,7 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
               await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
               assert.deepEqual(await page.locator(".x-finite li").allTextContents(), expected);
             }
+            if (target === "angular") assert.equal(await page.evaluate(() => (window as any).destroyTarget()), 0);
             assert.deepEqual(errors, []);
           } finally {
             await browser.close();

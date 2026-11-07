@@ -264,6 +264,43 @@ export function releaseContent(content: readonly Node[]): void {
   });
 }
 
+/** Plain ownership belongs to one logical projection and slot, including its structural marks. */
+export class ProjectionClaims {
+  readonly #owners = new Map<string, object>();
+  #waiters: Map<string, Set<readonly [Node, () => void]>> | undefined;
+
+  take(name: string, owner: object): boolean {
+    const current = this.#owners.get(name);
+    if (current !== undefined && current !== owner) return false;
+    this.#owners.set(name, owner);
+    return true;
+  }
+
+  wait(name: string, mark: Node, place: () => void): () => void {
+    const waiters = this.#waiters ??= new Map();
+    let waiting = waiters.get(name);
+    if (waiting === undefined) waiters.set(name, waiting = new Set());
+    const waiter = [mark, place] as const;
+    waiting.add(waiter);
+    return () => { waiting.delete(waiter); };
+  }
+
+  release(name: string, owner: object): void {
+    if (this.#owners.get(name) !== owner) return;
+    this.#owners.delete(name);
+    const waiting = this.#waiters?.get(name);
+    if (waiting !== undefined) queueMicrotask(() => {
+      if (this.#owners.has(name)) return;
+      let first: readonly [Node, () => void] | undefined;
+      for (const waiter of waiting) {
+        if (!waiter[0].isConnected) continue;
+        if (first === undefined || first[0].compareDocumentPosition(waiter[0]) & 2) first = waiter;
+      }
+      first?.[1]();
+    });
+  }
+}
+
 /** The nodes a server carrier held, which hydration puts in place only where their slots render them. */
 const carriedRoots = new WeakSet<Node>();
 
@@ -329,6 +366,25 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
   } else if (carrier !== undefined) carried.push(...Array.from(carrier.content.childNodes));
   if (consume) carried.push(...borrowedRanges.get(root) ?? []);
   return { ranges, carried };
+}
+
+/**
+ * The ranges in which its parent's `<slot of>` outlets rendered a server root's plain slot content
+ * (rendered-form#borrowed-slot-ranges): the root's entry index is its place among the component roots
+ * projected into its slot of the parent. Their content joins the root's projection (`borrowedRanges`).
+ */
+export function borrowedSlots(root: Element): HydrationRange[] {
+  const parent = root.parentElement?.closest("[component]");
+  const server = parent === null || parent === undefined ? undefined : serverRanges(parent, false);
+  if (server === undefined) return [];
+  const of = (range: HydrationRange): string | undefined => serverMark(range.markers[0]!)!.attributes.get("of");
+  const slot = server.ranges.find((range) => of(range) === undefined && range.content.includes(root))?.slot ?? root.getAttribute("slot") ?? "";
+  const siblings = [...server.ranges.flatMap((range) => of(range) === undefined && !range.fallback && !range.scoped && range.slot === slot ? range.content : []),
+    ...server.carried.filter((node) => node.nodeType === 1 && ((node as Element).getAttribute("slot") ?? "") === slot)];
+  const index = String(siblings.filter((node) => node.nodeType === 1 && (node as Element).hasAttribute("component")).indexOf(root));
+  const ranges = server.ranges.filter((range) => of(range) === index && !range.fallback && !range.scoped);
+  borrowedRanges.set(root, ranges.flatMap((range) => range.content));
+  return ranges;
 }
 
 export const FORM_DEFAULTS_ATTRIBUTE = "data-html-next-form-defaults";

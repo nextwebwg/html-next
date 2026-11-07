@@ -988,8 +988,7 @@ describe("parseComponent", () => {
     assert.deepEqual(merged.slots, [{ name: "icon", required: true }, { name: "label", required: true }]);
     // A slot is not a native root.
     expectDiagnostic("HT021", button(`<template $match><slot></slot><button $else></button></template>`));
-    // A slot is still declared once within an arm.
-    expectDiagnostic("HT008", button(`<template $match><a $when="$as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`));
+    assert.deepEqual(parseComponent(button(`<template $match><a $when="$as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`)).slots, [{ required: true }]);
 
     const delegated = parseComponent(
       `<template component="x-primary" status="early" summary="Delegates.">` +
@@ -1100,11 +1099,8 @@ describe("parseComponent", () => {
     }
   });
 
-  it("rejects invalid default-slot shapes and reserved language elements", () => {
-    expectDiagnostic(
-      "HT008",
-      componentSource(`<button><slot></slot><slot></slot></button>`),
-    );
+  it("accepts repeated default outlets and rejects reserved language elements", () => {
+    assert.deepEqual(parseComponent(componentSource(`<button><slot></slot><slot></slot></button>`)).slots, [{ required: true }]);
     expectDiagnostic(
       "HT009",
       componentSource(`<button><if test="ready"></if></button>`),

@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Share plain slot content between own, borrowed and repeated outlets in Node, compiled Vanilla and Angular. Retain original nodes and control edits through transfers, hydration and reconnect, and instantiate authored lazy templates at each outlet. Keep Angular views registered for server serialization and preserve native DOM order around structural anchors.
+
 - Preserve accepted-child entry identity through indexed, computed and structural aliases, conditional selection across lists, and null fallbacks in Node, native C# and generated targets. Select slot-prop conversion from every possible accepted tag. Keep Angular computed references intact, Vue slot props clear of generated helpers, and compiled Vanilla slot routing independent of root attributes.
 
 - Render native accepted-child `as` lists and borrowed slots with caller scope, stable prop snapshots, preset resolution and shared plain-content ownership. Preserve aliases through structural collection, keep collection state specific to explicit lists, and support implicit slot declarations and repeated ordinary outlets.

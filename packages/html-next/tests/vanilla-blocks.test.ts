@@ -117,7 +117,7 @@ describe("direct-extend Vanilla generation", () => {
       <main><x-card title="A"><p $if="$open">Body</p><small slot="footer">F</small></x-card></main></template>`;
     const { modules } = graph([page, card]);
     for (const module of modules.values()) {
-      assert.doesNotMatch(module, /\b(?:childList|childOutlet|listChanged|borrowedSlots)\b|const OF =/);
+      assert.doesNotMatch(module, /\b(?:childList|childOutlet|listChanged|borrowedSlots|initializeSlot|invokeAccepted|projectAccepted|sharePlainSlots)\b|const OF =/);
     }
     assert.match(modules.get("./XCards.js")!, /^import \{ attachGeneratedController, buildTemplate, clearRegion, dispose, invoke, projected, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
   });
@@ -1438,14 +1438,18 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], projection);
   });
 
-  it("gives projected nodes to the outlet live's assembly appends last when rows share a name", async () => {
-    // Slot names are unique, so outlets share one only in rows.
-    await same(slotsShape(`<state name="rows" type="list(integer)" value="[1, 2]"></state>`,
+  it("keeps plain content at its first active outlet across repeated rows", async () => {
+    const run = await same(slotsShape(`<state name="rows" type="list(integer)" value="[1, 2]"></state>`,
       '<section><ul><li $each="n of $rows" $key="$n" from:data-id="$n"><slot name="head">row</slot></li></ul></section>'), [
       (host) => { host.state.open = false; },
       (host) => { host.state.open = true; host.state.rows = [2, 1, 3]; },
       (host) => { host.state.rows = [4]; },
     ], projection);
+    assert.deepEqual(run.snapshots.map(html => {
+      const dom = new JSDOM(html);
+      try { return Array.from(dom.window.document.querySelectorAll("li"), row => row.textContent); }
+      finally { dom.window.close(); }
+    }), [["Titlesub", "row"], ["Titlesub", "row"], ["row", "Titlesub", "row"], ["Titlesub"], ["Titlesub"]]);
   });
 
   const armsShape = propsShape(`

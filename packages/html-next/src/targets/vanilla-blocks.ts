@@ -34,7 +34,7 @@ import { attributeNamespace } from "../dom-attributes.js";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { repeatedSlotNames, orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
 import { fail } from "../diagnostics.js";
 import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
@@ -1365,7 +1365,8 @@ class Planner {
   /** The tags the slot `node` is projected into accepts, in the component the content is projected into. */
   accepts(node: ElementNode): readonly string[] {
     const slot = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
-    return this.projecting?.definition.contract.slots?.[slot?.kind === "literal" ? slot.value : ""]?.accepts ?? [];
+    const declared = this.projecting?.definition.contract.slots?.[slot?.kind === "literal" ? slot.value : ""];
+    return declared?.as === undefined ? [] : declared.accepts ?? [];
   }
 
   /**
@@ -2018,6 +2019,11 @@ export function emitBlocks(
    * Creates the block's invocations when it first renders, as live lowering puts each component's
    * root in its invocation's place, then applies their bound props whenever those re-run.
    */
+  const acceptedBy = [...invocations?.values() ?? []].some(({ definition: parent }) => Object.values(parent.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(contract.tag)));
+  const repeated = repeatedSlotNames(definition);
+  const sharedPlain = acceptedBy || repeated.size > 0;
+  const projectionHelper = acceptedBy ? "projectAccepted" : "project";
+  const projectionTag = acceptedBy ? ", S.g" : "";
   const invoke = (block: Block): string[] => block.invocations.flatMap((invocation, index) => {
     const cacheProp = (prop: Invocation["props"][number], at: number, value: string, status?: string): string[] => !invocation.ordered ? [] : [
       `{ const accepted = propValue(${prop.type}, ${value}); if (${status === undefined ? "" : `!${status}.ready || `}accepted !== NONCONFORMING) r.t${index}_${at} = { value: accepted${status === undefined ? "" : `, status: ${status}`} }; }`,
@@ -2064,6 +2070,9 @@ export function emitBlocks(
     ];
     // In projected content a component waits until a slot places it, as live lowering does.
     const waits = inProjection(block) && invocation.accepted !== true;
+    const call = invocation.accepted === true ? "invokeAccepted" : "invoke";
+    const adoptCall = invocation.accepted === true ? "adoptAcceptedInvoke" : "adoptInvoke";
+    const acceptedTag = invocation.accepted !== true ? "" : `, ${JSON.stringify([...invocations!.values()].find(entry => `create${entry.definition.contract.name}` === invocation.factory)!.definition.contract.tag)}`;
     return [
       waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, -1, new Map()))) {` : `  if (r.h${index} === undefined) {`,
       ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.matches(':is([component]:not(template), [data-component]:not([component]))');`] : [],
@@ -2085,8 +2094,8 @@ export function emitBlocks(
         `    const k = document.createElement("div"), y = ${convertible(invocation.content.expression)};`,
         `    if (y !== NONCONFORMING) ${invocation.content.kind === "html" ? "writeHtml(k, toText(y))" : "k.textContent = toText(y)"};`,
       ],
-      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? adoptInvoke : invoke)` : "invoke"}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.ordered ? "W.attributes" : `{ ${invocation.attributes.map(([name, value]) => `${objectKey(name)}: ${JSON.stringify(value)}`).join(", ")} }`}${
-        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${invocation.ordered ? ", ...W.props" : hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, ${invocation.ordered ? "W.html" : "H"}, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
+      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? ${adoptCall} : ${call})` : call}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.ordered ? "W.attributes" : `{ ${invocation.attributes.map(([name, value]) => `${objectKey(name)}: ${JSON.stringify(value)}`).join(", ")} }`}${
+        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${invocation.ordered ? ", ...W.props" : hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, ${invocation.ordered ? "W.html" : "H"}, (root, previous) => { ${follow.join(" ")} }, r.z ??= []${acceptedTag});`,
       `    ${site} = r.h${index}.e;`,
       // The shared root carries both markers, and this component's lifecycle rides its owner's.
       ...invocation.root ? [
@@ -2266,18 +2275,8 @@ export function emitBlocks(
       }
       lines.push("  }");
     }
-    // Slots fill last, in the order live assembles their parents (deepest first, then document
-    // order), so when two outlets share a name the one live's assembly appends last holds the nodes.
-    const order = (index: number): number[] => block.sites[block.regions[index]!.site]!;
-    const sequence = [...block.regions.keys()].sort((left, right) => {
-      const a = block.regions[left]!.kind === "slot", b = block.regions[right]!.kind === "slot";
-      if (a !== b) return a ? 1 : -1;
-      if (!a) return left - right;
-      const [x, y] = [order(left), order(right)];
-      const [px, py] = [x.slice(0, -1), y.slice(0, -1)];
-      for (let step = 0; step < Math.min(px.length, py.length); step += 1) if (px[step] !== py[step]) return px[step]! - py[step]!;
-      return py.length - px.length || x.at(-1)! - y.at(-1)!;
-    });
+    // Regions place their content in authored order, including the slots nested in each body.
+    const sequence = [...block.regions.keys()];
     sequence.map((index) => [block.regions[index]!, index] as const).forEach(([region, index]) => {
       const child = region.block.id;
       if (region.kind === "slot") {
@@ -2300,9 +2299,9 @@ export function emitBlocks(
         if (props === undefined) {
           lines.push(
             // A consumer's <template slot> renders here afresh, and is let go when this outlet goes.
-            `  if (r.f${index} === undefined) { r.f${index} = 1; ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d${region.fallback === true ? ", r.z ??= []" : ""});`,
-            `    if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; ${place} } }`,
-            `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
+            `  if (r.f${index} === undefined) { r.f${index} = 1; ${sharedPlain ? fill.replaceAll("adoptSlot", "adoptPlainSlot").replaceAll("fillSlot", "initializeSlot") : fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d${region.fallback === true ? ", r.z ??= []" : ""});`,
+            `    ${sharedPlain ? `if (typeof at === "function") r.f${index} = at(r, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}); else ` : ""}if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; ${place} } }`,
+            `  else ${sharedPlain ? `if (typeof r.f${index} === "function") r.f${index}(c, d); else ` : ""}if (${body} !== undefined) p${child}(${body}, c, d);`,
           );
           return;
         }
@@ -2522,7 +2521,7 @@ export function emitBlocks(
       : [`${position(block.sites[region.site]![0]!)}: ${JSON.stringify(region.projected)}`]);
     const slotted = regions.length === 0 ? "" : `${invoked === "" ? ", []" : ""}, { ${regions.join(", ")} }`;
     // An accepted child's plain content its parent's `<slot of>` outlet rendered is found in that outlet's range.
-    const borrowed = into.accepted !== true ? "" : `${invoked === "" ? ", []" : ""}${slotted === "" ? ", {}" : ""}, borrowedSlots`;
+    const borrowed = into.accepted !== true ? "" : `${invoked === "" && slotted === "" ? ", []" : ""}${slotted === "" ? ", {}" : ""}, borrowedSlots`;
     return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked}${slotted}${borrowed});`];
   };
   /** The block's node: the one it adopted, or its prototype's clone. Projected content leaves its nodes where the server put them. */
@@ -2597,6 +2596,8 @@ export function emitBlocks(
   // a declared slot (components#columns-as-markup).
   const lists = plan.roots.flatMap((item, index) => item.list === undefined ? [] : [{ index, ...item.list }]);
   const slotted = lists.length > 0 || Object.keys(contract.slots ?? {}).length > 0 || blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
+
+
   /** Whether the props' `data-<tag>-prop-<name>` the root's template binds itself, which is then its output. */
   const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
     node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === propAttribute(contract.tag, name)));
@@ -2699,7 +2700,8 @@ export function emitBlocks(
     ...(instance && guardNestedDepth ? ["  I.nd = __htmlNextDepth + 1;"] : []),
     // An adopted root connects once the outermost adoption has finished.
     ...hydrate ? ["  if (h) I.L = adoptLifecycle;"] : [],
-    ...(slotted ? [hydrate ? "  const J = Y ? project(I, ...Y) : project(I, children, slots);" : "  const J = project(I, children, slots);"] : []),
+    ...(slotted ? [hydrate ? `  const J = Y ? ${projectionHelper}(I, ...Y${projectionTag}) : ${projectionHelper}(I, children, slots${projectionTag});` : `  const J = ${projectionHelper}(I, children, slots${projectionTag});`] : []),
+    ...repeated.size === 0 ? [] : [`  sharePlainSlots(I, J, ${JSON.stringify([...repeated])});`],
     // Each `as` list is read from the projection before the template first renders.
     ...lists.map((list) => {
       const named = `\`${contract.tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
@@ -2927,7 +2929,7 @@ export function emitBlocks(
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
-    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots",
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots", "initializeSlot", "adoptPlainSlot", "invokeAccepted", "adoptAcceptedInvoke", "sharePlainSlots", "projectAccepted",
     "transitionStyles", "writeTransitionStyle", "forwardAttributes", "resetForwardedAttributes", "writeInvocationAttribute", "forwardInvocationAttributes", "initialInvocationInputs", "writeInvocationModifier", "resetForwardedInvocationAttributes"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${plan.referenceSchemas.join("\n")}\n${outletProps.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
@@ -2946,7 +2948,7 @@ export function emitBlocks(
   const prototypes = blocks.filter(built).map((block) => `P${block.id}`);
   return [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
-    `import { ${helpers.map(name => guardNestedDepth && (name === "invoke" || name === "adoptInvoke") ? `${name === "invoke" ? "invokeNested" : "adoptNestedInvoke"} as ${name}` : name).join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
+    `import { ${helpers.map(name => guardNestedDepth && (name === "invoke" || name === "adoptInvoke" || name === "invokeAccepted" || name === "adoptAcceptedInvoke") ? `${({ invoke: "invokeNested", adoptInvoke: "adoptNestedInvoke", invokeAccepted: "invokeAcceptedNested", adoptAcceptedInvoke: "adoptAcceptedNestedInvoke" })[name]} as ${name}` : name).join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
     ...(modulePreparation === undefined ? [] : ['import { adoptNativeModule } from "@nextwebwg/html-next/bindings";']),
     // Each invoked component's factory, from its own module; a component that invokes itself has its own.
     ...[...new Set(blocks.flatMap((block) => block.invocations.map((invocation) => invocation.factory)))].filter((factory) => factory !== `create${contract.name}`).map((factory) => {

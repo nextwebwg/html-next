@@ -236,7 +236,7 @@ describe("framework converter", () => {
 
   for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) it(`converts every successful shared conformance definition to ${target} in both graph modes`, async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 49, "review new successful conformance cases for converter coverage");
+    assert.equal(successful.length, 50, "review new successful conformance cases for converter coverage");
     const root = await mkdtemp(join(tmpdir(), `html-next-${target}-conformance-`));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -1592,11 +1592,13 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await writeFile(consumer, `import React from "react";
 import XPanel from "./react/components/XPanel.tsx";
 const named = <XPanel slots={{ title: <b>Title</b> }}>Body</XPanel>;
-// @ts-expect-error A declared plain slot cannot receive a render function.
+const templateSlot = <XPanel slots={{ title: () => <b>Template</b> }} />;
+const defaultTemplate = <XPanel>{() => <b>Default template</b>}</XPanel>;
+// @ts-expect-error A template for a slot without props takes no required arguments.
 const functionSlot = <XPanel slots={{ title: (_props: Record<string, unknown>) => <b>Title</b> }} />;
 // @ts-expect-error A static slot contract does not accept an undeclared name.
 const undeclared = <XPanel slots={{ other: <b>Other</b> }} />;
-void [named, functionSlot, undeclared];`);
+void [named, templateSlot, defaultTemplate, functionSlot, undeclared];`);
     await typecheckReact(root, [...files, consumer]);
     const bundle = await build({
       entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,

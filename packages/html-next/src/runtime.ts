@@ -38,7 +38,7 @@ import {
 import { asciiLowerCase, kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
-  awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, writeMark, projectionRejected, rejectProjection, observeRegion, regionChanged, regionStart, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent,
+  ProjectionClaims, borrowedContent, borrowedRanges, borrowedSlots, currentProjection, releaseContent, writeMark, projectionRejected, rejectProjection, observeRegion, regionChanged, regionStart, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -96,7 +96,7 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes } from "./template.js";
+import { orderedAttributeWrites, repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes } from "./template.js";
 import { ITERATION_INDEX, type WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
@@ -1411,6 +1411,9 @@ function ownedContext(context: RuntimeRenderContext, owned: RenderOwned): Runtim
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
   readonly asScope?: ReactiveScope;
+  readonly claimedSlot?: SlotNode;
+  readonly sharedProjection?: true;
+  readonly plainProjection?: { claims?: ProjectionClaims };
   readonly attributeInputs?: InvocationAttributeInputs;
   owned: RenderOwned;
   readonly refs: Record<string, Element | Element[]>;
@@ -1802,8 +1805,9 @@ function existingDynamicRange(candidate: Node | undefined): readonly [Comment, C
   return undefined;
 }
 
-function rangeNodes(start: Comment, end: Comment): Node[] {
+function rangeNodes(start: Node, end: Node): Node[] {
   const nodes: Node[] = [start];
+  if (start === end) return nodes;
   for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
     nodes.push(node);
     if (node === end) break;
@@ -2284,8 +2288,8 @@ function bindElement(
 }
 
 /**
- * Bind a template-component invocation through the component that lowers there: props reach the
- * component, and everything else its current root. The component may already own `element` when
+ * Bind a template-component invocation: declared props reach the component and unclaimed attributes
+ * remain available for explicit `$attributes` forwarding. The component may already own `element` when
  * it was adopted in an earlier pass; otherwise lowering claims these bindings.
  */
 function bindInvocation(
@@ -2779,13 +2783,14 @@ function renderInstance(
     bindEvents(candidate, node, scope, context, invocation);
     settleInvocation(candidate, invocation);
     // On a shared root, this component's own ranges and carrier, not those of the components it delegates to.
+    const borrowed = borrowedSlots(candidate);
     const nested = serverRanges(candidate, false, node.name);
     const slotOf = (child: TemplateNode): string => child.kind === "element"
       ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
       : "";
     const scopedTemplate = (child: TemplateNode): child is ElementNode => child.kind === "element" && child.name === "template" &&
       child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot");
-    const rendered = nested?.ranges.filter((range) => !range.fallback) ?? [];
+    const rendered = [...nested?.ranges.filter((range) => !range.fallback) ?? [], ...borrowed];
     const walk = (children: readonly TemplateNode[], existing: readonly Node[]): void => {
       renderChildren(children, scope, document, context, existing[0]);
     };
@@ -2800,7 +2805,7 @@ function renderInstance(
     // A range showing its fallback ends with the marks of this slot's regions that render nothing, two each.
     for (const range of nested?.ranges ?? []) {
       const regions = node.children.filter((child) => !scopedTemplate(child) && slotOf(child) === range.slot);
-      if (!range.fallback || range.scoped || regions.length === 0 || !regions.every((child) => child.kind === "element" && child.flow !== undefined)) continue;
+      if (renderedSlots.has(range.slot) || !range.fallback || range.scoped || regions.length === 0 || !regions.every((child) => child.kind === "element" && child.flow !== undefined)) continue;
       walk(regions, range.content.slice(-2 * regions.length));
       renderedSlots.add(range.slot);
     }
@@ -2826,8 +2831,8 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
-  // An adopted root already holds its literals merged with its invocation's attributes, which win
-  // (class and style combine), so only a literal it lacks is written. A root control's default
+  // An adopted root already holds the server's ordered literal and forwarded attribute writes,
+  // so only a literal it lacks is written. A root control's default
   // value and checkedness are the template's again once adopted (below), so those are written.
   const adoptedRoot = adopted && node === context.rootNode;
   const resetDefault = (name: string): boolean => (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
@@ -3004,6 +3009,8 @@ function renderScopedTemplate(
   const projectionContext = authored === undefined ? context : Object.create(context, {
     definition: { value: authored.context.definition, enumerable: true },
     asScope: { value: authored.context.asScope, enumerable: true },
+    sharedProjection: { value: authored.context.sharedProjection, enumerable: true },
+    plainProjection: { value: authored.context.plainProjection, enumerable: true },
     refs: { value: authored.context.refs, enumerable: true },
     attributeInputs: { value: authored.context.attributeInputs, enumerable: true },
     projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
@@ -3066,6 +3073,10 @@ interface ChildEntry {
   readonly definition: ComponentDefinition;
   /** The child's invocation, then the root it lowers to; or its server-rendered root. */
   element: Element;
+  projected?: readonly Node[];
+  rootSelected?: boolean;
+  pending?: Set<() => void>;
+  claims?: ProjectionClaims;
 }
 const childEntries = new WeakMap<object, ChildEntry>();
 const entriesByElement = new WeakMap<Element, ChildEntry>();
@@ -3200,13 +3211,22 @@ function childSlotNodes(entry: ChildEntry, name: string): Node[] {
   let nodes: readonly Node[];
   if (projection !== undefined) {
     nodes = currentProjection(projection.nodes);
-  } else if (element.localName === entry.tag) nodes = Array.from(element.childNodes);
+  } else if (element.localName === entry.tag) nodes = entry.projected ??= Array.from(element.childNodes);
   else {
     nodes = serverCarried.get(element) ?? serverRanges(element, false, entry.tag)?.carried ?? [];
     serverCarried.set(element, nodes);
-    nodes = [...nodes, ...borrowedRanges.get(element) ?? []];
   }
-  return nodes.filter((node) => node.nodeType === 1 && (projection?.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") === name);
+  const borrowed = projection === undefined ? borrowedRanges.get(element) : undefined;
+  if (borrowed !== undefined) nodes = [...nodes, ...borrowed.filter(node => !nodes.includes(node))];
+  const assigned: Node[] = [];
+  let region: readonly [string, Node] | undefined;
+  for (const node of nodes) {
+    region ??= regionSlots.get(node);
+    const slot = projection?.slotNames.get(node) ?? region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
+    if (slot === name) assigned.push(node);
+    if (node === region?.[1]) region = undefined;
+  }
+  return assigned;
 }
 
 const childSlotPropCache = new WeakMap<SlotNode, WeakMap<ComponentDefinition, NonNullable<SlotNode["props"]>>>();
@@ -3261,7 +3281,7 @@ function placeChildSlot(
   existing: readonly Node[] | undefined,
   mark: Node,
   retry: () => void,
-): { readonly nodes: Node[]; readonly fallback: boolean; readonly scoped: boolean } {
+): { readonly nodes: Node[]; readonly fallback: boolean; readonly scoped: boolean; readonly pending?: true } {
   const name = node.name!;
   let scoped = (node.props?.length ?? 0) > 0;
   const fallback = (): { nodes: Node[]; fallback: boolean; scoped: boolean } => {
@@ -3293,17 +3313,22 @@ function placeChildSlot(
     warnAuthored(context.definition, `of:${entry.tag}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
     return fallback();
   }
-  // Plain content keeps its identity: the child's own outlet places it, else the first `<slot of>` that
-  // renders it. A later outlet takes it over when that one lets it go.
-  if (outlets.includes(name)) return fallback();
-  if (content.some((candidate) => borrowedContent.has(candidate))) {
-    const cancel = awaitContent(content, mark, retry);
+  if (entry.rootSelected === true && runtimeInstance(entry.element) === undefined && outlets.includes(name)) {
+    const waiting = entry.pending ??= new Set();
+    waiting.add(retry);
+    ownEffect(context, scope, () => () => { waiting.delete(retry); });
+    childPlacements = true;
+    return { nodes: [...existing ?? []], fallback: serverMark(mark)?.attributes.has("fallback") === true, scoped: false, pending: true };
+  }
+  const claims = entry.claims ??= new ProjectionClaims();
+  if (!claims.take(name, mark)) {
+    const cancel = claims.wait(name, mark, retry);
     ownEffect(context, scope, () => cancel);
     return fallback();
   }
   for (const placed of content) { borrowedContent.add(placed); placedOwners.set(placed, entry); }
   childPlacements = true;
-  ownEffect(context, scope, () => () => releaseContent(content));
+  ownEffect(context, scope, () => () => { claims.release(name, mark); releaseContent(content); });
   if (existing !== undefined) nodes = [...existing];
   else if (context.committed) {
     nodes = currentProjection(content);
@@ -3346,29 +3371,42 @@ function renderChildSlot(
     owned = renderOwned(context.owned);
     const existing = adopting;
     adopting = undefined;
-    if (existing === undefined) clearRange(start, end);
+    if (existing === undefined) {
+      // Keep caller regions intact while releasing this outlet's plain content.
+      if (flags === "" && start.nextSibling !== end) document.createDocumentFragment().append(...rangeNodes(start, end).slice(1, -1));
+      else clearRange(start, end);
+    }
     // An adopted range of plain content holds the child's own nodes: they join its slot content.
     else if (entry !== null && !hydrating!.fallback && !hydrating!.scoped) {
       const element = entry.element;
-      borrowedRanges.set(element, [...borrowedRanges.get(element) ?? [], ...existing]);
+      const borrowed = borrowedRanges.get(element) ?? [];
+      borrowedRanges.set(element, [...borrowed, ...existing.filter(node => !borrowed.includes(node))]);
     }
     // Released plain content another outlet placed: this outlet places it now (`retry`).
     const retry = (): void => { if (shown === entry) { place(entry); mark(); } };
     const placed = untracked(() => placeChildSlot(node, entry, scope, document, ownedContext(context, owned!), existing, start, retry));
+    if (placed.pending === true) adopting = existing;
     // Adopted nodes may come back through a fragment, so they go back before the end mark too.
     for (const stale of existing ?? []) if (!placed.nodes.includes(stale)) stale.parentNode?.removeChild(stale);
     end.before(...placed.nodes);
     flags = `${placed.fallback ? ' fallback=""' : ""}${placed.scoped ? ' scoped=""' : ""}`;
   };
-  ownEffect(context, scope, () => {
+  let decision: ReactiveEffect;
+  const disconnect = (): void => {
+    if (!decision.paused) return;
+    owned?.stop();
+    shown = undefined;
+  };
+  decision = ownEffect(context, scope, () => {
     const value = evalConforming(of.expressionPlan, scope, context.definition);
-    if (value === NONCONFORMING) return;
+    if (value === NONCONFORMING) return disconnect;
     const owner = context.asScope ?? scope;
     const list = of.lists === undefined ? owner.read(of.list) : of.lists.map(name => owner.read(name));
     index = ownedEntryIndex(value, list);
     const entry = index < 0 ? null : childEntries.get(value as object) ?? null;
     if (entry !== shown) place(shown = entry);
     mark();
+    return disconnect;
   });
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }
@@ -3380,6 +3418,59 @@ function slotFallback(nodes: Node[]): Node[] {
       whenLowered(node as Element, root => { nodes[index] = root; });
   }
   return nodes;
+}
+
+
+function renderClaimedSlot(
+  node: SlotNode, assigned: readonly Node[], scope: ReactiveScope, document: Document,
+  context: RuntimeRenderContext, candidate?: Node,
+): Node[] {
+  const name = node.name ?? "";
+  const claims = context.plainProjection!.claims ??= new ProjectionClaims();
+  const owner = {};
+  const hydration = context.hydrationRanges?.[0] ?? (candidate === undefined ? undefined : serverRangeAt(candidate, name));
+  const fragment = hydration === undefined ? document.createDocumentFragment() : undefined;
+  let start: ChildNode | undefined, end: ChildNode | undefined;
+  let first = true;
+  ownEffect(context, scope, () => {
+    let claimed = false;
+    let cancel: (() => void) | undefined;
+    let owned: RenderOwned | undefined;
+    const place = (): void => {
+      cancel?.();
+      cancel = undefined;
+      owned?.stop();
+      owned = renderOwned(context.owned);
+      const available = claims.take(name, owner);
+      if (available) claimed = true;
+      const parent = start?.parentNode, after = end?.nextSibling ?? null;
+      if (!first) document.createDocumentFragment().append(...rangeNodes(start!, end!));
+      const local = Object.create(context, {
+        owned: { value: owned, enumerable: true },
+        claimedSlot: { value: node, enumerable: true },
+        projectedNodes: { value: available ? context.projectedNodes : context.projectedNodes.filter(node => !assigned.includes(node)), enumerable: true },
+        hydrationRanges: { value: first ? context.hydrationRanges : undefined, enumerable: true, writable: true },
+      }) as RuntimeRenderContext;
+      const content = renderSlot(node, scope, document, local, first ? candidate : undefined);
+      start = content[0] as ChildNode;
+      end = content.at(-1) as ChildNode;
+      if (first && fragment !== undefined) fragment.append(...content);
+      else if (!first && parent != null) {
+        const nodes = document.createDocumentFragment();
+        nodes.append(...content);
+        parent.insertBefore(nodes, after);
+      }
+      if (!available) cancel = claims.wait(name, start, place);
+      first = false;
+    };
+    place();
+    return () => {
+      cancel?.();
+      owned?.stop();
+      if (claimed) claims.release(name, owner);
+    };
+  });
+  return fragment === undefined ? rangeNodes(start!, end!) : [fragment];
 }
 
 function renderSlot(
@@ -3397,6 +3488,17 @@ function renderSlot(
   // A consumer's <template slot> renders lazily, like an $if body: only while this outlet renders,
   // in the consumer's scope, and afresh each time. Plain projection stays eager.
   const lazy = props.length > 0 || carrier !== undefined;
+  if (!lazy && assigned.length > 0 && context.claimedSlot !== node &&
+    (context.sharedProjection === true || repeatedSlotNames(context.definition).has(name))) {
+    return renderClaimedSlot(node, assigned, scope, document, context, candidate);
+  }
+  if (!lazy && context.definition.contract.slots?.[name]?.as !== undefined) {
+    for (const child of currentProjection(assigned)) {
+      const entry = child.nodeType === 1 ? entriesByElement.get(child as Element) : undefined;
+      if (entry === undefined) continue;
+      ownEffect(context, scope, () => { entry.rootSelected = true; return () => { entry.rootSelected = false; }; });
+    }
+  }
   const renderScoped = (existing?: readonly Node[]): Node[] => {
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
     return renderScopedTemplate(carrier, name, props, scope, document, context, existing);
@@ -3832,14 +3934,17 @@ function prepareRuntimeInvocation(
       hydratedNodes = [];
     }
   }
-  const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
-  const projected = hydration ? children : Array.from(invocation.childNodes);
+  const foundEntry = entriesByElement.get(invocation);
+  const acceptedEntry = foundEntry?.tag === definition.contract.tag ? foundEntry : undefined;
+  const original = acceptedEntry?.projected;
+  const children: Node[] = hydration ? [...hydratedNodes!] : [...original ?? invocation.childNodes];
+  for (const node of borrowedRanges.get(invocation) ?? []) if (!children.includes(node)) children.push(node);
+  const projected = hydration ? children : [...children];
   // A consumer region for an element with `slot` projects whole into that slot, its marks included,
   // so what it renders later lands there too.
   let region: readonly [string, Node] | undefined;
   for (const node of children) {
     if (node.nodeType === 8 && /^html-next:(?:each-)?start$/.test((node as Comment).data)) projectedRegions.add(node);
-    if (hydration) continue;
     region ??= regionSlots.get(node);
     if (region === undefined) continue;
     projectedSlotNames.set(node, region[0]);
@@ -3892,6 +3997,8 @@ function prepareRuntimeInvocation(
   const context: RuntimeRenderContext = {
     definition,
     ...((lists?.length ?? 0) === 0 ? {} : { asScope: scope }),
+    ...(acceptedEntry === undefined ? {} : { sharedProjection: true as const }),
+    ...(acceptedEntry !== undefined ? { plainProjection: acceptedEntry } : repeatedSlotNames(definition).size > 0 ? { plainProjection: {} } : {}),
     attributeInputs,
     owned: instance.owned,
     refs: instance.refs,
@@ -4304,6 +4411,14 @@ function commitRuntimeInvocations(
       if (root !== undefined) followRoot(runtimeInstances.get(root) ?? invocation.instance, root);
     }
     connectRuntimeInstance(invocation.instance);
+    if (childPlacements) {
+      const entry = entriesByElement.get(invocation.invocation);
+      const waiting = entry?.pending;
+      if (waiting !== undefined) {
+        delete entry!.pending;
+        for (const place of waiting) place();
+      }
+    }
   }
 }
 

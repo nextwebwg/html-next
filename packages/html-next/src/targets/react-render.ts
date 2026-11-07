@@ -5,6 +5,7 @@
  * only the ones a component imports. Preact output reuses these with its compatibility API.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { REACT_PLAIN_SOURCE } from "./react-plain-source.js";
 import { ROOT_METADATA_SOURCE } from "../generated/dom-attributes-source.js";
 import { NATIVE_VALUE_ATTRIBUTE, nativeValueCss } from "../native-value.js";
 import { closureFreeFunctionSource } from "./format-source.js";
@@ -18,6 +19,7 @@ export const REACT_RENDER_SPECIFIER = "./render";
 
 const source = (preact = false): string => `import React from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 ${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 
 ${expressionHelpersSource()}
@@ -354,8 +356,10 @@ function KeyedRows(props: { readonly renderRows: KeyedRowsRender }): ReactNode {
 export ${HOST_STATE_TOKENS_SOURCE.trim()}
 
 /** A plain slot's content, or its fallback when the consumer passed none. */
+${REACT_PLAIN_SOURCE}
+
 export function renderPlainSlot(slot: ReactNode | ((props: Record<string, any>) => ReactNode) | undefined, fallback: ReactNode): ReactNode {
-  if (typeof slot === "function") return null;
+  if (typeof slot === "function") return markProjected(slot({}));
   return hasSlotContent(slot) ? markProjected(slot) : fallback;
 }
 
@@ -405,13 +409,13 @@ type ChildLink = {
   wrap?: (content: ReactNode) => ReactNode;
   /** Replaced when the child gives new contexts or slots, which an outlet rendered before it reads again. */
   stamp?: object;
-  claims: Map<string, object>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
+  plain?: Map<string, PlainFrame>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
 };
 const childLinks = new WeakMap<object, ChildLink>();
 /** A new stable entry for one accepted child: its props' names are fixed, and reads go through its link. */
 function childEntry(tag: string, props: Readonly<Record<string, unknown>>): object {
   const listeners = new Set<() => void>();
-  const link: ChildLink = { tag, props, slots: undefined, claims: new Map(), listeners,
+  const link: ChildLink = { tag, props, slots: undefined, listeners,
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
   const entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(props).map((prop) =>
     [prop, { get: () => link.props[prop], enumerable: true }]))) as object);
@@ -449,8 +453,8 @@ const markedProps = (mark: ChildMark, given: Readonly<Record<string, unknown>>):
  * renders them, so content after the outlet reads it complete.
  */
 export function useChildLists(given: unknown, lists: ChildListSlots, tag: string, file: string,
-  props: { readonly children?: ReactNode; readonly slots?: Readonly<Record<string, unknown>> }): {
-  readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ChildOwner; readonly content: Readonly<Record<string, ReactNode>>;
+  props: { readonly children?: unknown; readonly slots?: Readonly<Record<string, unknown>> }): {
+  readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ChildOwner; readonly plainEntries: ReadonlyMap<string, object>; readonly content: Readonly<Record<string, ReactNode>>;
 } {
   const parent = React.useContext(ChildEntries);
   const kept = React.useRef(new Map<string, object>()).current;
@@ -482,13 +486,13 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
       if (entry === undefined || childLinks.get(entry)!.tag !== descriptor.tag) entry = childEntry(descriptor.tag, descriptor.props);
       const link = childLinks.get(entry)!;
       // Plain content is claimed afresh each render by the first outlet that places it.
-      link.props = descriptor.props; link.slots = descriptor.slots; link.claims = new Map();
+      link.props = descriptor.props; link.slots = descriptor.slots; preparePlain(link);
       current.set(descriptor.key, entry);
       return entry;
     });
     result[name] = given === undefined && mounted.size > 0 ? withMounted(direct, committed.current[name], mounted) : direct;
   }
-  for (const entry of mounted) childLinks.get(entry)!.claims = new Map();
+  for (const entry of mounted) preparePlain(childLinks.get(entry)!);
   kept.clear();
   for (const [key, entry] of current) kept.set(key, entry);
   if (given !== undefined) for (const name of Object.keys(result)) Object.freeze(result[name]);
@@ -506,7 +510,7 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
     owner.moved = false;
     if (rereading.current) changed();
   });
-  return { lists: result, entries: owner, content };
+  return { lists: result, entries: owner, plainEntries: kept, content };
 }
 
 /** Direct children, with the wrapped ones still mounted after the entry they last followed. */
@@ -570,7 +574,7 @@ function childDescriptors(content: ReactNode, tag: string, slot: string, accepts
  * Limit: an outlet that renders before the child's own root reads the child's contexts only after the
  * child commits, and not in server output.
  */
-export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<Record<string, unknown>>, wrap?: (content: ReactNode) => ReactNode): void {
+export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<Record<string, unknown>>, wrap?: (content: ReactNode) => ReactNode): ChildLink | undefined {
   const nearest = React.useContext(ChildEntries);
   const own = React.useRef<{ entry?: object; owner?: ChildOwner }>({}).current;
   const tag = mark.tags[0]!;
@@ -608,6 +612,7 @@ export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<R
     }
   }
   const link = entry === undefined ? undefined : childLinks.get(entry);
+  if (link !== undefined) preparePlain(link);
   if (link !== undefined && wrap !== undefined) { link.wrap = wrap; link.stamp = {}; }
   const inRender = owner?.open === true;
   const list = owner?.lists?.[name!];
@@ -624,6 +629,7 @@ export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<R
     if (!list!.includes(entry!)) owner!.changed();
     return () => { mounted.delete(entry!); owner!.changed(); };
   }, [mounted]);
+  return link;
 }
 
 /** Each accepted tag's slots: those its own template places, those with props, all it declares, and those names as text. */
@@ -643,7 +649,6 @@ export function ChildSlot(props: {
   const prefix = file === "" ? "HR007: " : file + ": HR007: ";
   const link = entry !== null && typeof entry === "object" ? childLinks.get(entry) : undefined;
   React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.stamp, () => link?.stamp);
-  const claim = React.useRef({}).current;
   if (link === undefined) return fallback;
   const known = slots[link.tag];
   const location = file + "#of:" + link.tag + ":" + name;
@@ -660,10 +665,7 @@ export function ChildSlot(props: {
     warnUnless(false, location + ":plain", prefix + "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
     return fallback;
   } else {
-    if (known?.[0].includes(name) === true) return fallback;
-    if (!link.claims.has(name)) link.claims.set(name, claim);
-    if (link.claims.get(name) !== claim) return fallback;
-    content = slot as ReactNode;
+    return <PlainSlot frame={linkedPlain(link, name)} content={slot as ReactNode} fallback={fallback} />;
   }
   const placed = markProjected(content);
   return link.wrap === undefined ? placed : link.wrap(placed);

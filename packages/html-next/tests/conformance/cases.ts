@@ -1086,8 +1086,14 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HT006" },
   },
   {
-    name: "HT008: more than one slot",
-    source: scene({ root: `<div><slot></slot><slot></slot></div>`, use: `<x-t></x-t>` }),
+    name: "repeated plain outlets place content at the first outlet",
+    source: scene({ root: `<div><p><slot>First</slot></p><b><slot>Second</slot></b></div>`, use: `<x-t><i>Plain</i></x-t>` }),
+    expect: { probe: `return [q("p").textContent, q("b").textContent, qa("i").length];`, result: ["Plain", "Second", 1] },
+  },
+  {
+    name: "HT008: an outlet repeats a slot prop",
+    source: scene({ defs: `<slot name="cell"><prop name="count" type="number">Count.</prop></slot>`,
+      root: `<div><slot name="cell" count="1" from:count="2"></slot></div>`, use: `<x-t></x-t>` }),
     expect: { code: "HT008" },
   },
   {
