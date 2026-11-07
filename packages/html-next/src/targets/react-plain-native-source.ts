@@ -7,6 +7,10 @@ interface PlainNativeTree {
   sibling?: PlainNativeTree | null;
   return?: PlainNativeTree | null;
   alternate?: PlainNativeTree | null;
+  flags?: number;
+  subtreeFlags?: number;
+  lanes?: number;
+  childLanes?: number;
   stateNode?: unknown;
   props?: { __P?: Node };
   __k?: (PlainNativeTree | null)[];
@@ -132,6 +136,13 @@ function plainAdoptSource(source: PlainBoundary, host: PlainBoundary, container:
     from.node.sibling = null;
     from.node.return = portal;
     portal.child = from.node;
+    // React's commit traversal follows aggregate effects and pending work on the destination path.
+    const flags = (from.node.flags ?? 0) | (from.node.subtreeFlags ?? 0);
+    const lanes = (from.node.lanes ?? 0) | (from.node.childLanes ?? 0);
+    for (let owner: PlainNativeTree | null | undefined = portal; owner != null; owner = owner.return) {
+      owner.subtreeFlags = (owner.subtreeFlags ?? 0) | flags;
+      owner.childLanes = (owner.childLanes ?? 0) | lanes;
+    }
     return;
   }
   const parent = from.node.__!;

@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.92
 
+- Use shared slot lifetime analysis in React and Preact to retain ordinary content across conditional outlets. Preserve accepted roots, child-list context and borrowed content through receiving-outlet transfers, including nested receivers and StrictMode cleanup. Keep scoped templates fresh and ordinary static outlets on native paths.
+
 - Preserve the live and Vanilla plain-slot owner through whole-mount disconnect and reconnect. Keep paused claims distinct from permanently stopped effects, and release stopped claims through their existing ownership registration.
 
 - Hydrate retained React and Preact slot content in place, then transfer its existing framework subtree to a persistent portal without replacing controls or remounting state. Preserve native context, IDs, events and source updates through outlet changes and temporary absence. Keep retention owners out of ordinary named and default slot bundles.

@@ -14,7 +14,7 @@ import { parseDuration } from "../duration.js";
 import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
+import { retainedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact, jsxAttributeRecord } from "./vue-format.js";
@@ -1343,8 +1343,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // A hand-written consumer's accepting parent finds this component among its children by its tag, and a preset by its root's.
   const childTags = [definition.contract.tag];
   for (let root = definition.root; root?.kind === "component" && !childTags.includes(root.tag); root = options.componentGraph?.get(root.tag)?.root) childTags.push(root.tag);
-  const repeatedPlain = repeatedSlotNames(definition);
-  const sharedPlain = acceptedBy || repeatedPlain.size > 0;
+  const retainedPlain = new Set(retainedSlotNames(definition));
+  for (const name of retainedPlain) if (Object.keys(definition.contract.slots?.[name]?.props ?? {}).length > 0 ||
+    definition.slots?.some(slot => (slot.name ?? "") === name && (slot.props?.length ?? 0) > 0)) retainedPlain.delete(name);
+  const sharedPlain = acceptedBy || retainedPlain.size > 0;
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
   const invalidateSetterName = invalidateStateName !== "" && options.target === "preact" ? allocate("rerenderTick") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
@@ -1511,7 +1513,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
   const provide = (inner: string): string => states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
     `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${code.get(state.name)!}, ${state.initializer === undefined ? `subscribe: ${stateSubscriptions.get(state.name)!}, ` : `status: ${stateOwners.get(state.name)!}.status(), readStatus: ${stateOwners.get(state.name)!}.readStatus, subscribe: ${stateOwners.get(state.name)!}.subscribe, `}read: ${stateGetters.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, inner);
-  const projectedMarkup = repeatedPlain.size > 0 ? `<>${rootMarkup}<PlainSlots frames={htmlNextPlain.own} /></>` : rootMarkup;
+  const projectedMarkup = retainedPlain.size > 0 ? `<>${rootMarkup}<PlainSlots frames={htmlNextPlain.own} /></>` : rootMarkup;
   const contextMarkup = provide(lists.length === 0 ? projectedMarkup : `<ChildEntries value={htmlNextLists.entries}>${projectedMarkup}<PlainChildren entries={htmlNextLists.plainEntries} /></ChildEntries>`);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
   const HEAD_IMPORTS = "/* html-next head imports */";
@@ -2001,7 +2003,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       // A handler that reads $event gets a connection event, as a controller's host.on callback does.
       return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
-    ...(!sharedPlain ? [] : [`  const htmlNextPlain = usePlainSlots(${!acceptedBy ? "undefined" : `useChildEntry(_htmlNextEntry, ${name}.htmlNextChild, props${providedContexts.size === 0 ? "" : `, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")}`})`}, props, ${JSON.stringify([...repeatedPlain])});`]),
+    ...(!sharedPlain ? [] : [`  const htmlNextPlain = usePlainSlots(${!acceptedBy ? "undefined" : `useChildEntry(_htmlNextEntry, ${name}.htmlNextChild, props${providedContexts.size === 0 ? "" : `, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")}`})`}, props, ${JSON.stringify([...retainedPlain])}${lists.length === 0 ? "" : ", htmlNextLists"});`]),
     // Server rendering reads how many head-declaring components enclose each one from this context.
     `  return (${definition.head !== undefined ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",

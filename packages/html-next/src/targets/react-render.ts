@@ -25,11 +25,13 @@ ${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 ${expressionHelpersSource()}
 ${ROOT_METADATA_SOURCE}
 
-/** React removes a node from its declared parent even when a controller has temporarily moved it. */
+const plainPortalRoots = /* @__PURE__ */ new WeakSet<Node>();
+/** Restore controller moves unless a retained portal owns the native root's removal. */
 export function rememberParent(element: Element | null): () => void {
   const parent = element?.parentNode;
   const next = element?.nextSibling;
   return () => {
+    if (element && plainPortalRoots.has(element)) return;
     if (parent && element && element.parentNode !== parent) parent.insertBefore(element, next?.parentNode === parent ? next : null);
   };
 }
