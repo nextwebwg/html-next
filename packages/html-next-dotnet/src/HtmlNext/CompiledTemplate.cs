@@ -399,7 +399,8 @@ internal sealed record BoundPath(int Slot, int[] Fields, ValueType Type, string[
             return selected;
         }
         var value = root.ReferenceValue(ExpressionValue.StoredValue(ReadRoot(values), root));
-        for (var step = 0; step < Fields.Length; step++) value = value.MemberUnchecked(Keys![step]);
+        for (var step = 0; step < Fields.Length; step++)
+            value = conform && step == Fields.Length - 1 ? value.Member(Keys![step]) : value.MemberUnchecked(Keys![step]);
         return conform ? Type.CheckReference(value) : Type.ReferenceValue(value);
     }
 

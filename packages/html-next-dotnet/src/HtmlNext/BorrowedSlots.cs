@@ -2,8 +2,9 @@ namespace HtmlNext;
 
 internal sealed class AcceptedChildEntry(ExpressionValue value, string tag, object?[] owner, ProjectionFrame[] frames)
 {
-    public ExpressionValue Value { get; } = value;
+    public ExpressionValue Value => new(value.Type, this);
     public string Tag { get; } = tag;
+    public ValueType Type => value.Type;
     public object?[] Child { get; } = (object?[])value.Data!;
     public object?[] Owner { get; } = owner;
     public ProjectionFrame Frame => frames[^1];

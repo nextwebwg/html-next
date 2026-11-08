@@ -160,6 +160,146 @@ public sealed class AcceptedChildListTests
     }
 
     [Fact]
+    public async Task SelectedEntryDefaultsUseTheChildSelectorInDirectAndAliasedReads()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs>
+            <type name="shape" from="mode"><option value="a" type="object({ left: string, right: number })"></option><option value="b" type="object({ left: number, right: number })"></option></type>
+            <prop name="value" type="shape" default="{left:'bad',right:3}">Value.</prop>
+            <prop name="mode" type="keyword" values="a, b" default="a">Mode.</prop>
+            </defs><span>{$value.left}:{$value.right}</span></template>
+            <template component="x-list"><defs>
+            <prop name="mode" type="keyword" values="a, b" default="a">Outer mode.</prop>
+            <slot accepts="x-field" as="fields"></slot>
+            <computed name="chosen" from="$fields[0]"></computed>
+            </defs><article><slot></slot><output>{$fields[0].value.left}:{$fields[0].value.right}</output><b>{$chosen.value.left}:{$chosen.value.right}</b><i $with="$fields[0] as field">{$field.value.left}:{$field.value.right}</i></article></template>
+            <template component="x-page"><defs><prop name="mode" type="keyword" values="a, b" default="a">Child mode.</prop></defs><main><x-list><x-field from:mode="$mode"></x-field></x-list></main></template>
+            """).Template("x-page");
+        await Task.WhenAll(Enumerable.Range(0, 16).Select(index => Task.Run(() =>
+        {
+            var mode = index % 2 == 0 ? "a" : "b";
+            var left = index % 2 == 0 ? "bad" : "";
+            var html = template.Render(new { mode });
+            using var writer = new StringWriter(); template.Write(writer, new { mode });
+            Assert.Equal(html, writer.ToString());
+            using var document = new HtmlParser().ParseDocument(html);
+            Assert.Equal(new[] { left + ":3", left + ":3", left + ":3", left + ":3" },
+                document.QuerySelectorAll("span, output, b, i").Select(element => element.TextContent));
+        })));
+    }
+
+    [Fact]
+    public async Task MixedEntryTypesKeepIndependentSelectedFieldsAcrossRequests()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs>
+            <type name="value-type" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <type name="tail-type" from="tailMode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <prop name="value" type="value-type" default="3">Value.</prop><prop name="tail" type="tail-type" default="7">Tail.</prop>
+            <prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop><prop name="tailMode" type="keyword" values="number, text" default="number">Tail mode.</prop>
+            </defs><span>{$value}:{$tail}</span></template>
+            <template component="x-other"><defs><prop name="value" type="string" default="Other">Other.</prop></defs><em>{$value}</em></template>
+            <template component="x-list"><defs><slot accepts="x-field x-other" as="fields"></slot></defs><article><slot></slot><output>{$fields[0].value}:{$fields[0].tail}</output><i>{$fields[1].value}:{$fields[1].tail}</i></article></template>
+            <template component="x-page"><defs><prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop><prop name="tailMode" type="keyword" values="number, text" default="number">Tail mode.</prop></defs><main><x-list><x-field from:mode="$mode" from:tail-mode="$tailMode"></x-field><x-other></x-other></x-list></main></template>
+            """).Template("x-page");
+        (string Mode, string Tail, string Expected)[] cases = [("number", "number", "3:7"), ("text", "number", ":7"), ("number", "text", "3:"), ("text", "text", ":")];
+        await Task.WhenAll(Enumerable.Range(0, 32).Select(index => Task.Run(() =>
+        {
+            var item = cases[index % cases.Length];
+            var html = template.Render(new { mode = item.Mode, tailMode = item.Tail });
+            using var writer = new StringWriter(); template.Write(writer, new { mode = item.Mode, tailMode = item.Tail });
+            Assert.Equal(html, writer.ToString());
+            using var document = new HtmlParser().ParseDocument(html);
+            Assert.Equal(item.Expected, document.QuerySelector("span")!.TextContent);
+            Assert.Equal(item.Expected, document.QuerySelector("output")!.TextContent);
+            Assert.Equal("Other:", document.QuerySelector("i")!.TextContent);
+        })));
+    }
+
+    [Fact]
+    public void SeedingUntypedStateCopiesSelectedEntryDataWithoutKeepingItsTypeScope()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs>
+            <type name="value-type" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <prop name="value" type="value-type" default="3">Value.</prop><prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop>
+            </defs><span>{$value}</span></template>
+            <template component="x-list"><defs><slot accepts="x-field" as="fields"></slot><state name="copy" from="$fields[0]"></state></defs><article><output>{$copy = $fields[0]}:{$copy.value}</output></article></template>
+            <template component="x-page"><main><x-list><x-field mode="text"></x-field></x-list></main></template>
+            """).Template("x-page");
+        var html = template.Render();
+        using var writer = new StringWriter(); template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        using var document = new HtmlParser().ParseDocument(html);
+        Assert.Equal("false:3", document.QuerySelector("output")!.TextContent);
+    }
+
+    [Fact]
+    public void SelectedEntriesKeepBorrowedSlotsInTheOriginalCallerScope()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs>
+            <type name="value-type" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <prop name="value" type="value-type" default="3">Value.</prop><prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop>
+            <slot name="cell"><prop name="text" type="string">Text.</prop></slot>
+            </defs><span><slot name="cell"></slot></span></template>
+            <template component="x-list"><defs><slot accepts="x-field" as="fields"></slot></defs><article><slot of="$fields[0]" name="cell" text="row"></slot><output>{$fields[0].value}</output></article></template>
+            <template component="x-page"><defs><prop name="label" type="string" default="Parent">Label.</prop></defs><main><x-list><x-field mode="text"><template slot="cell">{$label}:{$text}</template></x-field></x-list></main></template>
+            """).Template("x-page");
+        var html = template.Render();
+        using var writer = new StringWriter(); template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        using var document = new HtmlParser().ParseDocument(html);
+        Assert.Equal("Parent:row", document.QuerySelector("article")!.TextContent);
+        Assert.Equal("", document.QuerySelector("output")!.TextContent);
+    }
+
+    [Fact]
+    public void EntryObjectSizeIncludesOnlyPropsAndCopiesExcludePrivateStateSlots()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs><state name="label" type="string" value="private"></state></defs><span>{$label}</span></template>
+            <template component="x-list"><defs><slot accepts="x-field" as="fields"></slot><state name="copy" from="$fields[0]"></state></defs><article><output>{$fields[0] ? 'wrong' : 'empty'}:{$copy ? 'wrong' : 'empty'}:{$copy = $fields[0]}</output></article></template>
+            <template component="x-page"><main><x-list><x-field></x-field></x-list></main></template>
+            """).Template("x-page");
+        var html = template.Render();
+        using var writer = new StringWriter(); template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        using var document = new HtmlParser().ParseDocument(html);
+        Assert.Equal("empty:empty:false", document.QuerySelector("output")!.TextContent);
+    }
+
+    [Fact]
+    public void AStateCopyKeepsNestedEntryDataUnderAnUnknownField()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs><prop name="payload" type="object({ value: length })" required>Payload.</prop></defs><span>{$payload.value}</span></template>
+            <template component="x-list"><defs><slot accepts="x-field" as="fields"></slot><state name="copy" type="object({ payload: unknown })" from="$fields[0]"></state></defs><article><output>{$copy.payload.value}:{$copy.payload.value + 1px}</output></article></template>
+            <template component="x-page"><main><x-list><x-field payload="{value:'10px'}"></x-field></x-list></main></template>
+            """).Template("x-page");
+        var html = template.Render();
+        using var writer = new StringWriter(); template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        using var document = new HtmlParser().ParseDocument(html);
+        Assert.Equal("10px:", document.QuerySelector("output")!.TextContent);
+    }
+
+    [Fact]
+    public void AnUnknownScopedPropDoesNotInheritTheEntrysSelectedTypeChecks()
+    {
+        var template = HtmlNextCompiler.CompileResource("""
+            <template component="x-field"><defs><type name="value-type" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type><prop name="value" type="value-type" default="3">Value.</prop><prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop></defs><span>{$value}</span></template>
+            <template component="x-list"><defs><slot accepts="x-field" as="fields"></slot><slot name="row"><prop name="entry" type="unknown">Entry.</prop></slot></defs><article><slot name="row" from:entry="$fields[0]"></slot></article></template>
+            <template component="x-page"><main><x-list><x-field mode="text"></x-field><template slot="row">{$entry.value}</template></x-list></main></template>
+            """).Template("x-page");
+        var html = template.Render();
+        using var writer = new StringWriter(); template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        using var document = new HtmlParser().ParseDocument(html);
+        Assert.Equal("3", document.QuerySelector("article")!.TextContent);
+    }
+
+    [Fact]
     public async Task PlacingRepeatedCallsKeepsEachCollectedInvocationIsolated()
     {
         var template = HtmlNextCompiler.CompileResource("""

@@ -6,6 +6,23 @@ namespace HtmlNext.Tests;
 
 public sealed class ScopedSlotTests
 {
+    [Theory]
+    [InlineData("length", "$item", "$value", "10px")]
+    [InlineData("object({ values: list(length) })", "$item", "$value.values[0]", null)]
+    public void UnknownInputsKeepNestedStorageWithoutInferringDimensionTypes(string type, string input, string read, string? scalar)
+    {
+        var template = HtmlNextCompiler.CompileResource($$"""
+            <template component="x-card"><defs><prop name="item" type="{{type}}" required>Item.</prop><slot><prop name="value" type="unknown">Value.</prop></slot></defs><section><slot from:value="{{input}}"></slot></section></template>
+            <template component="x-page"><defs><prop name="item" type="{{type}}" required>Item.</prop></defs><main><x-card from:item="$item"><template slot=""><output>{ {{read}} }:{ {{read}} + 1px }</output></template></x-card></main></template>
+            """).Template("x-page");
+        var inputs = new { item = (object?)scalar ?? new { values = new[] { "10px" } } };
+        var html = template.Render(inputs);
+        using var writer = new StringWriter(); template.Write(writer, inputs);
+        Assert.Equal(html, writer.ToString());
+        using var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        Assert.Equal("10px:", document.QuerySelector("output")!.TextContent);
+    }
+
     public static IEnumerable<object[]> Cases(string group)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "scoped-slots.json")));

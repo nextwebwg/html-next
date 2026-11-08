@@ -129,7 +129,7 @@ public static partial class HtmlNextCompiler
                         if (declaration.GetAttribute("type") is null or "unknown" && (declaration.Children.Length > 0 || declaration.Attributes.Any(attribute => attribute.Name is "open" or "values" or "min" or "max" or "minlength" or "maxlength")))
                             throw ValueType.Error(source, "An untyped state cannot declare fields or value constraints.");
                         var type = declaration.GetAttribute("type") is not (null or "unknown")
-                            ? DeclarationTypes.Read(declaration, source, true, Default).At(name) : new ValueType("unknown").At(name);
+                            ? DeclarationTypes.Read(declaration, source, true, Default).At(name) : new ValueType("unknown", Unconstrained: true).At(name);
                         var literal = declaration.GetAttribute("value");
                         var seed = declaration.GetAttribute("from");
                         if (seed is not null && (string.IsNullOrWhiteSpace(seed) || literal is not null))

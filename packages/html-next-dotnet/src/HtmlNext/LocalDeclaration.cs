@@ -112,6 +112,21 @@ internal static class StateSeedCopy
     private static object? Copy(object? value, string source, CancellationToken cancellation, Dictionary<object, object>? seen)
     {
         cancellation.ThrowIfCancellationRequested();
+        if (value is ExpressionValue { Data: AcceptedChildEntry entry })
+        {
+            var fields = entry.Type.Fields!;
+            var type = fields.Any(field => field.Type.Selection is not null)
+                ? entry.Type with { Fields = fields.Select(field => field.Type.Selection is null
+                    ? field : field with { Type = new("unknown", Path: field.Type.Path) }).ToArray() }
+                : entry.Type;
+            seen ??= new(ReferenceEqualityComparer.Instance);
+            if (seen.TryGetValue(entry.Child, out var previousEntry)) return new ExpressionValue(type, previousEntry);
+            ExecutionStack.Check(source);
+            var copiedEntry = new object?[fields.Length];
+            seen.Add(entry.Child, copiedEntry);
+            for (var index = 0; index < copiedEntry.Length; index++) copiedEntry[index] = Copy(entry.Child[index], source, cancellation, seen);
+            return new ExpressionValue(type, copiedEntry);
+        }
         if (value is ExpressionValue aggregate)
             return new ExpressionValue(aggregate.Type, Copy(aggregate.Data, source, cancellation, seen), aggregate.Number, aggregate.Written).Store();
         if (value is not (object?[] or ExpressionValue[])) return value;

@@ -31,7 +31,7 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
     public bool IsNumeric => Type.Kind is "number" or "integer";
     public bool IsText => Type.Kind is "string" or "keyword";
     public bool IsScalar => IsNumeric || IsText || IsDimension || Type.Kind is "boolean" or "null";
-    public int Count => Data switch { object?[] values => values.Length, ExpressionValue[] values => values.Length, string text => text.Length, _ => 0 };
+    public int Count => Data switch { object?[] values => values.Length, ExpressionValue[] values => values.Length, AcceptedChildEntry => Type.Fields!.Length, string text => text.Length, _ => 0 };
     public bool Truthy => Type.Kind switch
     {
         "null" or "absent" or "invalid" => false,
@@ -56,7 +56,7 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
         if (data is sbyte or byte or short or ushort or int or uint or long or ulong or float or decimal)
             return Numeric(Convert.ToDouble(data, CultureInfo.InvariantCulture));
         if (data is bool boolean) return Boolean(boolean);
-        if (type.Kind is "length" or "percentage" or "duration" && data is string text)
+        if (type.Kind is "length" or "percentage" or "duration" && !type.Unconstrained && data is string text)
             return type.Kind == "length" && text == "0" ? Text("0")
                 : Dimensions.TryParse(text, out var quantity) && quantity.Type.Kind == type.Kind ? quantity : Invalid;
         if (data is string scalarText) return new(type.Kind == "keyword" ? type : StringType, scalarText);
@@ -77,7 +77,13 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
     {
         if ((uint)index >= (uint)Count) return Absent;
         var declared = Type.Kind == "list" ? Type.Item! : Type.Fields![index].Type;
-        var value = Data switch
+        var data = Data;
+        if (data is AcceptedChildEntry entry)
+        {
+            if (declared.Selection is { } selection) declared = selection.ReferenceType(entry.Child);
+            data = entry.Child;
+        }
+        var value = data switch
         {
             ExpressionValue[] values => values[index],
             object?[] values => StoredValue(values[index], declared.Reference && values[index] is not object?[] ? UnknownStoredType : declared),
