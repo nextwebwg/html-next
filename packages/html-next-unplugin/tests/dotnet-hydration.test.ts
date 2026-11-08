@@ -24,6 +24,9 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + '<template component="x-attrs"><defs><prop name="tone" type="string" default="quiet">Tone.</prop></defs><div><section $attributes from:data-tone="$tone"></section></div></template><template component="x-attribute-source"><x-attrs tone="bright" title="Outside" class="consumer"></x-attrs></template>'
   + '<template component="x-selected"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop><prop name="mode" type="keyword" values="text, number" required>Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>'
   + '<template component="x-selected-default"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value" default="3">Value.</prop><prop name="mode" type="keyword" values="text, number" default="number">Mode.</prop></defs><output>{$value}:{$value = 3}</output><style>:host([value]){color:red}</style></template>';
+const waitingSource = '<template component="x-wait"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><input value="Original"><b>{$rows.length}</b><output>{$draft.length}</output></article></template>'
+  + '<template component="x-wait-shell"><defs><prop name="rows" type="list(string)">Rows.</prop></defs><main><x-wait from:rows="$rows"></x-wait></main></template>'
+  + '<template component="x-wait-literal"><defs><state name="raw" value="wrong"></state></defs><main><x-wait rows="[&quot;Literal&quot;]" from:rows="$raw"></x-wait></main></template>';
 const acceptedSource = '<template component="x-column"><defs><prop name="header" type="string">Header.</prop><slot name="cell"></slot></defs><aside><b>{$header}</b></aside></template>'
  + '<template component="x-list"><defs><prop name="open" type="boolean" default="true">Open.</prop><slot accepts="x-column" as="columns"></slot></defs><section><ul><li $each="column of $columns" $key="$column"><h3>{$column.header}</h3><template $if="$open"><slot of="$column" name="cell"></slot></template></li></ul><div hidden><slot></slot></div></section></template>'
  + '<template component="x-page"><defs><prop name="headers" type="list(string)" default="[\'One\', \'Two\']">Headers.</prop></defs><main><x-list><x-column $each="header of $headers" $key="$header" from:header="$header"><input slot="cell" value="Original"></x-column></x-list></main></template>';
@@ -39,7 +42,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     directory = await mkdtemp(join(tmpdir(), "html-next-dotnet-hydration-"));
     await execute("dotnet", ["restore", host, "--locked-mode"], { timeout: 60_000 });
     await execute("dotnet", ["build", host, "-c", "Release", "--nologo", "--no-restore"], { timeout: 60_000 });
-    await writeFile(join(directory, "card.html"), source + acceptedSource);
+    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource);
     await writeFile(join(directory, "prepared.html"), preparedSource);
     await writeFile(join(directory, "producer.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
       const instances = new WeakMap();
@@ -57,7 +60,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-page", "x-list", "x-column"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -72,7 +75,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }, 60_000);
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
-  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource): Promise<string> {
+  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource): Promise<string> {
     const request = join(directory, "request.json");
     await writeFile(request, JSON.stringify({ source: definitions, tag, inputs, manifest: assets, prepared }));
     return (await execute("dotnet", [join(host, "bin/Release/net10.0/HtmlNext.FixtureHost.dll"), request])).stdout;
@@ -82,6 +85,50 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     const source = (preparedManifest as { server: { preparedModules: { tag: string; source: string }[] } }).server.preparedModules.find(item => item.tag === "x-prepared")!.source;
     return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
   }
+
+  it("adopts a valid literal fallback after refusing a bound value", async () => {
+    const { window } = new JSDOM(await render("x-wait-literal"), { runScripts: "dangerously" });
+    try {
+      const root = window.document.querySelector("article")!;
+      const output = root.querySelector("output")!;
+      assert.equal(output.textContent, "1");
+      window.eval(bundle);
+      const client = Reflect.get(window, "NativeClient");
+      client.hydrate();
+      assert.equal(window.document.querySelector("article"), root);
+      assert.equal(root.querySelector("output"), output);
+      assert.equal(output.textContent, "1");
+      client.componentRegistry.update(root, { rows: ["One", "Two"] });
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.equal(root.querySelector("b")!.textContent, "2");
+      assert.equal(output.textContent, "1");
+    } finally { window.close(); }
+  });
+
+  it.each(["x-wait", "x-wait-shell"])("keeps an omitted prop's state seed waiting until its first caller value arrives (%s)", async tag => {
+    const { window } = new JSDOM(await render(tag), { runScripts: "dangerously" });
+    try {
+      const root = window.document.querySelector("article")!;
+      const owner = tag === "x-wait-shell" ? window.document.querySelector("main")! : root;
+      const input = root.querySelector("input")!;
+      input.value = "Early waiting";
+      window.eval(bundle);
+      const client = Reflect.get(window, "NativeClient");
+      client.hydrate();
+      assert.equal(window.document.querySelector("article"), root);
+      assert.equal(root.querySelector("output")!.textContent, "");
+      client.componentRegistry.update(owner, { rows: ["One", "Two"] });
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.equal(root.querySelector("b")!.textContent, "2");
+      assert.equal(root.querySelector("output")!.textContent, "2");
+      client.componentRegistry.update(owner, { rows: ["Later"] });
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.equal(root.querySelector("b")!.textContent, "1");
+      assert.equal(root.querySelector("output")!.textContent, "2");
+      assert.equal(root.querySelector("input"), input);
+      assert.equal(input.value, "Early waiting");
+    } finally { window.close(); }
+  });
 
   it("reclaims native borrowed controls after reopening and reorders their accepted entries", async () => {
     const { window } = new JSDOM(await render("x-page"), { runScripts: "dangerously" });
@@ -280,6 +327,40 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} initializes waiting native state from the first later caller value`, async () => {
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent(`<section id="direct">${await render("x-wait")}</section><section id="nested">${await render("x-wait-shell")}</section>`);
+        await page.evaluate(() => {
+          Reflect.set(window, "waitingRoots", [...document.querySelectorAll("article")]);
+          Reflect.set(window, "waitingControls", [...document.querySelectorAll("input")]);
+          document.querySelectorAll("input").forEach((input, index) => { input.value = `Early ${index}`; });
+        });
+        await page.addScriptTag({ content: bundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        assert.deepEqual(await page.locator("output").allTextContents(), ["", ""]);
+        await page.evaluate(() => {
+          const registry = Reflect.get(window, "NativeClient").componentRegistry;
+          registry.update(document.querySelector("#direct article"), { rows: ["One", "Two"] });
+          registry.update(document.querySelector("#nested main"), { rows: ["One", "Two"] });
+        });
+        await page.waitForFunction(() => [...document.querySelectorAll("output")].every(output => output.textContent === "2"));
+        await page.evaluate(() => {
+          const registry = Reflect.get(window, "NativeClient").componentRegistry;
+          registry.update(document.querySelector("#direct article"), { rows: ["Later"] });
+          registry.update(document.querySelector("#nested main"), { rows: ["Later"] });
+        });
+        await page.waitForFunction(() => [...document.querySelectorAll("article b")].every(output => output.textContent === "1"));
+        assert.deepEqual(await page.locator("output").allTextContents(), ["2", "2"]);
+        assert.equal(await page.evaluate(() => Reflect.get(window, "waitingRoots").every((root: Element, index: number) => document.querySelectorAll("article")[index] === root)
+          && Reflect.get(window, "waitingControls").every((input: HTMLInputElement, index: number) => document.querySelectorAll("input")[index] === input && input.value === `Early ${index}`)), true);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} reclaims and reorders native borrowed controls`, async () => {
       const browser = await launchParityBrowser(engine);
       try {

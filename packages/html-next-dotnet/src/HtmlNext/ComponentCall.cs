@@ -2,7 +2,27 @@ using System.Runtime.InteropServices;
 
 namespace HtmlNext;
 
-internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1, string? Written = null);
+internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1, string? Written = null, int InputContextSlot = -1)
+{
+    public ExpressionValue Read(object?[] values, out bool available)
+    {
+        if (InputContextSlot < 0)
+        {
+            available = true;
+            return Expression!.Evaluate(values);
+        }
+        var context = (DeclarationEvaluation)values[InputContextSlot]!;
+        var previous = context.Ready;
+        context.Ready = true;
+        try
+        {
+            var value = Expression!.Evaluate(values);
+            available = context.Ready;
+            return value;
+        }
+        finally { context.Ready = previous; }
+    }
+}
 
 internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute?[]? Attributes = null) : RenderOperation
 {

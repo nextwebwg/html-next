@@ -28,7 +28,7 @@ internal sealed record HydrationRegion(RenderOperation[] Body, string Prefix = "
 
 internal sealed record HydrationState(string Name, int Slot, ValueType Type, LocalDeclaration? Seed);
 
-internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, HydrationState[] States, string Source, bool ForwardsAttributes)
+internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, HydrationState[] States, string Source, bool ForwardsAttributes, int DeclarationContextSlot)
 {
     public InstanceInputs Inputs(object?[] values) => (InstanceInputs)values[Slot]!;
 
@@ -50,7 +50,17 @@ internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, Hy
                 .ToDictionary(item => item.Name, item => item.Value, StringComparer.Ordinal),
             ["state"] = state
         };
-        if (initialized.Count > 0) record.Add("initialized", initialized.ToArray());
+        record.Add("initialized", initialized.ToArray());
+        if (DeclarationContextSlot >= 0 && values[DeclarationContextSlot] is DeclarationEvaluation { InputReady: { } ready })
+        {
+            Dictionary<string, object?>? availability = null;
+            for (var index = 0; index < ready.Length; index++) if (!ready[index])
+                (availability ??= new(StringComparer.Ordinal)).Add(Props[index].Name, new Dictionary<string, object?>
+                {
+                    ["ready"] = false, ["pending"] = false, ["stale"] = false, ["error"] = null
+                });
+            if (availability is not null) record.Add("availability", availability);
+        }
         if (ForwardsAttributes)
         {
             var attributes = new Dictionary<string, string?>(StringComparer.Ordinal);

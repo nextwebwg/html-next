@@ -112,14 +112,6 @@ internal static class PreparedModuleRecords
 
 public sealed partial class CompiledTemplate
 {
-    private bool[]? PrepareInputReadiness(object?[] values, bool[]? caller, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
-    {
-        if (caller is null || declarations.Length == 0) return null;
-        var ready = props.Select(prop => prop.HasDefault).ToArray();
-        CreateDeclarations(values, cancellation, onDiagnostic, ready);
-        return ready;
-    }
-
     private void ApplyPreparation(object?[] values, bool[] caller, RenderContext context, InstanceInputs? record,
         CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
     {

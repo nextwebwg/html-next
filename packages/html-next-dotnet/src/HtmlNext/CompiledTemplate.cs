@@ -101,6 +101,15 @@ public sealed partial class CompiledTemplate
         return errors.Count == 0 ? Array.Empty<HtmlNextValidationError>() : errors.AsReadOnly();
     }
 
+    private bool[]? PrepareInputReadiness(object?[] values, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+    {
+        if (declarationContextSlot < 0) return null;
+        var ready = new bool[props.Length];
+        for (var index = 0; index < props.Length; index++) ready[index] = props[index].HasDefault;
+        CreateDeclarations(values, cancellation, onDiagnostic, ready);
+        return ready;
+    }
+
     private void Initialize(object?[] values, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
     {
         PrepareDeclarations(values, cancellation, onDiagnostic);
@@ -119,9 +128,9 @@ public sealed partial class CompiledTemplate
 
     private void CreateDeclarations(object?[] values, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, bool[]? inputReady = null)
     {
-        if (declarations.Length > 0 && values[declarationContextSlot] is DeclarationEvaluation { InputReady: not null }) return;
+        if (declarationContextSlot >= 0 && values[declarationContextSlot] is DeclarationEvaluation { InputReady: not null }) return;
         foreach (var initializer in initializers) initializer.Initialize(values, source, cancellation);
-        if (declarations.Length == 0) return;
+        if (declarationContextSlot < 0) return;
         var evaluation = new DeclarationEvaluation(values, declarations.Length, source, cancellation, onDiagnostic, inputReady);
         values[declarationContextSlot] = evaluation;
         foreach (var declaration in declarations) values[declaration.Slot] = declaration;
@@ -141,7 +150,7 @@ public sealed partial class CompiledTemplate
         var values = validation is null || preparationSlot >= 0 ? CreateValues(interactive) : new object?[props.Length];
         var record = interactive ? instance?.Inputs(values) : null;
         var caller = context?.PrepareModule is not null && Module is not null ? new bool[props.Length] : null;
-        var inputReady = PrepareInputReadiness(values, caller, cancellationToken, onDiagnostic);
+        var inputReady = validation is null || preparationSlot >= 0 ? PrepareInputReadiness(values, cancellationToken, onDiagnostic) : null;
         BindingSnapshot? snapshot = null;
         for (var position = 0; position < props.Length; position++)
         {
@@ -200,6 +209,7 @@ public sealed partial class CompiledTemplate
                 throw new HtmlNextException("HNCS002", $"Reading input '{prop.Name}' failed.", source, error);
             }
         }
+        if (inputReady is not null) ((DeclarationEvaluation)values[declarationContextSlot]!).RefreshWaiting(declarations);
         if (caller is not null) ApplyPreparation(values, caller, context!, record, cancellationToken, onDiagnostic);
         return values;
     }
@@ -218,7 +228,7 @@ public sealed partial class CompiledTemplate
         var values = CreateValues(context?.Interactive == true);
         var record = context?.Interactive == true ? instance?.Inputs(values) : null;
         var caller = context?.PrepareModule is not null && Module is not null ? new bool[props.Length] : null;
-        var inputReady = PrepareInputReadiness(values, caller, cancellation, onDiagnostic);
+        var inputReady = PrepareInputReadiness(values, cancellation, onDiagnostic);
         var marker = -1;
         var classModifiers = false;
         if (attributes is not null) for (var index = 0; index < attributes.Length; index++)
@@ -249,9 +259,9 @@ public sealed partial class CompiledTemplate
             var present = forwarded || argument?.Written is not null;
             var producer = argument?.Expression is not null;
             values[index] = prop.Default;
-            if (argument?.Expression is { } expression)
+            if (argument?.Expression is not null)
             {
-                var input = expression.Evaluate(parent);
+                var input = argument.Read(parent, out var available);
                 if (input.IsInvalid)
                 {
                     values[index] = LiteralFallback(prop, argument, type, cancellation, onDiagnostic, ref failed);
@@ -261,7 +271,7 @@ public sealed partial class CompiledTemplate
                 }
                 raw = input;
                 present = !input.IsAbsent;
-                if (inputReady is not null) inputReady[index] = present;
+                if (inputReady is not null) inputReady[index] = present && available;
                 inputSource = "value";
                 try
                 {
@@ -274,9 +284,16 @@ public sealed partial class CompiledTemplate
                 }
                 catch (HtmlNextException error) when (error.Code == "HNCS001")
                 {
-                    if (inputReady is not null) inputReady[index] = prop.HasDefault;
-                    failed = true;
                     values[index] = LiteralFallback(prop, argument, type, cancellation, onDiagnostic, ref failed);
+                    if (inputReady is not null) inputReady[index] = argument.Written is not null && !failed || prop.HasDefault;
+                    if (argument.Written is not null)
+                    {
+                        raw = argument.Written;
+                        inputSource = "html";
+                        present = true;
+                        producer = false;
+                    }
+                    else failed = true;
                     onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
                 }
             }
@@ -298,6 +315,7 @@ public sealed partial class CompiledTemplate
                 onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
             record?.Add(prop.Name, raw, present, present && !failed && !producer, inputSource, producer);
         }
+        if (inputReady is not null) ((DeclarationEvaluation)values[declarationContextSlot]!).RefreshWaiting(declarations);
         if (caller is not null)
         {
             PrepareEntryInvocation(values, parent, projection, context!, cancellation, onDiagnostic);

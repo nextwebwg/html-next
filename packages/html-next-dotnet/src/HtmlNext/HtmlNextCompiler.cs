@@ -213,7 +213,7 @@ public static partial class HtmlNextCompiler
             var propDefinitions = props.ToArray();
             if (assets?.Hydrate == true && assets.Client?.Adopts(Tag) == true)
                 instance = new(Tag, slots++, propDefinitions, states.Select(state => new HydrationState(state.Name, state.Slot, state.Type,
-                    derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes);
+                    derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes, declarationContextSlot);
             if (assets is not null) rootStyle = new(Tag, styleNames.Select(name => new RootStyleState(name,
                 bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance);
             var operations = Element(root, bindings);
@@ -287,7 +287,7 @@ public static partial class HtmlNextCompiler
                     return new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration));
                 return locals is IDeclarationExpressionScope inherited ? inherited.Read(name, slot, type)
                     : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null,
-                        InputContextSlot: declarations && compiler.module is not null && slot < compiler.props.Count ? compiler.declarationContextSlot : -1));
+                        InputContextSlot: declarations && compiler.declarationContextSlot >= 0 && slot < compiler.props.Count ? compiler.declarationContextSlot : -1));
             }
             public IEnumerator<KeyValuePair<string, (int Slot, ValueType Type)>> GetEnumerator() => ValuesByName.GetEnumerator();
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
@@ -374,6 +374,9 @@ public static partial class HtmlNextCompiler
         private void ReadReferences(IElement element, HashSet<string> names)
         {
             ExecutionStack.Check(source);
+            if (declarationContextSlot < 0 && props.Count > 0 && element.LocalName.Contains('-')
+                && element.Attributes.Any(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal)))
+                declarationContextSlot = slots++;
             if (element.GetAttribute("$ref") is { } name)
             {
                 if (!ReferenceNamePattern().IsMatch(name))
@@ -884,7 +887,7 @@ public static partial class HtmlNextCompiler
                 {
                     var expression = new ExpressionCompiler(attribute.Value, source, new DeclarationScope(this, ExpressionScope(scope)), Storage, declarationContextSlot).Compile();
                     if (!prop.Type.CanBindType(expression.Type)) throw ValueType.Error(source, $"Binding '{name}' has an incompatible type.");
-                    arguments[index] = new(expression, arguments[index]?.Constant, Written: arguments[index]?.Written);
+                    arguments[index] = new(expression, arguments[index]?.Constant, Written: arguments[index]?.Written, InputContextSlot: declarationContextSlot);
                     names[index] = name;
                 }
                 else

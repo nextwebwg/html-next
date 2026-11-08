@@ -23,6 +23,21 @@ public sealed class ConstraintTests
         Assert.Empty(diagnostics);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ValidatesPropsIndependentlyOfRenderingDeclarations(bool nested)
+    {
+        var source = "<template component=\"x-child\"><defs><prop name=\"value\" type=\"integer\">Value.</prop></defs><output>{$value}</output></template>"
+            + "<template component=\"x-card\"><defs><prop name=\"value\" type=\"integer\" required>Value.</prop>"
+            + (nested ? "" : "<computed name=\"unused\" from=\"$unused\"></computed>")
+            + "</defs><div>" + (nested ? "<x-child from:value=\"$value\"></x-child>" : "{$value}") + "</div></template>";
+        var template = HtmlNextCompiler.CompileResource(source).Template("x-card");
+        Assert.Empty(template.Validate(new { value = 3 }));
+        Assert.Equal("typeMismatch", Assert.Single(template.Validate(new { value = "wrong" })).Reason);
+        Assert.Equal("valueMissing", Assert.Single(template.Validate()).Reason);
+    }
+
     [Fact]
     public void ValidatesRangesAndUtf16LengthsWithoutReplacingAcceptedValues()
     {
