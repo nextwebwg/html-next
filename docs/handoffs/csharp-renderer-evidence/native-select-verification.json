@@ -1,0 +1,230 @@
+{
+  "recordedAt": "2026-11-08T22:15:55.419306+00:00",
+  "base": "2af47582",
+  "scope": "Incremental native select compilation and generated-client adoption. The full native renderer remains unfinished.",
+  "implementation": {
+    "platform": "AngleSharp 1.9.1 tokenizer callbacks, checked HTML parsing and DOM named-node maps",
+    "remainingPlatformGap": "Its select insertion mode discards proposal slot, structural and customizable content before compilation.",
+    "composition": "Mask actual select tag tokens with a same-length name, record source offsets, then restore only those parsed elements with their existing attribute objects and children.",
+    "requestCost": "Source processing runs at compilation. Render plans add no per-request DOM parsing.",
+    "dependencyChange": false
+  },
+  "sourceHashes": {
+    "CHANGELOG.md": "d5c45c9ca084f660c4efbaae15eb11fc64e142d3445e6684a13b81e17e419ce5",
+    "packages/html-next-dotnet/README.md": "3554c92a9bb2854efed4eec298be0dcf0abd9cffc1ff701bb5b9da3dc1425ffc",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentGraph.cs": "1a24fa7921829680840893bbdc0ccc1c2ff30d46be8150e6ce1a9e699dc1a4bf",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "73537478b0b951e3017af3c75319296d2b85e9726e7cb82b4aab8aee8634c284",
+    "packages/html-next-dotnet/src/HtmlNext/SourceParsing.cs": "c29bf8d91833ebf27cf7752cfc941eb20495b9182ea85ad9f7697365e7dcf4b8",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/RenderingTests.cs": "510f6b67ab16444f4b07f3c1645458ad773f2477913f7a9f22c21434e56d6ba4",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/SelectRenderingTests.cs": "77637826bc703f859405100db1f6773cceab1972f2bb16a6a157bd0059ef3234",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "5f80e53ea55f1a62c9a8ab4b5f06498dc7ebcb9f5edb2f9af93884cce635508e"
+  },
+  "regressions": {
+    "selectBasics": "Four focused cases failed before implementation: attributes/options, projection/fallbacks, structural/customizable content, literal text and authored placeholder names.",
+    "namespace": "A separate SVG/xml:lang case failed before namespace-preserving restoration.",
+    "directiveAttributes": "The real catalog exposed SetAttribute rejecting parsed $ref and $attributes names. An independent fact failed with DomException before moving native parsed Attr objects.",
+    "nativeSuite": {
+      "passed": 972,
+      "skipped": 0
+    },
+    "clientAdoption": {
+      "passed": 26,
+      "skipped": 0,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "assertions": [
+        "SSR selected option",
+        "Early selection preserved",
+        "Root and option nodes retained",
+        "Disabled prop updates preserve the selection",
+        "Existing native adoption assertions"
+      ]
+    }
+  },
+  "latestLoomaCompilation": {
+    "catalogBase": "915afd2e8fafdba86887ea4eefd3b3534c20de5a",
+    "components": 111,
+    "compiled": 83,
+    "failed": 28,
+    "qualification": "Compilation characterization only, not complete native catalog rendering or browser behavior.",
+    "failures": [
+      {
+        "component": "ui-calendar",
+        "code": "HNCS001",
+        "detail": "Expected number or integer, got string. In expression '$disabled or ($mode = 'days' and $model.previousMonth = '') or ($mode = 'months' and $model.month < '0002-01') or ($mode = 'years' and $model.yearPageStart = 1)' at 110."
+      },
+      {
+        "component": "ui-card-group",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_grid-column-cap'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-column",
+        "code": "HNCS001",
+        "detail": "Expected one native root after <defs>."
+      },
+      {
+        "component": "ui-combobox",
+        "code": "HNCS001",
+        "detail": "'style:--_max-rows' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-data-table",
+        "code": "HNCS001",
+        "detail": "Expected one native root after <defs>."
+      },
+      {
+        "component": "ui-date-picker",
+        "code": "HNCS001",
+        "detail": "Expected number or integer, got string. In expression '$disabled or ($mode = 'days' and $model.previousMonth = '') or ($mode = 'months' and $model.month < '0002-01') or ($mode = 'years' and $model.yearPageStart = 1)' at 110."
+      },
+      {
+        "component": "ui-date-range-picker",
+        "code": "HNCS001",
+        "detail": "Expected number or integer, got string. In expression '$disabled or ($mode = 'days' and $model.previousMonth = '') or ($mode = 'months' and $model.month < '0002-01') or ($mode = 'years' and $model.yearPageStart = 1)' at 110."
+      },
+      {
+        "component": "ui-editor-chip-editor",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_ui-stack-height'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-code-language",
+        "code": "HNCS001",
+        "detail": "'style:--_max-rows' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-footnote-editor",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_rows'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-image-toolbar",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_ui-stack-height'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-insert-table-grid",
+        "code": "HNCS001",
+        "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-link-card",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_ui-stack-height'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-link-form",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_ui-stack-height'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-table-context-menu",
+        "code": "HNCS001",
+        "detail": "'style:--_swatch' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-table-overlay",
+        "code": "HNCS001",
+        "detail": "'style:top' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor-table-toolbar",
+        "code": "HNCS001",
+        "detail": "'style:--_swatch' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-editor",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_ui-stack-height'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-file-input",
+        "code": "HNCS001",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression 'format($file.size, 'unit', { unit: 'byte', unitDisplay: 'short', maximumFractionDigits: 0 }, $locale)' at 101."
+      },
+      {
+        "component": "ui-grid",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_grid-column-cap'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-listbox",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_rows'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-meter",
+        "code": "HNCS001",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression '{ true: null, false: { true: $valueText, false: format($percent / 100, 'percent', { maximumFractionDigits: 0 }) }[concat($valueText != '')] }[concat($variant = 'distribution')]' at 113."
+      },
+      {
+        "component": "ui-pagination",
+        "code": "HNCS001",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression 'format($item.value, 'number')' at 29."
+      },
+      {
+        "component": "ui-skeleton",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--ui-skeleton-width'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-stack",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_ui-stack-height'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-textarea",
+        "code": "HNCS001",
+        "detail": "'attribute 'style:--_rows'' is not implemented in the measured rendering slice."
+      },
+      {
+        "component": "ui-time-picker",
+        "code": "HNCS001",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression 'format($hour * 3600000, 'time', $hourFormat, $locale)' at 53."
+      },
+      {
+        "component": "ui-wizard",
+        "code": "HNCS001",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression 'format($index + 1, 'number')' at 28."
+      }
+    ]
+  },
+  "review": {
+    "mode": "One bounded inline correctness and simplification pass, no agents or cross-model review.",
+    "activeFindings": 0,
+    "simplificationEdits": 0
+  },
+  "finalRepositoryGate": {
+    "command": "corepack pnpm verify:pr",
+    "exitCode": 0,
+    "javascript": {
+      "passed": 2137,
+      "explicitlyGatedSkips": 5029,
+      "seconds": 448.02
+    },
+    "native": {
+      "passed": 972,
+      "skipped": 0
+    },
+    "fullFluidOutputValidations": 5,
+    "nativeClient": {
+      "passed": 11,
+      "browserGatedSkips": 15,
+      "seconds": 6.01
+    },
+    "packedChecks": {
+      "passed": 8,
+      "seconds": 69.12
+    },
+    "browserSkips": "All 26 native/client cases were independently enabled and passed across the three engines."
+  },
+  "limits": [
+    "Formatting, keyed styles, remaining language/application/hydration behavior and complete catalog qualification remain unfinished.",
+    "Matched Fluid/Node latency, throughput, retained/peak memory and serving qualification remain unfinished.",
+    "No NuGet publication."
+  ]
+}

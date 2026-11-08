@@ -2,6 +2,7 @@
 
 ## 1.0.0-alpha.93
 
+- Compile native select options, projected fallbacks and structural content into retained render plans. Use AngleSharp's token callbacks to preserve select children during source parsing, including comments, raw text, authored placeholder names and foreign namespaces.
 - Keep native state seeds waiting for omitted or refused props, carry readiness through component bindings, and preserve that ownership through browser adoption.
 - Preserve accepted-child borrowed slot ownership in native rendered markers so generated clients reclaim the original controls after reopening an outlet.
 - Check native dependent prop defaults against the current selected type when expressions read them. Preserve valid sibling fields and raw prop values in adoption records and CSS prop selectors, and accept structured literal null inputs without a type diagnostic.

@@ -155,14 +155,9 @@ public static partial class HtmlNextCompiler
         var document = parser.ParseDocument("");
         try
         {
-            parser.Error += (_, error) =>
-            {
-                if (error is AngleSharp.Html.Dom.Events.HtmlErrorEvent detail)
-                    throw ValueType.Error(source.Id, $"HTML parsing failed at {detail.Position}: {detail.Message}");
-            };
             var carriers = new List<IHtmlTemplateElement>();
             var dependencies = new List<string>();
-            foreach (var node in parser.ParseFragment(source.Content, document.Body!).Where(Significant))
+            foreach (var node in ParseSourceFragment(source.Content, document, source.Id).Where(Significant))
             {
                 if (node is IHtmlTemplateElement carrier && carrier.HasAttribute("component")) { carriers.Add(carrier); continue; }
                 if (node is IElement { LocalName: "link" } link && Rel(link, "component") && !Rel(link, "import"))

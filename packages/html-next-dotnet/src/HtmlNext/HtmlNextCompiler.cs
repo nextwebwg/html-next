@@ -430,7 +430,7 @@ public static partial class HtmlNextCompiler
 
         private RenderOperation[] Element(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope, bool matchArm = false, bool projected = false, bool guardHandled = false)
         {
-            if (element.LocalName is "script" or "style" or "defs" or "select") Unsupported(element.LocalName);
+            if (element.LocalName is "script" or "style" or "defs") Unsupported(element.LocalName);
             var fragment = element is IHtmlTemplateElement;
             if (!matchArm && (element.HasAttribute("$when") || element.HasAttribute("$else")))
                 throw ValueType.Error(source, "$when and $else require a direct $match parent.");
