@@ -12,11 +12,13 @@ public sealed class HtmlNextServerAssets
     private readonly FrozenDictionary<string, IReadOnlyList<string>> stateNames;
 
     private HtmlNextServerAssets(HtmlNextAssetSource[] sources, Dictionary<string, HtmlNextAssetSource> components,
-        Dictionary<string, IReadOnlyList<string>> stateNames, string[] stylesheets, bool hydrate, HtmlNextClientPlan? client)
+        Dictionary<string, IReadOnlyList<string>> stateNames, Dictionary<string, string> preparedModules,
+        string[] stylesheets, bool hydrate, HtmlNextClientPlan? client)
     {
         Sources = Array.AsReadOnly(sources);
         this.components = components.ToFrozenDictionary(StringComparer.Ordinal);
         this.stateNames = stateNames.ToFrozenDictionary(StringComparer.Ordinal);
+        PreparedModules = preparedModules.ToFrozenDictionary(StringComparer.Ordinal);
         Stylesheets = Array.AsReadOnly(stylesheets);
         Hydrate = hydrate;
         Client = client;
@@ -27,6 +29,8 @@ public sealed class HtmlNextServerAssets
     public IReadOnlyList<string> Stylesheets { get; }
     public bool Hydrate { get; }
     public HtmlNextClientPlan? Client { get; }
+    /// <summary>Compiler-owned preparation source revisions, indexed by component tag.</summary>
+    public IReadOnlyDictionary<string, string> PreparedModules { get; }
 
     public static HtmlNextServerAssets FromManifest(string json, string sourceName = "<assets>")
     {
@@ -62,12 +66,21 @@ public sealed class HtmlNextServerAssets
                 if (!states.TryAdd(item.Name, Array.AsReadOnly(Strings(item.Value)))) throw Error(sourceName, $"Duplicate state owner '{item.Name}'.");
             foreach (var tag in components.Keys)
                 if (!states.ContainsKey(tag)) throw Error(sourceName, $"Component '{tag}' has no state requirements entry.");
+            var preparedModules = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (server.TryGetProperty("preparedModules", out var modules))
+                foreach (var module in modules.EnumerateArray())
+                {
+                    var tag = Text(module.GetProperty("tag"));
+                    var revision = Text(module.GetProperty("source"));
+                    if (!components.ContainsKey(tag) || !preparedModules.TryAdd(tag, revision))
+                        throw Error(sourceName, $"Prepared module '{tag}' has no unique component owner.");
+                }
             var stylesheets = Strings(server.GetProperty("stylesheets"));
             if (server.GetProperty("hasStyles").GetBoolean() && stylesheets.Length == 0)
                 throw Error(sourceName, "The manifest requires stylesheets but contains no emitted stylesheet files.");
             var hydrate = server.TryGetProperty("hydrate", out var hydrating) && hydrating.GetBoolean();
             var client = document.RootElement.TryGetProperty("client", out var plan) ? HtmlNextClientPlan.Read(plan, components.Keys) : null;
-            return new(sources.ToArray(), components, states, stylesheets, hydrate, client);
+            return new(sources.ToArray(), components, states, preparedModules, stylesheets, hydrate, client);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or FormatException)
         {

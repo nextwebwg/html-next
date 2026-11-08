@@ -126,6 +126,8 @@ Resolve `graph.Stylesheets` beneath the application's deployed asset base and in
 
 The reader validates server asset version 1, unique source/component entries and emitted stylesheet availability. Compilation checks each component's source fingerprint against the manifest. A stale source or incompatible manifest raises `HNCS006`. Source identities may differ between the build and deployment; matching uses the declared component tag and the complete source-content fingerprint.
 
+`assets.PreparedModules` maps each prepared component tag to the compiler-owned source revision used by browser adoption. The reader rejects duplicate or unknown component owners and malformed revisions. Earlier version 1 manifests without this metadata expose an empty map. Native application preparation and completion-record writing remain unfinished.
+
 Standalone CSS compilation and native validation of imported stylesheet-source fingerprints remain unfinished.
 
 ## Render for browser adoption
