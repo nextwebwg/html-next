@@ -168,5 +168,30 @@
       "value": "2px"
     },
     "expected": "<output>4px</output>"
+  },
+  {
+    "name": "dependent default remains typed by the current selector",
+    "source": "<template component=\"x-field\"><defs><type name=\"input-value\" from=\"mode\"><option value=\"text\" type=\"string\"></option><option value=\"number\" type=\"number\"></option></type><prop name=\"value\" type=\"input-value\" default=\"3\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"text, number\" default=\"number\">Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": "text"
+    },
+    "expected": "<output>:</output>"
+  },
+  {
+    "name": "selected default checks fields only when read",
+    "source": "<template component=\"x-field\"><defs><type name=\"shape\" from=\"mode\"><option value=\"a\" type=\"object({ left: string, right: number })\"></option><option value=\"b\" type=\"object({ left: number, right: number })\"></option></type><prop name=\"value\" type=\"shape\" default=\"{left: 'bad', right: 3}\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"a, b\" default=\"a\">Mode.</prop></defs><output>{$value.left}:{$value.right}</output></template>",
+    "entry": "x-field",
+    "inputs": {
+      "mode": "b"
+    },
+    "expected": "<output>:3</output>"
+  },
+  {
+    "name": "selected structured literal null resets its default",
+    "source": "<template component=\"x-field\"><defs><type name=\"shape\" from=\"mode\"><option value=\"many\" type=\"list(number)\"></option><option value=\"one\" type=\"number\"></option></type><prop name=\"value\" type=\"shape\" default=\"[2, 3]\">Value.</prop><prop name=\"mode\" type=\"keyword\" values=\"many, one\" default=\"many\">Mode.</prop></defs><output>{$value[0]}:{$value[1] = 3}</output></template><template component=\"x-page\"><div><x-field value=\"null\"></x-field></div></template>",
+    "entry": "x-page",
+    "inputs": {},
+    "expected": "<div><output>2:true</output></div>"
   }
 ]

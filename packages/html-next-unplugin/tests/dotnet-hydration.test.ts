@@ -22,7 +22,8 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + '<template component="x-project"><defs><prop name="open" type="boolean" default="false">Open.</prop></defs><div><x-slots from:open="$open"><input slot="details" value="Details"><template slot="row"><b>{$item}</b></template>Summary</x-slots></div></template>'
   + '<template component="x-data"><defs><prop name="payload" type="object" open>Payload.</prop><state name="draft" from="{left: $payload.value, right: $payload.value}"></state></defs><output>{$draft.left = $draft.right}:{$draft.left.name}</output></template>'
   + '<template component="x-attrs"><defs><prop name="tone" type="string" default="quiet">Tone.</prop></defs><div><section $attributes from:data-tone="$tone"></section></div></template><template component="x-attribute-source"><x-attrs tone="bright" title="Outside" class="consumer"></x-attrs></template>'
-  + '<template component="x-selected"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop><prop name="mode" type="keyword" values="text, number" required>Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>';
+  + '<template component="x-selected"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop><prop name="mode" type="keyword" values="text, number" required>Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>'
+  + '<template component="x-selected-default"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value" default="3">Value.</prop><prop name="mode" type="keyword" values="text, number" default="number">Mode.</prop></defs><output>{$value}:{$value = 3}</output><style>:host([value]){color:red}</style></template>';
 
 describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance adoption", () => {
   let directory: string;
@@ -34,7 +35,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     await execute("dotnet", ["build", host, "-c", "Release", "--nologo", "--no-restore"], { timeout: 60_000 });
     await writeFile(join(directory, "card.html"), source);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
     bundle = await readFile(join(directory, "dist/app.js"), "utf8");
@@ -184,7 +185,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native records, ranges, shared roots and carried slots`, async () => {
-      const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main>`;
+      const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main><main id="selected-default">${await render("x-selected-default", { mode: "text" })}</main>`;
       const browser = await launchParityBrowser(engine);
       try {
         const page = await browser.newPage();
@@ -207,6 +208,8 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
         assert.equal(await page.locator("#card b").textContent(), "Default");
         assert.equal(await page.locator("#selected output").textContent(), "3:true");
         assert.equal(await page.locator("#unselected output").textContent(), ":false");
+        assert.equal(await page.locator("#selected-default output").textContent(), ":");
+        assert.equal(await page.locator("#selected-default output").getAttribute("data-x-selected-default-state"), "value value=3");
         await page.evaluate(() => {
           const registry = Reflect.get(window, "NativeClient").componentRegistry;
           registry.update(document.querySelector("#card article"), { title: "Client" });
@@ -215,6 +218,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
           registry.update(document.querySelector("#project div"), { open: true });
           registry.update(document.querySelector("#selected output"), { mode: "text", value: "3" });
           registry.update(document.querySelector("#unselected output"), { mode: "number", value: 3 });
+          registry.update(document.querySelector("#selected-default output"), { mode: "number" });
         });
         await page.waitForFunction(() => document.querySelector("#flow aside output")?.textContent === "2" && document.querySelector("#project section input") !== null);
         assert.equal(await page.locator("#card b").textContent(), "Client");
@@ -224,6 +228,8 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
         assert.equal(await page.locator("#shell output").textContent(), "Shared");
         assert.equal(await page.locator("#selected output").textContent(), "3:false");
         assert.equal(await page.locator("#unselected output").textContent(), "3:true");
+        assert.equal(await page.locator("#selected-default output").textContent(), "3:true");
+        assert.equal(await page.locator("#selected-default output").getAttribute("data-x-selected-default-state"), "value value=3");
         assert.equal(await page.evaluate(() => document.querySelector("#project section input") === Reflect.get(window, "carriedInput")), true);
         assert.equal(await page.locator("#project section input").inputValue(), "Carried browser edit");
         assert.deepEqual(errors, []);

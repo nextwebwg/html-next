@@ -266,7 +266,7 @@ public sealed class CompiledTemplate
                 try
                 {
                     if (type is null) throw ValueType.Error(source, $"Input '{prop.Name}' requires a null value while its selector is null.");
-                    values[index] = prop.Store(HtmlNextCompiler.AttributeInput(text, type, source, cancellation), type);
+                    values[index] = prop.Store(HtmlNextCompiler.AttributeInput(text, type, source, cancellation), type) ?? prop.Default;
                 }
                 catch (HtmlNextException error) when (error.Code == "HNCS001")
                 {
@@ -289,7 +289,7 @@ public sealed class CompiledTemplate
         try
         {
             if (type is null) throw ValueType.Error(source, $"Input '{prop.Name}' requires a null value while its selector is null.");
-            return prop.Store(HtmlNextCompiler.AttributeInput(argument.Written, type, source, cancellation), type);
+            return prop.Store(HtmlNextCompiler.AttributeInput(argument.Written, type, source, cancellation), type) ?? prop.Default;
         }
         catch (HtmlNextException error) when (error.Code == "HNCS001")
         {
@@ -390,6 +390,14 @@ internal sealed record BoundPath(int Slot, int[] Fields, ValueType Type, string[
     public ExpressionValue ReadReference(object?[] values, bool conform)
     {
         var root = RootType ?? Type;
+        if (root.Selection is { } selection)
+        {
+            var expected = selection.ReferenceType(values);
+            var selected = ExpressionValue.StoredValue(ReadRoot(values), root);
+            selected = conform ? expected.CheckReference(selected) : expected.ReferenceValue(selected);
+            for (var step = 0; step < Fields.Length; step++) selected = conform ? selected.Member(Keys![step]) : selected.MemberUnchecked(Keys![step]);
+            return selected;
+        }
         var value = root.ReferenceValue(ExpressionValue.StoredValue(ReadRoot(values), root));
         for (var step = 0; step < Fields.Length; step++) value = value.MemberUnchecked(Keys![step]);
         return conform ? Type.CheckReference(value) : Type.ReferenceValue(value);

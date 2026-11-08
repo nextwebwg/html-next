@@ -36,7 +36,7 @@ internal sealed record RootStyle(string Tag, RootStyleState[] States, string Sou
         var started = false;
         foreach (var state in States)
         {
-            var value = state.Read.Evaluate(values);
+            var value = state.Read.EvaluateUnchecked(values);
             var text = value.Data as string;
             if (text is null && value.IsDimension) text = value.ScalarText();
             var scalar = text is not null || value.IsNumeric;

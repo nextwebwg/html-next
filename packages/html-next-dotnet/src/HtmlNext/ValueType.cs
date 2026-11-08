@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 namespace HtmlNext;
 
-internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.Field[]? Fields = null, string Path = "", bool Open = false, ValueConstraints? Constraints = null, bool Reference = false, ScopedSlotContract[]? ChildSources = null)
+internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.Field[]? Fields = null, string Path = "", bool Open = false, ValueConstraints? Constraints = null, bool Reference = false, ScopedSlotContract[]? ChildSources = null, SelectedType? Selection = null)
 {
     private readonly ConcurrentDictionary<Type, ModelAccess.RecordReader>? readers = Kind == "object" ? new() : null;
     internal sealed record Field(string Name, ValueType Type, bool Optional = false);

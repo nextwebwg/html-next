@@ -95,6 +95,23 @@ public sealed class ServerStyleAssetsTests
         Assert.Equal("<b component=\"x-styled\" data-x-styled-state=\"tone=\">Value</b>", template.Render(new { tone = "", active = false }));
     }
 
+    [Fact]
+    public void PropSelectorsKeepRawSelectedDefaultsWhileExpressionsCheckTheirType()
+    {
+        const string source = """
+            <template component="x-styled"><defs>
+            <type name="input-value" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <prop name="value" type="input-value" default="3">Value.</prop>
+            <prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop>
+            </defs><b>{$value}</b><style>:host([value]){color:red}</style></template>
+            """;
+        var template = HtmlNextCompiler.Compile(source, "styled.html", HtmlNextServerAssets.FromManifest(Manifest(source, states: ["value"])));
+        const string expected = "<b component=\"x-styled\" data-x-styled-state=\"value value=3\"></b>";
+        Assert.Equal(expected, template.Render(new { mode = "text" }));
+        using var writer = new StringWriter(); template.Write(writer, new { mode = "text" });
+        Assert.Equal(expected, writer.ToString());
+    }
+
     [Theory]
     [InlineData("😀", "tone tone=%F0%9F%98%80")]
     [InlineData("!'()*~", "tone tone=!'()*~")]

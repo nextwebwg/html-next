@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.93
+
+- Check native dependent prop defaults against the current selected type when expressions read them. Preserve valid sibling fields and raw prop values in adoption records and CSS prop selectors, and accept structured literal null inputs without a type diagnostic.
+
 ## 1.0.0-alpha.92
 
 ### Breaking

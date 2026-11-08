@@ -2,7 +2,10 @@ using AngleSharp.Dom;
 
 namespace HtmlNext;
 
-internal sealed record SelectedTypeOption(ExpressionValue Value, ValueType Type);
+internal sealed record SelectedTypeOption(ExpressionValue Value, ValueType Type)
+{
+    public ValueType ReferenceType { get; } = Type.AsReference();
+}
 
 internal sealed class SelectedType(string from, bool state, SelectedTypeOption[] options, ValueType? defaultType)
 {
@@ -17,10 +20,13 @@ internal sealed class SelectedType(string from, bool state, SelectedTypeOption[]
         PreparationSlot = preparationSlot;
     }
     public string From { get; } = from;
-    public ValueType? Read(object?[] values)
+    private static readonly ValueType NoSelection = ExpressionValue.NullType.AsReference();
+    public ValueType? Read(object?[] values) => Option(values)?.Type;
+    public ValueType ReferenceType(object?[] values) => Option(values)?.ReferenceType ?? NoSelection;
+    private SelectedTypeOption? Option(object?[] values)
     {
         var value = ExpressionValue.StoredValue(selector.Read(values), selector.Type);
-        foreach (var option in options) if (Same(option.Value, value)) return option.Type;
+        foreach (var option in options) if (Same(option.Value, value)) return option;
         return null;
     }
     internal static bool Same(ExpressionValue left, ExpressionValue right) => left.IsNumeric && right.IsNumeric ? left.Number == right.Number

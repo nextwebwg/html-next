@@ -1,0 +1,100 @@
+{
+  "base": "a703e965fedb07c63120ba4e63ed42f1ec8b6d8b",
+  "scope": "Native selected prop defaults: current option reference checks, valid sibling reads, raw CSS selector and hydration values, structured literal null default reset. Incremental correction in the active unfinished renderer goal.",
+  "sourceHashes": {
+    "CHANGELOG.md": "fd72d3ee7d97966d882b2e92d6643c4358b8dd6db520b16d9d804615190cb105",
+    "packages/html-next-dotnet/README.md": "5570b41ca3072bb09f41ce8f9ae46bda5e0644602581282b7be1175e8dc1d5a5",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "4801ca12846719737eb1843ced8dbcb02de4bdc2706bc1f3f0eab8ebc5fd1257",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "e19ce3ec9aa79baa764d5cb88a2b1f53cecd6ca12dda621f7c98a3f1f406c58d",
+    "packages/html-next-dotnet/src/HtmlNext/RootStyle.cs": "6179da17be7fda668f84e43689a1add9ce43acfd72ebce30b002ee0fa60847ef",
+    "packages/html-next-dotnet/src/HtmlNext/SelectedTypes.cs": "fb8e3f0eeb8da0048f3cfd0c55ed8093596782ec6e386ccd9f91c04777e95cc1",
+    "packages/html-next-dotnet/src/HtmlNext/ValueType.cs": "e4ff3afa2442f8e0342d01217fc48a043aee9aa3112c9459d01c44e78a9a40f0",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HydrationRecordTests.cs": "101a44b325483310f474ba9cdc76d69b95690cf1fca0c3ec1a94c9443e974e96",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/SelectedTypeTests.cs": "3d0edec199d4198b2abc6d637970e7a701c682f7fcde69a445de30b67fa7bc59",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ServerStyleAssetsTests.cs": "a4cbd5049f7e50b96e32f9edd18bb7263ec772b43dc38aa4e63d59875184e4d4",
+    "packages/html-next-dotnet/tests/fixtures/selected-types.json": "0c9d4ad0f78a02eb9ad7561cf8df9bc36477ab919048b8e42f578a85318bf1fe",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "909a804b858dd8deb85d4d6493c5d961ce536d368827e9bbbc28ef442ea06ca7"
+  },
+  "proof": {
+    "nativeBeforeFix": {
+      "selectedDefaults": "Two new shared cases failed: numeric default rendered under the string option, and an invalid object field rendered beside a valid sibling.",
+      "literalNull": "The structured null reset emitted HNCS004.",
+      "cssSelectors": "The style regression omitted value=3 while the independent Node observation retained it."
+    },
+    "sharedCorpus": 22,
+    "focusedNative": {
+      "passed": 69,
+      "skipped": 0,
+      "scope": "SelectedTypeTests, HydrationRecordTests and ServerStyleAssetsTests"
+    },
+    "rawRecord": "The output hides the invalid numeric default; its adoption record retains props.value=3 and inputs.value.present=false."
+  },
+  "verification": {
+    "repository": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2114,
+        "explicitlyGatedSkips": 5012,
+        "seconds": 377.1
+      },
+      "native": {
+        "passed": 894,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 6,
+        "browserGatedSkips": 3
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 62.73
+      },
+      "includes": [
+        "verify:inner",
+        "lint",
+        "typecheck",
+        "generated checks",
+        "size checks",
+        "native tests",
+        "client integration",
+        "builds",
+        "packed consumers"
+      ]
+    },
+    "browser": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH HTMLNEXT_BROWSER_TEST=1 HTMLNEXT_FIREFOX_ENDPOINT=ws://127.0.0.1:39991/native-hydration node scripts/test-dotnet-client.ts",
+      "exitCode": 0,
+      "passed": 9,
+      "skipped": 0,
+      "seconds": 16.07,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "coverage": "Original roots and controls, early edits, structure, shared roots, carried slots, selected defaults, raw CSS selector tokens and subsequent selector updates.",
+      "firefox": "Owned Linux arm64 Playwright1.64.0 container, pinned image sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f. Stopped and removed."
+    }
+  },
+  "catalog": {
+    "loomaCommit": "714d557c0e042a16a274f107f77dcccd67070b69",
+    "nativeGraphs": 106,
+    "compiles": 79,
+    "firstFailures": 27,
+    "scope": "Refreshed native compilation only, not rendering or browser qualification."
+  },
+  "review": {
+    "execution": "Bounded single-agent lite correctness review and five-rubric inline simplification, following user instructions.",
+    "confirmedFinding": "CSS selectors require raw prop values. The new native regression failed before switching RootStyle to EvaluateUnchecked and passed after it.",
+    "simplificationEdits": 0,
+    "proofTestsPreserved": true
+  },
+  "limitations": [
+    "Full native styles, formatting, controls, preparation and complete catalog qualification remain unfinished.",
+    "Selected dependent type ownership through accepted-child entries and generated selected-dimension arithmetic remain separate known gaps.",
+    "No new latency, throughput, allocation, retained/peak memory or serving claim.",
+    "The alpha92 JavaScript release remains unpublished pending the owner rollout choice for the breaking explicit-forwarding migration."
+  ]
+}

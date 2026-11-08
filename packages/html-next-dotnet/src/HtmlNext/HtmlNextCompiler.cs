@@ -230,7 +230,7 @@ public static partial class HtmlNextCompiler
             if (!ExpressionCompiler.IsIdentifier(name)) throw ValueType.Error(source, $"Invalid prop name '{name}'.");
             if (declared.Any(item => AsciiEquals(item.Name, name))) throw ValueType.Error(source, $"Duplicate prop '{name}'.");
             var selection = attributeOnly ? SelectedTypes.Read(prop, source) : null;
-            var type = selection is null ? DeclarationTypes.Read(prop, source, false, Default, javaScriptValues: !attributeOnly).At(name) : new ValueType("unknown").At(name);
+            var type = selection is null ? DeclarationTypes.Read(prop, source, false, Default, javaScriptValues: !attributeOnly).At(name) : new ValueType("unknown", Reference: true, Selection: selection).At(name);
             if (attributeOnly && selection is null && !type.HasAttributeForm) throw ValueType.Error(source, "A prop and its declared fields require an HTML attribute type.");
             var literal = prop.GetAttribute("default");
             if (literal is not null && selection is not null && selection.DefaultType is null)
@@ -984,7 +984,7 @@ public static partial class HtmlNextCompiler
             if (!expression.Constant || !compiler.LiteralOnly) throw ValueType.Error(source, "A default requires a literal value.");
             value = ModelValue(expression.Evaluate([]));
         }
-        return type.Bind(value, source, cancellation);
+        return value is null && type.Kind is "list" or "object" ? null : type.Bind(value, source, cancellation);
     }
 
     private static object? ModelValue(ExpressionValue value)

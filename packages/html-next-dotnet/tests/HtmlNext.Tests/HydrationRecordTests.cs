@@ -62,6 +62,24 @@ public sealed class HydrationRecordTests
     }
 
     [Fact]
+    public void KeepsRawDefaultsInRecordsWhileReferencesUseTheCurrentSelectedType()
+    {
+        var source = """
+            <template component="x-card"><defs>
+            <type name="input-value" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <prop name="value" type="input-value" default="3">Value.</prop>
+            <prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop>
+            </defs><article><output>{$value}</output></article></template>
+            <template component="x-static"><p>Static</p></template>
+            """;
+        var html = Graph(source).Template("x-card").Render(new { mode = "text" }, options: new() { Interactive = true });
+        Assert.Equal("", new HtmlParser().ParseDocument(html).QuerySelector("output")!.TextContent);
+        var record = Records(html).GetProperty("x-card");
+        Assert.Equal(3, record.GetProperty("props").GetProperty("value").GetDouble());
+        Assert.False(record.GetProperty("inputs").GetProperty("value").GetProperty("present").GetBoolean());
+    }
+
+    [Fact]
     public void ReadsNestedApplicationDataOnceAndWrapsGetterFailuresAtTheBindingBoundary()
     {
         var source = Source.Replace("<prop name=\"title\"", "<prop name=\"payload\" type=\"object({ name: string })\">Payload.</prop><prop name=\"title\"");
