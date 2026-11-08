@@ -7,6 +7,8 @@ public sealed record HtmlNextRenderOptions
 {
     /// <summary>Emit instance records for components selected by the matching compiler-owned client plan.</summary>
     public bool Interactive { get; init; }
+    /// <summary>Supplies settled module data, preserving initialized state and completing waiting seeds.</summary>
+    public HtmlNextPrepareModule? PrepareModule { get; init; }
 }
 
 internal sealed record HydrationRegion(RenderOperation[] Body, string Prefix = "") : RenderOperation
@@ -65,14 +67,27 @@ internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, Hy
         if (input.SerializedRoot is null)
         {
             var records = new Dictionary<string, object?>(StringComparer.Ordinal);
+            Dictionary<string, PreparedModuleRecord>? prepared = null;
             foreach (var parent in context.RootStyles())
-                if (parent.Style.Instance is { } instance) records.Add(instance.Tag, instance.Record(parent.Values, context));
+                if (parent.Style.Instance is { } instance)
+                {
+                    records.Add(instance.Tag, instance.Record(parent.Values, context));
+                    if (context.PreparedModule(instance.Inputs(parent.Values)) is { } module) (prepared ??= new(StringComparer.Ordinal)).Add(instance.Tag, module);
+                }
             records.Add(Tag, Record(values, context));
+            if (context.PreparedModule(input) is { } own) (prepared ??= new(StringComparer.Ordinal)).Add(Tag, own);
             input.SerializedRoot = HydrationRecords.Encode(records, Source, cancellation);
+            if (prepared is not null) context.RecordModuleBindings(input, PreparedModuleRecords.Encode(prepared, Source, cancellation));
         }
         writer.Write(" data-html-next-instance=\"");
         HtmlOutput.Escape(ref writer, input.SerializedRoot, true);
         writer.Write('"');
+        if (context.SerializedModuleBindings(input) is { } bindings)
+        {
+            writer.Write(" data-html-next-bindings=\"");
+            HtmlOutput.Escape(ref writer, bindings, true);
+            writer.Write('"');
+        }
     }
 }
 

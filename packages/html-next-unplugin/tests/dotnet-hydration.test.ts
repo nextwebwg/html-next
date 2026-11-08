@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { JSDOM } from "jsdom";
-import { afterAll, beforeAll, describe, it } from "vitest";
+import { afterAll, beforeAll, describe, it, vi } from "vitest";
 import { build } from "vite";
 import { chromium, firefox, webkit } from "playwright";
 import { htmlNext, hydrationModule } from "../src/index.js";
-import { decodeHydrationValue } from "../../html-next/src/hydration-value.js";
+import { decodeHydrationValue, encodeHydrationValue } from "../../html-next/src/hydration-value.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const execute = promisify(execFile);
@@ -24,30 +24,93 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + '<template component="x-attrs"><defs><prop name="tone" type="string" default="quiet">Tone.</prop></defs><div><section $attributes from:data-tone="$tone"></section></div></template><template component="x-attribute-source"><x-attrs tone="bright" title="Outside" class="consumer"></x-attrs></template>'
   + '<template component="x-selected"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop><prop name="mode" type="keyword" values="text, number" required>Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>'
   + '<template component="x-selected-default"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value" default="3">Value.</prop><prop name="mode" type="keyword" values="text, number" default="number">Mode.</prop></defs><output>{$value}:{$value = 3}</output><style>:host([value]){color:red}</style></template>';
+const preparedSource = '<template component="x-prepared" module="./producer.js"><defs><prop name="count" type="integer" default="2">Count.</prop><prop name="filters" type="list(string)" default="[]">Filters.</prop><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><section><ul><li $each="row of $rows" $key="$row"><input value="Original"><b>{$row}</b></li></ul><output>{$draft.length}</output></section></template>';
 
 describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance adoption", () => {
   let directory: string;
   let bundle: string;
   let manifest: unknown;
+  let preparedBundle: string;
+  let preparedManifest: unknown;
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-dotnet-hydration-"));
     await execute("dotnet", ["restore", host, "--locked-mode"], { timeout: 60_000 });
     await execute("dotnet", ["build", host, "-c", "Release", "--nologo", "--no-restore"], { timeout: 60_000 });
     await writeFile(join(directory, "card.html"), source);
+    await writeFile(join(directory, "prepared.html"), preparedSource);
+    await writeFile(join(directory, "producer.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
+      const instances = new WeakMap();
+      function binding(host, source) {
+        let value = instances.get(host.props);
+        if (!value) {
+          value = bindModule({ props: { rows: { input: props => ({ count: props.count, filters: props.filters }),
+            load({ count, filters }) { window.preparedReads = (window.preparedReads ?? 0) + 1; return Array.from({length: count}, (_, index) => count + ":" + index + ":" + filters.length); }
+          } }, connect(host) { host.root.setAttribute("data-connected", "true"); } }, { browser: { source } });
+          instances.set(host.props, value);
+        }
+        return value;
+      }
+      export const prepare = (host, options) => binding(host, options.source).prepare(host, options);
+      export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
+      export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
     await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default"] } })],
-      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)) } },
+      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
+        "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
     bundle = await readFile(join(directory, "dist/app.js"), "utf8");
     manifest = JSON.parse(await readFile(join(directory, "dist/html-next.manifest.json"), "utf8"));
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["prepared.html"], hydrate: true, client: { publicRoots: ["x-prepared"] } })],
+      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
+        "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
+      build: { outDir: "prepared", minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
+    preparedBundle = await readFile(join(directory, "prepared/app.js"), "utf8");
+    preparedManifest = JSON.parse(await readFile(join(directory, "prepared/html-next.manifest.json"), "utf8"));
   }, 60_000);
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
-  async function render(tag: string, inputs: object = {}): Promise<string> {
+  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source): Promise<string> {
     const request = join(directory, "request.json");
-    await writeFile(request, JSON.stringify({ source, tag, inputs, manifest }));
+    await writeFile(request, JSON.stringify({ source: definitions, tag, inputs, manifest: assets, prepared }));
     return (await execute("dotnet", [join(host, "bin/Release/net10.0/HtmlNext.FixtureHost.dll"), request])).stdout;
   }
+
+  async function prepared(): Promise<string> {
+    const source = (preparedManifest as { server: { preparedModules: { tag: string; source: string }[] } }).server.preparedModules.find(item => item.tag === "x-prepared")!.source;
+    return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
+  }
+
+  it("adopts native module completion keys without repeating the initial read", async () => {
+    const { window } = new JSDOM(await prepared(), { runScripts: "dangerously" });
+    Object.assign(window, { fetch: globalThis.fetch, structuredClone: globalThis.structuredClone });
+    try {
+      const root = window.document.querySelector("section")!;
+      const rows = [...root.querySelectorAll("li")];
+      const input = rows[0]!.querySelector("input")!;
+      assert.deepEqual(rows.map(row => row.textContent), ["2:0:0", "2:1:0"]);
+      const frame = JSON.parse(root.getAttribute("data-html-next-bindings")!)["x-prepared"];
+      const transfer = decodeHydrationValue(frame[2]) as { snapshot: { source: string; reads: Record<string, unknown> }; inputs: Record<string, unknown> };
+      const key = JSON.stringify(encodeHydrationValue({ count: 2, filters: [] }));
+      assert.equal(transfer.snapshot.source, frame[1]);
+      assert.deepEqual(transfer.snapshot.reads.rows, { input: key, value: key, revision: 0 });
+      assert.deepEqual(transfer.inputs.rows, { value: ["2:0:0", "2:1:0"], status: { ready: true, pending: false, error: null, stale: false } });
+      input.value = "Early prepared";
+      window.eval(preparedBundle);
+      Reflect.get(window, "NativeClient").hydrate();
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.equal(window.document.querySelector("section"), root);
+      assert.equal(root.querySelector("li"), rows[0]);
+      assert.equal(root.querySelector("input"), input);
+      assert.equal(input.value, "Early prepared");
+      assert.equal(root.getAttribute("data-connected"), "true");
+      assert.equal(root.hasAttribute("data-html-next-bindings"), false);
+      assert.equal(Reflect.get(window, "preparedReads") ?? 0, 0);
+      Reflect.get(window, "NativeClient").componentRegistry.update(root, { count: 3 });
+      await vi.waitFor(() => assert.deepEqual([...root.querySelectorAll("b")].map(row => row.textContent), ["3:0:0", "3:1:0", "3:2:0"]), { timeout: 1000, interval: 10 });
+      assert.equal(Reflect.get(window, "preparedReads"), 1);
+      assert.equal(root.querySelector("output")!.textContent, "2");
+    } finally { window.close(); }
+  });
 
   it("adopts native output with the compiler-selected client and preserves edits and one-time seeds", async () => {
     const html = await render("x-card", { title: "Server title" });
@@ -184,6 +247,32 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native prepared reads and refreshes from later caller inputs`, async () => {
+      const html = await prepared();
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        await page.setContent(html);
+        await page.evaluate(() => {
+          Object.assign(window, { earlyPreparedRoot: document.querySelector("section"), earlyPreparedRow: document.querySelector("li"), earlyPreparedInput: document.querySelector("input") });
+        });
+        await page.locator("input").first().fill("Early prepared");
+        await page.addScriptTag({ content: preparedBundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        await page.waitForFunction(() => document.querySelector("section")?.getAttribute("data-connected") === "true");
+        assert.equal(await page.evaluate(() => document.querySelector("section") === Reflect.get(window, "earlyPreparedRoot")
+          && document.querySelector("li") === Reflect.get(window, "earlyPreparedRow") && document.querySelector("input") === Reflect.get(window, "earlyPreparedInput")), true);
+        assert.equal(await page.locator("input").first().inputValue(), "Early prepared");
+        assert.equal(await page.evaluate(() => Reflect.get(window, "preparedReads") ?? 0), 0);
+        assert.equal(await page.locator("section").getAttribute("data-html-next-bindings"), null);
+        await page.evaluate(() => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("section"), { count: 3 }));
+        await page.waitForFunction(() => document.querySelector("b")?.textContent === "3:0:0");
+        assert.deepEqual(await page.locator("b").allTextContents(), ["3:0:0", "3:1:0", "3:2:0"]);
+        assert.equal(await page.evaluate(() => Reflect.get(window, "preparedReads")), 1);
+        assert.equal(await page.locator("output").textContent(), "2");
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native records, ranges, shared roots and carried slots`, async () => {
       const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main><main id="selected-default">${await render("x-selected-default", { mode: "text" })}</main>`;
       const browser = await launchParityBrowser(engine);

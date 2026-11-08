@@ -6,6 +6,7 @@
 - Ignore inert authoring annotations on native prop declarations and expanded fields while retaining declaration validation.
 - Check native accepted-child references against each child's active selected type, including mixed lists and aliases. Keep borrowed slot ownership and ordinary state-copy behavior when entries contain dependent props.
 - Include compiler-owned prepared-module source revisions in server manifests and expose them to native .NET applications.
+- Apply request-scoped prepared module values in the native renderer and transfer completed read identities through the existing browser bindings. Preserve caller inputs and initialized drafts, and complete waiting state seeds when their inputs become available.
 
 ## 1.0.0-alpha.92
 

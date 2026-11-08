@@ -126,7 +126,7 @@ Resolve `graph.Stylesheets` beneath the application's deployed asset base and in
 
 The reader validates server asset version 1, unique source/component entries and emitted stylesheet availability. Compilation checks each component's source fingerprint against the manifest. A stale source or incompatible manifest raises `HNCS006`. Source identities may differ between the build and deployment; matching uses the declared component tag and the complete source-content fingerprint.
 
-`assets.PreparedModules` maps each prepared component tag to the compiler-owned source revision used by browser adoption. The reader rejects duplicate or unknown component owners and malformed revisions. Earlier version 1 manifests without this metadata expose an empty map. Native application preparation and completion-record writing remain unfinished.
+`assets.PreparedModules` maps each prepared component tag to the compiler-owned source revision used by browser adoption. The reader rejects duplicate or unknown component owners and malformed revisions. Earlier version 1 manifests without this metadata expose an empty map.
 
 Standalone CSS compilation and native validation of imported stylesheet-source fingerprints remain unfinished.
 
@@ -150,7 +150,43 @@ Interactive rendering requires a compatible client plan and assets built with `h
 
 Native output carries accepted props, input source and caller ownership, state and claimed one-time initializers in the existing version 1 instance format. Explicit null inputs retain caller ownership while the accepted prop takes its declared default. Shared roots hold a record for each owner. Explicit `$attributes` owners record only the invocation attributes not consumed by props. Tagged values preserve negative zero and shared references; cyclic or non-finite values raise `HNCS008` during interactive serialization. Request-local getter snapshots and records are reused between the buffered renderer's counting and writing passes.
 
-The native client-integration tests exercise actual generated-client adoption in Chromium, Firefox and WebKit: root and control identity, early edits, prop updates, retained state seeds, keyed and fragment rows, aliases, shared roots, nested components, scoped templates and initially carried plain content. Complete hydration qualification still requires accepted-child records, application/module preparation snapshots, the remaining native language features and the full Looma catalog.
+The native client-integration tests exercise actual generated-client adoption in Chromium, Firefox and WebKit: root and control identity, early edits, prop updates, retained state seeds, keyed and fragment rows, aliases, shared roots, nested components, scoped templates, initially carried plain content and completed module reads. Complete hydration qualification still requires accepted-child records, pending/error/stale preparation snapshots, the remaining native language features and the full Looma catalog.
+
+## Supply prepared module values
+
+Prepare request data with application services, then supply it through `HtmlNextRenderOptions.PrepareModule`. The callback receives each logical module instance's reference, accepted prop snapshot, caller ownership and cancellation token. Nested invocations use the same request callback. Buffered rendering reuses the prepared instance between its counting and writing passes.
+
+For an `x-results` component declaring `count`, `filters` and `rows`, whose JavaScript provider selects `{ count, filters }` for `rows`:
+
+```csharp
+var preparedRows = new[] { "First", "Second" };
+var options = new HtmlNextRenderOptions
+{
+    Interactive = true,
+    PrepareModule = context =>
+        context.Module.Component != "x-results" || context.Supplied("rows")
+        ? null
+        : new HtmlNextPreparedModule(
+            context.Source ?? throw new InvalidOperationException("Matching module assets are required."),
+            new Dictionary<string, HtmlNextPreparedRead>
+            {
+                ["rows"] = new(
+                    new { count = context.Props["count"], filters = context.Props["filters"] },
+                    preparedRows)
+            })
+};
+var html = graph.Template("x-results").Render(options: options);
+```
+
+`HtmlNextPreparedModule.Source` identifies the deployed module revision. Interactive output checks it against the matching manifest; a missing or different revision raises `HNCS006`. Inert output can use an application-owned revision without a manifest. `Reads` maps declared prop names to completed reads. Each read's `Input` is the selected input used by the browser provider, and `Value` is its produced value. The renderer encodes input identities with the existing JavaScript codec's representation, so browser adoption can reuse a matching read. Later input changes follow the browser provider's normal lifecycle.
+
+Use `HtmlNextPreparedRead.UndefinedInput` when the JavaScript selector returns `undefined`, including inside a selected record or list. A null input has its own identity.
+
+Caller-supplied props retain control, including explicit null. Produced values pass the declared prop type boundary; null takes the declared default, or null without one. A rejected value reports `HNCS004` and contributes no completed read. Unknown output names raise `HNCS001`; callback and getter failures retain their source through `HNCS002`. Input identities reject cycles, non-finite numbers, non-string record keys and opaque or executable values with `HNCS008`. Prop snapshots expose read-only records and lists, preserve shared references, and reuse the request's already-bound application data.
+
+State seeded from an available default keeps that draft. A seed waiting on an unavailable input can initialize after preparation supplies it. Each request owns its prepared props, drafts and transfer records. The callback observes the render cancellation token, and cancellation is checked before and after it runs.
+
+This API handles completed successful reads. Pending, failed and stale read snapshots, renderer-owned asynchronous preparation, and complete prepared accepted-child adoption remain implementation work. Application services retain their request resource lifetimes.
 
 ## Verify and measure
 

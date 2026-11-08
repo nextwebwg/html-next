@@ -236,7 +236,7 @@ public static partial class HtmlNextCompiler
                 throw ValueType.Error(source, "A dependent prop default requires a prop selector with a matching default.");
             var value = literal is null ? null : !attributeOnly && type.Kind == "unknown" ? literal : Default(literal, selection?.DefaultType ?? type);
             var constraints = ValueConstraints.Read(prop, type, source, Default);
-            var definition = new Prop(name, type, prop.HasAttribute("required"), value, constraints, selection);
+            var definition = new Prop(name, type, prop.HasAttribute("required"), value, constraints, selection, literal is not null);
             if (selection?.DefaultType is { } defaultType) definition = definition with { Default = definition.Store(value, defaultType) };
             if (literal is not null)
             {
@@ -286,7 +286,8 @@ public static partial class HtmlNextCompiler
                 if (declarations && compiler.derived.TryGetValue(name, out var item) && item.Declaration.Slot == slot)
                     return new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration));
                 return locals is IDeclarationExpressionScope inherited ? inherited.Read(name, slot, type)
-                    : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null));
+                    : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null,
+                        InputContextSlot: declarations && compiler.module is not null && slot < compiler.props.Count ? compiler.declarationContextSlot : -1));
             }
             public IEnumerator<KeyValuePair<string, (int Slot, ValueType Type)>> GetEnumerator() => ValuesByName.GetEnumerator();
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();

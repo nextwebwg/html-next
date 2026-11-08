@@ -23,11 +23,22 @@ internal sealed class LocalDeclaration(string name, int slot, int index, int con
     public object? Read(object?[] values) => ((DeclarationEvaluation)values[ContextSlot]!).Read(this);
 }
 
-internal sealed class DeclarationEvaluation(object?[] values, int count, string source, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+internal sealed class DeclarationEvaluation(object?[] values, int count, string source, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, bool[]? inputReady = null)
 {
     // 0: unread, 1: evaluating, 2: available, 3: unavailable.
     private readonly byte[] status = new byte[count];
     public bool Ready { get; set; } = true;
+    public bool[]? InputReady { get; } = inputReady;
+    public void ObserveInput(int slot) { if (InputReady is { } inputs) Ready &= inputs[slot]; }
+    public void RefreshWaiting(LocalDeclaration[] declarations)
+    {
+        foreach (var declaration in declarations)
+            if (declaration.SeedType is null || status[declaration.Index] != 2)
+            {
+                status[declaration.Index] = 0;
+                values[declaration.Slot] = declaration;
+            }
+    }
     public bool Initialized(LocalDeclaration declaration) => status[declaration.Index] == 2;
 
     public object? Read(LocalDeclaration declaration)

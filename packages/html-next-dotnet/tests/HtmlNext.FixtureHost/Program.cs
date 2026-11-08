@@ -27,4 +27,13 @@ if (root.TryGetProperty("sources", out var resources))
 }
 var graph = HtmlNextCompiler.CompileResource(root.GetProperty("source").GetString()!, assets: assets);
 var inputs = root.TryGetProperty("inputs", out var supplied) ? (object)supplied : null;
-Console.Write(graph.Template(root.GetProperty("tag").GetString()!).Render(inputs, options: new() { Interactive = true }));
+HtmlNextPreparedModule? Prepare(HtmlNextPreparationContext context)
+{
+    if (!root.TryGetProperty("prepared", out var modules) || !modules.TryGetProperty(context.Module.Component, out var module)) return null;
+    return new(module.GetProperty("source").GetString()!, module.GetProperty("reads").EnumerateObject().ToDictionary(item => item.Name,
+        item => new HtmlNextPreparedRead(item.Value.GetProperty("input"), item.Value.GetProperty("value"))));
+}
+Console.Write(graph.Template(root.GetProperty("tag").GetString()!).Render(inputs, options: new()
+{
+    Interactive = true, PrepareModule = root.TryGetProperty("prepared", out _) ? Prepare : null
+}));

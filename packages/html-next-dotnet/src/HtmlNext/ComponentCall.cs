@@ -133,8 +133,14 @@ internal sealed record DeferredPropAttribute(string Name, ValueExpression Expres
     }
 }
 
-internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnostic>? onDiagnostic, bool interactive = false)
+internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnostic>? onDiagnostic, bool interactive = false, HtmlNextPrepareModule? prepareModule = null)
 {
+    private readonly ModulePreparationState? preparation = prepareModule is null ? null : new(prepareModule);
+    public HtmlNextPrepareModule? PrepareModule => preparation?.Prepare;
+    public PreparedModuleRecord? PreparedModule(InstanceInputs inputs) => preparation?.For(inputs);
+    public void RecordPreparedModule(InstanceInputs inputs, PreparedModuleRecord record) => preparation!.Record(inputs, record);
+    public string? SerializedModuleBindings(InstanceInputs inputs) => preparation?.Serialized(inputs);
+    public void RecordModuleBindings(InstanceInputs inputs, string value) => preparation!.RecordSerialized(inputs, value);
     public bool Interactive { get; } = interactive;
     public bool Adopting { get; set; }
     private readonly List<object?[]>? children = cacheChildren ? [] : null;

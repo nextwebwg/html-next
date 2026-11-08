@@ -291,7 +291,7 @@ internal sealed class ExpressionCompiler(string text, string source, IReadOnlyDi
         }
         else result = Unknown;
         if (target is PathExpression path && index >= 0)
-            return new PathExpression(new(path.Path.Slot, [..path.Path.Fields, index], result, [..path.Path.Keys ?? [], key], path.Path.RootType, path.Path.Declaration));
+            return new PathExpression(new(path.Path.Slot, [..path.Path.Fields, index], result, [..path.Path.Keys ?? [], key], path.Path.RootType, path.Path.Declaration, path.Path.InputContextSlot));
         return Fold(new MemberExpression(target, key, result));
     }
 
