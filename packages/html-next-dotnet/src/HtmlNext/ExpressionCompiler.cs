@@ -149,7 +149,9 @@ internal sealed class ExpressionCompiler(string text, string source, IReadOnlyDi
             }
             else if (op is "<" or "<=" or ">" or ">=")
             {
-                Require(left, "number", "integer"); Require(right, "number", "integer"); result = ExpressionValue.BooleanType;
+                Require(left, "number", "integer", "string", "keyword"); Require(right, "number", "integer", "string", "keyword");
+                if (!Compatible(left.Type, right.Type)) Fail("Ordered comparison requires compatible operand types.");
+                result = ExpressionValue.BooleanType;
             }
             else result = ArithmeticType(op, left, right);
             left = Fold(op is "+" or "-" or "*" or "/" or "%" && left.Type.Kind is "number" or "integer" && right.Type.Kind is "number" or "integer"

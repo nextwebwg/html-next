@@ -91,6 +91,31 @@ public sealed class ExpressionTests
         }));
     }
 
+    [Theory]
+    [InlineData("'0001-12' < '0002-01'", "true")]
+    [InlineData("'9999-01' > '9998-12'", "true")]
+    [InlineData("'same' <= 'same'", "true")]
+    [InlineData("'same' >= 'same'", "true")]
+    [InlineData("'same' < 'same'", "false")]
+    [InlineData("'2' < '10'", "false")]
+    [InlineData("'Z' < 'a'", "true")]
+    [InlineData("'😀' < '�'", "true")]
+    public void OrdersStringsByOrdinalUtf16WithoutNumericCoercion(string expression, string expected)
+    {
+        Assert.Equal("<output>" + expected + "</output>", Text(expression).Render());
+    }
+
+    [Fact]
+    public void OrdersCurrentStringInputsAndRejectsStaticallyDisjointOperands()
+    {
+        var template = Text("$month < '0002-01'", """<prop name="month" type="string">Month.</prop>""");
+        Assert.Equal("<output>true</output>", template.Render(new { month = "0001-12" }));
+        Assert.Equal("<output>false</output>", template.Render(new { month = "2026-11" }));
+        Assert.Equal("<output></output>", template.Render());
+        Assert.Throws<HtmlNextException>(() => Text("'2' < 10"));
+        Assert.Throws<HtmlNextException>(() => Text("10 >= '2'"));
+    }
+
     [Fact]
     public void DistinguishesSafeMissingReadsFromNullAndDoesNotCoerce()
     {

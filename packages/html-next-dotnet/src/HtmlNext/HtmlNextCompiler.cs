@@ -71,7 +71,7 @@ public static partial class HtmlNextCompiler
                 module = new(Tag, source, specifier);
             }
             var children = carrier.Content.ChildNodes.Where(Significant).Where(node => node is not IElement element || !Metadata(element, source)).ToList();
-            if (children.FirstOrDefault() is IElement { LocalName: "defs" } defs)
+            if (children.FirstOrDefault(node => node is IElement { LocalName: "defs" }) is IElement defs)
             {
                 var declarations = defs.ChildNodes.Where(Significant).ToArray();
                 foreach (var node in declarations)
@@ -157,7 +157,7 @@ public static partial class HtmlNextCompiler
                 foreach (var prop in props)
                     if (prop.Selection is { } selection) selection.Link(bindings,
                         derived.TryGetValue(selection.From, out var item) ? item.Declaration : null, selection.FromState ? preparationSlot : -1);
-                children.RemoveAt(0);
+                children.Remove(defs);
             }
             if (assets is not null) children.RemoveAll(node => node is IElement { LocalName: "style" });
             if (children.Count != 1 || children[0] is not IElement elementRoot) throw ValueType.Error(source, "Expected one native root after <defs>.");

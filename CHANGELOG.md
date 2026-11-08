@@ -2,6 +2,7 @@
 
 ## 1.0.0-alpha.93
 
+- Read native declaration groups before or after the markup root, and compare string and keyword values in ordinal UTF-16 order without numeric coercion.
 - Compile native select options, projected fallbacks and structural content into retained render plans. Use AngleSharp's token callbacks to preserve select children during source parsing, including comments, raw text, authored placeholder names and foreign namespaces.
 - Keep native state seeds waiting for omitted or refused props, carry readiness through component bindings, and preserve that ownership through browser adoption.
 - Preserve accepted-child borrowed slot ownership in native rendered markers so generated clients reclaim the original controls after reopening an outlet.

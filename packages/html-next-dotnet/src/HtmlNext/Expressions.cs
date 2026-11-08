@@ -265,6 +265,12 @@ internal sealed record BinaryExpression(string Operator, ValueExpression Left, V
         if (left.IsNull || right.IsNull) return ExpressionValue.Absent;
         if (Operator is "<" or "<=" or ">" or ">=")
         {
+            if (left.IsText && right.IsText)
+            {
+                var order = string.CompareOrdinal((string?)left.Data, (string?)right.Data);
+                return ExpressionValue.Boolean(Operator switch { "<" => order < 0, "<=" => order <= 0,
+                    ">" => order > 0, _ => order >= 0 });
+            }
             if (!left.IsNumeric || !right.IsNumeric) return ExpressionValue.Absent;
             return ExpressionValue.Boolean(Operator switch { "<" => left.Number < right.Number, "<=" => left.Number <= right.Number,
                 ">" => left.Number > right.Number, _ => left.Number >= right.Number });
