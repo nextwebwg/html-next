@@ -223,8 +223,7 @@ public static partial class HtmlNextCompiler
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)
         {
-            foreach (var attribute in prop.Attributes)
-                if (attribute.Name is not ("name" or "type" or "required" or "default" or "values" or "min" or "max" or "minlength" or "maxlength" or "open")) Unsupported(attribute.Name);
+            DeclarationTypes.CheckAttributes(prop, source);
             if (string.IsNullOrWhiteSpace(prop.TextContent)) throw ValueType.Error(source, "A prop requires a description.");
             var name = prop.GetAttribute("name") ?? throw ValueType.Error(source, "A prop requires a name.");
             if (!ExpressionCompiler.IsIdentifier(name)) throw ValueType.Error(source, $"Invalid prop name '{name}'.");

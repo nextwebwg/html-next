@@ -61,6 +61,8 @@ Named and inline `<type from="selector">` declarations select a prop's type from
 
 A component's expressions check its dependent props against the active option, including defaults. Structured fields are checked when read, so valid sibling fields remain available. Adoption records and CSS prop selectors retain the raw prop values. A structured literal `null` restores the prop's default without a type diagnostic.
 
+Prop and field declarations may carry inert authoring annotations, such as `data-note` and `default-true-reason`; native compilation ignores them.
+
 Resource-level and direct carrier metadata (`title`, `meta` without `http-equiv`, and ordinary metadata links) is ignored by component rendering. Only resource-level component dependency links reach the resolver. Active resource content, policy metadata, HTML Imports, and executable metadata attributes fail compilation.
 
 Projection plans retain the consumer's lexical bindings. Default and named outlets choose assigned nodes or fallback; an empty text node counts as assigned. Conditional and repeated consumer content participates in that selection, and `<template $slot>` uses the same outlet plan. Consumer `<template slot>` bodies render on demand and remain as inert source in serialized carriers. Unused plain content also remains in a carrier, with component setup deferred until placement. Delegated roots write their carriers in outer-to-inner order. These operations stream into the same counting and writing passes without building a per-request DOM.
