@@ -290,8 +290,9 @@ const { html, css } = await renderComponents('<x-counter id="counter"></x-counte
 });
 ```
 
-The counter's template uses `$attributes` on its root to forward `id="counter"`.
-Choose an explicit destination for unclaimed invocation attributes, following the
+Unclaimed invocation attributes, including `id="counter"`, reach the root before
+its authored attributes and bindings. Add `noforward` to the defining template to
+place `$attributes` explicitly, following the
 [proposal's attribute forwarding rules](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
 
 Serve the returned markup and styles. In the browser, register the same definitions through

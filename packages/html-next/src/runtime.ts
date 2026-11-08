@@ -1702,7 +1702,9 @@ function setAttribute(element: Element, name: string, value: string | null): voi
     writeNamespacedAttribute(element, namespace, name, name.slice(name.indexOf(":") + 1), value !== null && isUrlAttribute(name) && hasExecutableUrl(value) ? null : value);
     return;
   }
-  if (value === null || (isUrlAttribute(name) && hasExecutableUrl(value))) {
+  if (value !== null && isUrlAttribute(name) && hasExecutableUrl(value)) value = null;
+  if (element.getAttribute(name) === value) return;
+  if (value === null) {
     element.removeAttribute(name);
   }
   else element.setAttribute(name, value);

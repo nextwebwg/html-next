@@ -128,10 +128,30 @@ internal sealed class InvocationAttributeState
     public void Leave(int previous) => count = previous;
 }
 
-internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes) : RenderOperation
+internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes, RootStyle? Owner = null) : RenderOperation
 {
+    private readonly RenderOperation[]? direct = Direct(Attributes, Owner);
+
+    private static RenderOperation[]? Direct(InvocationAttribute?[] attributes, RootStyle? owner)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<RenderOperation>();
+        foreach (var attribute in attributes)
+        {
+            if (attribute is null || owner is not null && attribute.Name == "component") continue;
+            if (attribute.Target is not null || attribute.Prop is not null || !names.Add(attribute.Name)) return null;
+            result.Add(owner is null ? attribute : new RootAuthoredAttribute(attribute.Name, attribute, owner));
+        }
+        return result.ToArray();
+    }
+
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellation)
     {
+        if (direct is not null && writer.Context?.InvocationAttributesFor(values) is null)
+        {
+            foreach (var attribute in direct) attribute.Write(ref writer, values, cancellation);
+            return;
+        }
         var output = writer.Context?.AttributeOutput() ?? new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var attribute in Attributes)
         {
@@ -149,6 +169,14 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
         foreach (var (name, text) in output)
         {
             if (text is null) continue;
+            if (Owner is not null)
+            {
+                if (name == "component" || Owner.Manages(name)) continue;
+                var managed = false;
+                if (writer.Context is { } context) foreach (var parent in context.RootStyles())
+                    if (parent.Style.Manages(name)) { managed = true; break; }
+                if (managed) continue;
+            }
             writer.Write(' '); writer.Write(name); writer.Write("=\""); HtmlOutput.Escape(ref writer, text.AsSpan(), true); writer.Write('"');
         }
     }

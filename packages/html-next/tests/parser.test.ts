@@ -5,7 +5,7 @@ import { describe, it } from "vitest";
 import { JSDOM, VirtualConsole } from "jsdom";
 
 import { parseBrowserComponent } from "../src/browser-source.js";
-import { HtmlDiagnosticError } from "../src/diagnostics.js";
+import { getDiagnosticLocation, HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ElementNode, SlotNode, TemplateNode } from "../src/template.js";
@@ -14,6 +14,38 @@ import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeSc
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
 describe("explicit attribute forwarding destinations", () => {
+  it("retains authored root and match-arm locations when adding default forwarding", () => {
+    for (const tag of ["button", "x-child"]) {
+      const root = parseComponent(`<template component="x-forward">\n  <${tag}></${tag}>\n</template>`).template;
+      assert.deepEqual(getDiagnosticLocation(root), { line: 2, column: 3 });
+    }
+    const root = parseComponent('<template component="x-forward">\n  <template $match>\n    <a $when="true">Link</a>\n    <button $else>Button</button>\n  </template>\n</template>').template;
+    assert.deepEqual(getDiagnosticLocation(root), { line: 2, column: 3 });
+    assert.deepEqual(root.children.map(node => getDiagnosticLocation(node)), [{ line: 3, column: 5 }, { line: 4, column: 5 }]);
+  });
+  for (const browser of [false, true]) {
+    const parse = (source: string) => browser
+      ? parseBrowserComponent(new JSDOM(source).window.document.querySelector("template")!)
+      : parseComponent(source);
+    it(`places default forwarding before authored root attributes (${browser ? "browser" : "Node"})`, () => {
+      const root = parse('<template component="x-forward"><button title="Template">Save</button></template>').template;
+      assert.deepEqual(root.attributes, [{ kind: "forward", name: "attributes" }, { kind: "literal", name: "title", value: "Template" }]);
+    });
+    it(`places default forwarding on delegated roots and each root match arm (${browser ? "browser" : "Node"})`, () => {
+      const delegated = parse('<template component="x-forward"><x-child title="Template"></x-child></template>').template;
+      assert.equal(delegated.attributes[0]?.kind, "forward");
+      const match = parse('<template component="x-forward"><template $match><a $when="true">Link</a><button $else>Button</button></template></template>').template;
+      assert.deepEqual(match.attributes, []);
+      assert.deepEqual(match.children.map(arm => (arm as ElementNode).attributes[0]?.kind), ["forward", "forward"]);
+    });
+    for (const flag of ["noforward", 'noforward="false"', 'noforward="noforward"']) {
+      it(`uses presence of ${flag} to retain only explicit destinations (${browser ? "browser" : "Node"})`, () => {
+        const root = parse(`<template component="x-forward" ${flag}><section title="Wrapper"><button $attributes>Save</button></section></template>`).template;
+        assert.deepEqual(root.attributes, [{ kind: "literal", name: "title", value: "Wrapper" }]);
+        assert.deepEqual((root.children[0] as ElementNode).attributes, [{ kind: "forward", name: "attributes" }]);
+      });
+    }
+  }
   for (const body of ['<button $attributes="attrs">Save</button>', '<section><template $attributes>Body</template></section>',
     '<section><slot $attributes></slot></section>', '<section><template $slot $attributes></template></section>']) {
     it(`rejects a forwarding directive without a rendered destination: ${body}`, () => {
@@ -637,7 +669,7 @@ describe("parseComponent", () => {
  from: "x-steps",
       as: "activeStep",
     });
-    assert.deepEqual(reader.template.attributes[0]?.kind, "attribute");
+    assert.deepEqual(reader.template.attributes.map(attribute => attribute.kind), ["forward", "attribute"]);
   });
 
   it("requires a context source and keeps context reads out of writable paths", () => {
@@ -693,7 +725,7 @@ describe("parseComponent", () => {
       `<prop name="message" type="string">Button text.</prop>`,
     );
     const definition = parseComponent(source, "property.html");
-    const property = definition.template.attributes[0];
+    const property = definition.template.attributes.find(attribute => attribute.kind === "property");
     assert.ok(property?.kind === "property");
     assert.deepEqual({
       kind: property.kind,
@@ -763,7 +795,7 @@ describe("parseComponent", () => {
       "label.html",
     );
     assert.deepEqual(definition.contract.props.label?.target, { attribute: "title" });
-    assert.deepEqual(definition.template.attributes.map((attribute) => attribute.name), ["title", "aria-label"]);
+    assert.deepEqual(definition.template.attributes.map((attribute) => attribute.name), ["attributes", "title", "aria-label"]);
   });
 
   it("rejects props declared without a name, type, or binding", () => {

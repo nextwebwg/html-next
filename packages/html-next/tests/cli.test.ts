@@ -134,6 +134,7 @@ describe("buildComponents", () => {
         "controllers/x-app/app.js",
         "controllers/x-app/helper.js",
         "html.manifest.json",
+        "vue/attributes.ts",
         "vue/host.ts",
         "vue/XApp.vue",
         "vue/XChild.vue",

@@ -1443,7 +1443,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const equals = attribute.indexOf("=");
       return `{...{ ${quote(attribute.slice(0, equals))}: ${attribute.slice(equals + 2, -1)} }}`;
     });
-    attributes.splice(0, attributes.length, `{...invocationProps(${jsxAttributeRecord(inputs)}, ${htmlInputs}, ${JSON.stringify([STATUS_INPUTS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP])})}`, ...attachments);
+    attributes.splice(0, attributes.length, `{...(invocationProps(${jsxAttributeRecord(inputs)}, ${htmlInputs}, ${JSON.stringify([STATUS_INPUTS_PROP, BINDING_INPUTS_PROP, LITERAL_INPUTS_PROP])}) as any)}`, ...attachments);
   }
   if (!component && (forwards || node.attributes.some(attribute => Object.hasOwn(Object.prototype, attribute.name)))) {
     const attachments = attributes.filter(attribute => attribute.startsWith("{@attach") || attribute.startsWith("bind:"));

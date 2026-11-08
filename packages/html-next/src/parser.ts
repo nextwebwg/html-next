@@ -2426,6 +2426,15 @@ function parseComponentNodesAtSource(
   const lifecycle: Parameters<typeof parseEvents>[3] = {};
   const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined,
     rootArms === undefined && !delegatedRoot ? lifecycle : undefined);
+  if (attr(wrapper, "noforward") === undefined) {
+    const forward = (node: ElementNode): ElementNode => node.attributes[0]?.kind === "forward" ? node : Object.assign(node, {
+      attributes: [{ kind: "forward", name: "attributes" }, ...node.attributes],
+    });
+    // Normalize the default to the same ordered operation as an authored $attributes. Every
+    // interpreter and generated target then shares prop consumption and precedence semantics.
+    if (rootArms === undefined) forward(template);
+    else for (const arm of template.children) forward(arm as ElementNode);
+  }
   if (template.flow !== undefined && template.flow.kind !== "with" && template.flow.kind !== "match") {
     fail("HT021", "A component root must always select exactly one native or delegated element.", source);
   }

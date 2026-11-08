@@ -47,7 +47,9 @@ public static partial class HtmlNextCompiler
         public string Tag { get; private set; } = "";
         public string? DelegatedTag => root.LocalName.Contains('-') ? root.LocalName : null;
 
-        public bool ForwardsAttributes => Forwarding(root);
+        public bool ForwardsAttributes => !carrier.HasAttribute("noforward") || Forwarding(root);
+        private bool ImplicitForwarding(IElement element) => !carrier.HasAttribute("noforward") && IsRoot(element)
+            && element.Attributes.FirstOrDefault()?.Name != "$attributes";
         private static bool Forwarding(IElement element) => element.HasAttribute("$attributes") || Children(element).OfType<IElement>().Any(Forwarding);
         public Prop[] Props => props.ToArray();
         private HtmlNextModuleReference? module;
@@ -58,7 +60,7 @@ public static partial class HtmlNextCompiler
         public void ReadContract()
         {
             foreach (var attribute in carrier.Attributes)
-                if (attribute.Name is not ("component" or "status" or "summary" or "module")) Unsupported(attribute.Name);
+                if (attribute.Name is not ("component" or "status" or "summary" or "module" or "noforward")) Unsupported(attribute.Name);
             Tag = carrier.GetAttribute("component")!;
             if (!Regex.IsMatch(Tag, @"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$", RegexOptions.CultureInvariant))
                 throw ValueType.Error(source, "Expected a lowercase component tag containing a dash.");
@@ -516,10 +518,10 @@ public static partial class HtmlNextCompiler
             if (!fragment) Add(operations, "<" + element.LocalName);
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
-            if (element.HasAttribute("$attributes"))
+            if (element.HasAttribute("$attributes") || !fragment && ImplicitForwarding(element))
             {
-                if (fragment || element.GetAttribute("$attributes") != "") throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
-                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope)));
+                if (element.HasAttribute("$attributes") && (fragment || element.GetAttribute("$attributes") != "")) throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
+                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes));
             }
             else
             {
@@ -814,6 +816,7 @@ public static partial class HtmlNextCompiler
         private InvocationAttribute?[] ForwardingAttributes(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope)
         {
             var result = new List<InvocationAttribute?>();
+            if (ImplicitForwarding(element)) result.Add(null);
             var bound = element.Attributes.Where(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal)).Select(attribute => attribute.Name[5..]).ToHashSet(StringComparer.Ordinal);
             foreach (var attribute in element.Attributes)
             {
@@ -827,6 +830,8 @@ public static partial class HtmlNextCompiler
                     result.Add(new(token, null, Expression(attribute.Value, scope), source, "class")); continue;
                 }
                 var dynamic = name.StartsWith("from:", StringComparison.Ordinal);
+                if (!dynamic && (name == "srcdoc" || BoundAttributeRules.IsUrl(name) && BoundAttribute.ExecutableUrl(attribute.Value)))
+                    throw ValueType.Error(source, $"Literal attribute '{name}' contains executable content.");
                 if (dynamic) name = AttributeName(element, name[5..]);
                 else if (bound.Contains(name)) continue;
                 if (name.StartsWith('$') || name.StartsWith("on", StringComparison.OrdinalIgnoreCase) || name is "srcdoc" or "innerhtml" or "outerhtml" or "textcontent" or "innertext" || name.Contains(':') && attribute.NamespaceUri is null) Unsupported("attribute '" + attribute.Name + "'");
@@ -899,8 +904,10 @@ public static partial class HtmlNextCompiler
                     propAttributes.Add(index, new DeferredPropAttribute(names[index], expression, target.Props[index].Type.AsReference(), BoundAttribute.Kind(names[index]), source, fallbacks.GetValueOrDefault(index), declarationContextSlot));
                 else propAttributes.Add(index, new Literal(fallbacks[index]));
             var deferred = new List<RenderOperation>();
-            var deferredOrdered = element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target == "class") ? new List<InvocationAttribute?>() : null;
+            var implicitForwarding = ImplicitForwarding(element);
+            var deferredOrdered = implicitForwarding || element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target == "class") ? new List<InvocationAttribute?>() : null;
             var attributes = new List<InvocationAttribute?>();
+            if (implicitForwarding) { attributes.Add(null); deferredOrdered!.Add(null); }
             var writtenProps = new HashSet<int>();
             var writtenAttributes = new HashSet<string>(StringComparer.Ordinal);
             foreach (var attribute in element.Attributes)

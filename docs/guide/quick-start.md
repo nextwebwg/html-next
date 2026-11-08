@@ -25,7 +25,7 @@ Save this as `counter.html`: each click counts a guest, and Reset starts the nex
       <set name="count" expr:value="0"></set>
     </handler>
   </defs>
-  <div $attributes>
+  <div>
     <button type="button" on:click="increment">
       Count: {$count}
     </button>

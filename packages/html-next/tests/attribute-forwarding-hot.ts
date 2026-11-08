@@ -7,8 +7,8 @@ import { parseComponent } from "../src/source-parser.js";
 export async function attributeForwardingHotFiles(): Promise<Record<string, string>> {
   const roots = ['<button title="Template">Initial</button>', '<article $attributes title="Template">Before</article>',
     '<section title="Template" $attributes>After</section>', '<aside title="Final">Hidden</aside>', '<footer $attributes>Restored</footer>'];
-  const definitions = roots.map(root => parseComponent(`<template component="x-subject">${root}</template>`, "https://attributes-hot.example/subject.html"));
-  const parent = parseComponent(`<template component="x-page"><defs><state name="caller" type="string" value="Caller"></state><state name="note" type="string" value="Note"></state></defs><main><x-subject from:title="$caller" from:data-note="$note" __proto__="Prototype"></x-subject></main></template>`, "https://attributes-hot.example/page.html");
+  const definitions = roots.map(root => parseComponent(`<template noforward component="x-subject">${root}</template>`, "https://attributes-hot.example/subject.html"));
+  const parent = parseComponent(`<template noforward component="x-page"><defs><state name="caller" type="string" value="Caller"></state><state name="note" type="string" value="Note"></state></defs><main><x-subject from:title="$caller" from:data-note="$note" __proto__="Prototype"></x-subject></main></template>`, "https://attributes-hot.example/page.html");
   const invocations = new Map([["x-subject", { module: "./subject0.js", definition: definitions[0]! }]]);
   const moduleSource = (definition: typeof parent) => generateComponent(definition, { hot: true, invocations }).find(artifact => artifact.path === `vanilla/${definition.contract.name}.js`)!.content;
   const modules = Object.fromEntries(definitions.map((definition, index) => [`subject${index}.js`, moduleSource(definition)]));

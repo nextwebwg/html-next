@@ -88,7 +88,7 @@ describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
     const module = vanilla(benchmarkShape);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
-    assert.match(module, /^import \{ attachGeneratedController, checkedReferenceValue, equalValue, buildTemplate, clearRegion, KeyedList, NONCONFORMING, readMember, toAttribute, toText, trackContainer, truthy, visitSelected, writeAttribute, writeText, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(module, /^import \{ attachGeneratedController, checkedReferenceValue, equalValue, buildTemplate, clearRegion, KeyedList, NONCONFORMING, readMember, toAttribute, toText, trackContainer, truthy, visitSelected, writeAttribute, writeText, forwardAttributes, resetForwardedAttributes, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
     const { inputs } = await bundle(module, true);
     const forbidden = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
@@ -119,7 +119,7 @@ describe("direct-extend Vanilla generation", () => {
     for (const module of modules.values()) {
       assert.doesNotMatch(module, /\b(?:childList|childOutlet|listChanged|borrowedSlots|initializeSlot|invokeAccepted|projectAccepted|sharePlainSlots)\b|const OF =/);
     }
-    assert.match(modules.get("./XCards.js")!, /^import \{ attachGeneratedController, buildTemplate, clearRegion, dispose, invoke, projected, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(modules.get("./XCards.js")!, /^import \{ attachGeneratedController, buildTemplate, clearRegion, dispose, invoke, projected, forwardAttributes, resetForwardedAttributes, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
   });
 
   it("compiles every component without the general runtime", () => {
