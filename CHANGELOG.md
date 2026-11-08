@@ -21,6 +21,8 @@
 
 ### Changes
 
+- Release unreachable component callbacks held by shared script entries while keeping retained disconnected instances synchronized with shared script status.
+
 - Compile React and Preact components when a keyed style precedes a trailing `$attributes` destination, preserving the authored style order.
 
 - Bind native named and inline conditional prop types after their prop or initialized state selectors, preserving selected structured types, literal fallbacks, defaults and request isolation. Refuse non-null dependent inputs under null selectors in both shared JavaScript runtimes, and resolve selected dimensions from the current values in Node and live scopes.

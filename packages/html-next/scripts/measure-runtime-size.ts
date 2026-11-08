@@ -231,9 +231,12 @@ const headNoneGenerated = await generatedFixture("head-none", 12_957);
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
 // Recursive-factory helper exports change minified identifier allocation by 2 B gzip.
 // These acyclic fixtures contain none of the nesting helpers.
-const headStaticGenerated = await generatedFixture("head-static", 15_022);
+// Weak script ownership changes minified names beside static head output (-1 B gzip).
+const headStaticGenerated = await generatedFixture("head-static", 15_021);
 const headJsonGenerated = await generatedFixture("head-json", 15_161);
-const headGenerated = await generatedFixture("head-script", 17_101);
+// +106 B gzip for native weak subscriber ownership and collection cleanup. Other fixtures
+// contain none of that code; retained disconnected handles keep their normal status callbacks.
+const headGenerated = await generatedFixture("head-script", 17_207);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

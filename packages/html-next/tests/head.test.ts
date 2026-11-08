@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, describe, it, vi } from "vitest";
 
 import { JSDOM } from "jsdom";
@@ -264,6 +266,51 @@ const payments = (tag: string, attributes = "") => `<template component="${tag}"
   <script name="stripe" src="https://js.stripe.com/v3/" ${attributes} on:load="loaded" on:error="failed"></script>
 </defs><form from:data-pending="$stripe.pending" from:data-ok="$stripe.ok" from:data-loads="$loads" from:data-errors="$errors"></form></template>`;
 
+it("does not keep a disconnected script owner alive through the document entry", async () => {
+  const probe = `import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { declareScript } from ${JSON.stringify(new URL("../src/head.ts", import.meta.url).href)};
+const require = createRequire(${JSON.stringify(new URL("../package.json", import.meta.url).href)});
+const { JSDOM } = require("jsdom");
+const dom = new JSDOM("<!doctype html><head></head><body></body>", { url: "https://acme.example/" });
+try {
+  const document = dom.window.document;
+  const declaration = { src: "/shared.js", base: "https://acme.example/component.html", loading: "manual", source: "ownership.html" };
+  let deadCalls = 0;
+  function abandon() {
+    const owner = { element: document.createElement("main"), label: "removed" };
+    const handle = declareScript(document, declaration, () => owner.element,
+      () => { deadCalls += owner.label.length; }, () => { deadCalls += owner.label.length; });
+    handle.connect(); handle.disconnect();
+    return new WeakRef(owner);
+  }
+  const owner = abandon();
+  deadCalls = 0;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise(setImmediate);
+    global.gc();
+    await new Promise(setImmediate);
+    if (owner.deref() === undefined) break;
+  }
+  assert.equal(owner.deref(), undefined, "the document's script entry must not retain a disconnected instance");
+  let changed = 0, handled = 0;
+  const kept = declareScript(document, declaration, () => undefined, () => { handled++; }, () => { changed++; });
+  kept.connect(); changed = 0;
+  const ready = kept.ready;
+  assert.equal(kept.load(), ready);
+  document.querySelector("script").dispatchEvent(new dom.window.Event("load"));
+  await ready; await Promise.resolve();
+  assert.equal(deadCalls, 0);
+  assert.equal(changed, 2);
+  assert.equal(handled, 1);
+  kept.disconnect();
+  console.log(JSON.stringify({ collected: true, liveNotifications: changed, liveHandlers: handled }));
+} finally { dom.window.close(); }`;
+  const { stdout } = await promisify(execFile)(process.execPath,
+    ["--expose-gc", "--import", "tsx", "--input-type=module", "--eval", probe], { cwd: new URL("../../../", import.meta.url) });
+  assert.deepEqual(JSON.parse(stdout), { collected: true, liveNotifications: 2, liveHandlers: 1 });
+});
+
 describe("declared scripts in the live runtime", () => {
   it("inserts one ordinary script per URL, runs each connection's on:load once it loads, and never removes it", async () => {
     const { document, main, settle, runtime } = await page("", [payments("saved-cards", 'integrity="sha384-abc" crossorigin referrerpolicy="no-referrer" fetchpriority="high"'),
@@ -295,15 +342,19 @@ describe("declared scripts in the live runtime", () => {
   });
 
   it("gives a connection that ends before the script settles no handler, and the next one its own", async () => {
-    const { document, main, settle } = await page("", [payments("checkout-form")]);
+    const { document, main, settle, runtime } = await page("", [payments("checkout-form")]);
     main.innerHTML = "<checkout-form></checkout-form>";
     await settle();
     const form = main.firstElementChild!;
+    const host = runtime.getComponentHost(form)!;
     form.remove();
     await settle();
-    document.querySelector("script")!.dispatchEvent(new Event("error"));
+    const error = new Event("error");
+    document.querySelector("script")!.dispatchEvent(error);
     await settle();
     assert.equal(form.getAttribute("data-errors"), "0", "nothing runs while disconnected");
+    assert.equal(host.scripts.stripe!.pending, false, "a retained disconnected host reads the shared script status");
+    assert.equal(host.scripts.stripe!.error, error);
     main.append(form);
     await settle();
     assert.equal(form.getAttribute("data-errors"), "1");
