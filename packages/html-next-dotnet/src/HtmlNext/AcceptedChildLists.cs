@@ -28,7 +28,7 @@ internal static class AcceptedChildLists
             case ComponentCall call:
                 if (context?.AcceptsProjection(call.Target, call.Target.Template.Tag, null, caller) != false)
                 {
-                    var entry = call.ReadEntry(accepts, capture && context is not null ? context.CaptureScope(caller) : caller, receiver, context!, cancellation);
+                    var entry = call.ReadEntry(accepts, entries.Count, capture && context is not null ? context.CaptureScope(caller) : caller, receiver, context!, cancellation);
                     context!.RecordEntry(entry);
                     entries.Add(entry.Value);
                 }

@@ -2,6 +2,7 @@
 
 ## 1.0.0-alpha.93
 
+- Preserve accepted-child borrowed slot ownership in native rendered markers so generated clients reclaim the original controls after reopening an outlet.
 - Check native dependent prop defaults against the current selected type when expressions read them. Preserve valid sibling fields and raw prop values in adoption records and CSS prop selectors, and accept structured literal null inputs without a type diagnostic.
 - Ignore inert authoring annotations on native prop declarations and expanded fields while retaining declaration validation.
 - Check native accepted-child references against each child's active selected type, including mixed lists and aliases. Keep borrowed slot ownership and ordinary state-copy behavior when entries contain dependent props.

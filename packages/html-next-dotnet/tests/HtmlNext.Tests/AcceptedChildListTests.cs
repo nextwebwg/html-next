@@ -34,6 +34,30 @@ public sealed class AcceptedChildListTests
         })));
     }
 
+    [Theory]
+    [InlineData(0, "0", "One")]
+    [InlineData(1, "1", "Two")]
+    [InlineData(99, "", "Empty")]
+    public void IdentifiesBorrowedSlotRangesByTheirEntryPosition(int index, string marker, string text)
+    {
+        var source = """
+            <template component="x-column"><defs><slot name="cell"></slot><slot name="missing"></slot></defs><aside></aside></template>
+            <template component="x-list"><defs><prop name="index" type="integer">Index.</prop><slot accepts="x-column" as="columns"></slot></defs>
+            <section><slot of="$columns[$index]" name="cell">Empty</slot><slot of="$columns[0]" name="missing"></slot><slot></slot></section></template>
+            <template component="x-page"><defs><prop name="index" type="integer">Index.</prop></defs><main><x-list from:index="$index">
+            <x-column><b slot="cell">One</b></x-column><x-column><b slot="cell">Two</b></x-column></x-list></main></template>
+            """;
+        var template = HtmlNextCompiler.CompileResource(source).Template("x-page");
+        var html = template.Render(new { index });
+        using var writer = new StringWriter();
+        template.Write(writer, new { index });
+        Assert.Equal(html, writer.ToString());
+        Assert.Contains($"<?start slot=\"cell\" of=\"{marker}\"" + (marker.Length == 0 ? " fallback=\"\"" : "") + "?>", html);
+        Assert.Contains("<?start slot=\"missing\" of=\"0\" fallback=\"\"?><?end?>", html);
+        using var document = new HtmlParser().ParseDocument(html);
+        Assert.StartsWith(text, document.QuerySelector("section")!.TextContent);
+    }
+
     public static IEnumerable<object[]> EntryExpressions()
     {
         static string Outlet(string expression) => $"<slot of=\"{expression}\" name=\"cell\" text=\"7\"><em>Empty</em></slot>";

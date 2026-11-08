@@ -7,7 +7,7 @@ internal sealed record ComponentArgument(ValueExpression? Expression, object? Co
 internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute?[]? Attributes = null) : RenderOperation
 {
     private readonly Prop[] props = Target.Props;
-    internal AcceptedChildEntry ReadEntry(string[] accepts, object?[] caller, object?[] owner, RenderContext context, CancellationToken cancellation)
+    internal AcceptedChildEntry ReadEntry(string[] accepts, int index, object?[] caller, object?[] owner, RenderContext context, CancellationToken cancellation)
     {
         var frames = new List<ProjectionFrame>();
         return Read(this, caller);
@@ -22,7 +22,7 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             var frame = new ProjectionFrame(call.Projection ?? [], parent, matched ? owner : child, template.Tag, call.SharedRoot);
             context.RecordCollectedInvocation(call, parent, child, frame.Claims);
             frames.Add(frame);
-            if (matched) return new(new(call.Target.EntryType!, child), template.Tag, owner, frames.ToArray());
+            if (matched) return new(new(call.Target.EntryType!, child), template.Tag, owner, frames.ToArray(), index);
             var delegated = template.DelegatedInvocation ?? throw ValueType.Error(template.SourceName, "This accepted preset root is not implemented.");
             if (call.Target.ForwardsAttributes) context.CaptureInvocationAttributes(call.Attributes, call.props, parent, child);
             var previousFilter = context.PauseAcceptedProjection();

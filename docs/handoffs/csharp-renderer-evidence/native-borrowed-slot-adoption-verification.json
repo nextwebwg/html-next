@@ -1,0 +1,89 @@
+{
+  "base": "2a58bc4905ec6e1c69ad3f41b26bff29f7df6ac3",
+  "scope": "Native accepted-child borrowed slot index markers and subsequent generated-client ownership.",
+  "sourceHashes": {
+    "CHANGELOG.md": "16766f2df8ef0eafcad6f0a1ede312bc652a1ffacc5ce43b743746d4857c2abf",
+    "packages/html-next-dotnet/README.md": "892f3053b869d516352ff747d19575c10a06da5970097ebe3b313705e864901c",
+    "packages/html-next-dotnet/src/HtmlNext/AcceptedChildLists.cs": "18b732adda0a8610a0629661748042153ba714d1a1b983abb4c1d3c5f2d1456f",
+    "packages/html-next-dotnet/src/HtmlNext/BorrowedSlots.cs": "30097cb8ec2be8c4d0fead908c161af605f868b76f8c2da3f844f2c5e7e0d04c",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "fbbbb77623dee04397a8d468ca53c99539ed915d27203b0215b64db7ca22cea8",
+    "packages/html-next-dotnet/src/HtmlNext/SlotRendering.cs": "a3e9a0832b92bd5ef91b68f9a7a26e7083e11fbe95106bd0085b04eec966e7fd",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/AcceptedChildListTests.cs": "ee32034694d7b8f6113e4805a80f2ab8e2c08dfd092bb4ab0be514b3fdfa6846",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "e601bf47d57ba254f52e28b620733964944dbb99defa85e06471145b464bd83c"
+  },
+  "platformAudit": {
+    "native": "HTML parsing preserves existing slot processing-instruction comments.",
+    "browser": "Existing borrowedSlots, childOutlet and projection claims adopt and reclaim actual DOM nodes.",
+    "remainingGap": "Native output omitted the existing of=\"child-index\" field, causing two borrowed controls to become four after an outlet closed and reopened.",
+    "change": "Carry the request-local per-slot entry index into start markers; empty entries and empty fallbacks keep explicit ranges. No new browser runtime or wire version."
+  },
+  "proof": {
+    "nativeBefore": "Three new marker cases failed because the expected of index or empty-entry marker was missing.",
+    "browserBefore": "The generated-client reopening regression failed with four controls instead of two.",
+    "nativeAfter": {
+      "passed": 945,
+      "skipped": 0
+    },
+    "browserAfter": {
+      "passed": 17,
+      "skipped": 0,
+      "seconds": 18.31,
+      "engines": [
+        "Chromium local",
+        "Firefox pinned Playwright Linux container",
+        "WebKit local"
+      ],
+      "behavior": "Root/row/control identity, early edits, close/reopen, keyed entry reorder and new-child insertion. Existing preparation and static factory-pruning assertions remain intact."
+    }
+  },
+  "verification": {
+    "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+    "exitCode": 0,
+    "javascript": {
+      "passed": 2116,
+      "explicitlyGatedSkips": 5020,
+      "seconds": 329.18
+    },
+    "native": {
+      "passed": 945,
+      "skipped": 0
+    },
+    "fluidFullOutputValidations": 5,
+    "nativeClientIntegration": {
+      "passed": 8,
+      "browserGatedSkips": 9,
+      "seconds": 4.42
+    },
+    "packedConsumers": {
+      "passed": 8,
+      "skipped": 0,
+      "seconds": 62.79
+    }
+  },
+  "review": {
+    "method": "One bounded single-agent CE lite correctness review and inline five-rubric simplification.",
+    "findings": 0,
+    "codeSimplificationEdits": 0,
+    "proofTestsPreserved": true,
+    "coverage": {
+      "depth": "lite",
+      "scope": "Current eight-path diff against 2a58bc49. All production changes, native marker regression and generated-client integration changes read. Existing collection, borrowed-slot decoder, generated ownership claims and source-order serialization traced.",
+      "criteria": "Root AGENTS.md, included by CLAUDE.md; no CODING_STANDARDS.md or REVIEW.md governs these paths.",
+      "compound_packs": "None declared.",
+      "independent_review": "No reviewer agents or cross-model review dispatched, under user single-agent instructions.",
+      "not_assessed": [
+        "learnings",
+        "agent-native gaps",
+        "deployment notes"
+      ],
+      "validation": "945 native tests pass; 17 integration/browser tests pass without skips. Final verify:pr running.",
+      "simplification": "Five-rubric inline pass found no worthwhile behavior-preserving code edits. Existing serializer and projection mechanisms reused; proof tests preserved. Two prose-only corrections applied by caller."
+    }
+  },
+  "limits": [
+    "This increment qualifies plain borrowed controls and native marker identities. Broader scoped/prepared accepted-child qualification remains unfinished.",
+    "No timing, allocation, retained/peak-memory or serving claim.",
+    "The full native goal and Looma qualification remain unfinished.",
+    "No npm or .NET publication is performed by this increment. JavaScript release remains pending the unanswered companion Looma rollout choice."
+  ]
+}
