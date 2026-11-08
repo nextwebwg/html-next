@@ -15,7 +15,7 @@
 ### Breaking
 
 - Bind iteration indices explicitly with `$each="item, index of $items"`. The implicit `$loop` value has been removed; list `.length` supplies the size.
-- Forward invocation attributes at an explicit `$attributes` destination. Inputs consumed by declared props are excluded from that forwarding.
+- Apply unconsumed invocation attributes before authored root attributes by default. Use `noforward` and an explicit trailing `$attributes` when caller attributes must override authored defaults.
 
 ### Changes
 
@@ -46,7 +46,7 @@
 - Preserve non-ASCII case in public prop names, reflected attributes, invocation matching and style name resolution across Node, C# and generated targets. Allocate distinct React locals and emit valid JSX for Unicode prop inputs.
 - Filter Node, live and native .NET slot content declared with `accepts`, including structural content and delegated component lineage, without creating an `as` list. Omit rejected ordinary content from carriers. Keep forwarded fallback subscriptions independent and follow fallback component roots through lowering.
 - Enroll React and Svelte components in child-list bookkeeping only when a receiving slot declares an `as` list. Keep ordinary slot content on the frameworks' normal children paths.
-- Forward invocation attributes only at explicit `$attributes` destinations, excluding inputs consumed by declared props. Preserve source-order precedence on roots, inner elements and delegated invocations, and retain whole-attribute class/style replacement. Keep application-owned layer identity on rendered roots, independently of authored forwarding.
+- Forward unconsumed invocation attributes first on each rendered root by default. The defining template's boolean `noforward` attribute disables that default so authors can place `$attributes` explicitly. Preserve source-order precedence on roots, inner elements and delegated invocations, and retain whole-attribute class/style replacement. Keep application-owned layer identity on rendered roots, independently of authored forwarding.
 - Apply native-element class bindings in authored order across generated targets, retaining each binding's accepted value and classes added through the DOM. Preserve raw class text for no-op toggles and scoped styles through replacements, server rendering and framework hydration. Keep class-only React and Preact rows as native elements with direct refs.
 - Render native keyed class bindings with literal and `from:class` composition, authored binding order, invalid-result retention and DOM token semantics. Fold constants and reuse request storage across rows. Accept non-ASCII spaces within class tokens, and correct literal-token removal in generated Vanilla, React, Preact, Vue and Angular components. Share class serialization with Svelte.
 - Bind only the authored item and optional index aliases in Node, native C# and compiled targets. Use list `.length` for size and CSS structural selectors for first/last presentation. Remove the implicit `$loop` binding, preserve lexical shadowing, and give item/index aliases their own types. Ordinary declarations named `loop` or `index` remain valid.

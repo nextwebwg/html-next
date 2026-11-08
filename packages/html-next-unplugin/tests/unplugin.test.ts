@@ -579,7 +579,8 @@ describe("HTML Next unplugin", () => {
     // +218 B: declared row-field checks retain invalid results and warn once at their read sites.
     // Namespace-aware prototype attribute keys add 20 B here. Namespace writers and URI tables
     // remain absent; keep the limit at this exact measurement.
-    assert.ok(gzip <= 9_639, `direct benchmark entry is ${gzip} B gzip-6`);
+    // Automatic root forwarding adds its invocation input channel (+316 B gzip-6).
+    assert.ok(gzip <= 9_955, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

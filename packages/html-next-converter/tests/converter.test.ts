@@ -183,7 +183,7 @@ describe("framework converter", () => {
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!, { id: "case", className: "outer" })),
-      "<main id=\"case\" class=\"outer\" data-html-next-renderer=\"react\" component=\"x-app\"><article aria-label=\"Hello\" class=\"card ready\" style=\"border-radius:2px;color:red\" data-html-next-renderer=\"react\" data-x-card-prop-label=\"Hello\" data-x-card-state=\"label label=Hello\" component=\"x-card\"></article></main>");
+      "<main id=\"case\" class=\"outer\" data-html-next-renderer=\"react\" component=\"x-app\"><article aria-label=\"Hello\" class=\"card ready\" data-html-next-renderer=\"react\" data-x-card-prop-label=\"Hello\" data-x-card-state=\"label label=Hello\" component=\"x-card\" style=\"border-radius:2px;color:red\"></article></main>");
   });
 
   it("writes each controller's typed host beside its definition when asked, as the CLI does", async () => {
@@ -200,7 +200,7 @@ describe("framework converter", () => {
   it("does not infer React helpers from authored text", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-text-"));
     temporary.push(root);
-    await writeFile(join(root, "card.html"), '<template component="x-card" status="early" summary="Text."><article>attachNativeEvents( attachBoundControl( &lt;SanitizedHtml </article></template>');
+    await writeFile(join(root, "card.html"), '<template component="x-card" noforward status="early" summary="Text."><article>attachNativeEvents( attachBoundControl( &lt;SanitizedHtml </article></template>');
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["card.html"] });
     assert.deepEqual(manifest.output.artifacts.filter((artifact) => artifact.kind === "helper"), [{ kind: "helper", path: "react/render.tsx" }]);
@@ -1104,7 +1104,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("uses HTML parser recovery for duplicate attributes, as the browser does", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"),
-      '<template component="x-card" status="early" summary="Card."><article class="first" class="second">Ready</article></template>');
+      '<template component="x-card" noforward status="early" summary="Card."><article class="first" class="second">Ready</article></template>');
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(root, `recovered-${mode}`);
       await convertComponents({ mode, entries: ["x-card.html"], target: "vue", root, outDirectory });
@@ -1251,6 +1251,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
 
   it("emits a Vue component with only its authored-feature helper", async () => {
     const root = await fixture();
+    const file = join(root, "x-card.html");
+    await writeFile(file, (await readFile(file, "utf8")).replace('<template component="x-card"', '<template component="x-card" noforward'));
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["x-card.html"], target: "vue", root, outDirectory });
     const path = join(outDirectory, "vue", "XCard.vue");
@@ -1284,7 +1286,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("maps state, computed values, handlers, and typed events to Vue", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-converter-reactive-"));
     temporary.push(root);
-    await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
+    await writeFile(join(root, "counter.html"), `<template component="x-counter" noforward status="early" summary="Counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
         <computed name="double" from="$count * 2"></computed>
@@ -1559,7 +1561,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.doesNotMatch(helper, /\.setHTML\(/);
     assert.ok(manifest.output.artifacts.some(({ path, kind }) => path === "react/html.ts" && kind === "helper"));
     assert.deepEqual(manifest.package, {
-      dependencies: { parse5: "^8.0.1" },
+      dependencies: { parse5: "^8.0.1", cssstyle: "^6.2.0", "css-tree": "^3.2.1" },
       peerDependencies: { react: "^19.3.0" },
     });
     assert.deepEqual(JSON.parse(await readFile(join(outDirectory, manifest.output.inventory), "utf8")).package,

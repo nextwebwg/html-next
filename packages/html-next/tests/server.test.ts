@@ -46,7 +46,7 @@ describe("Node component rendering", () => {
     } finally { dom.window.close(); }
   });
   it("writes application root attributes independently of invocation forwarding", async () => {
-    const definition = parseComponent('<template component="x-root-output"><defs><state name="count" type="integer" value="0"></state></defs><main><b $attributes>Forwarded</b><output>{$count}</output></main></template>');
+    const definition = parseComponent('<template component="x-root-output" noforward><defs><state name="count" type="integer" value="0"></state></defs><main><b $attributes>Forwarded</b><output>{$count}</output></main></template>');
     const { html } = await renderComponents('<x-root-output data-input="Caller"></x-root-output>', {
       definitions: [definition], rootAttributes: { "x-root-output": { "data-app-layer": "0" } }, state: { '[data-app-layer="0"]': { count: 3 } },
     });

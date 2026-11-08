@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import ts from "typescript-compiler";
 import { preparedModuleRevision } from "./module-preparation.js";
+import { attributeHelperArtifact } from "./targets/attribute-helper.js";
 
 import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueBindings, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, importsVueHead, headHelperArtifact, requestsHelperArtifact, vueHostArtifact, vueBindingsArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
@@ -248,6 +249,11 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const props = vuePropsArtifact();
     if (files.has(props.path)) throw new Error(`Package artifact collision at ${props.path}.`);
     files.set(props.path, props.content);
+  }
+  if ([...files].some(([path, content]) => path.startsWith("vue/") && typeof content === "string" && /\bfrom\s+["']\.\/attributes["']/.test(content))) {
+    const attributes = attributeHelperArtifact("vue", GENERATOR_VERSION);
+    if (files.has(attributes.path)) throw new Error(`Package artifact collision at ${attributes.path}.`);
+    files.set(attributes.path, attributes.content);
   }
   if ([...files.values()].some((content) => typeof content === "string" && importsVueRequests(content))) {
     const requests = requestsHelperArtifact("vue");

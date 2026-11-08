@@ -56,7 +56,9 @@ Omitted props keep their invocation values or implicit defaults. Inputs must nam
 a selector that matches no invocation is an error. Values cross the worker boundary through
 Node's structured clone.
 
-Invocation attributes follow the proposal's [explicit forwarding rules](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
+Unconsumed invocation attributes apply first on the rendered root. A defining
+template with `noforward` forwards them only at explicit `$attributes` positions,
+following the proposal's [attribute forwarding rules](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
 The example forwards `id` through its authored `$attributes` directive.
 
 `rootAttributes` writes application-owned output attributes directly on lowered roots, keyed by

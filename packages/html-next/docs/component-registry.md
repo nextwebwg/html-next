@@ -11,8 +11,9 @@ component that another bundle defined ([one registry for each document](https://
 `componentRegistry`. Importing it reads no document.
 
 Framework adapters supply typed inputs to `attachComponent(root, definition, { props, attributes })`.
-The `attributes` record holds logical invocation inputs for the definition's authored `$attributes`
-destinations; it is separate from the framework's rendered root. Native factories that use
+The `attributes` record holds logical invocation inputs. By default they apply first on the rendered
+root, before authored attributes. With `noforward` on the defining template, only explicit
+`$attributes` destinations receive them. Native factories that use
 `manageComponentLifecycle` pass the same attachment options. The public proposal defines
 [which inputs are forwarded and how their order applies](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
 
@@ -46,8 +47,10 @@ Compiled Vanilla DOM is the output of `generateComponent`, `html-next build` and
 
 Adapters update a generated instance's HTML inputs with
 `setInvocationAttributes(root, attributes)` from `/generated-runtime`. Supply the complete current
-record: omitted keys are removed. The helper replays the template's authored `$attributes`
-destinations in source order, including destinations inside the root. Declared prop names and their
+record: omitted keys are removed. The helper replays the implicit first root destination and authored
+`$attributes` destinations in source order, including destinations inside the root. `noforward`
+removes the implicit destination. Convert framework style objects to HTML style text before
+supplying the record. Declared prop names and their
 HTML aliases are consumed; update those values through `componentRegistry.update`. Direct writes
 owned by the surrounding page remain on the rendered root.
 

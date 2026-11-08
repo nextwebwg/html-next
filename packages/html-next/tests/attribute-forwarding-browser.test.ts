@@ -8,16 +8,19 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { parseComponentResource } from "../src/source-parser.js";
 import { attributeForwardingHotFiles } from "./attribute-forwarding-hot.js";
 import { renderComponents } from "../src/server.js";
+import { launchParityBrowser } from "./pixel-parity.js";
 
-const source = `<template component="x-before"><button $attributes title="Template">Before</button></template>
-  <template component="x-after"><button title="Template" $attributes>After</button></template>
-  <template component="x-inner"><section><button $attributes>Inner</button></section></template>
-  <template component="x-none"><button>None</button></template>
-  <template component="x-consumed"><defs><prop name="title" type="string">Title.</prop></defs><button $attributes>{$title}</button></template>
-  <template component="x-future"><defs><state name="forward" type="boolean" value="false"></state></defs><article><button $if="$forward" $attributes>Future</button><i $if="not $forward">Hidden</i></article></template>
-  <template component="x-bound-before"><defs><state name="local" type="string" value="Local"></state></defs><button from:title="$local" $attributes>Bound before</button></template>
-  <template component="x-bound-after"><defs><state name="local" type="string" value="Local"></state></defs><button $attributes from:title="$local">Bound after</button></template>
-  <template component="x-page"><defs><state name="caller" type="string" from="'Caller'"></state></defs><main>
+const source = `<template component="x-auto"><button title="Template">Auto</button></template>
+<template noforward component="x-before"><button $attributes title="Template">Before</button></template>
+  <template noforward component="x-after"><button title="Template" $attributes>After</button></template>
+  <template noforward component="x-inner"><section><button $attributes>Inner</button></section></template>
+  <template noforward component="x-none"><button>None</button></template>
+  <template noforward component="x-consumed"><defs><prop name="title" type="string">Title.</prop></defs><button $attributes>{$title}</button></template>
+  <template noforward component="x-future"><defs><state name="forward" type="boolean" value="false"></state></defs><article><button $if="$forward" $attributes>Future</button><i $if="not $forward">Hidden</i></article></template>
+  <template noforward component="x-bound-before"><defs><state name="local" type="string" value="Local"></state></defs><button from:title="$local" $attributes>Bound before</button></template>
+  <template noforward component="x-bound-after"><defs><state name="local" type="string" value="Local"></state></defs><button $attributes from:title="$local">Bound after</button></template>
+  <template noforward component="x-page"><defs><state name="caller" type="string" from="'Caller'"></state></defs><main>
+    <div data-case="auto"><x-auto id="auto-control" from:title="$caller" from:aria-label="$caller" from:class="$caller"></x-auto></div>
     <div data-case="before"><x-before from:title="$caller"></x-before></div>
     <div data-case="after"><x-after from:title="$caller"></x-after></div>
     <div data-case="inner"><x-inner from:title="$caller"></x-inner></div>
@@ -41,7 +44,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("ordered explicit att
 
   for (const [engine, type] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
     it(`${engine} retains caller inputs across compiled hot replacement and marker changes`, async () => {
-      const browser = await type.launch();
+      const browser = await launchParityBrowser(type);
       try {
         const page = await browser.newPage();
         const errors: string[] = [];
@@ -65,11 +68,11 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("ordered explicit att
       } finally { await browser.close(); }
     });
     for (const hydrate of [false, true]) it(`${engine} carries page writes without leaking forwarded inputs across root choices (${hydrate ? "hydrated" : "fresh"})`, async () => {
-      const source = `<template component="x-choice"><defs><state name="alternate" type="boolean" value="false"></state></defs><template $match><section $when="$alternate" class="own" style="display: block">Other</section><button $else $attributes>Initial</button></template></template>`;
+      const source = `<template noforward component="x-choice"><defs><state name="alternate" type="boolean" value="false"></state></defs><template $match><section $when="$alternate" class="own" style="display: block">Other</section><button $else $attributes>Initial</button></template></template>`;
       const definitions = parseComponentResource(source, "attribute-root-choice.html").definitions;
       const invocation = '<x-choice title="Caller" class="caller" style="color: red"></x-choice>';
       const html = hydrate ? (await renderComponents(invocation, { definitions })).html : source + invocation;
-      const browser = await type.launch({ headless: true });
+      const browser = await launchParityBrowser(type);
       try {
         const page = await browser.newPage();
         await page.setContent(html);
@@ -103,7 +106,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("ordered explicit att
     for (const hydrate of [false, true]) it(`${engine} preserves precedence, destinations and future inputs (${hydrate ? "hydrated" : "fresh"})`, async () => {
       const definitions = parseComponentResource(source, "attribute-forwarding-browser.html").definitions;
       const html = hydrate ? (await renderComponents("<x-page></x-page>", { definitions })).html : source + "<x-page></x-page>";
-      const browser = await type.launch({ headless: true });
+      const browser = await launchParityBrowser(type);
       try {
         const page = await browser.newPage();
         const errors: string[] = [];
@@ -119,6 +122,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("ordered explicit att
         const snapshot = () => page.evaluate(() => {
           const get = (caseName: string, selector: string) => document.querySelector(`[data-case="${caseName}"] ${selector}`);
           return {
+            automatic: [get("auto", "button")?.id, get("auto", "button")?.getAttribute("title"), get("auto", "button")?.getAttribute("aria-label"), get("auto", "button")?.getAttribute("class")],
             before: get("before", "button")?.getAttribute("title"),
             after: get("after", "button")?.getAttribute("title"),
             innerRoot: get("inner", "section")?.getAttribute("title"),
@@ -129,7 +133,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("ordered explicit att
             futureRoot: get("future", "article")?.getAttribute("title"),
           };
         });
-        const expected = (caller: string) => ({ before: "Template", after: caller, innerRoot: null, inner: caller, none: null, consumedTitle: null, consumedText: caller, futureRoot: null });
+        const expected = (caller: string) => ({ automatic: ["auto-control", "Template", caller, caller], before: "Template", after: caller, innerRoot: null, inner: caller, none: null, consumedTitle: null, consumedText: caller, futureRoot: null });
         await settle();
         assert.deepEqual(await snapshot(), expected("Caller"));
         await page.evaluate(() => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("main")).state.caller = "Updated"; });

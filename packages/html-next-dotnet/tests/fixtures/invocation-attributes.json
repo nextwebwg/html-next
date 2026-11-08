@@ -56,7 +56,7 @@
   },
   {
     "name": "root-literal-then-forwarded",
-    "source": "<template component=\"x-leaf\"><b data-local=\"yes\" $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
+    "source": "<template noforward component=\"x-leaf\"><b data-local=\"yes\" $attributes>Leaf</b></template><template component=\"x-page\"><main><x-leaf id=\"leaf\"></x-leaf></main></template>",
     "expected": "<main><b data-local=\"yes\" id=\"leaf\">Leaf</b></main>"
   },
   {
@@ -66,7 +66,7 @@
   },
   {
     "name": "delegation",
-    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template component=\"x-wrap\"><x-leaf data-middle=\"yes\" $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap id=\"leaf\"></x-wrap></main></template>",
+    "source": "<template component=\"x-leaf\"><b $attributes>Leaf</b></template><template noforward component=\"x-wrap\"><x-leaf data-middle=\"yes\" $attributes></x-leaf></template><template component=\"x-page\"><main><x-wrap id=\"leaf\"></x-wrap></main></template>",
     "expected": "<main><b data-middle=\"yes\" id=\"leaf\">Leaf</b></main>"
   },
   {

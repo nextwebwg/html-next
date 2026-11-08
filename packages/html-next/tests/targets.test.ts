@@ -22,6 +22,7 @@ import { generateComponent, generateReactComponent, generateVueComponent, reactP
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
 import { attributeHelperArtifact } from "../src/targets/attribute-helper.js";
+import { inlineStyleArtifacts } from "../src/targets/inline-style.js";
 import { expressionHelpersSource } from "../src/targets/vue-lowering.js";
 import { formattingSource } from "./formatting-fixture.js";
 
@@ -31,6 +32,8 @@ const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 /** Resolves a converted component's shared helper imports to the modules a build ships beside it. */
 const generatedHelpers = (target: "vue" | "react"): Plugin => ({ name: "generated-helpers", setup(bundler) {
   const artifacts: Record<string, () => { readonly content: string }> = { host: vueHostArtifact, props: target === "vue" ? vuePropsArtifact : reactPropsArtifact, html: vueHtmlArtifact, control: vueControlArtifact, render: reactRenderArtifact, attributes: () => attributeHelperArtifact("vue", "test") };
+  artifacts.style = () => inlineStyleArtifacts(target, "test").find(artifact => artifact.path.endsWith("/style.js"))!;
+  bundler.onResolve({ filter: /^\.\/style\/style\.js$/ }, () => ({ path: "style", namespace: "generated-helper" }));
   bundler.onResolve({ filter: /^\.\/(?:host|props|html|control|render|attributes)$/ }, (args) => ({ path: args.path.slice(2), namespace: "generated-helper" }));
   bundler.onLoad({ filter: /.*/, namespace: "generated-helper" }, (args) => ({ contents: artifacts[args.path]!().content, loader: args.path === "render" ? "tsx" : "ts", resolveDir: packageRoot }));
 } });
@@ -41,7 +44,7 @@ const run = promisify(execFile);
 // `props` supplies the `<prop>` declarations for the bindings in `template`.
 function componentSource(tag: string, props: string, template: string): string {
   const group = props === "" ? "" : `<props>${props}</props>`;
-  return `<template component="${tag}" status="experimental" summary="A target compiler fixture.">${group}${template}</template>`;
+  return `<template component="${tag}" noforward status="experimental" summary="A target compiler fixture.">${group}${template}</template>`;
 }
 
 function generated(source: string): Map<string, string> {
@@ -99,7 +102,7 @@ function importsOf(source: string): string[] {
   return [...source.matchAll(/^(?:import|\} from)[^'\n]*'([^']+)'/gm)].map((match) => match[1]!);
 }
 
-const featureSource = `<template component="x-feature" status="experimental" summary="Every convertible construct." controller="./x-feature.js">
+const featureSource = `<template component="x-feature" noforward status="experimental" summary="Every convertible construct." controller="./x-feature.js">
   <defs>
     <prop name="label" type="string" default="Items">Heading.</prop>
     <prop name="items" type="list(object({ id: string, name: string, done: boolean }))">Rows.</prop>
@@ -482,6 +485,7 @@ describe("official target compilers", () => {
     try {
       await writeFile(join(directory, "XOptional.ts"), compileVue(vue, "XOptional.vue"));
       await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await writeFile(join(directory, "attributes.ts"), attributeHelperArtifact("vue", "test").content);
       await writeFile(join(directory, "host.ts"), vueHostArtifact().content);
       await writeFile(join(directory, "consumer.ts"), [
         'import XOptional from "./XOptional";',
@@ -524,6 +528,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     try {
       await writeFile(join(directory, "component.ts"), compileVue(checked, "XConcatTypes.vue"));
       await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await writeFile(join(directory, "attributes.ts"), attributeHelperArtifact("vue", "test").content);
       await writeFile(join(directory, "host.ts"), vueHostArtifact().content);
       await run("corepack", [
         "pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck",
@@ -801,7 +806,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       platform: "node",
       write: false,
       logLevel: "silent",
-      plugins: [{ name: "generated-vue-helpers", setup(bundler) {
+      plugins: [vueHelpers, { name: "generated-vue-helpers", setup(bundler) {
         bundler.onResolve({ filter: /^\.\/host$/ }, () => ({ path: "host", namespace: "generated-vue-host" }));
         bundler.onLoad({ filter: /^host$/, namespace: "generated-vue-host" }, () => ({ contents: vueHostArtifact().content, loader: "ts", resolveDir: fileURLToPath(new URL("..", import.meta.url)) }));
         bundler.onResolve({ filter: /^\.\/props$/ }, () => ({ path: "props", namespace: "generated-vue-props" }));
@@ -814,14 +819,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         .then((html: string) => html.replace(/<!--(?:\[|\]|teleport start|teleport end)?-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
     // The styles select the root as `:host`, so each arm's root carries the tag as a class, the
     // converted-root marker, and the attribute of the component's own markup.
-    assert.equal(await render({}), '<button class="x-action action" type="button" data-hn data-hn-x-action>Go</button>');
+    assert.equal(await render({}), '<button class="x-action action" data-hn data-hn-x-action type="button">Go</button>');
     assert.equal(await render({ as: "a", href: "/next" }), '<a class="x-action action" data-hn data-hn-x-action href="/next" data-x-action-prop-as="a" data-x-action-prop-href="/next">Go</a>');
     const listed = await render({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] });
     assert.match(listed, /data-x-action-prop-tags="red, blue"/);
     assert.match(listed, /data-x-action-prop-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
     assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a class="x-action action" data-hn data-hn-x-action data-x-action-prop-as="a" data-x-action-prop-disabled="true" data-x-action-prop-href="/next">Go</a>');
-    assert.doesNotMatch(await render({ constructor: "safe" }), / constructor=/);
+    assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
     await transform(vanilla, { loader: "js", format: "esm" });

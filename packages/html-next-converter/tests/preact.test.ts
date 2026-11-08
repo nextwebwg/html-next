@@ -39,7 +39,7 @@ for (const mode of ["application", "library"] as const) it(`converts a typed ${m
   const root = await mkdtemp(join(tmpdir(), "html-next-preact-"));
   roots.push(root);
   await mkdir(join(root, "node_modules"));
-  for (const name of ["preact", "preact-render-to-string", "parse5"]) {
+  for (const name of ["preact", "preact-render-to-string", "parse5", "cssstyle", "css-tree"]) {
     await symlink(fileURLToPath(new URL(`../node_modules/${name}`, import.meta.url)), join(root, "node_modules", name), "dir");
   }
   await writeFile(join(root, "package.json"), '{"type":"module"}');

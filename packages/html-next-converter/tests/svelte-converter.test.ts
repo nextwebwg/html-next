@@ -182,7 +182,7 @@ it("lowers state, computed text, and declarative handlers to Svelte runes", asyn
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
   assert.match(source, /\$state<number>\(0\)/);
   assert.match(source, /cycleCheckedComputed/);
-  assert.match(source, /onclick=\{increment\}/);
+  assert.match(source, /"onclick": increment/);
   compile(source, { filename: "XCounter.svelte", generate: "client" });
   compile(source, { filename: "XCounter.svelte", generate: "server" });
 });

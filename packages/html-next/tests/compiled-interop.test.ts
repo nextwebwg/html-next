@@ -69,13 +69,15 @@ describe("compiled roots in the live runtime's inspection and serialization", as
   const rows = [1, 2, 3].map((id) => ({ id, label: `r${id}`, tags: id === 2 ? ["t"] : [] }));
 
   it("replays replacement HTML inputs at authored destinations without assigning props", async () => {
-    for (const [markup, title, destination] of [
-      ['<button $attributes title="Template">Before</button>', 'Template', 'button'],
-      ['<button title="Template" $attributes>After</button>', 'Updated', 'button'],
-      ['<section><button $attributes>Inner</button></section>', 'Updated', 'button'],
-      ['<button>None</button>', null, 'button'],
+    for (const [markup, title, destination, manual] of [
+      ['<button $attributes title="Template">Before</button>', 'Template', 'button', true],
+      ['<button title="Template" $attributes>After</button>', 'Updated', 'button', true],
+      ['<section><button $attributes>Inner</button></section>', 'Updated', 'button', true],
+      ['<button>None</button>', null, 'button', true],
+      ['<button>Automatic</button>', 'Updated', 'button', false],
+      ['<button title="Template">Automatic first</button>', 'Template', 'button', false],
     ] as const) {
-      const definition = parseComponent(`<template component="x-input">${markup}</template>`, "file:///input.html");
+      const definition = parseComponent(`<template component="x-input"${manual ? " noforward" : ""}>${markup}</template>`, "file:///input.html");
       const { runtime, document } = await load(definition);
       const root = runtime.factory({ attributes: { title: "Caller", "data-old": "Old" } });
       document.body.append(root);

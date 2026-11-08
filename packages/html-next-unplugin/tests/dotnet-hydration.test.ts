@@ -203,7 +203,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       assert.equal(record[0], 1);
       assert.deepEqual(decodeHydrationValue(record[1]), { "x-card": {
         explicit: ["title"], inputs: { title: { value: "Server title", source: "value", present: true, provided: true, producer: false } },
-        props: { title: "Server title" }, state: { draft: "Server title" }, initialized: ["draft"],
+        props: { title: "Server title" }, state: { draft: "Server title" }, initialized: ["draft"], attributes: [],
       } });
       input.value = "Early draft";
       window.eval(bundle);

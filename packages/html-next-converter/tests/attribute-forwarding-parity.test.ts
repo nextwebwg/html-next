@@ -20,26 +20,28 @@ import { compiledFixtures } from "../../html-next/tests/hydration-fixtures.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const nativeStyleInput = { "--caller": "9px", width: 12, lineHeight: 1.5, aspectRatio: 2, fontSizeAdjust: 0.5 };
-const dynamicSource = `<template component="x-native-style-leaf"><button $attributes>Native style</button></template>
-<template component="x-native-style-wrapper"><x-native-style-leaf $attributes style:--local="'2px'"></x-native-style-leaf></template>
-<template component="x-style-prop"><defs><prop name="style" type="string" default="color: green">Style text.</prop></defs><output>{$style}</output></template>
-<template component="x-style-before"><defs><state name="local" type="string" value="--local: 2px"></state><handler name="change"><set name="local" value="--local: 4px"></set></handler></defs><button from:style="$local" $attributes style:--extra="'3px'" on:click="change">Before style</button></template>
-<template component="x-style-after"><defs><state name="local" type="string" value="--local: 2px"></state><handler name="change"><set name="local" value="--local: 4px"></set></handler></defs><button $attributes from:style="$local" style:--extra="'3px'" on:click="change">After style</button></template>
-<template component="x-class-before"><defs><state name="active" type="boolean" value="true"></state><handler name="toggle"><set name="active" expr:value="not $active"></set></handler></defs><button class:active="$active" $attributes on:click="toggle">Before class</button></template>
-<template component="x-class-after"><defs><state name="active" type="boolean" value="true"></state><handler name="toggle"><set name="active" expr:value="not $active"></set></handler></defs><button $attributes class:active="$active" on:click="toggle">After class</button></template>
-<template component="x-bound-before"><defs><state name="local" type="string" value="Local"></state><handler name="change"><set name="local" value="Changed"></set></handler></defs><button from:title="$local" $attributes on:click="change">Before binding</button></template>
-<template component="x-bound-after"><defs><state name="local" type="string" value="Local"></state><handler name="change"><set name="local" value="Changed"></set></handler></defs><button $attributes from:title="$local" on:click="change">After binding</button></template>
-<template component="x-before"><button $attributes title="Template">Before</button></template>
-<template component="x-after"><button title="Template" $attributes>After</button></template>
-<template component="x-inner"><section><button $attributes>Inner</button></section></template>
-<template component="x-none"><button>None</button></template>
-<template component="x-consumed"><defs><prop name="title" type="string">Title.</prop></defs><button $attributes>{$title}</button></template>
-<template component="x-local-attribute"><defs><state name="rows" type="list(number)" value="[1]"></state><state name="divisor" type="number" value="1"></state><handler name="reject"><set name="divisor" value="0"></set></handler></defs><section><button id="reject-local" on:click="reject">Reject local</button><i $each="row of $rows" from:aria-selected="$row / $divisor = 1">Row</i></section></template>
-<template component="x-selected-child"><defs><prop name="kind" type="keyword" values="text, number" default="number">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop></defs><output>{$kind}:{$value}</output></template>
-<template component="x-selected-wrap"><x-selected-child $attributes></x-selected-child></template>
-<template component="x-selected-owner"><defs><state name="mode" type="string" value="text"></state><state name="entry" type="string" value="7"></state><handler name="reject"><set name="mode" value="bad space"></set><set name="entry" value="8"></set></handler></defs><section><x-selected-wrap from:kind="$mode" from:value="$entry"></x-selected-wrap><button id="reject-selector" on:click="reject">Reject selector</button></section></template>
-<template component="x-page"><defs><state name="caller" type="string" from="'Caller'"></state><state name="callerStyle" type="string" from="'--caller: 9px; --local: 9px'"></state><state name="styleDivisor" type="number" value="1"></state><handler name="rejectStyle"><set name="styleDivisor" value="0"></set></handler><handler name="validStyle"><set name="styleDivisor" value="2"></set></handler><handler name="next"><set name="caller" value="Updated"></set><set name="callerStyle" value="--caller: 8px; --local: 8px"></set></handler><handler name="remove"><set name="caller" expr:value="null"></set><set name="callerStyle" expr:value="null"></set></handler></defs><main>
+const dynamicSource = `<template component="x-auto"><button title="Template">Auto</button></template>
+<template noforward component="x-native-style-leaf"><button $attributes>Native style</button></template>
+<template noforward component="x-native-style-wrapper"><x-native-style-leaf $attributes style:--local="'2px'"></x-native-style-leaf></template>
+<template noforward component="x-style-prop"><defs><prop name="style" type="string" default="color: green">Style text.</prop></defs><output>{$style}</output></template>
+<template noforward component="x-style-before"><defs><state name="local" type="string" value="--local: 2px"></state><handler name="change"><set name="local" value="--local: 4px"></set></handler></defs><button from:style="$local" $attributes style:--extra="'3px'" on:click="change">Before style</button></template>
+<template noforward component="x-style-after"><defs><state name="local" type="string" value="--local: 2px"></state><handler name="change"><set name="local" value="--local: 4px"></set></handler></defs><button $attributes from:style="$local" style:--extra="'3px'" on:click="change">After style</button></template>
+<template noforward component="x-class-before"><defs><state name="active" type="boolean" value="true"></state><handler name="toggle"><set name="active" expr:value="not $active"></set></handler></defs><button class:active="$active" $attributes on:click="toggle">Before class</button></template>
+<template noforward component="x-class-after"><defs><state name="active" type="boolean" value="true"></state><handler name="toggle"><set name="active" expr:value="not $active"></set></handler></defs><button $attributes class:active="$active" on:click="toggle">After class</button></template>
+<template noforward component="x-bound-before"><defs><state name="local" type="string" value="Local"></state><handler name="change"><set name="local" value="Changed"></set></handler></defs><button from:title="$local" $attributes on:click="change">Before binding</button></template>
+<template noforward component="x-bound-after"><defs><state name="local" type="string" value="Local"></state><handler name="change"><set name="local" value="Changed"></set></handler></defs><button $attributes from:title="$local" on:click="change">After binding</button></template>
+<template noforward component="x-before"><button $attributes title="Template">Before</button></template>
+<template noforward component="x-after"><button title="Template" $attributes>After</button></template>
+<template noforward component="x-inner"><section><button $attributes>Inner</button></section></template>
+<template noforward component="x-none"><button>None</button></template>
+<template noforward component="x-consumed"><defs><prop name="title" type="string">Title.</prop></defs><button $attributes>{$title}</button></template>
+<template noforward component="x-local-attribute"><defs><state name="rows" type="list(number)" value="[1]"></state><state name="divisor" type="number" value="1"></state><handler name="reject"><set name="divisor" value="0"></set></handler></defs><section><button id="reject-local" on:click="reject">Reject local</button><i $each="row of $rows" from:aria-selected="$row / $divisor = 1">Row</i></section></template>
+<template noforward component="x-selected-child"><defs><prop name="kind" type="keyword" values="text, number" default="number">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop></defs><output>{$kind}:{$value}</output></template>
+<template noforward component="x-selected-wrap"><x-selected-child $attributes></x-selected-child></template>
+<template noforward component="x-selected-owner"><defs><state name="mode" type="string" value="text"></state><state name="entry" type="string" value="7"></state><handler name="reject"><set name="mode" value="bad space"></set><set name="entry" value="8"></set></handler></defs><section><x-selected-wrap from:kind="$mode" from:value="$entry"></x-selected-wrap><button id="reject-selector" on:click="reject">Reject selector</button></section></template>
+<template noforward component="x-page"><defs><state name="caller" type="string" from="'Caller'"></state><state name="callerStyle" type="string" from="'--caller: 9px; --local: 9px'"></state><state name="styleDivisor" type="number" value="1"></state><handler name="rejectStyle"><set name="styleDivisor" value="0"></set></handler><handler name="validStyle"><set name="styleDivisor" value="2"></set></handler><handler name="next"><set name="caller" value="Updated"></set><set name="callerStyle" value="--caller: 8px; --local: 8px"></set></handler><handler name="remove"><set name="caller" expr:value="null"></set><set name="callerStyle" expr:value="null"></set></handler></defs><main>
 <div data-case="modified-style-prop"><x-style-prop from:style="$callerStyle" style:--local="concat(2 / $styleDivisor, 'px')"></x-style-prop></div><div data-case="declared-style"><x-style-prop from:style="$callerStyle"></x-style-prop></div><div data-case="style-before"><x-style-before from:style="$callerStyle"></x-style-before></div><div data-case="style-after"><x-style-after from:style="$callerStyle"></x-style-after></div>
+<div data-case="auto"><x-auto id="auto-control" from:title="$caller" from:aria-label="$caller" from:class="$caller" from:style="$callerStyle"></x-auto></div>
 <div data-case="before"><x-before from:title="$caller"></x-before></div>
 <div data-case="after"><x-after from:title="$caller"></x-after></div>
 <div data-case="inner"><x-inner from:title="$caller"></x-inner></div>
@@ -53,55 +55,55 @@ const dynamicSource = `<template component="x-native-style-leaf"><button $attrib
 const nativeFixtures = JSON.parse(await readFile(new URL("../../html-next-dotnet/tests/fixtures/attribute-forwarding.json", import.meta.url), "utf8")) as readonly { name: string; source: string; expected: string }[];
 const fixtures = [...nativeFixtures, ...[false, true].map(callerLast => ({
   name: `forwarded-keyed-style-${callerLast ? "caller" : "template"}-wins`,
-  source: `<template component="x-subject"><button ${callerLast ? 'style:--local="\'2px\'" $attributes' : '$attributes style:--local="\'2px\'"'}>Styled</button></template><template component="x-page"><main><x-subject style="--caller: 0px; --local: 9px"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><button ${callerLast ? 'style:--local="\'2px\'" $attributes' : '$attributes style:--local="\'2px\'"'}>Styled</button></template><template noforward component="x-page"><main><x-subject style="--caller: 0px; --local: 9px"></x-subject></main></template>`,
   expected: `<main><button style="--caller: 0px; --local: ${callerLast ? 9 : 2}px;">Styled</button></main>`,
 })), ...[false, true].map(callerLast => ({
   name: `forwarded-bound-style-${callerLast ? "caller" : "template"}-wins`,
-  source: `<template component="x-subject"><defs><prop name="local" type="string" default="--local: 2px">Local style.</prop></defs><button ${callerLast ? 'from:style="$local" $attributes' : '$attributes from:style="$local"'}>Styled</button></template><template component="x-page"><main><x-subject style="--caller: 0px; --local: 9px"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><defs><prop name="local" type="string" default="--local: 2px">Local style.</prop></defs><button ${callerLast ? 'from:style="$local" $attributes' : '$attributes from:style="$local"'}>Styled</button></template><template noforward component="x-page"><main><x-subject style="--caller: 0px; --local: 9px"></x-subject></main></template>`,
   expected: `<main><button style="${callerLast ? '--caller: 0px; --local: 9px;' : '--local: 2px;'}">Styled</button></main>`,
 })), ...[false, true].map(callerLast => ({
   name: `forwarded-important-style-${callerLast ? "caller" : "template"}-wins`,
-  source: `<template component="x-subject"><button ${callerLast ? 'style="color: red !important" $attributes' : '$attributes style="color: red !important"'}>Styled</button></template><template component="x-page"><main><x-subject style="color: blue"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><button ${callerLast ? 'style="color: red !important" $attributes' : '$attributes style="color: red !important"'}>Styled</button></template><template noforward component="x-page"><main><x-subject style="color: blue"></x-subject></main></template>`,
   expected: `<main><button style="color: ${callerLast ? 'blue' : 'red !important'};">Styled</button></main>`,
 })), ...[0, 1, 2].map(marker => {
   const operations = ['from:style="$local"', 'style:--extra="\'3px\'"'];
   operations.splice(marker, 0, '$attributes');
   return {
     name: `forwarded-whole-and-keyed-style-marker-${marker}`,
-    source: `<template component="x-subject"><defs><prop name="local" type="string" default="--local: 2px">Local style.</prop></defs><button ${operations.join(' ')}>Styled</button></template><template component="x-page"><main><x-subject style="--caller: 9px; --local: 9px"></x-subject></main></template>`,
+    source: `<template noforward component="x-subject"><defs><prop name="local" type="string" default="--local: 2px">Local style.</prop></defs><button ${operations.join(' ')}>Styled</button></template><template noforward component="x-page"><main><x-subject style="--caller: 9px; --local: 9px"></x-subject></main></template>`,
     expected: `<main><button style="${marker === 0 ? '--local: 2px;' : '--caller: 9px; --local: 9px;'}${marker === 2 ? '' : ' --extra: 3px;'}">Styled</button></main>`,
   };
 }), {
   name: "declared-style-prop-is-text",
-  source: `<template component="x-subject"><defs><prop name="style" type="string">Style text.</prop></defs><output $attributes>{$style}</output></template><template component="x-page"><main><x-subject style="color: blue" title="Caller"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><defs><prop name="style" type="string">Style text.</prop></defs><output $attributes>{$style}</output></template><template noforward component="x-page"><main><x-subject style="color: blue" title="Caller"></x-subject></main></template>`,
   expected: '<main><output title="Caller">color: blue</output></main>',
 }, {
   name: "forwarded-style-text-to-declared-prop",
-  source: `<template component="x-child"><defs><prop name="style" type="string">Style text.</prop></defs><output $attributes>{$style}</output></template><template component="x-wrap"><x-child $attributes></x-child></template><template component="x-page"><main><x-wrap style="color: blue" title="Caller"></x-wrap></main></template>`,
+  source: `<template noforward component="x-child"><defs><prop name="style" type="string">Style text.</prop></defs><output $attributes>{$style}</output></template><template noforward component="x-wrap"><x-child $attributes></x-child></template><template noforward component="x-page"><main><x-wrap style="color: blue" title="Caller"></x-wrap></main></template>`,
   expected: '<main><output title="Caller">color: blue</output></main>',
 }, {
   name: "declared-style-prop-null-restores-default",
-  source: `<template component="x-subject"><defs><prop name="style" type="string" default="color: green">Style text.</prop></defs><output $attributes>{$style}</output></template><template component="x-page"><main><x-subject from:style="null"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><defs><prop name="style" type="string" default="color: green">Style text.</prop></defs><output $attributes>{$style}</output></template><template noforward component="x-page"><main><x-subject from:style="null"></x-subject></main></template>`,
   expected: '<main><output>color: green</output></main>',
 }, {
   name: "invocation-style-modifier-updates-declared-prop",
-  source: `<template component="x-subject"><defs><prop name="style" type="string">Style text.</prop></defs><output $attributes>{$style}</output></template><template component="x-page"><main><x-subject style="--caller: 0px" style:--local="'2px'"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><defs><prop name="style" type="string">Style text.</prop></defs><output $attributes>{$style}</output></template><template noforward component="x-page"><main><x-subject style="--caller: 0px" style:--local="'2px'"></x-subject></main></template>`,
   expected: '<main><output>--caller: 0px; --local: 2px;</output></main>',
 }, {
   name: "forwarded-important-style-only",
-  source: `<template component="x-subject"><button $attributes>Styled</button></template><template component="x-page"><main><x-subject style="color: red !important"></x-subject></main></template>`,
+  source: `<template noforward component="x-subject"><button $attributes>Styled</button></template><template noforward component="x-page"><main><x-subject style="color: red !important"></x-subject></main></template>`,
   expected: '<main><button style="color: red !important;">Styled</button></main>',
 }, {
   name: "forwarded-list-prop",
-  source: `<template component="x-child"><defs><prop name="items" type="list(integer)" default="[]">Items.</prop></defs><section><output>{$items.length}</output><b $each="item of $items">{$item}</b></section></template><template component="x-wrap"><x-child $attributes></x-child></template><template component="x-page"><main><x-wrap items="[1, 2]"></x-wrap></main></template>`,
+  source: `<template noforward component="x-child"><defs><prop name="items" type="list(integer)" default="[]">Items.</prop></defs><section><output>{$items.length}</output><b $each="item of $items">{$item}</b></section></template><template noforward component="x-wrap"><x-child $attributes></x-child></template><template noforward component="x-page"><main><x-wrap items="[1, 2]"></x-wrap></main></template>`,
   expected: '<main><section><output>2</output><b>1</b><b>2</b></section></main>',
 }, {
   name: "forwarded-object-prop",
-  source: `<template component="x-child"><defs><prop name="person" type="object({ name: string })" required>Person.</prop></defs><output>{$person.name}</output></template><template component="x-wrap"><x-child $attributes></x-child></template><template component="x-page"><main><x-wrap person="{ name: 'Ada' }"></x-wrap></main></template>`,
+  source: `<template noforward component="x-child"><defs><prop name="person" type="object({ name: string })" required>Person.</prop></defs><output>{$person.name}</output></template><template noforward component="x-wrap"><x-child $attributes></x-child></template><template noforward component="x-page"><main><x-wrap person="{ name: 'Ada' }"></x-wrap></main></template>`,
   expected: '<main><output>Ada</output></main>',
 }, ...["number", "bad space"].map(kind => ({
   name: `forwarded-selected-prop-${kind === "number" ? "number" : "rejected-selector"}`,
-  source: `<template component="x-child"><defs><prop name="kind" type="keyword" values="text, number" default="number">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop></defs><output>{$value = 7}</output></template><template component="x-wrap"><x-child $attributes></x-child></template><template component="x-page"><main><x-wrap value="7" kind="${kind}"></x-wrap></main></template>`,
+  source: `<template noforward component="x-child"><defs><prop name="kind" type="keyword" values="text, number" default="number">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop></defs><output>{$value = 7}</output></template><template noforward component="x-wrap"><x-child $attributes></x-child></template><template noforward component="x-page"><main><x-wrap value="7" kind="${kind}"></x-wrap></main></template>`,
   expected: '<main><output>true</output></main>',
 }))];
 const unicodeFixture = fixtures.findIndex(fixture => fixture.name === "unicode-prop-exact-case");
@@ -282,7 +284,7 @@ const target = document.querySelector("#mount")!; const props = { [createAttachm
           await page.waitForSelector('[data-case="after"] button', { state: "attached" });
           const snapshot = () => page.evaluate(() => {
             const get = (name: string, selector: string) => document.querySelector(`[data-case="${name}"] ${selector}`);
-            return { before: get("before", "button")?.getAttribute("title"), after: get("after", "button")?.getAttribute("title"), innerRoot: get("inner", "section")?.getAttribute("title"), inner: get("inner", "button")?.getAttribute("title"), none: get("none", "button")?.getAttribute("title"), consumedTitle: get("consumed", "button")?.getAttribute("title"), consumedText: get("consumed", "button")?.textContent };
+            return { automatic: [get("auto", "button")?.id, get("auto", "button")?.getAttribute("title"), get("auto", "button")?.getAttribute("aria-label"), get("auto", "button")?.getAttribute("class")], before: get("before", "button")?.getAttribute("title"), after: get("after", "button")?.getAttribute("title"), innerRoot: get("inner", "section")?.getAttribute("title"), inner: get("inner", "button")?.getAttribute("title"), none: get("none", "button")?.getAttribute("title"), consumedTitle: get("consumed", "button")?.getAttribute("title"), consumedText: get("consumed", "button")?.textContent };
           });
           await assertStaticCases(page);
           if (target === "react" || target === "preact") {
@@ -295,7 +297,7 @@ const target = document.querySelector("#mount")!; const props = { [createAttachm
             assert.deepEqual(styles[0]!.slice(0, 4), ['9px', '12px', '1.5', '2 / 1']);
             assert.equal(await page.locator('#native-style-control button').evaluate((element: HTMLElement) => element.style.getPropertyValue('--local').trim()), '2px');
           }
-          const expected = (caller: string) => ({ before: "Template", after: caller, innerRoot: null, inner: caller, none: null, consumedTitle: null, consumedText: caller });
+          const expected = (caller: string) => ({ automatic: ["auto-control", "Template", caller, caller], before: "Template", after: caller, innerRoot: null, inner: caller, none: null, consumedTitle: null, consumedText: caller });
           const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
           await settle(); assert.deepEqual(hydrationDiagnostics(errors), expectedDiagnostics); assert.deepEqual(await snapshot(), expected("Caller"));
           if (target === "svelte") assert.equal(await page.evaluate(() => (window as any).attributeRoot === document.querySelector('#mount > main')), true);

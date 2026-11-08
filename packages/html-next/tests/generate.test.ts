@@ -25,7 +25,7 @@ const expectedPaths = [
 // `demo-action` derives the component name `DemoAction`; targets are inferred from the
 // bindings the caller writes in `template`.
 function componentSource(template: string): string {
-  return `<template component="demo-action" status="experimental" summary="An action fixture.">
+  return `<template component="demo-action" noforward status="experimental" summary="An action fixture.">
     <props>
       <prop name="destination" type="string">Submission destination.</prop>
       <prop name="disabled" type="boolean" default="false">Whether the action is disabled.</prop>
@@ -36,7 +36,7 @@ function componentSource(template: string): string {
 }
 
 function audioSource(): string {
-  return `<template component="demo-player" status="experimental" summary="An audio fixture.">
+  return `<template component="demo-player" noforward status="experimental" summary="An audio fixture.">
     <audio controls><slot></slot></audio>
   </template>`;
 }
@@ -66,7 +66,7 @@ describe("generateComponent", () => {
     assert.match(vue, /referenceIndex\(byId, 42\)/);
   });
   it("writes whitespace between inline content in each framework's kept form", async () => {
-    const definition = parseComponent(`<template component="x-spaces"><div>
+    const definition = parseComponent(`<template component="x-spaces" noforward><div>
       <p><strong>Package:</strong> <code>x</code> and <em>a</em>
         <em>b</em><template $if="true"> <b>c</b></template></p>
       <ul>

@@ -169,13 +169,13 @@
   },
   {
     "name": "forwarded-deferred-before-literal",
-    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template component=\"x-subject\"><section><x-unused><x-leaf $attributes title=\"Template\"></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template noforward component=\"x-subject\"><section><x-unused><x-leaf $attributes title=\"Template\"></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "native": "<main><section><aside><template carrier=\"x-unused\"><x-leaf title=\"Template\"></x-leaf></template></aside></section></main>",
     "carrier": "<x-leaf title=\"Template\"></x-leaf>"
   },
   {
     "name": "forwarded-deferred-after-literal",
-    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template component=\"x-subject\"><section><x-unused><x-leaf title=\"Template\" $attributes></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template noforward component=\"x-subject\"><section><x-unused><x-leaf title=\"Template\" $attributes></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "native": "<main><section><aside><template carrier=\"x-unused\"><x-leaf title=\"Caller\"></x-leaf></template></aside></section></main>",
     "carrier": "<x-leaf title=\"Caller\"></x-leaf>"
   }

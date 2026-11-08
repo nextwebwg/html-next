@@ -1,257 +1,297 @@
 [
   {
     "name": "no-implicit-forwarding",
-    "source": "<template component=\"x-subject\"><button>Save</button></template><template component=\"x-page\"><main><x-subject id=\"save\" title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button>Save</button></template><template noforward component=\"x-page\"><main><x-subject id=\"save\" title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Save</button></main>"
   },
   {
     "name": "explicit-root",
-    "source": "<template component=\"x-subject\"><button $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Save</button></main>"
   },
   {
     "name": "template-wins",
-    "source": "<template component=\"x-subject\"><button $attributes title=\"Template\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes title=\"Template\">Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Template\">Save</button></main>"
   },
   {
     "name": "caller-wins",
-    "source": "<template component=\"x-subject\"><button title=\"Template\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button title=\"Template\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Save</button></main>"
   },
   {
     "name": "bound-template-wins",
-    "source": "<template component=\"x-subject\"><button $attributes from:title=\"'Template'\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes from:title=\"'Template'\">Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Template\">Save</button></main>"
   },
   {
     "name": "caller-wins-over-bound",
-    "source": "<template component=\"x-subject\"><button from:title=\"'Template'\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject from:title=\"'Caller'\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button from:title=\"'Template'\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject from:title=\"'Caller'\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Save</button></main>"
   },
   {
     "name": "inner-destination",
-    "source": "<template component=\"x-subject\"><section><button $attributes>Save</button></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><section><button $attributes>Save</button></section></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><section><button title=\"Caller\">Save</button></section></main>"
   },
   {
     "name": "unused-prop-consumed",
-    "source": "<template component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Save</button></main>"
   },
   {
     "name": "used-prop-consumed",
-    "source": "<template component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button $attributes>{$title}</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button $attributes>{$title}</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Caller</button></main>"
   },
   {
     "name": "prop-target-is-explicit",
-    "source": "<template component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button $attributes from:aria-label=\"$title\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button $attributes from:aria-label=\"$title\">Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button aria-label=\"Caller\">Save</button></main>"
   },
   {
     "name": "mapped-prop-consumed",
-    "source": "<template component=\"x-subject\"><defs><prop name=\"ariaLabel\" type=\"string\">Label.</prop></defs><button $attributes>{$ariaLabel}</button></template><template component=\"x-page\"><main><x-subject aria-label=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><prop name=\"ariaLabel\" type=\"string\">Label.</prop></defs><button $attributes>{$ariaLabel}</button></template><template noforward component=\"x-page\"><main><x-subject aria-label=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Caller</button></main>"
   },
   {
     "name": "unicode-prop-exact-case",
-    "source": "<template component=\"x-subject\"><defs><prop name=\"É\" type=\"string\">Value.</prop></defs><button $attributes>{$É}</button></template><template component=\"x-page\"><main><x-subject É=\"Prop\" é=\"Attribute\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><prop name=\"É\" type=\"string\">Value.</prop></defs><button $attributes>{$É}</button></template><template noforward component=\"x-page\"><main><x-subject É=\"Prop\" é=\"Attribute\"></x-subject></main></template>",
     "expected": "<main><button é=\"Attribute\">Prop</button></main>"
   },
   {
     "name": "class-template-wins",
-    "source": "<template component=\"x-subject\"><button $attributes class=\"template\">Save</button></template><template component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes class=\"template\">Save</button></template><template noforward component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
     "expected": "<main><button class=\"template\">Save</button></main>"
   },
   {
     "name": "class-caller-wins",
-    "source": "<template component=\"x-subject\"><button class=\"template\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button class=\"template\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
     "expected": "<main><button class=\"caller\">Save</button></main>"
   },
   {
     "name": "delegated-explicit",
-    "source": "<template component=\"x-subject\"><x-base $attributes title=\"Template\"></x-base></template><template component=\"x-base\"><button $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><x-base $attributes title=\"Template\"></x-base></template><template noforward component=\"x-base\"><button $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Template\">Save</button></main>"
   },
   {
     "name": "delegated-caller-wins",
-    "source": "<template component=\"x-subject\"><x-base title=\"Template\" $attributes></x-base></template><template component=\"x-base\"><button $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><x-base title=\"Template\" $attributes></x-base></template><template noforward component=\"x-base\"><button $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Save</button></main>"
   },
   {
     "name": "delegation-does-not-imply-forwarding",
-    "source": "<template component=\"x-subject\"><x-base $attributes></x-base></template><template component=\"x-base\"><button>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><x-base $attributes></x-base></template><template noforward component=\"x-base\"><button>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Save</button></main>"
   },
   {
     "name": "consumed-prop-preserves-destination",
-    "source": "<template component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button title=\"Template\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button title=\"Template\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Template\">Save</button></main>"
   },
   {
     "name": "forwarded-child-prop-wins",
-    "source": "<template component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><b>{$title}</b></template><template component=\"x-subject\"><x-base title=\"Template\" $attributes></x-base></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><b>{$title}</b></template><template noforward component=\"x-subject\"><x-base title=\"Template\" $attributes></x-base></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><b>Caller</b></main>"
   },
   {
     "name": "later-child-prop-wins",
-    "source": "<template component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><b>{$title}</b></template><template component=\"x-subject\"><x-base $attributes title=\"Template\"></x-base></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><b>{$title}</b></template><template noforward component=\"x-subject\"><x-base $attributes title=\"Template\"></x-base></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><b>Template</b></main>"
   },
   {
     "name": "null-input-does-not-shadow-template",
-    "source": "<template component=\"x-subject\"><button title=\"Template\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject from:title=\"null\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button title=\"Template\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject from:title=\"null\"></x-subject></main></template>",
     "expected": "<main><button title=\"Template\">Save</button></main>"
   },
   {
     "name": "consumed-prop-does-not-reach-child",
-    "source": "<template component=\"x-base\"><defs><prop name=\"title\" type=\"string\" default=\"Default\">Title.</prop></defs><b>{$title}</b></template><template component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><x-base $attributes></x-base></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><defs><prop name=\"title\" type=\"string\" default=\"Default\">Title.</prop></defs><b>{$title}</b></template><template noforward component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><x-base $attributes></x-base></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><b>Default</b></main>"
   },
   {
     "name": "inner-component-destination",
-    "source": "<template component=\"x-base\"><b $attributes>Base</b></template><template component=\"x-subject\"><section><x-base $attributes></x-base></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><b $attributes>Base</b></template><template noforward component=\"x-subject\"><section><x-base $attributes></x-base></section></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><section><b title=\"Caller\">Base</b></section></main>"
   },
   {
     "name": "style-template-wins",
-    "source": "<template component=\"x-subject\"><button $attributes style=\"color: red\">Save</button></template><template component=\"x-page\"><main><x-subject style=\"color: blue\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes style=\"color: red\">Save</button></template><template noforward component=\"x-page\"><main><x-subject style=\"color: blue\"></x-subject></main></template>",
     "expected": "<main><button style=\"color: red\">Save</button></main>"
   },
   {
     "name": "style-caller-wins",
-    "source": "<template component=\"x-subject\"><button style=\"color: red\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject style=\"color: blue\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button style=\"color: red\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject style=\"color: blue\"></x-subject></main></template>",
     "expected": "<main><button style=\"color: blue\">Save</button></main>"
   },
   {
     "name": "class-toggle-after-forward",
-    "source": "<template component=\"x-subject\"><button $attributes class:active=\"true\">Save</button></template><template component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes class:active=\"true\">Save</button></template><template noforward component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
     "expected": "<main><button class=\"caller active\">Save</button></main>"
   },
   {
     "name": "class-forward-after-toggle",
-    "source": "<template component=\"x-subject\"><button class:active=\"true\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button class:active=\"true\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
     "expected": "<main><button class=\"caller\">Save</button></main>"
   },
   {
     "name": "class-whole-binding-before-forward",
-    "source": "<template component=\"x-subject\"><button from:class=\"'Template'\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button from:class=\"'Template'\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
     "expected": "<main><button class=\"caller\">Save</button></main>"
   },
   {
     "name": "class-whole-binding-after-forward",
-    "source": "<template component=\"x-subject\"><button $attributes from:class=\"'Template'\">Save</button></template><template component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes from:class=\"'Template'\">Save</button></template><template noforward component=\"x-page\"><main><x-subject class=\"caller\"></x-subject></main></template>",
     "expected": "<main><button class=\"Template\">Save</button></main>"
   },
   {
     "name": "literal-is-binding-fallback-before-forward",
-    "source": "<template component=\"x-subject\"><button from:title=\"'Bound'\" title=\"Fallback\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button from:title=\"'Bound'\" title=\"Fallback\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Save</button></main>"
   },
   {
     "name": "literal-is-binding-fallback-after-forward",
-    "source": "<template component=\"x-subject\"><button $attributes from:title=\"'Bound'\" title=\"Fallback\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes from:title=\"'Bound'\" title=\"Fallback\">Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Bound\">Save</button></main>"
   },
   {
     "name": "invalid-binding-uses-literal-fallback",
-    "source": "<template component=\"x-subject\"><button title=\"Fallback\" $attributes from:title=\"1 / 0\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button title=\"Fallback\" $attributes from:title=\"1 / 0\">Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Fallback\">Save</button></main>"
   },
   {
     "name": "invalid-binding-without-fallback-keeps-forward",
-    "source": "<template component=\"x-subject\"><button $attributes from:title=\"1 / 0\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes from:title=\"1 / 0\">Save</button></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Save</button></main>"
   },
   {
     "name": "loop-binding-after-forward",
-    "source": "<template component=\"x-subject\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['A', 'B']\"></state></defs><section><b $each=\"item of $rows\" $attributes from:title=\"$item\">{$item}</b></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['A', 'B']\"></state></defs><section><b $each=\"item of $rows\" $attributes from:title=\"$item\">{$item}</b></section></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><section><b title=\"A\">A</b><b title=\"B\">B</b></section></main>"
   },
   {
     "name": "loop-forward-after-binding",
-    "source": "<template component=\"x-subject\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['A', 'B']\"></state></defs><section><b $each=\"item of $rows\" from:title=\"$item\" $attributes>{$item}</b></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['A', 'B']\"></state></defs><section><b $each=\"item of $rows\" from:title=\"$item\" $attributes>{$item}</b></section></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><section><b title=\"Caller\">A</b><b title=\"Caller\">B</b></section></main>"
   },
   {
     "name": "unmarked-root-choice",
-    "source": "<template component=\"x-subject\"><template $match><button $when=\"true\">Choice</button><a $else>Other</a></template></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><template $match><button $when=\"true\">Choice</button><a $else>Other</a></template></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Choice</button></main>"
   },
   {
     "name": "marked-root-choice",
-    "source": "<template component=\"x-subject\"><template $match><button $when=\"true\" $attributes>Choice</button><a $else $attributes>Other</a></template></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><template $match><button $when=\"true\" $attributes>Choice</button><a $else $attributes>Other</a></template></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Caller\">Choice</button></main>"
   },
   {
     "name": "delegated-prop-fallback-position",
-    "source": "<template component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button from:title=\"$title\">Save</button></template><template component=\"x-subject\"><x-base title=\"Fallback\" $attributes from:title=\"'Bound'\"></x-base></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button from:title=\"$title\">Save</button></template><template noforward component=\"x-subject\"><x-base title=\"Fallback\" $attributes from:title=\"'Bound'\"></x-base></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Bound\">Save</button></main>"
   },
   {
     "name": "delegated-attribute-fallback-position",
-    "source": "<template component=\"x-base\"><button $attributes>Save</button></template><template component=\"x-subject\"><x-base title=\"Fallback\" $attributes from:title=\"'Bound'\"></x-base></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><button $attributes>Save</button></template><template noforward component=\"x-subject\"><x-base title=\"Fallback\" $attributes from:title=\"'Bound'\"></x-base></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button title=\"Bound\">Save</button></main>"
   },
   {
     "name": "forwarded-prop-initializes-state",
-    "source": "<template component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop><state name=\"seed\" type=\"string\" from=\"$title\"></state></defs><button>{$seed}</button></template><template component=\"x-subject\"><x-base from:title=\"'Bound'\" $attributes></x-base></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><defs><prop name=\"title\" type=\"string\">Title.</prop><state name=\"seed\" type=\"string\" from=\"$title\"></state></defs><button>{$seed}</button></template><template noforward component=\"x-subject\"><x-base from:title=\"'Bound'\" $attributes></x-base></template><template noforward component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button>Caller</button></main>"
   },
   {
     "name": "forwarded-number-prop-initializes-state",
-    "source": "<template component=\"x-base\"><defs><prop name=\"count\" type=\"integer\">Count.</prop><state name=\"seed\" type=\"integer\" from=\"$count\"></state></defs><button>{$seed}</button></template><template component=\"x-subject\"><x-base count=\"2\" $attributes></x-base></template><template component=\"x-page\"><main><x-subject count=\"7\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-base\"><defs><prop name=\"count\" type=\"integer\">Count.</prop><state name=\"seed\" type=\"integer\" from=\"$count\"></state></defs><button>{$seed}</button></template><template noforward component=\"x-subject\"><x-base count=\"2\" $attributes></x-base></template><template noforward component=\"x-page\"><main><x-subject count=\"7\"></x-subject></main></template>",
     "expected": "<main><button>7</button></main>"
   },
   {
     "name": "invocation-class-modifier-no-implicit-forwarding",
-    "source": "<template component=\"x-child\"><button>Child</button></template><template component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
+    "source": "<template noforward component=\"x-child\"><button>Child</button></template><template noforward component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
     "expected": "<main><button>Child</button></main>"
   },
   {
     "name": "invocation-class-modifier-explicit-forwarding",
-    "source": "<template component=\"x-child\"><button $attributes>Child</button></template><template component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
+    "source": "<template noforward component=\"x-child\"><button $attributes>Child</button></template><template noforward component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
     "expected": "<main><button class=\"Caller active\">Child</button></main>"
   },
   {
     "name": "invocation-class-modifier-consumed-prop",
-    "source": "<template component=\"x-child\"><defs><prop name=\"class\" type=\"string\">Class.</prop></defs><button $attributes>Child</button></template><template component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
+    "source": "<template noforward component=\"x-child\"><defs><prop name=\"class\" type=\"string\">Class.</prop></defs><button $attributes>Child</button></template><template noforward component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
     "expected": "<main><button>Child</button></main>"
   },
   {
     "name": "invocation-class-modifier-updates-prop",
-    "source": "<template component=\"x-child\"><defs><prop name=\"class\" type=\"string\">Class.</prop></defs><button from:data-label=\"$class\">Child</button></template><template component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
+    "source": "<template noforward component=\"x-child\"><defs><prop name=\"class\" type=\"string\">Class.</prop></defs><button from:data-label=\"$class\">Child</button></template><template noforward component=\"x-page\"><main><x-child class=\"Caller\" class:active=\"true\"></x-child></main></template>",
     "expected": "<main><button data-label=\"Caller active\">Child</button></main>"
   },
   {
     "name": "forwarded-prototype-named-prop",
-    "source": "<template component=\"x-child\"><defs><prop name=\"__proto__\" type=\"string\" default=\"Base\">Value.</prop></defs><button $attributes from:data-value=\"$__proto__\">Child</button></template><template component=\"x-wrap\"><x-child $attributes></x-child></template><template component=\"x-page\"><main><x-wrap __proto__=\"Caller\" title=\"Kept\"></x-wrap></main></template>",
+    "source": "<template noforward component=\"x-child\"><defs><prop name=\"__proto__\" type=\"string\" default=\"Base\">Value.</prop></defs><button $attributes from:data-value=\"$__proto__\">Child</button></template><template noforward component=\"x-wrap\"><x-child $attributes></x-child></template><template noforward component=\"x-page\"><main><x-wrap __proto__=\"Caller\" title=\"Kept\"></x-wrap></main></template>",
     "expected": "<main><button title=\"Kept\" data-value=\"Caller\">Child</button></main>"
   },
   {
     "name": "prototype-attributes-template-wins",
-    "source": "<template component=\"x-subject\"><button $attributes __proto__=\"Template\" constructor=\"Template\">Save</button></template><template component=\"x-page\"><main><x-subject __proto__=\"Caller\" constructor=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button $attributes __proto__=\"Template\" constructor=\"Template\">Save</button></template><template noforward component=\"x-page\"><main><x-subject __proto__=\"Caller\" constructor=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button __proto__=\"Template\" constructor=\"Template\">Save</button></main>"
   },
   {
     "name": "prototype-attributes-caller-wins",
-    "source": "<template component=\"x-subject\"><button __proto__=\"Template\" constructor=\"Template\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject __proto__=\"Caller\" constructor=\"Caller\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><button __proto__=\"Template\" constructor=\"Template\" $attributes>Save</button></template><template noforward component=\"x-page\"><main><x-subject __proto__=\"Caller\" constructor=\"Caller\"></x-subject></main></template>",
     "expected": "<main><button __proto__=\"Caller\" constructor=\"Caller\">Save</button></main>"
   },
   {
     "name": "executable-url-forwarding",
-    "source": "<template component=\"x-subject\"><a $attributes>Link</a></template><template component=\"x-page\"><main><x-subject from:href=\"'javascript:alert(1)'\" title=\"Kept\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><a $attributes>Link</a></template><template noforward component=\"x-page\"><main><x-subject from:href=\"'javascript:alert(1)'\" title=\"Kept\"></x-subject></main></template>",
     "expected": "<main><a title=\"Kept\">Link</a></main>"
   },
   {
     "name": "executable-url-before-template",
-    "source": "<template component=\"x-subject\"><a $attributes href=\"/template\">Link</a></template><template component=\"x-page\"><main><x-subject from:href=\"'javascript:alert(1)'\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><a $attributes href=\"/template\">Link</a></template><template noforward component=\"x-page\"><main><x-subject from:href=\"'javascript:alert(1)'\"></x-subject></main></template>",
     "expected": "<main><a href=\"/template\">Link</a></main>"
   },
   {
     "name": "executable-url-after-template",
-    "source": "<template component=\"x-subject\"><a href=\"/template\" $attributes>Link</a></template><template component=\"x-page\"><main><x-subject from:href=\"'javascript:alert(1)'\"></x-subject></main></template>",
+    "source": "<template noforward component=\"x-subject\"><a href=\"/template\" $attributes>Link</a></template><template noforward component=\"x-page\"><main><x-subject from:href=\"'javascript:alert(1)'\"></x-subject></main></template>",
     "expected": "<main><a href=\"/template\">Link</a></main>"
+  },
+  {
+    "name": "default-root-attributes",
+    "source": "<template component=\"x-subject\"><button title=\"Template\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\" id=\"save\"></x-subject></main></template>",
+    "expected": "<main><button title=\"Template\" id=\"save\">Save</button></main>"
+  },
+  {
+    "name": "default-root-unclaimed",
+    "source": "<template component=\"x-subject\"><button>Save</button></template><template component=\"x-page\"><main><x-subject id=\"save\" title=\"Caller\"></x-subject></main></template>",
+    "expected": "<main><button id=\"save\" title=\"Caller\">Save</button></main>"
+  },
+  {
+    "name": "default-bound-root-attribute",
+    "source": "<template component=\"x-subject\"><button from:title=\"'Template'\">Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "expected": "<main><button title=\"Template\">Save</button></main>"
+  },
+  {
+    "name": "default-root-explicit-later",
+    "source": "<template component=\"x-subject\"><button title=\"Template\" $attributes>Save</button></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "expected": "<main><button title=\"Caller\">Save</button></main>"
+  },
+  {
+    "name": "default-root-match",
+    "source": "<template component=\"x-subject\"><template $match><a $when=\"false\">Link</a><button $else title=\"Template\">Save</button></template></template><template component=\"x-page\"><main><x-subject title=\"Caller\" id=\"save\"></x-subject></main></template>",
+    "expected": "<main><button title=\"Template\" id=\"save\">Save</button></main>"
+  },
+  {
+    "name": "default-prop-consumed",
+    "source": "<template component=\"x-subject\"><defs><prop name=\"title\" type=\"string\">Title.</prop></defs><button>{$title}</button></template><template component=\"x-page\"><main><x-subject id=\"save\" title=\"Caller\"></x-subject></main></template>",
+    "expected": "<main><button id=\"save\">Caller</button></main>"
+  },
+  {
+    "name": "default-delegated-root",
+    "source": "<template component=\"x-child\"><button title=\"Child\">Save</button></template><template component=\"x-subject\"><x-child title=\"Wrapper\"></x-child></template><template component=\"x-page\"><main><x-subject title=\"Caller\" id=\"save\"></x-subject></main></template>",
+    "expected": "<main><button title=\"Child\" id=\"save\">Save</button></main>"
+  },
+  {
+    "name": "noforward-false-is-present",
+    "source": "<template component=\"x-subject\" noforward=\"false\"><button>Save</button></template><template component=\"x-page\"><main><x-subject id=\"save\" title=\"Caller\"></x-subject></main></template>",
+    "expected": "<main><button>Save</button></main>"
   }
 ]
