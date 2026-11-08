@@ -9,6 +9,8 @@
 
 ### Changes
 
+- Compile React and Preact components when a keyed style precedes a trailing `$attributes` destination, preserving the authored style order.
+
 - Bind native named and inline conditional prop types after their prop or initialized state selectors, preserving selected structured types, literal fallbacks, defaults and request isolation. Refuse non-null dependent inputs under null selectors in both shared JavaScript runtimes, and resolve selected dimensions from the current values in Node and live scopes.
 
 - Consume the compiler-owned client plan in native .NET rendering and emit interoperable instance records on request. Preserve caller input ownership, state seeds, shared references, forwarded attributes, shared roots, structural ranges and keyed rows through generated-client adoption. Verify early control edits, hidden projection and subsequent prop updates in Chromium, Firefox and WebKit; keep native application preparation and full catalog qualification in progress.
