@@ -63,6 +63,15 @@ async function fixture({ optionalEditor = false }: { optionalEditor?: boolean } 
   return { root, library };
 }
 
+it.each(["react", "preact"] as const)("checks keyed styles before trailing attributes in %s declarations", async target => {
+  const { root, library } = await fixture();
+  if (target === "preact") await symlink(join(modules, "preact"), join(root, "node_modules", "preact"), "dir");
+  const file = join(library, "controls.html");
+  await writeFile(file, (await readFile(file, "utf8")).replace("<button $attributes", `<button style:--probe="'2px'" $attributes`));
+  const prepared = await syncHtmlNext({ root, target });
+  assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
+}, 60_000);
+
 it("prepares concurrent framework consumers of the same source cache", async () => {
   const { root } = await fixture();
   const results = await Promise.all([

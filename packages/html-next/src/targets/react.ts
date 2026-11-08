@@ -657,7 +657,8 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   if (componentStyle || boundStyle || forwards && !component) state.usesStyle = true;
   let orderedStyleValue = "undefined";
   const addStyle = (property: string): void => {
-    if (orderedStyles) orderedStyleValue = `{ ...(${orderedStyleValue}), ${property} }`;
+    if (orderedStyles) orderedStyleValue = orderedStyleValue === "undefined"
+      ? `{ ${property} }` : `{ ...(${orderedStyleValue}), ${property} }`;
     else reactiveStyles.push(property);
   };
   const ordered: string[] = [];
