@@ -80,10 +80,13 @@ Components. Such migrations are consumer-specific and live outside this reposito
 An application build may serve as a complete alternative to a framework application.
 A library build keeps independently consumable component entries while allowing the consumer's
 bundler to combine their shared support. All three modes consume one normalized semantic model and
-must preserve appearance, interactions, state, events, validation, lifecycle, and successful
-hydration. Optional language extensions are the exception: each lists the modes that build it in
-[Versions and stability](./docs/guide/versions.md#extensions). Frameworks may use their own DOM and SSR representations; acceptance is based on how
-the resulting component looks and acts, including controller connect/disconnect and cleanup.
+must preserve appearance, interactions, state results, events, validation, and successful
+hydration. Framework conversion is judged by identical user experience, not exact lifecycle or
+node identity. Frameworks use their normal reconciliation and hydration, including node or component
+recreation; tests cover what users see and do, including focus, forms, accessibility, event delivery,
+and cleanup. See the [conversion lifecycle contract](https://nextwebwg.org/declarative-components/targets#framework-lifecycle).
+Optional language extensions list the modes that build them in
+[Versions and stability](./docs/guide/versions.md#extensions).
 
 The detailed contracts and independent progress tracks are in the
 [proposal](https://nextwebwg.org/declarative-components/) and

@@ -40,6 +40,13 @@
 
 ## Verification
 
+- Converter conformance is based on identical user experience, not exact component lifecycle,
+  framework instance identity, or DOM node identity. Use each framework's supported reconciliation
+  and hydration behavior, including normal node or component recreation. Do not patch framework
+  internals or retain custom event/view machinery solely to match lifecycle mechanics with no
+  user-visible effect. Preserve coverage for rendered content, placement, interactions, focus,
+  form edits, and accessibility. The public proposal's target-equivalence section owns this contract.
+
 - Use the real Looma catalog as a required converter pressure test. Every supported target must convert the complete catalog, compile with its framework toolchain, and pass Looma's shared browser tests for rendering and behavior. Keep those assertions independent of the renderer; fix compiler or adapter defects rather than weakening assertions or skipping failing components. Small converter fixtures supplement this gate.
 
 - During development, run the smallest focused test plus `pnpm verify:inner`.

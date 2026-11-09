@@ -21,13 +21,19 @@ output inventory.
 
 Generated target components must preserve the shared semantic model: native root behavior,
 projected content, properties (as attributes), events, methods, declared type behavior, state results,
-requests, styles, lifecycle, controller behavior, and hydration outcome.
+requests, styles, controller behavior, and hydration outcome.
 
-Acceptance is based on the component's appearance and runtime behavior, including controller
-connect/disconnect calls and cleanup. Each framework may use its own DOM and SSR representation,
-provided its output can hydrate into the equivalent functioning component. Node-object identity
-and identical serialized SSR markup are not independent acceptance criteria. Tests should verify
-the behavior at stake, such as focus, selection, edited control values, event delivery, and cleanup.
+Acceptance is based on **identical user experience**. Exact component lifecycle, setup or effect
+counts, DOM node identity, and framework instance identity are not conversion requirements. Each
+framework owns its normal reconciliation and hydration, including recreation of nodes or components.
+Tests verify visible content and placement, interactions, focus, selection, edited control values,
+validation, accessibility, event delivery, and cleanup. They must not force lifecycle mechanics that
+have no effect on the user. The public [conversion lifecycle contract](https://nextwebwg.org/declarative-components/targets#framework-lifecycle)
+is authoritative.
+
+Use supported framework primitives. Do not patch private ownership trees, copy framework event
+banks, or retain views solely to enforce invisible lifecycle or identity matching. Integration code
+must address a demonstrated difference in user experience.
 
 Target-native conventions may shape private implementation and generated source. They must not add
 wrapper elements, change public names, substitute framework-only event semantics, or make target
