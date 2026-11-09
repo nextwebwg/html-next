@@ -11,7 +11,7 @@ import { compileComponentStylesForSvelte, componentStateNames, VUE_ROOT_ATTRIBUT
 import { asciiLowerCase, kebabCase, componentName, propAttribute } from "../names.js";
 import { invocationValue } from "../prop-values.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, retainedSlotNames } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, repeatedSlotNames } from "../template.js";
 import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
 import { templateForwardsAttributes } from "../template.js";
@@ -668,15 +668,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }).join(", ");
       const shapes = outletPropsSource(node, context);
       const given = shapes === undefined ? `{ ${values} }` : `(${shapes}[${placed}.tag]?.({ ${values} }) ?? { ${values} })`;
-      const fallbackName = context.freshIdentifier("childFallback");
-      return `{#if true}{#snippet ${fallbackName}()}${fallback}{/snippet}{@const ${outlet} = {}}{@const ${placed} = childSlot(${lowering.value(node.of.expressionPlan.ast, scope)}, ${name}, ${outlet}, ${fallbackName})}{#if ${placed}}<HtmlNextContextScope contexts={${placed}.contexts}>{@render ${placed}.snippet(${placed}.args(${given}))}</HtmlNextContextScope>${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
+      return `{#if true}{@const ${outlet} = {}}{@const ${placed} = childSlot(${lowering.value(node.of.expressionPlan.ast, scope)}, ${name}, ${outlet})}{#if ${placed}}{#key ${placed}.owner}<HtmlNextContextScope contexts={${placed}.contexts} release={${placed}.release}>{@render ${placed}.snippet(${placed}.args(${given}))}</HtmlNextContextScope>{/key}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
     }
     const selected = context.freshIdentifier("slot");
     const scoped = (node.props?.length ?? 0) > 0;
     if (!scoped && context.plainSlots.has(node.name ?? "")) {
-      const fallbackName = context.freshIdentifier("slotFallback");
+      context.usesChildOutlets = true;
       const outlet = context.freshIdentifier("outlet");
-      return `{#if true}{#snippet ${fallbackName}()}${fallback}{/snippet}{@const ${outlet} = {}}{@const ${selected} = htmlNextPlain(${name}, ${outlet}, ${fallbackName})}{@render ${selected}()}{/if}`;
+      return `{#if true}{@const ${outlet} = {}}{@const ${selected} = htmlNextPlain(${name}, ${outlet})}{#if ${selected}}{#key ${selected}.owner}<HtmlNextContextScope contexts={${selected}.contexts} release={${selected}.release}>{@render ${selected}.snippet(${selected}.args({}))}</HtmlNextContextScope>{/key}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
     }
     if (scoped) context.usesScopedSlots = true;
     const defaultSlot = node.name === undefined;
@@ -841,7 +840,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     componentChildren = defaults.map(projectedNode);
     const target = context.componentGraph?.get(node.name);
     if (listed?.slots.has("") === true) componentChildren = [];
-    if (groups.has("") || (childProps?.children !== undefined || target !== undefined && retainedSlotNames(target).has("")) && defaults.length > 0) {
+    if (groups.has("") || (childProps?.children !== undefined || target !== undefined && repeatedSlotNames(target).has("")) && defaults.length > 0) {
       const unnamed = projection.filter((child) => {
         const assigned = child.kind === "element" ? child.attributes.find((entry) => entry.kind === "literal" && entry.name === "slot") : undefined;
         return assigned?.kind !== "literal" || assigned.value === "";
@@ -874,7 +873,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       // its snippet while one renders, and the receiving slot shows its fallback otherwise.
       const present = plainSourceCondition(children, carrier, scope, lowering, context);
       const target = context.componentGraph?.get(node.name);
-      const shared = target !== undefined && retainedSlotNames(target).has(slot) || [...context.componentGraph?.values() ?? []]
+      const shared = target !== undefined && repeatedSlotNames(target).has(slot) || [...context.componentGraph?.values() ?? []]
         .some(definition => Object.values(definition.contract.slots ?? {}).some(declared => declared.as !== undefined && declared.accepts?.includes(node.name)));
       const source = shared && !scoped && carrier === undefined ? `plainSnippet(${snippet})` : snippet;
       slotBindings.push(`${objectKey(slot)}: ${present === undefined ? source : `${present} ? ${source} : undefined`}`);
@@ -1024,7 +1023,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
     bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
   }
-  const ordered: string[] = [];
+  // Invocation metadata precedes authored attributes and must survive ordered forwarding.
+  const ordered: string[] = forwards ? [...bindings] : [];
   let capturedBindings = 0;
   for (const attribute of node.attributes) {
     const literalStart = literals.length, bindingStart = bindings.length;
@@ -1592,7 +1592,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   // A component another accepts gives its list entry its contexts, which content placed for it reads.
   const accepted = [...options.componentGraph?.values() ?? []].some((other) =>
     Object.values(other.contract.slots ?? {}).some((slot) => slot.as !== undefined && slot.accepts?.includes(definition.contract.tag) === true));
-  const plainSlots = new Set(retainedSlotNames(definition));
+  const plainSlots = new Set(repeatedSlotNames(definition));
   if (accepted) for (const slot of definition.slots ?? []) plainSlots.add(slot.name ?? "");
   for (const name of plainSlots) if (Object.keys(definition.contract.slots?.[name]?.props ?? {}).length > 0 ||
     definition.slots?.some(slot => (slot.name ?? "") === name && (slot.props?.length ?? 0) > 0)) plainSlots.delete(name);

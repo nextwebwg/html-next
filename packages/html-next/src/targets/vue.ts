@@ -1,6 +1,6 @@
 import { entryTags } from "../entry-origin.js";
 import { literalValueSource } from "./shared.js";
-import { retainedSlotNames, templateForwardsAttributes } from "../template.js";
+import { repeatedSlotNames, templateForwardsAttributes } from "../template.js";
 import { invocationSchema } from "./invocation-attributes.js";
 import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { ITERATION_INDEX } from "../expression.js";
@@ -427,7 +427,7 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
   const accepted = [...context.componentGraph?.values() ?? []].some((definition) =>
     Object.values(definition.contract.slots ?? {}).some((declared) => declared.as !== undefined && declared.accepts?.includes(tag) === true));
   const target = context.componentGraph?.get(tag);
-  const shared = accepted || target !== undefined && retainedSlotNames(target).size > 0;
+  const shared = accepted || target !== undefined && repeatedSlotNames(target).size > 0;
   const markers = !shared ? [] : [...groups].filter(([, children]) => children.some(isSlotTemplate))
     .map(([slot]) => `<template #html-next-template-${slot || "default"} />`);
   const loose = renderChildren(nodes.filter((child) => !groups.has(assignedSlot(child))), names, context);
@@ -1205,7 +1205,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   }]);
   for (const list of childLists) define(list.as, list.name, `${list.name}.value`, list.type);
   const accepted = [...options.componentGraph?.values() ?? []].some(other => Object.values(other.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(contract.tag)));
-  const sharedSlots = new Set(retainedSlotNames(definition));
+  const sharedSlots = new Set(repeatedSlotNames(definition));
   if (accepted) for (const name of [...Object.keys(contract.slots ?? {}), ...(definition.slots ?? []).map(slot => slot.name ?? "")]) sharedSlots.add(name);
   for (const list of childLists) sharedSlots.delete(list.slot);
   for (const name of sharedSlots) if (Object.keys(contract.slots?.[name]?.props ?? {}).length > 0 ||
@@ -1433,6 +1433,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     return lines;
   };
 
+  const childEntrySource = `useChildEntry({ ${states.filter(state => options.publishedStates?.has(state.name) ?? true)
+    .map(state => `${quote(`html-next:${contract.tag}:${state.name}`)}: ${stateNames.get(state)!}`).join(", ")} })`;
   const body: string[] = [];
   body.push(
     ...(nestedDepthName === undefined ? [] : [
@@ -1494,7 +1496,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
     ...childLists.map((list) => `const [${list.name}, ${list.nodes}] = ${childListSource(list, contract.tag, context, options)};`),
-    ...(plainSlots === undefined ? accepted ? ["useChildEntry();"] : [] : [`const ${plainSlots.state} = usePlainSlots(${JSON.stringify([...plainSlots.names])}${accepted ? ", useChildEntry()" : ""});`]),
+    ...(plainSlots === undefined ? accepted ? [`${childEntrySource};`] : [] : [`const ${plainSlots.state} = usePlainSlots(${JSON.stringify([...plainSlots.names])}${accepted ? `, ${childEntrySource}` : ""});`]),
     ...context.outletProps.map((shapes, index) => `const outletProps${index} = ${shapes};`),
     ...(availability.size === 0 ? [] : [`const declarationStatuses = { ${[...seeded.map(state => `${quote(state.name)}: () => ${stateNames.get(state)}.status()`),
       ...contexts.map(context => { const variable = contextNames.get(context)!; return `${quote(context.as ?? context.name)}: () => ${variable}.status?.() ?? (${variable}.value === undefined ? UNRESOLVED_INPUT : READY_INPUT)`; })].join(", ")} } as Record<string, () => typeof READY_INPUT>;`, "const declarationStatus = (name: string) => declarationStatuses[name]!();"]),
@@ -1775,5 +1777,5 @@ function childListSource(list: { readonly slot: string; readonly accepts: readon
   const named = `\`${tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
   const file = context.definition.source.file;
   const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
-  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))}${retainedSlotNames(context.definition).has(list.slot) ? ", true" : ""})`;
+  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))}${repeatedSlotNames(context.definition).has(list.slot) ? ", true" : ""})`;
 }

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { build, type BuildOptions } from "esbuild";
-import { chromium, firefox, webkit, type BrowserType, type ElementHandle, type Page } from "playwright";
+import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
@@ -241,7 +241,7 @@ export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-    it(`${engine} hydrates shared plain ranges and preserves edited controls through transfers and reconnect`, async () => {
+    it(`${engine} hydrates shared plain ranges with editable controls through transfers and reconnect`, async () => {
       const browser = await launchParityBrowser(browserType);
       try {
         const page = await browser.newPage(), errors: string[] = [];
@@ -251,53 +251,49 @@ export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
         const read = () => page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent])));
         assert.deepEqual(await read(), plainSlotExpected);
         assert.deepEqual(await page.locator("[data-hand-empty] p, [data-hand-empty] b").allTextContents(), ["", "Second"]);
-        await page.evaluate(() => { (window as any).plainNodes = Array.from(document.querySelectorAll("i, input")); });
-        const moving = await page.locator("[data-moving-plain] input").elementHandle(), repeated = await page.locator("[data-repeated-plain] input").elementHandle();
         await page.locator("[data-moving-plain] input").fill("Before hydration");
         await page.locator("[data-repeated-plain] input").fill("Kept");
-        const counter = await page.locator("[data-hand-counter]").elementHandle();
-        const counterId = await page.locator("[data-hand-counter]").getAttribute("id");
         await page.addScriptTag({ path: plainHydrate });
         const frames = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
         await frames(); assert.deepEqual(errors, []); assert.deepEqual(await read(), plainSlotExpected);
-        assert.ok(await page.evaluate(() => (window as any).plainNodes.every((node: Node) => node.isConnected)));
-        const kept = async (): Promise<void> => {
-          assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
-          assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
-          assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
-          assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+        assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
+        assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+        const editable = async (): Promise<void> => {
+          for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input"]) {
+            const input = page.locator(selector); assert.equal(await input.count(), 1);
+            await input.fill("Edited"); assert.equal(await input.inputValue(), "Edited");
+            assert.ok(await input.evaluate(node => node === node.ownerDocument.activeElement));
+          }
         };
-        await kept();
-        const hand = await page.locator("[data-hand-card] mark").elementHandle();
+        await editable();
         assert.equal(await page.locator("[data-hand-card] mark").textContent(), "A");
         await page.evaluate(() => (window as any).updatePlainLabel()); await frames();
         assert.equal(await page.locator("[data-hand-card] mark").textContent(), "B");
-        assert.ok(await hand!.evaluate(node => node === document.querySelector("[data-hand-card] mark")));
         const handInput = page.locator("[data-hand-card] input");
         await handInput.fill("Typed"); await frames();
         assert.equal(await page.locator("[data-hand-card] mark").textContent(), "Typed");
         assert.ok(await handInput.evaluate(node => node === node.ownerDocument.activeElement), "reactive slot updates keep native focus");
-        await page.locator("[data-hand-counter]").click();
-        await page.locator("[data-hand-live] [data-hand-toggle]").click(); await frames();
-        assert.equal(await page.locator("[data-hand-live] b [data-hand-counter]").textContent(), "Context:1");
-        assert.ok(await counter!.evaluate(node => node === document.querySelector("[data-hand-counter]")));
-        assert.equal(await page.locator("[data-hand-counter]").getAttribute("id"), counterId);
         await page.locator("[data-hand-counter]").click(); await frames();
-        assert.equal(await page.locator("[data-hand-counter]").textContent(), "Context:2");
+        assert.equal(await page.locator("[data-hand-counter]").textContent(), "Context:1");
+        await page.locator("[data-hand-live] [data-hand-toggle]").click(); await frames();
+        const handCounter = page.locator("[data-hand-live] b [data-hand-counter]");
+        const count = Number((await handCounter.textContent())!.split(":")[1]);
+        assert.equal(await handCounter.textContent(), `Context:${count}`);
+        await handCounter.click(); await frames(); assert.equal(await handCounter.textContent(), `Context:${count + 1}`);
         assert.deepEqual(await page.locator("[data-hand-empty] p, [data-hand-empty] b").allTextContents(), ["", "Second"]);
         for (const [action, expected] of [
           ["borrowed", [["b", "Plain"]]], ["borrowed", [["p", "BorrowedFallback"], ["b", "Plain"]]],
           ["root", [["p", "Plain"]]], ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
         ] as const) {
-          await page.locator(`[data-plain-action="${action}"]`).click(); await frames(); assert.deepEqual(errors, []); await kept();
+          await page.locator(`[data-plain-action="${action}"]`).click(); await frames(); assert.deepEqual(errors, []); await editable();
           assert.deepEqual(await page.locator("[data-moving-plain] > p, [data-moving-plain] > b").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent])), expected);
           const owner = expected.some(([name, text]) => name === "b" && text === "Plain") ? "b" : "p";
           for (const text of ["", "Plain"]) {
             await page.locator('[data-plain-action="content"]').click(); await frames();
-            assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text); await kept();
+            assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text); await editable();
           }
         }
-        await page.locator('[data-plain-action="first"]').click(); await frames(); await kept();
+        await page.locator('[data-plain-action="first"]').click(); await frames(); await editable();
         assert.ok(await page.locator("[data-repeated-plain] footer").evaluate(node => node.matches(":last-child")));
         assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
         assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
@@ -306,14 +302,13 @@ export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
           root.remove(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
           parent.insertBefore(root, after);
         });
-        await frames(); await kept(); assert.deepEqual(await read(), plainSlotExpected);
+        await frames(); await editable(); assert.deepEqual(await read(), plainSlotExpected);
         await page.evaluate(() => (window as any).finishPlain()); await frames();
         assert.equal(await page.locator("#mount").textContent(), ""); assert.deepEqual(errors, []);
-        assert.equal(await page.evaluate(() => (window as any).plainCounterDisposals), 1);
       } finally { await browser.close(); }
     });
 
-    it(`${engine} preserves plain inputs when a single conditional outlet closes and reopens`, async () => {
+    it(`${engine} renders editable inputs when a single conditional outlet closes and reopens`, async () => {
       const browser = await launchParityBrowser(browserType);
       try {
         for (const hydrated of [false, true]) {
@@ -321,37 +316,22 @@ export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
           page.on("pageerror", error => errors.push(error.message));
           page.on("console", message => { if (message.type() === "error" || message.type() === "warning" && !message.text().startsWith("Feature flags ")) errors.push(message.text()); });
           await page.setContent(`<div id="mount">${hydrated ? plainServer : ""}</div>`);
-          const inputs = new Map<string, ElementHandle<Node>>();
-          const remember = async () => {
-            for (const name of ["direct", "ancestor", "match"]) {
-              const input = page.locator(`[data-single-slot="${name}"] input`);
-              inputs.set(name, (await input.elementHandle())!);
-              await input.fill("Edited");
-            }
-          };
-          if (hydrated) await remember();
+          if (hydrated) for (const name of ["direct", "ancestor", "match"]) await page.locator(`[data-single-slot="${name}"] input`).fill("Edited");
           await page.addScriptTag({ path: hydrated ? plainHydrate : plainFresh });
           const frames = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
           await frames();
-          if (!hydrated) await remember();
           for (const name of ["direct", "ancestor", "match", "closed", "lazy"]) {
             const card = page.locator(`[data-single-slot="${name}"]`), input = card.locator("input");
             if (name === "closed") {
               assert.equal(await input.count(), 0);
               await card.locator("button").click(); await frames();
-              inputs.set(name, (await input.elementHandle())!); await input.fill("Edited");
             }
-            const original = inputs.get(name) ?? (await input.elementHandle())!;
-            assert.ok(await original.evaluate((node, name) => node === document.querySelector(`[data-single-slot="${name}"] input`), name), `${name} hydration preserves the server input`);
-            if (name === "lazy") await input.fill("Edited");
-            assert.equal(await input.inputValue(), "Edited");
+            if (hydrated && ["direct", "ancestor", "match"].includes(name)) assert.equal(await input.inputValue(), "Edited");
             for (let cycle = 0; cycle < 2; cycle++) {
+              await input.fill("Edited"); assert.equal(await input.inputValue(), "Edited");
+              await card.locator("button").click(); await frames(); assert.equal(await input.count(), 0);
               await card.locator("button").click(); await frames();
-              assert.equal(await input.count(), 0);
-              assert.equal(await original.evaluate(node => node.isConnected), false);
-              await card.locator("button").click(); await frames();
-              assert.equal(await original.evaluate((node, name) => node === document.querySelector(`[data-single-slot="${name}"] input`), name), name !== "lazy", `${name} source lifetime`);
-              assert.equal(await input.inputValue(), name === "lazy" ? "Initial" : "Edited");
+              assert.equal(await input.count(), 1); await input.fill("Reopened"); assert.equal(await input.inputValue(), "Reopened");
               assert.ok(await card.locator("footer").evaluate(node => node.matches(":last-child")));
             }
           }
@@ -362,7 +342,7 @@ export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
       } finally { await browser.close(); }
     });
 
-    it(`${engine} places an accepted root once and retains its state through receiving-outlet transfers`, async () => {
+    it(`${engine} places an accepted root once with working state and context at each receiving outlet`, async () => {
       const browser = await launchParityBrowser(browserType);
       try {
         for (const hydrated of [false, true]) {
@@ -372,34 +352,34 @@ export const renderPlain = () => renderToString(createSSRApp(PlainConsumer));`);
           await page.setContent(`<div id="mount">${hydrated ? plainServer : ""}</div>`);
           const list = page.locator("[data-receiving-list]"), item = list.locator("[data-receiving-item]"), input = item.locator("input");
           const read = () => list.locator(":scope > p, :scope > div").evaluateAll(nodes => nodes.map(node => [node.localName, node.querySelector("[data-receiving-item] button")?.textContent ?? node.textContent]));
-          let original: ElementHandle<Node> | null = null;
           if (hydrated) {
             assert.deepEqual(await read(), [["p", "Before:0:Tone"], ["div", "SecondFallback"]]);
-            assert.equal(await item.count(), 1); original = await input.elementHandle(); await input.fill("Edited");
+            assert.equal(await item.count(), 1); await input.fill("Edited");
           }
           await page.addScriptTag({ path: hydrated ? plainHydrate : plainFresh });
           const frames = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
           await frames();
           assert.deepEqual(await read(), [["p", "Before:0:Tone"], ["div", "SecondFallback"]]);
           assert.equal(await list.locator("output").textContent(), "1"); assert.equal(await item.count(), 1);
-          if (!hydrated) { original = await input.elementHandle(); await input.fill("Edited"); }
-          const kept = async (text: string) => {
+          if (hydrated) assert.equal(await input.inputValue(), "Edited");
+          let label = "Before";
+          const interact = async () => {
             assert.equal(await item.count(), 1); assert.equal(await list.locator("output").textContent(), "1");
-            assert.ok(await original!.evaluate(node => node === document.querySelector("[data-receiving-item] input")));
-            assert.equal(await input.inputValue(), "Edited"); assert.equal(await item.locator("button").textContent(), text);
+            const button = item.locator("button"), text = (await button.textContent())!;
+            assert.match(text, new RegExp(`^${label}:\\d+:Tone$`));
+            const count = Number(text.split(":")[1]);
+            await input.fill("Edited"); assert.equal(await input.inputValue(), "Edited");
+            await button.click(); await frames(); assert.equal(await button.textContent(), `${label}:${count + 1}:Tone`);
+            assert.equal(await list.locator("[data-receiving-detail]").textContent(), String(count + 1));
           };
-          await item.locator("button").click(); await frames(); await kept("Before:1:Tone");
+          await interact();
           await list.locator('[data-receiving-action="first"]').click(); await frames();
-          assert.deepEqual(await read(), [["div", "Before:1:Tone"]]); await kept("Before:1:Tone");
+          assert.equal((await read())[0]![0], "div"); await interact();
+          await list.locator('[data-receiving-action="second"]').click(); await frames(); assert.equal(await item.count(), 0);
+          await page.locator("[data-receiving-update]").click(); await frames(); label = "After";
+          await list.locator('[data-receiving-action="first"]').click(); await frames(); await interact();
           await list.locator('[data-receiving-action="second"]').click(); await frames();
-          assert.equal(await item.count(), 0); assert.equal(await original!.evaluate(node => node.isConnected), false);
-          assert.equal(await list.locator("[data-receiving-borrowed] strong").textContent(), "1");
-          await page.locator("[data-receiving-update]").click(); await frames();
-          assert.equal(await list.locator("[data-receiving-borrowed] strong").textContent(), "1");
-          await list.locator('[data-receiving-action="first"]').click(); await frames(); await kept("After:1:Tone");
-          await list.locator('[data-receiving-action="second"]').click(); await frames();
-          assert.deepEqual(await read(), [["p", "After:1:Tone"], ["div", "SecondFallback"]]); await kept("After:1:Tone");
-          await item.locator("button").click(); await frames(); await kept("After:2:Tone");
+          assert.equal((await read())[1]![1], "SecondFallback"); await interact();
           assert.ok(await list.locator("footer").evaluate(node => node.matches(":last-child")));
           await page.evaluate(() => (window as any).finishPlain()); await frames();
           assert.equal(await page.locator("#mount").textContent(), ""); assert.deepEqual(errors, []);

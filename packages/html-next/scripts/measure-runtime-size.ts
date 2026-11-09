@@ -170,7 +170,8 @@ const staticGenerated = await generatedFixture("static-card", 8_580);
 // Closed event validation is shared with minified framework compilers. Its one-time factory
 // costs +1/+17/+4/+8 B gzip on static/reactive/prop/computed fixtures; limits record
 // those measured totals, with no extra allowance. The cached brand-check hot path is unchanged.
-const reactiveGenerated = await generatedFixture("reactive-counter", 8_334);
+// Typed text ordering adds33B gzip to this arithmetic helper bundle.
+const reactiveGenerated = await generatedFixture("reactive-counter", 8_367);
 // +1.0–1.1 KB on prop fixtures: the typed input SDK, accepted caller ownership, and status-only
 // publication use compiled prop checks and the existing scheduler. Components without props
 // do not import the SDK. The dedicated await fixture protects actual status/error lowering.
@@ -205,7 +206,8 @@ const seededGenerated = await generatedFixture("state-seed", 16_486);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
 // +5 B gzip: finite arithmetic checks and invalid-result retention in the computed counter.
-const computedGenerated = await generatedFixture("computed-counter", 9_029);
+// The same comparison correction adds37B gzip here; these are exact measured baselines.
+const computedGenerated = await generatedFixture("computed-counter", 9_066);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 // Removing loop metadata leaves this fixture at 20,798 B; minifier allocation shifts gzip by 2 B on Node 24.
 const keyedGenerated = await generatedFixture("keyed-list", 8_764);

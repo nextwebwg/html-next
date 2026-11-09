@@ -12,6 +12,8 @@ export const checkedReferenceSource = `<template component="x-checked-reads"><de
   <output id="lazy">{false ? $draft.name : 'OK'}</output>
   <output id="and">{false and $draft.name}</output>
   <output id="or">{true or $draft.name}</output>
+  <output id="ordered-name">{$draft[$key] < 'M'}</output><output id="ordered-numeric-text">{'10' < '2'}</output>
+  <output id="ordered-unicode">{'😀' < '�'}</output><output id="missing-order">{$partial.name < 'M'}</output><output id="null-order">{$nullFields.name < 'M'}</output>
   <output id="fallback">{default('present', $draft.name)}</output>
   <output id="computed-key">{$draft[$key]}</output>
   <output id="computed-index">{$rows[$index].name}</output>
@@ -26,10 +28,11 @@ export const checkedReferenceSource = `<template component="x-checked-reads"><de
   <output id="missing-self-equality">{$partial.count = $partial.count}</output><output id="missing-not-equality">{not ($partial.count = $partial.count)}</output>
   <output id="null-equality">{$nullFields.count = null}</output><output id="missing-nested-equality">{($partial.count = null) = false}</output>
   <output id="missing-equality-fallback">{default($partial.count = null, true)}</output>
-  <p $each="row of $rows"><output id="alias-lazy">{false ? $row.name : 'Alias'}</output><output id="alias-key">{$row[$key]}</output></p>
+  <p $each="row of $rows"><output id="alias-lazy">{false ? $row.name : 'Alias'}</output><output id="alias-key">{$row[$key]}</output><output id="ordered-row">{$row.name < 'S'}</output></p>
   </section></template>`;
 
 export const checkedReferenceInitial = {
+  "ordered-name": "", "ordered-row": "", "ordered-numeric-text": "true", "ordered-unicode": "true", "missing-order": "", "null-order": "",
   lazy: "OK", and: "false", or: "true", fallback: "present", "computed-key": "", "computed-index": "",
   "bad-fallback": "", "quoted-key": "", "safe-missing": "missing", label: "OK", seeded: "Seeded",
   "alias-lazy": "Alias", "alias-key": "",

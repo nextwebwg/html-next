@@ -35,10 +35,14 @@ const receivingSlots = `<template component="x-receiving-item"><defs><prop name=
 <aside><button data-receiving-update on:click="update">Update</button><x-receiving-list><x-receiving-item from:label="$label"><x-receiving-detail slot="detail"></x-receiving-detail></x-receiving-item><i data-rejected>Rejected</i>Rejected</x-receiving-list></aside></template>
 <template component="x-receiving-outer"><defs><slot accepts="x-receiving-list" as="lists"></slot></defs><article><slot></slot></article></template>`;
 
+const textButton = `<template component="x-text-button"><defs><prop name="link" type="boolean" default="false">Use a link.</prop></defs>
+<template $match><a $when="$link" href="#target"><span class="caption"><slot></slot></span></a>
+<button $else type="button"><span class="caption"><slot></slot></span></button></template></template>`;
+
 export async function plainSlotRendering(target: "react" | "preact", application?: (entry: string) => string): Promise<{ directory: string; html: string; entry: string }> {
   const directory = await mkdtemp(join(tmpdir(), `html-next-${target}-plain-server-`));
   try {
-    const sources = { ...plainSlotFiles, "repeated.html": repeatedPlainSource, "moving.html": dynamicPlainSource, "conditional.html": conditionalSlots, "receiving.html": receivingSlots,
+    const sources = { ...plainSlotFiles, "repeated.html": repeatedPlainSource, "moving.html": dynamicPlainSource, "conditional.html": conditionalSlots, "receiving.html": receivingSlots, "text-button.html": textButton,
       "page.html": `<template component="x-ssr-plain"><main>${plainSlotInvocations}<x-repeat-page></x-repeat-page></main></template>` };
     for (const [name, source] of Object.entries(sources)) await writeFile(join(directory, name), source);
     const output = join(directory, "out");

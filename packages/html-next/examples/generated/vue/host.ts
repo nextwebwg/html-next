@@ -21,7 +21,6 @@ import {
   ref,
   renderSlot,
   shallowRef,
-  Teleport,
   Text,
   useSlots,
   watch,
@@ -1628,7 +1627,10 @@ interface ChildRecord {
   readonly tag: string
   readonly slots: ChildSlotNames
   readonly prefix: string
-  readonly plain: Map<string, PlainFrame>
+  readonly claims: Map<string, object>
+  readonly released: Ref<number>
+  contexts?: Readonly<Record<string, unknown>>
+  readonly contextKey: Ref<symbol>
   node: VNode
   props: Record<string, unknown>
   entry: object
@@ -1638,292 +1640,53 @@ interface ChildRecord {
 }
 const childRecords = new WeakMap<object, ChildRecord>()
 const vnodeRecords = new WeakMap<object, ChildRecord>()
-const projectionFrames = /* @__PURE__ */ new WeakMap<object, PlainFrame>()
+const projectionClaims = /* @__PURE__ */ new WeakMap<object, SlotClaims>()
 
-interface PlainSite {
-  vnode?: VNode
+interface SlotClaims {
+  readonly claims: Map<string, object>
+  readonly released: Ref<number>
 }
-class PlainFrame {
-  owner: PlainSite | undefined
-  current: VNode | undefined
-  cached: VNode | undefined
-  retired = false
-  readonly sites = new Set<PlainSite>()
-  readonly revision = shallowRef(0)
-  private park?: DocumentFragment
-  private container?: DocumentFragment
-  private internals: any
-  private parent: any
-  private suspense: any
-  private stop?: () => void
-  constructor(readonly read: () => VNode[]) {}
-  nodes(): Node[] {
-    if (this.current === undefined) return [...this.park?.childNodes ?? []]
-    const nodes: Node[] = []
-    for (
-      let node = this.current.el!.nextSibling;
-      node !== null && node !== this.current.anchor;
-      node = node.nextSibling
-    ) nodes.push(node)
-    return nodes
-  }
-  target(): DocumentFragment {
-    if (this.container !== undefined) return this.container
-    const fragment = this.container = document.createDocumentFragment()
-    fragment.insertBefore = <T extends Node>(node: T, before: Node | null): T => {
-      if (before !== null) before.parentNode!.insertBefore(node, before)
-      else if (this.current !== undefined) {
-        this.current.anchor!.parentNode!.insertBefore(node, this.current.anchor!)
-      } else (this.park ??= document.createDocumentFragment()).appendChild(node)
-      return node
-    }
-    return fragment
-  }
-  remember(vnode: VNode, parent: any, suspense: any, internals: any): void {
-    this.cached = vnode
-    this.current = vnode
-    this.parent = parent
-    this.suspense = suspense
-    this.internals = internals
-  }
-  release(vnode: VNode): void {
-    if (this.current !== vnode) return
-    const nodes = this.nodes()
-    this.current = undefined
-    const park = this.park ??= document.createDocumentFragment()
-    for (const node of nodes) park.appendChild(node)
-    this.owner = undefined
-    this.choose()
-  }
-  choose(): void {
-    if (this.retired) return
-    if (this.owner?.vnode?.el?.isConnected === true) return
-    if (this.current !== undefined) this.release(this.current)
-    queueMicrotask(() => {
-      if (this.retired || this.owner !== undefined) return
-      this.owner = [...this.sites].filter(site => site.vnode?.el?.isConnected === true)
-        .sort((left, right) =>
-          left.vnode!.el!.compareDocumentPosition(right.vnode!.el!) & 4 ? -1 : 1
-        )[0]
-      this.revision.value++
-    })
-  }
-  observe(site: PlainSite): void {
-    const parent = site.vnode?.el?.parentElement
-    if (this.stop === undefined && parent != null) {
-      this.stop = observeConnection(parent, () =>
-        this.choose())
-    }
-  }
-  dispose(): void {
-    if (this.retired) return
-    this.retired = true
-    this.stop?.()
-    this.sites.clear()
-    this.owner = undefined
-    if (this.cached !== undefined) {
-      for (const node of this.cached.children as VNode[]) {
-        this.internals.um(node, this.parent, this.suspense, true)
-      }
-      this.cached.children = []
-      this.cached = undefined
-    }
-  }
-}
-// Vue's server renderer recognizes the Teleport shape and emits its normal inline hydration marks.
-// These hooks retain the children when a destination disappears; Vue still owns their patching and disposal.
-const PlainPortal = /* @__PURE__ */ (() => {
-  const base = Teleport as any
-  return {
-    ...base,
-    process(
-      n1: any,
-      n2: any,
-      container: any,
-      anchor: any,
-      parent: any,
-      suspense: any,
-      namespace: any,
-      scopes: any,
-      optimized: any,
-      internals: any,
-    ): void {
-      const { frame, site, active } = n2.props as {
-        frame: PlainFrame
-        site: PlainSite
-        active: boolean
-      }
-      const args = [container, anchor, parent, suspense, namespace, scopes, optimized, internals]
-      if (n1 !== null && n1.props.active !== active) {
-        args[1] = n1.anchor.nextSibling
-        PlainPortal.remove(n1, parent, suspense, internals, true)
-        n1.el?.parentNode?.removeChild(n1.el)
-        n1 = null
-      }
-      if (!active) {
-        base.process(n1, n2, ...args)
-        site.vnode = n2
-        return
-      }
-      const nodes = frame.current?.anchor === n1?.anchor && n1 !== null ? [] : frame.nodes()
-      if (n1 === null) {
-        const empty = { ...n2, children: [] }
-        base.process(null, empty, ...args)
-        n2.el = empty.el
-        n2.anchor = empty.anchor
-        n2.target = empty.target
-        n2.targetStart = empty.targetStart
-        n2.targetAnchor = empty.targetAnchor
-      } else {
-        n2.el = n1.el
-        n2.anchor = n1.anchor
-        n2.target = n1.target
-        n2.targetStart = n1.targetStart
-        n2.targetAnchor = n1.targetAnchor
-      }
-      frame.current = n2
-      site.vnode = n2
-      for (const node of nodes) n2.anchor.parentNode!.insertBefore(node, n2.anchor)
-      if (frame.cached !== undefined) {
-        internals.pc(
-          frame.cached,
-          n2,
-          frame.target(),
-          null,
-          parent,
-          suspense,
-          namespace,
-          scopes,
-          false,
-        )
-      } else {internals.mc(
-          n2.children,
-          frame.target(),
-          null,
-          parent,
-          suspense,
-          namespace,
-          scopes,
-          false,
-        )}
-      frame.remember(n2, parent, suspense, internals)
-    },
-    hydrate(
-      node: any,
-      vnode: any,
-      parent: any,
-      suspense: any,
-      scopes: any,
-      optimized: any,
-      internals: any,
-      hydrateChildren: any,
-    ): any {
-      const next = base.hydrate(
-        node,
-        vnode,
-        parent,
-        suspense,
-        scopes,
-        optimized,
-        internals,
-        hydrateChildren,
-      )
-      const { frame, site, active } = vnode.props as {
-        frame: PlainFrame
-        site: PlainSite
-        active: boolean
-      }
-      site.vnode = vnode
-      if (active) frame.remember(vnode, parent, suspense, internals)
-      return next
-    },
-    remove(vnode: any, parent: any, suspense: any, internals: any, doRemove: boolean): void {
-      const { frame, active } = vnode.props as { frame: PlainFrame; active: boolean }
-      if (!active) {
-        base.remove(vnode, parent, suspense, internals, doRemove)
-        return
-      }
-      frame.release(vnode)
-      for (const node of [vnode.el, vnode.anchor, vnode.targetStart, vnode.targetAnchor]) {node
-          ?.parentNode?.removeChild(node)}
-    },
-  }
-})()
+const newSlotClaims = (): SlotClaims => ({ claims: new Map(), released: shallowRef(0) })
 const plainFilled = (nodes: readonly VNode[]): boolean =>
   nodes.some(node =>
     node.type === Fragment ? plainFilled(slotContent(node.children)) : node.type !== Comment
   )
+/** Choose one destination; Vue creates and destroys each destination's ordinary subtree. */
 const PlainPlacement = /* @__PURE__ */ defineComponent({
-  props: { frame: { type: Object as PropType<PlainFrame>, required: true } },
+  props: {
+    owner: { type: Object as PropType<SlotClaims>, required: true },
+    name: { type: String, default: '' },
+    read: { type: Function as PropType<() => VNode[]>, required: true },
+  },
   setup(props, { slots }) {
-    const site: PlainSite = {}
-    props.frame.sites.add(site)
-    onMounted(() => props.frame.observe(site))
+    const site = {}
     onBeforeUnmount(() => {
-      props.frame.sites.delete(site)
+      if (props.owner.claims.get(props.name) === site) {
+        props.owner.claims.delete(props.name)
+        props.owner.released.value++
+      }
     })
     return () => {
-      const frame = props.frame
-      void frame.revision.value
-      if (frame.retired) return slots.default?.()
-      if (
-        frame.owner === undefined
-        && (typeof document === 'undefined' || site.vnode === undefined
-          || site.vnode.el?.isConnected === true)
-      ) frame.owner = site
-      const active = frame.owner === site
-      const content = active ? frame.read() : []
-      return h(Fragment, [
-        h(PlainPortal as any, {
-          frame,
-          site,
-          active,
-          disabled: true,
-          to: typeof document === 'undefined' ? '#html-next-plain' : frame.target(),
-        }, content),
-        !active || !plainFilled(content) ? slots.default?.() : null,
-      ])
+      const { owner, name } = props
+      void owner.released.value
+      const current = owner.claims.get(name)
+      if (current !== undefined && current !== site) return slots.default?.()
+      owner.claims.set(name, site)
+      const content = props.read()
+      return plainFilled(content) ? h(Fragment, content) : slots.default?.()
     }
   },
 })
 interface PlainSlots {
-  readonly own: Map<string, PlainFrame>
+  readonly own: SlotClaims
   readonly slots: Slots
   readonly record: ChildRecord | undefined
 }
 const slotKey = (name: string): string => name === '' ? 'default' : name
-function plainFrame(record: ChildRecord, name: string): PlainFrame {
-  let frame = record.plain.get(name)
-  if (frame === undefined) {
-    frame = new PlainFrame(() => {
-      const given = record.read().children as Slots | null
-      return given?.[slotKey(name)] === undefined
-        ? []
-        : [renderChildSlot(given, slotKey(name), {}, () => [])]
-    })
-    record.plain.set(name, frame)
-  }
-  return frame
-}
-export function usePlainSlots(names: readonly string[], record?: ChildRecord): PlainSlots {
-  const slots = useSlots(), own = new Map<string, PlainFrame>()
-  if (record === undefined) {
-    for (const name of names) {
-      own.set(
-        name,
-        new PlainFrame(() =>
-          slots[slotKey(name)] === undefined
-            ? []
-            : [renderChildSlot(slots, slotKey(name), {}, () => [])]
-        ),
-      )
-    }
-  }
+export function usePlainSlots(_names: readonly string[], record?: ChildRecord): PlainSlots {
+  const slots = useSlots(), own = newSlotClaims()
   onBeforeUpdate(() => {
-    for (const frame of own.values()) frame.revision.value++
-  })
-  onBeforeUnmount(() => {
-    for (const frame of own.values()) frame.dispose()
+    own.released.value++
   })
   return { own, slots, record }
 }
@@ -1935,16 +1698,15 @@ export const PlainSlot = /* @__PURE__ */ defineComponent({
   setup(props, { slots }) {
     return () => {
       const { state, name } = props
+      const read = () =>
+        state.slots[slotKey(name)] === undefined
+          ? []
+          : [renderChildSlot(state.slots, slotKey(name), {}, () => [])]
       if (state.slots[TEMPLATE_SLOT + slotKey(name)] !== undefined) {
         return renderChildSlot(state.slots, slotKey(name), {}, () =>
           slots.default?.() ?? [])
       }
-      const frame = state.record === undefined
-        ? state.own.get(name)
-        : plainFrame(state.record, name)
-      return frame === undefined
-        ? renderChildSlot(state.slots, slotKey(name), {}, () => slots.default?.() ?? [])
-        : h(PlainPlacement, { frame }, slots)
+      return h(PlainPlacement, { owner: state.record ?? state.own, name, read }, slots)
     }
   },
 })
@@ -1998,12 +1760,20 @@ const nodeRoot = (entry: object): Node | null => childRecords.get(entry)!.node.e
  * A child the parent read from its slot's vnodes holds its place; any other, such as one inside the
  * consumer's own wrapper component, joins the nearest ancestor that accepts its component.
  */
-export function useChildEntry(): ChildRecord | undefined {
+export function useChildEntry(
+  contexts: Readonly<Record<string, unknown>> = {},
+): ChildRecord | undefined {
   const instance = getCurrentInstance()!
   const nearest = inject<ChildOwner | undefined>(ACCEPTING, undefined)
   let owner = nearest
   while (owner !== undefined && !owner.kinds.has(instance.type)) owner = owner.parent
-  return owner?.add(instance, owner === nearest)
+  const record = owner?.add(instance, owner === nearest)
+  if (record !== undefined) {
+    const replaced = record.contexts !== undefined && Object.keys(contexts).length > 0
+    record.contexts = contexts
+    if (replaced) record.contextKey.value = Symbol()
+  }
+  return record
 }
 
 /**
@@ -2027,15 +1797,14 @@ export function useChildList<List>(
   prefix: string,
   named: string,
   listed: string,
-  retain = false,
+  singlePlacement = false,
 ): readonly [Readonly<Ref<List>>, Readonly<Ref<VNode[]>>] {
   const slots = useSlots()
-  const instance = getCurrentInstance()!
-  // A consumer's render that reads its values outside the slot function gives the table new vnodes
-  // without a change the list tracks: each new vnode from the consumer reads the slot afresh.
-  const source = shallowRef(instance.vnode)
+  // Read slots afresh for every component update. Cached mounted VNodes cannot be hydrated again
+  // when a conditional outlet recreates its ordinary subtree.
+  const source = shallowRef(0)
   onBeforeUpdate(() => {
-    source.value = instance.vnode
+    source.value++
   })
   const kinds = new Map(accepted.map((kind) => [kind[0], kind]))
   const leftOut = (key: string, message: string): void => {
@@ -2062,7 +1831,9 @@ export function useChildList<List>(
       tag: kind[1],
       slots: kind[3],
       prefix,
-      plain: new Map(),
+      claims: new Map(),
+      released: shallowRef(0),
+      contextKey: shallowRef(Symbol()),
       node,
       props: {},
       entry: {},
@@ -2165,18 +1936,6 @@ export function useChildList<List>(
     void source.value
     const nodes = (slots[slot === '' ? 'default' : slot]?.() ?? []) as VNode[]
     visit(nodes, '')
-    const removed: ChildRecord[] = []
-    for (const [key, record] of records) {
-      if (next.get(key) !== record && record.plain.size > 0) removed.push(record)
-    }
-    if (removed.length > 0) {
-      queueMicrotask(() => {
-        const retained = new Set(records.values())
-        for (const record of removed) {
-          if (!retained.has(record)) { for (const frame of record.plain.values()) frame.dispose() }
-        }
-      })
-    }
     records = next
     return { entries: Object.freeze(entries) as List, nodes: projected(nodes) }
   })
@@ -2240,7 +1999,6 @@ export function useChildList<List>(
         })
         onBeforeUnmount(() => {
           joined.splice(joined.indexOf(record), 1)
-          for (const frame of record.plain.values()) frame.dispose()
           reread()
         })
         return record
@@ -2254,15 +2012,9 @@ export function useChildList<List>(
   onUpdated(() => {
     if (joined.length > 0) reread()
   })
-  const projection = retain ? new PlainFrame(() => childNodes(state.value.nodes)) : undefined
+  const projection = singlePlacement ? newSlotClaims() : undefined
   onBeforeUnmount(() => {
     observer?.disconnect()
-    projection?.dispose()
-    for (const record of [...records.values(), ...joined]) {
-      for (const frame of record.plain.values()) {
-        frame.dispose()
-      }
-    }
   })
   return [
     list as unknown as Readonly<Ref<List>>,
@@ -2270,7 +2022,7 @@ export function useChildList<List>(
       const nodes = state.value.nodes
       if (
         projection !== undefined && slots[TEMPLATE_SLOT + slotKey(slot)] === undefined
-      ) projectionFrames.set(nodes, projection)
+      ) projectionClaims.set(nodes, projection)
       return nodes
     }),
   ]
@@ -2293,28 +2045,9 @@ const outletChild = (instance: ComponentInternalInstance): ComponentInternalInst
   return top
 }
 
-// A closed accepting outlet can reopen with the same collected source VNodes. A disposed component's
-// server element must not make Vue treat its new instance as another hydration of that old root.
+/** Vue owns clones of collected slot VNodes through its ordinary renderer. */
 function childNodes(nodes: readonly VNode[]): VNode[] {
-  return nodes.map(node => {
-    if (node.type === Fragment) {
-      const copy = cloneVNode(node)
-      copy.children = childNodes(slotContent(node.children))
-      return copy
-    }
-    if (node.component?.isUnmounted !== true) return node
-    const copy = cloneVNode(node)
-    copy.el = null
-    copy.anchor = null
-    copy.component = null
-    const record = vnodeRecords.get(node)
-      ?? (node.props === null ? undefined : vnodeRecords.get(node.props))
-    if (record !== undefined) {
-      vnodeRecords.set(copy, record)
-      record.node = copy
-    }
-    return copy
-  })
+  return nodes.map(node => cloneVNode(node))
 }
 
 /** An accepting slot's outlet: the consumer's vnodes the slot's `as` list read, or the fallback. */
@@ -2322,9 +2055,9 @@ export const ChildNodes = /* @__PURE__ */ defineComponent({
   props: { nodes: { type: Array as PropType<VNode[]>, required: true } },
   setup(props, { slots }) {
     return () => {
-      const frame = projectionFrames.get(props.nodes)
-      return frame !== undefined
-        ? h(PlainPlacement, { frame }, slots)
+      const owner = projectionClaims.get(props.nodes)
+      return owner !== undefined
+        ? h(PlainPlacement, { owner, read: () => childNodes(props.nodes) }, slots)
         : plainFilled(props.nodes)
         ? h(Fragment, childNodes(props.nodes))
         : slots.default?.()
@@ -2340,16 +2073,7 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
   },
   setup(props, { slots }) {
     const { record, name } = props
-    const instance = getCurrentInstance()!
-    // Content placed here injects from the child first, then the child's own ancestors. Vue has no public
-    // API to read another instance's provided values, so this takes the child's internal `provides`,
-    // which every Vue 3 release (3.0 through 3.5, tested with 3.5.43) keeps on the internal instance and
-    // children inject from; vue-columns-parity reads a column's context from cell content to catch a change.
-    // The child's instance exists only once its outlet rendered: a table renders the slot's outlet before its cells.
-    const child = record.node.component as { provides?: object } | null
-    if (child?.provides !== undefined) {
-      ;(instance as unknown as { provides: object }).provides = child.provides
-    }
+    for (const [key, value] of Object.entries(record.contexts ?? {})) provide(key, value)
 
     return () => {
       const node = record.read()
@@ -2387,7 +2111,11 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
         )
       }
       if (given?.[slotKey(name)] === undefined || withProps) return fallback()
-      return h(PlainPlacement, { frame: plainFrame(record, name) }, slots)
+      return h(PlainPlacement, {
+        owner: record,
+        name,
+        read: () => [renderChildSlot(given!, slotKey(name), {}, fallback)],
+      }, slots)
     }
   },
 })
@@ -2409,7 +2137,11 @@ export const ChildSlot = /* @__PURE__ */ (() => {
       : undefined
     if (record === undefined) return slots.default?.()
     const given = props.shapes?.[record.tag]?.(props.given) ?? props.given
-    return h(ChildPlacement, { key: props.of as never, record, name: props.name, given }, slots)
+    return h(
+      ChildPlacement,
+      { key: record.contextKey.value, record, name: props.name, given },
+      slots,
+    )
   }
   slot.props = ['of', 'name', 'given', 'shapes']
   return slot

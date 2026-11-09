@@ -1177,7 +1177,7 @@ export function initializedState(evaluate: () => { value: unknown; status: Input
     set(next: unknown): void { initialized = true; value = next; version.update(value => value + 1); } });
 }
 \nexport function revertValue(value: unknown, fallback: unknown): unknown { return value ?? fallback; }\n${NATIVE_PATH_WRITE_SOURCE.replace("writeBoundPath", "updatePath")}\nexport function stateTokens(values: Record<string, unknown>): string {\n  return Object.entries(values).flatMap(([name, value]) => [\n    ...(value === true || typeof value === "string" && value.length > 0 || typeof value === "number" && value !== 0 && Number.isFinite(value) ? [name] : []),\n    ...(typeof value === "string" || typeof value === "number" ? [name + "=" + encodeURIComponent(String(value))] : [])\n  ]).join(" ");\n}\n` },
-    { path: "angular/children.ts", content: `import { ChangeDetectorRef, DestroyRef, Directive, ElementRef, InjectionToken, Injector, Input, TemplateRef, ViewContainerRef, afterNextRender, computed, inject, signal, type EmbeddedViewRef, type Signal, type WritableSignal } from "@angular/core";
+    { path: "angular/children.ts", content: `import { ChangeDetectorRef, DestroyRef, Directive, ElementRef, InjectionToken, Injector, Input, TemplateRef, ViewContainerRef, computed, inject, signal, type EmbeddedViewRef, type Signal, type WritableSignal } from "@angular/core";
 ${NATIVE_CONNECTION_SOURCE}
 /** An accepted child (components#slot-accepts-as): its tag, the slot its \`slot\` attribute routes it to, and the entry its parent's \`as\` list holds. */
 export interface AcceptedChild { readonly tag: string; readonly slot: string; readonly entry: object }
@@ -1241,147 +1241,113 @@ const child = (entry: unknown) => entry !== null && typeof entry === "object" ? 
 export function childSlot(entry: unknown, name: string): TemplateRef<any> | undefined { return child(entry)?.slots[name]?.(); }
 /** The accepted component an entry belongs to, whose slot declaration shapes the outlet's props. */
 export function childTag(entry: unknown): string | undefined { return child(entry)?.tag; }
-// By the template's anchor: each directive that injects TemplateRef receives its own object for one template.
+// TemplateRef wrappers can differ for one declaration; its native anchor keys placement.
 const plain = new WeakSet<object>();
-const declarations = new WeakMap<object, ViewContainerRef>();
-interface PlainView {
-  view?: EmbeddedViewRef<any>;
-  owner?: HtmlNextChildSlot;
-  readonly waiting: Set<HtmlNextChildSlot>;
-  pending?: boolean;
-  retired?: boolean;
-}
-const views = new WeakMap<object, PlainView>();
-const warned = new Set<string>();
-// Angular lists structural anchors before their rendered children; move them in their native DOM order.
-function plainNodes(view: EmbeddedViewRef<any>): Node[] {
-  return [...view.rootNodes].sort((left: Node, right: Node) => left === right ? 0 : left.compareDocumentPosition(right) & 4 ? -1 : 1);
-}
-function markPlain(template: TemplateRef<any>): void {
-  const anchor = template.elementRef.nativeElement;
-  plain.add(anchor);
-  declarations.set(anchor, inject(ViewContainerRef));
-  inject(DestroyRef).onDestroy(() => {
-    const frame = views.get(anchor);
-    if (frame === undefined) return;
-    frame.retired = true;
-    frame.owner = undefined;
-    frame.waiting.clear();
-    const view = frame.view; frame.view = undefined;
-    view?.destroy();
-  });
-}
-/** Plain views keep their declaration lifetime while their native nodes move between outlets. */
 @Directive({ selector: "ng-template[hnNextPlain]", standalone: true })
-export class HtmlNextPlain { constructor() { markPlain(inject(TemplateRef)); } }
+export class HtmlNextPlain { constructor() { plain.add(inject(TemplateRef).elementRef.nativeElement); } }
 @Directive({ selector: "ng-template[hnNextCapture]", standalone: true })
 export class HtmlNextCapture {
   readonly template = inject(TemplateRef);
-  constructor() { markPlain(this.template); }
+  constructor() { plain.add(this.template.elementRef.nativeElement); }
 }
-function choose(frame: PlainView): void {
-  if (frame.pending) return;
-  frame.pending = true;
-  queueMicrotask(() => {
-    frame.pending = false;
-    if (frame.owner === undefined) {
-      const next = [...frame.waiting].filter(outlet => outlet.connected()).sort((left, right) => left.anchor.compareDocumentPosition(right.anchor) & 4 ? -1 : 1)[0];
-      next?.placePlain(frame);
-    }
-    for (const outlet of frame.waiting) if (outlet !== frame.owner && outlet.connected()) outlet.showFallback();
-  });
-}
-/** Own and borrowed outlets share one declaration-owned plain view; lazy templates render afresh. */
+const warned = new Set<string>();
+const claims = new WeakMap<object, HtmlNextChildSlot>();
+const waiting = new WeakMap<object, Set<HtmlNextChildSlot>>();
+const choosing = new WeakSet<object>();
+/** One destination renders ordinary content; Angular owns view creation, updates and destruction. */
 @Directive({ selector: "[hnNextChildSlot]", standalone: true })
 export class HtmlNextChildSlot {
   @Input("hnNextChildSlot") template: TemplateRef<any> | undefined;
   @Input("hnNextChildSlotContext") context: Record<string, unknown> = {};
   @Input("hnNextChildSlotFallback") fallback: TemplateRef<any> | undefined;
   @Input("hnNextChildSlotPlainWarning") plainWarning: string | undefined;
-  readonly anchor = inject<ElementRef<Node>>(ElementRef).nativeElement;
   private readonly container = inject(ViewContainerRef);
+  private readonly anchor = inject<ElementRef<Node>>(ElementRef).nativeElement;
   private readonly changes = inject(ChangeDetectorRef);
   private readonly injector = inject(Injector);
   private readonly values = new Proxy({}, { get: (_target, name) => Reflect.get(this.context, name) });
   private shown: TemplateRef<any> | undefined;
-  private shownView: EmbeddedViewRef<any> | undefined;
-  private frame: PlainView | undefined;
-  private stop: (() => void) | undefined;
+  private primary: EmbeddedViewRef<any> | undefined;
+  private empty: EmbeddedViewRef<any> | undefined;
+  private claimed: object | undefined;
+  private waits: object | undefined;
   private disposed = false;
-  connected(): boolean { return !this.disposed && this.anchor.isConnected; }
+  private stop: (() => void) | undefined;
+  private initializing = true;
+  constructor() { queueMicrotask(() => { this.initializing = false; }); }
   ngOnChanges(): void { this.render(); }
   ngDoCheck(): void { this.render(); }
-  ngAfterViewInit(): void {
-    if (typeof MutationObserver !== "undefined" && this.anchor.parentElement !== null) this.stop = observeConnection(this.anchor.parentElement, () => this.render());
-    this.render();
-  }
   private render(): void {
     if (this.disposed) return;
     let template = this.template;
-    if (template !== undefined && plain.has(template.elementRef.nativeElement) && this.plainWarning !== undefined) {
+    const key = template?.elementRef.nativeElement;
+    const ordinary = key !== undefined && plain.has(key);
+    if (ordinary && this.stop === undefined && typeof MutationObserver !== "undefined") {
+      let connected = this.anchor.isConnected;
+      this.stop = observeConnection(this.anchor.parentElement ?? this.anchor.ownerDocument!.documentElement, () => {
+        const next = this.anchor.isConnected;
+        if (connected !== next) { connected = next; this.render(); this.changes.markForCheck(); }
+      });
+    }
+    if (this.claimed !== key) this.release();
+    if (this.waits !== key) this.stopWaiting();
+    if (ordinary && !this.initializing && !this.anchor.isConnected) {
+      this.release(); template = undefined;
+    } else if (ordinary && this.plainWarning !== undefined) {
       if (!warned.has(this.plainWarning)) { warned.add(this.plainWarning); console.warn(this.plainWarning); }
       template = undefined;
+    } else if (ordinary) {
+      const owner = claims.get(key);
+      const position = owner?.initializing ? this.anchor.compareDocumentPosition(owner.anchor) : 0;
+      if (owner === undefined || owner === this || !(position & 1) && !!(position & 4)) {
+        claims.set(key, this); this.claimed = key;
+        // Initial view construction can run out of DOM order. Later outlets wait for the owner.
+        if (owner !== undefined && owner !== this) {
+          owner.claimed = undefined; owner.render(); owner.changes.markForCheck();
+        }
+      } else {
+        let queue = waiting.get(key);
+        if (queue === undefined) waiting.set(key, queue = new Set());
+        queue.add(this); this.waits = key; template = undefined;
+      }
     }
-    const key = template?.elementRef.nativeElement;
-    let frame = key === undefined || !plain.has(key) ? undefined : views.get(key);
-    if (key !== undefined && plain.has(key) && frame === undefined) views.set(key, frame = { waiting: new Set() });
-    if (frame?.retired === true) { frame = undefined; template = undefined; }
-    if (frame !== this.frame) { this.release(); this.frame = frame; }
-    if (frame === undefined) { this.show(template ?? this.fallback); return; }
-    frame.waiting.add(this);
-    if (!this.connected()) { if (frame.owner === this) this.releaseOwner(frame); return; }
-    if (frame.owner === this) { frame.view!.detectChanges(); this.syncEmpty(frame); }
-    else if (frame.owner !== undefined) this.showFallback();
-    else choose(frame);
-  }
-  placePlain(frame: PlainView): void {
-    if (!this.connected() || this.frame !== frame) return;
-    frame.owner = this;
-    this.show(undefined);
-    if (frame.view === undefined) {
-      const view = frame.view = this.container.createEmbeddedView(this.template!, this.values, { injector: this.injector });
-      view.detectChanges();
-      const declaration = declarations.get(this.template!.elementRef.nativeElement)!;
-      afterNextRender(() => {
-        if (view.destroyed) return;
-        const index = this.container.indexOf(view);
-        if (index < 0) return;
-        const detached = this.container.detach(index) as EmbeddedViewRef<any>;
-        frame.view = detached;
-        declaration.insert(detached);
-        if (frame.owner !== undefined) for (const node of plainNodes(detached)) frame.owner.anchor.parentNode!.insertBefore(node, frame.owner.anchor);
-      }, { injector: this.injector });
+    const selected = template ?? this.fallback;
+    if (selected !== this.shown) {
+      this.container.clear(); this.primary = undefined; this.empty = undefined; this.shown = selected;
+      if (selected !== undefined) this.primary = this.container.createEmbeddedView(selected, this.values, { injector: this.injector });
     }
-    for (const node of plainNodes(frame.view)) this.anchor.parentNode!.insertBefore(node, this.anchor);
-    this.syncEmpty(frame);
-    this.changes.markForCheck();
-  }
-  private syncEmpty(frame: PlainView): void {
-    const empty = !frame.view!.rootNodes.some((node: Node) => node.nodeType === 1 || node.nodeType === 3 && (node as Text).data.trim() !== "");
-    this.show(empty ? this.fallback : undefined);
-  }
-  showFallback(): void { this.show(this.fallback); }
-  private show(template: TemplateRef<any> | undefined): void {
-    if (template === this.shown) return;
-    this.shownView?.destroy(); this.shownView = undefined; this.shown = template;
-    if (template !== undefined) this.shownView = this.container.createEmbeddedView(template, this.values, { injector: this.injector });
-    this.changes.markForCheck();
-  }
-  private releaseOwner(frame: PlainView): void {
-    if (frame.owner !== this) return;
-    frame.owner = undefined;
-    if (frame.view !== undefined && !frame.view.destroyed) {
-      const fragment = this.anchor.ownerDocument!.createDocumentFragment();
-      for (const node of plainNodes(frame.view)) fragment.appendChild(node);
+    this.primary?.detectChanges();
+    const needsFallback = ordinary && template !== undefined && this.primary !== undefined && this.fallback !== undefined &&
+      !this.primary.rootNodes.some((node: Node) => node.nodeType === 1 || node.nodeType === 3 && (node as Text).data.trim() !== "");
+    if (needsFallback && this.empty === undefined) this.empty = this.container.createEmbeddedView(this.fallback!, this.values, { injector: this.injector });
+    else if (!needsFallback && this.empty !== undefined) {
+      const index = this.container.indexOf(this.empty);
+      if (index >= 0) this.container.remove(index);
+      this.empty = undefined;
     }
-    choose(frame);
+  }
+  private stopWaiting(): void {
+    if (this.waits !== undefined) waiting.get(this.waits)?.delete(this);
+    this.waits = undefined;
   }
   private release(): void {
-    const frame = this.frame; this.frame = undefined;
-    if (frame === undefined) return;
-    frame.waiting.delete(this); this.releaseOwner(frame);
+    const key = this.claimed; this.claimed = undefined;
+    if (key === undefined || claims.get(key) !== this) return;
+    claims.delete(key); this.choose(key);
   }
-  ngOnDestroy(): void { this.disposed = true; this.stop?.(); this.release(); }
+  private choose(key: object): void {
+    if (claims.has(key) || choosing.has(key)) return;
+    choosing.add(key);
+    queueMicrotask(() => {
+      choosing.delete(key);
+      if (claims.has(key)) return;
+      // All destinations now exist, so initial ownership follows visible document order.
+      const next = [...waiting.get(key) ?? []].filter(outlet => !outlet.disposed && outlet.anchor.isConnected)
+        .sort((a, b) => a.anchor.compareDocumentPosition(b.anchor) & 4 ? -1 : 1)[0];
+      if (next !== undefined) { claims.set(key, next); next.stopWaiting(); next.render(); next.changes.markForCheck(); }
+    });
+  }
+  ngOnDestroy(): void { this.disposed = true; this.stop?.(); this.release(); this.stopWaiting(); }
 }
 
 ` },

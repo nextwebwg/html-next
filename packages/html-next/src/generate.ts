@@ -20,7 +20,6 @@ import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyle
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
 import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
-import { sveltePlainArtifacts as makeSveltePlainArtifacts } from "./targets/svelte-plain-source.js";
 import { svelteRenderArtifact as makeSvelteRenderArtifact } from "./targets/svelte-render.js";
 import { svelteDataArtifact as makeSvelteDataArtifact } from "./targets/svelte-data.js";
 import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
@@ -222,11 +221,6 @@ export function svelteDataArtifact(): GeneratedArtifact {
 /** The rendering helpers converted Svelte components share; every package that emits Svelte ships it once. */
 export function svelteRenderArtifact(): GeneratedArtifact {
   return makeSvelteRenderArtifact(GENERATOR_VERSION);
-}
-
-/** The native renderer bridge shared by retained Svelte projections. */
-export function sveltePlainArtifacts(): readonly GeneratedArtifact[] {
-  return makeSveltePlainArtifacts(GENERATOR_VERSION);
 }
 
 /** The component `<slot of>` outlets render a child's slot content in, with the child's contexts. */
