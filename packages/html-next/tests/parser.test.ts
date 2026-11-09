@@ -5,13 +5,55 @@ import { describe, it } from "vitest";
 import { JSDOM, VirtualConsole } from "jsdom";
 
 import { parseBrowserComponent } from "../src/browser-source.js";
-import { HtmlDiagnosticError } from "../src/diagnostics.js";
+import { getDiagnosticLocation, HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ElementNode, SlotNode, TemplateNode } from "../src/template.js";
 import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeScriptType } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
+
+describe("explicit attribute forwarding destinations", () => {
+  it("retains authored root and match-arm locations when adding default forwarding", () => {
+    for (const tag of ["button", "x-child"]) {
+      const root = parseComponent(`<template component="x-forward">\n  <${tag}></${tag}>\n</template>`).template;
+      assert.deepEqual(getDiagnosticLocation(root), { line: 2, column: 3 });
+    }
+    const root = parseComponent('<template component="x-forward">\n  <template $match>\n    <a $when="true">Link</a>\n    <button $else>Button</button>\n  </template>\n</template>').template;
+    assert.deepEqual(getDiagnosticLocation(root), { line: 2, column: 3 });
+    assert.deepEqual(root.children.map(node => getDiagnosticLocation(node)), [{ line: 3, column: 5 }, { line: 4, column: 5 }]);
+  });
+  for (const browser of [false, true]) {
+    const parse = (source: string) => browser
+      ? parseBrowserComponent(new JSDOM(source).window.document.querySelector("template")!)
+      : parseComponent(source);
+    it(`places default forwarding before authored root attributes (${browser ? "browser" : "Node"})`, () => {
+      const root = parse('<template component="x-forward"><button title="Template">Save</button></template>').template;
+      assert.deepEqual(root.attributes, [{ kind: "forward", name: "attributes" }, { kind: "literal", name: "title", value: "Template" }]);
+    });
+    it(`places default forwarding on delegated roots and each root match arm (${browser ? "browser" : "Node"})`, () => {
+      const delegated = parse('<template component="x-forward"><x-child title="Template"></x-child></template>').template;
+      assert.equal(delegated.attributes[0]?.kind, "forward");
+      const match = parse('<template component="x-forward"><template $match><a $when="true">Link</a><button $else>Button</button></template></template>').template;
+      assert.deepEqual(match.attributes, []);
+      assert.deepEqual(match.children.map(arm => (arm as ElementNode).attributes[0]?.kind), ["forward", "forward"]);
+    });
+    for (const flag of ["noforward", 'noforward="false"', 'noforward="noforward"']) {
+      it(`uses presence of ${flag} to retain only explicit destinations (${browser ? "browser" : "Node"})`, () => {
+        const root = parse(`<template component="x-forward" ${flag}><section title="Wrapper"><button $attributes>Save</button></section></template>`).template;
+        assert.deepEqual(root.attributes, [{ kind: "literal", name: "title", value: "Wrapper" }]);
+        assert.deepEqual((root.children[0] as ElementNode).attributes, [{ kind: "forward", name: "attributes" }]);
+      });
+    }
+  }
+  for (const body of ['<button $attributes="attrs">Save</button>', '<section><template $attributes>Body</template></section>',
+    '<section><slot $attributes></slot></section>', '<section><template $slot $attributes></template></section>']) {
+    it(`rejects a forwarding directive without a rendered destination: ${body}`, () => {
+      assert.throws(() => parseComponent(`<template component="x-forward">${body}</template>`),
+        (error: unknown) => error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT012");
+    });
+  }
+});
 
 describe("head content outside <defs>", () => {
   it("rejects a head element placed directly in a carrier", () => {
@@ -91,6 +133,12 @@ describe("parseComponent", () => {
     expectDiagnostic("HC011", `<template component="x-names"><defs>
       <prop name="Name" type="string">Name.</prop><prop name="name" type="string">Name.</prop>
       </defs><p from:title="$Name">$name</p></template>`);
+    const distinct = parseComponent(`<template component="x-names"><defs>
+      <prop name="é" type="string">Lower.</prop><prop name="É" type="string">Upper.</prop>
+      </defs><p from:data-é="$é" from:data-É="$É">{$é}:{$É}</p></template>`);
+    assert.deepEqual(Object.keys(distinct.contract.props).sort(), ["É", "é"]);
+    assert.deepEqual(distinct.contract.props["É"]!.target, { attribute: "data-É" });
+    assert.deepEqual(distinct.contract.props["é"]!.target, { attribute: "data-é" });
     expectDiagnostic("HT016", `<template component="x-names"><p $each="😀of [1]">Hi</p></template>`);
   });
 
@@ -100,7 +148,7 @@ describe("parseComponent", () => {
       <state name="rows" type="list(string)" value="[]"></state></defs><section>${body}</section></template>`;
     const scoped = `<div $with="$account.owner as owner"><p>{$owner}</p></div>` +
       `<template $match="$account.plan as plan"><b $when="$plan = 'pro'">{$plan}</b><i $else>{$plan}</i></template>` +
-      `<ul><li $each="row, i of $rows">{$row} {$i} {$loop.index}</li></ul>`;
+      `<ul><li $each="row, i of $rows">{$row} {$i}</li></ul>`;
     assert.doesNotThrow(() => parseComponent(source(scoped)));
     for (const outside of ["$owner", "$plan", "$row", "$i", "$loop.index"]) {
       expectDiagnostic("HT003", source(`${scoped}<p>{${outside}}</p>`));
@@ -532,14 +580,14 @@ describe("parseComponent", () => {
     assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$column"></slot></td>`)), /HT008: A `<slot of>` outlet names the child's slot it places/);
     assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot from:of="$column" name="cell"></slot></td>`)), /HT008: /);
     assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$column" name="cell" size="1" from:size="2"></slot></td>`)), /HT008: .*`size` more than once/);
-    // An entry of the list, not an expression reaching one.
-    assert.match(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$columns[0]" name="cell"></slot></td>`)), /HT008: `of` takes an entry/);
+    // Indexed expressions preserve the identity of their own accepted entry.
+    assert.equal(message(table(accepts, `<td $each="column of $columns" $key="$column"><slot of="$columns[0]" name="cell"></slot></td>`)), "");
   });
 
   it("parses repeated scoped slots and exposes their row bindings", () => {
     const definition = parseComponent(
       `<template component="x-rows"><defs><slot name="row"><prop name="item" type="unknown" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
-      `<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">` +
+      `<ul><slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index">` +
       `<li $value="$row.name"></li></slot></ul></template>`,
     );
     const slot = definition.template.children[0];
@@ -548,7 +596,7 @@ describe("parseComponent", () => {
     assert.deepEqual(slot.flow?.kind === "each" && slot.flow.listPlan?.dependencies, ["rows"]);
     assert.deepEqual(slot.flow?.kind === "each" && slot.flow.keyPlan?.dependencies, ["row.id"]);
     assert.deepEqual(slot.props?.map((prop) => [prop.name, prop.expressionPlan.dependencies]), [
-      ["item", ["row"]], ["index", ["loop.index"]],
+      ["item", ["row"]], ["index", ["index"]],
     ]);
     assert.deepEqual(definition.slots?.map(({ declared: _declared, ...slot }) => slot), [{ name: "row", required: false, props: ["item", "index"] }]);
     assert.deepEqual(slot.fallback?.[0]?.kind === "element" && slot.fallback[0].attributes[0]?.kind === "directive"
@@ -621,7 +669,7 @@ describe("parseComponent", () => {
  from: "x-steps",
       as: "activeStep",
     });
-    assert.deepEqual(reader.template.attributes[0]?.kind, "attribute");
+    assert.deepEqual(reader.template.attributes.map(attribute => attribute.kind), ["forward", "attribute"]);
   });
 
   it("requires a context source and keeps context reads out of writable paths", () => {
@@ -655,6 +703,7 @@ describe("parseComponent", () => {
       if (attribute.kind !== "attribute") return attribute;
       return { kind: attribute.kind, name: attribute.name, expression: attribute.expression };
     }), [
+      { kind: "forward", name: "attributes" },
       { kind: "literal", name: "data-x-button", value: "" },
       { kind: "attribute", name: "data-variant", expression: "$variant" },
       { kind: "attribute", name: "data-size", expression: "$size" },
@@ -676,7 +725,7 @@ describe("parseComponent", () => {
       `<prop name="message" type="string">Button text.</prop>`,
     );
     const definition = parseComponent(source, "property.html");
-    const property = definition.template.attributes[0];
+    const property = definition.template.attributes.find(attribute => attribute.kind === "property");
     assert.ok(property?.kind === "property");
     assert.deepEqual({
       kind: property.kind,
@@ -746,7 +795,7 @@ describe("parseComponent", () => {
       "label.html",
     );
     assert.deepEqual(definition.contract.props.label?.target, { attribute: "title" });
-    assert.deepEqual(definition.template.attributes.map((attribute) => attribute.name), ["title", "aria-label"]);
+    assert.deepEqual(definition.template.attributes.map((attribute) => attribute.name), ["attributes", "title", "aria-label"]);
   });
 
   it("rejects props declared without a name, type, or binding", () => {
@@ -808,7 +857,7 @@ describe("parseComponent", () => {
       const own = (node as { twoWay?: boolean }).twoWay === true ? [(node as unknown as { writablePath: unknown }).writablePath] : [];
       return [...own, ...Object.values(node).flatMap(writes)];
     };
-    const loopIndex = { kind: "index", item: "row", expression: { kind: "member", object: { kind: "id", name: "loop" }, key: "index" } };
+    const loopIndex = { kind: "index", item: "row", expression: { kind: "id", name: "#index" } };
     assert.deepEqual(writes(parse(`<div $with="$draft.owner as owner"><input bind:value="owner.name"></div>` +
       `<template $match="$draft as d"><input $when="$d.plan" bind:value="d.plan"><i $else></i></template>` +
       `<p $each="row of $rows"><input bind:value="row.label"></p>` +
@@ -971,8 +1020,7 @@ describe("parseComponent", () => {
     assert.deepEqual(merged.slots, [{ name: "icon", required: true }, { name: "label", required: true }]);
     // A slot is not a native root.
     expectDiagnostic("HT021", button(`<template $match><slot></slot><button $else></button></template>`));
-    // A slot is still declared once within an arm.
-    expectDiagnostic("HT008", button(`<template $match><a $when="$as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`));
+    assert.deepEqual(parseComponent(button(`<template $match><a $when="$as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`)).slots, [{ required: true }]);
 
     const delegated = parseComponent(
       `<template component="x-primary" status="early" summary="Delegates.">` +
@@ -1004,6 +1052,15 @@ describe("parseComponent", () => {
         `<prop name="markup" type="string">Markup.</prop>`,
       ),
     );
+  });
+
+  it.each(["onclick", "onload", "onerror"].flatMap(name => ["from", "bind"].map(kind => ({ name, kind }))))("rejects executable $kind:$name bindings", ({ name, kind }) => {
+    const binding = `${kind}:${name}="${kind === "from" ? "$handler" : "handler"}"`;
+    expectDiagnostic("HT007", `<template component="x-events"><defs><state name="handler" type="string" value=""></state></defs><button ${binding}>Value</button></template>`);
+  });
+
+  it("keeps component input names separate from native executable attributes", () => {
+    assert.doesNotThrow(() => parseComponent('<template component="x-parent"><defs><state name="value" type="string" value=""></state></defs><div><x-child from:onclick="$value" bind:onload="value"></x-child></div></template>'));
   });
 
   it("rejects executable literal attributes and unsafe property sinks", () => {
@@ -1074,11 +1131,8 @@ describe("parseComponent", () => {
     }
   });
 
-  it("rejects invalid default-slot shapes and reserved language elements", () => {
-    expectDiagnostic(
-      "HT008",
-      componentSource(`<button><slot></slot><slot></slot></button>`),
-    );
+  it("accepts repeated default outlets and rejects reserved language elements", () => {
+    assert.deepEqual(parseComponent(componentSource(`<button><slot></slot><slot></slot></button>`)).slots, [{ required: true }]);
     expectDiagnostic(
       "HT009",
       componentSource(`<button><if test="ready"></if></button>`),

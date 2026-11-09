@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { it } from "vitest";
 import * as generation from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { attributeHelperArtifact } from "../src/targets/attribute-helper.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
@@ -48,9 +49,9 @@ async function preparedFixture(hydrate: boolean, ssrTemplate = false, partial = 
         const descriptor = parse(await readFile(args.path, "utf8"), { filename: args.path }).descriptor;
         return { contents: compileScript(descriptor, { id: args.path, inlineTemplate: true, templateOptions: { ssr: ssrTemplate && bundler.initialOptions.platform === "node" } }).content, loader: "ts" };
       });
-      bundler.onResolve({ filter: /^\.\/(host|props|bindings|control)$/ }, args => ({ path: args.path.slice(2), namespace: "fixture-helper" }));
+      bundler.onResolve({ filter: /^\.\/(host|props|bindings|control|attributes)$/ }, args => ({ path: args.path.slice(2), namespace: "fixture-helper" }));
       bundler.onLoad({ filter: /.*/, namespace: "fixture-helper" }, args => {
-        const helper = args.path === "bindings" ? generation.vueBindingsArtifact() : args.path === "host" ? generation.vueHostArtifact() : args.path === "control" ? generation.vueControlArtifact() : generation.vuePropsArtifact();
+        const helper = args.path === "attributes" ? attributeHelperArtifact("vue", generation.GENERATOR_VERSION) : args.path === "bindings" ? generation.vueBindingsArtifact() : args.path === "host" ? generation.vueHostArtifact() : args.path === "control" ? generation.vueControlArtifact() : generation.vuePropsArtifact();
         return { contents: helper.content, loader: "ts", resolveDir: root };
       });
       bundler.onResolve({ filter: /^@nextwebwg\/html-next\/bindings$/ }, () => ({ path: join(root, "src/bindings.ts") }));

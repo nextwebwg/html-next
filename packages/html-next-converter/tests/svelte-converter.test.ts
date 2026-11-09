@@ -39,12 +39,25 @@ async function serverHtml(outDirectory: string, name: string, source: string, pr
   return render(await serverComponent(outDirectory, name, source), { props }).body;
 }
 
+it("removes plain projection machinery from an ordinary Svelte button bundle", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-plain-pruning-"));
+  temporary.push(root);
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "dir");
+  await writeFile(join(root, "button.html"), '<template component="x-label"><button><slot name="icon"></slot><slot></slot></button></template>' +
+    '<template component="x-ordinary"><main><x-label><i slot="icon">Icon</i>Label</x-label></main></template>');
+  const out = join(root, "out");
+  const manifest = await convertComponents({ mode: "application", target: "svelte", root, outDirectory: out, entries: ["button.html"] });
+  const bundle = await build({ entryPoints: [join(out, manifest.components.find(component => component.tag === "x-ordinary")!.artifact)], bundle: true, write: false,
+    platform: "browser", format: "esm", plugins: [sveltePlugin("client")], loader: { ".css": "empty" } });
+  assert.doesNotMatch(bundle.outputFiles[0]!.text, /class PlainFrame|childPlainFrame|isPlainSnippet|plainSnippet/);
+});
+
 it("converts a simple component to compilable Svelte 5 in both graph modes", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-converter-"));
   temporary.push(root);
   await writeFile(join(root, "card.html"), `<template component="x-card" status="early" summary="Card.">
     <props><prop name="label" type="string" default="Ready">Label.</prop></props>
-    <article class="card" from:aria-label="$label"><slot></slot></article>
+    <article class="card" $attributes from:aria-label="$label"><slot></slot></article>
     <style>:host { display: block; }</style>
   </template>`);
 
@@ -66,9 +79,10 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.match(html, /aria-label="Hello"/);
     assert.match(html, /id="case"/);
     // Only the root is styled, so Svelte gives no element its hash class.
-    assert.match(html, /class="x-card card outside"/);
+    assert.match(html, /class="x-card outside"/);
     const defaulted = await serverHtml(outDirectory, "XCard", source);
     assert.match(defaulted, /aria-label="Ready"/);
+    assert.match(defaulted, /class="x-card card"/);
     assert.doesNotMatch(defaulted, /data-label=/);
   }
 });
@@ -168,7 +182,7 @@ it("lowers state, computed text, and declarative handlers to Svelte runes", asyn
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
   assert.match(source, /\$state<number>\(0\)/);
   assert.match(source, /cycleCheckedComputed/);
-  assert.match(source, /onclick=\{increment\}/);
+  assert.match(source, /"onclick": increment/);
   compile(source, { filename: "XCounter.svelte", generate: "client" });
   compile(source, { filename: "XCounter.svelte", generate: "server" });
 });
@@ -206,12 +220,12 @@ it("lowers a match inside table markup to one selected native row", async () => 
   compile(source, { filename: "XTable.svelte", generate: "server" });
 });
 
-it("renders sorted, filtered, limited rows with loop metadata and no wrapper", async () => {
+it("renders sorted, filtered, limited rows with explicit index aliases and no wrapper", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-each-"));
   temporary.push(root);
   await writeFile(join(root, "list.html"), `<template component="x-list" status="early" summary="List.">
     <ul><li $each="n, i of [3, 1, 2, 5]" $where="$n < 5" $sort="n" $limit="3"
-      from:data-i="$i" from:data-last="$loop.last" from:data-count="$loop.count" $value="$n"></li></ul>
+      from:data-i="$i" $value="$n"></li></ul>
   </template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["list.html"] });
@@ -221,10 +235,8 @@ it("renders sorted, filtered, limited rows with loop metadata and no wrapper", a
   const html = await serverHtml(outDirectory, "XList", source);
   assert.deepEqual([...html.matchAll(/<li ([^>]*)>([^<]*)<\/li>/g)].map((match) => [
     /data-i="([^"]*)"/.exec(match[1]!)?.[1],
-    /data-count="([^"]*)"/.exec(match[1]!)?.[1],
-    /data-last="([^"]*)"/.exec(match[1]!)?.[1] ?? null,
     match[2],
-  ]), [["0", "3", null, "1"], ["1", "3", null, "2"], ["2", "3", "", "3"]]);
+  ]), [["0", "1"], ["1", "2"], ["2", "3"]]);
 });
 
 it("treats an absent list as empty and reports duplicate keyed rows", async () => {

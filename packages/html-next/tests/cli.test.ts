@@ -7,6 +7,7 @@ import { describe, it } from "vitest";
 
 import { buildComponents, checkComponents, inspectComponents } from "../src/cli.js";
 import { GENERATOR_VERSION } from "../src/generate.js";
+import { namespaceSource } from "./namespace-fixture.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/x-button.html", import.meta.url));
 const graphFixture = fileURLToPath(new URL("./fixtures/graph/app.html", import.meta.url));
@@ -28,6 +29,17 @@ async function snapshot(directory: string): Promise<Record<string, string>> {
 }
 
 describe("buildComponents", () => {
+  it("emits the helper imported by a Vue component with namespaced attributes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "html-next-cli-namespaces-"));
+    try {
+      const source = join(directory, "namespaces.html");
+      await writeFile(source, namespaceSource);
+      await buildComponents([source], join(directory, "output"), { targets: ["vue"] });
+      assert.match(await readFile(join(directory, "output/vue/XNamespaces.vue"), "utf8"), /from ['"]\.\/attributes['"]/);
+      assert.match(await readFile(join(directory, "output/vue/attributes.ts"), "utf8"), /export function applyNamespacedAttributes/);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it("builds deterministic component, documentation, and manifest artifacts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "html-next-cli-"));
     try {
@@ -44,6 +56,7 @@ describe("buildComponents", () => {
         "styles/x-button.css",
         "vanilla/XButton.d.ts",
         "vanilla/XButton.js",
+        "vue/attributes.ts",
         "vue/host.ts",
         "vue/props.ts",
         "vue/XButton.vue",
@@ -121,6 +134,7 @@ describe("buildComponents", () => {
         "controllers/x-app/app.js",
         "controllers/x-app/helper.js",
         "html.manifest.json",
+        "vue/attributes.ts",
         "vue/host.ts",
         "vue/XApp.vue",
         "vue/XChild.vue",

@@ -1,13 +1,15 @@
+import { createHash } from "node:crypto";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
 
 import {
   generateComponent,
+  analyzeClientPlan,
   preparedModuleRevision,
   GENERATOR_VERSION,
   collectSharedStylesheets,
-  compileComponentGraphStylesForBuild,
+  compileComponentGraphStyleAssetsForBuild,
   normalizeConversionStyleIdentities,
   getDiagnosticLocation,
   withDiagnosticLocation,
@@ -21,6 +23,7 @@ import {
   type HtmlDiagnostic,
   type DiagnosticLocation,
   type ComponentDefinition,
+  type ClientPlan,
   type GeneratedArtifact,
   type ComponentGraphNode,
   type ElementNode,
@@ -45,9 +48,12 @@ export const componentsModule = "virtual:html-next/components";
 export const supportModule = "virtual:html-next/support";
 /** Server preparation for native factories generated from the same component graph. */
 export const preparationModule = "virtual:html-next/prepare";
+/** Closed-graph adoption entry for server output. Requires `hydrate: true`. */
+export const hydrationModule = "virtual:html-next/hydrate";
 const resolvedComponentsModule = "\0html-next:components";
 const resolvedSupportModule = "\0html-next:support";
 const resolvedPreparationModule = "\0html-next:prepare";
+const resolvedHydrationModule = "\0html-next:hydrate";
 const resolvedPackagePrefix = "\0html-next:package:";
 const publicComponentPrefix = `${componentsModule}/`;
 const resolvedPublicComponentPrefix = "\0html-next:public-component:";
@@ -64,6 +70,11 @@ export interface HtmlNextNativePluginOptions {
   readonly mode?: "application" | "library";
   /** Generate native factories that can adopt an existing server-rendered root. */
   readonly hydrate?: boolean;
+  /** Additional browser capabilities that templates alone cannot reveal. */
+  readonly client?: {
+    readonly creationRoots?: readonly string[] | "all";
+    readonly publicRoots?: readonly string[] | "all";
+  };
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
   /** Optional language extensions to build, such as `"transitions"`. Each is off until listed. */
   readonly extensions?: readonly string[];
@@ -81,9 +92,21 @@ export interface HtmlNextDynamicBoundary {
   readonly strategy: "external-custom-element";
 }
 
+/** Build-time styles and source identities consumed by server renderers. */
+export interface HtmlNextServerAssets {
+  readonly version: 1;
+  readonly hydrate: boolean;
+  readonly hasStyles: boolean;
+  readonly sources: readonly { readonly source: string; readonly kind: "component" | "stylesheet"; readonly sha256: string }[];
+  readonly stateNames: Readonly<Record<string, readonly string[]>>;
+  readonly stylesheets: readonly string[];
+}
+
 export interface HtmlNextBuildManifest {
+  readonly server: HtmlNextServerAssets;
   readonly mode: "native-application-or-library-build";
   readonly delivery: "application" | "library";
+  readonly client: ClientPlan & { readonly module: typeof hydrationModule };
   readonly entries: readonly string[];
   readonly publicEntries: readonly {
     readonly name: string;
@@ -122,6 +145,7 @@ interface CompiledGraph {
   readonly styles: ReadonlyMap<string, string>;
   readonly support: string;
   readonly preparation: string;
+  readonly hydration: string;
   readonly sourceFiles: readonly string[];
   readonly manifest: HtmlNextBuildManifest;
   readonly graph: ComponentGraph;
@@ -313,7 +337,19 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   if (entryURLs.length === 0) throw new Error("HTML Next requires at least one component entry or an installed HTML source package.");
   // An installed package's components are imported, so their page-wide head entries are left out.
   const packageRoots = installed.map((library) => pathToFileURL(`${library.directory}${sep}`).href);
+  const sourceRecords = new Map<string, HtmlNextServerAssets["sources"][number]>();
+  const readSource = async (url: string, kind: "component" | "stylesheet") => {
+    const source = await readFile(fileURLToPath(url), "utf8");
+    const record = Object.freeze({ source: displayPath(root, url), kind, sha256: createHash("sha256").update(source).digest("hex") });
+    const key = `${kind}:${record.source}`;
+    const previous = sourceRecords.get(key);
+    if (previous !== undefined && previous.sha256 !== record.sha256) throw new Error(`Source changed during compilation: ${record.source}`);
+    sourceRecords.set(key, record);
+    return { url, source };
+  };
   const graph = await loadNodeComponents(entryURLs, { baseURL: pathToFileURL(`${root}${sep}`).href, collectDiagnostics,
+    readComponent: url => readSource(url, "component"),
+    readStylesheet: url => readSource(url, "stylesheet"),
     isApplicationURL: (url) => !packageRoots.some((prefix) => url.startsWith(prefix)),
     ...(resolveStylesheet === undefined ? {} : { resolveStylesheet }),
     stylesheetAssetURL: url => url.startsWith("file:") ? `/@fs/${fileURLToPath(url).split(sep).join("/")}${new URL(url).search}${new URL(url).hash}` : url,
@@ -331,9 +367,6 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   const supportImports = new Set<string>();
   const sharedStyles = collectSharedStylesheets([...graph.nodes.values()].map(node => node.definition));
   const combinedStyleId = `${stylePrefix}shared-graph.css`;
-  if (sharedStyles.length > 0) {
-    styles.set(`\0${combinedStyleId}`, compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition)));
-  }
   const dynamicBoundaries = new Map<string, HtmlNextDynamicBoundary>();
   const generatedNames = new Map<string, string>();
 
@@ -397,7 +430,8 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
       generated.push({ node, definition, artifacts, artifact, modulePreparation });
     } catch (error) {
-      recoverDiagnostic(error, report);
+      recoverDiagnostic(error instanceof HtmlDiagnosticError && error.diagnostic.source === undefined
+        ? new HtmlDiagnosticError({ ...error.diagnostic, source: node.url }) : error, report);
     }
   }
 
@@ -435,6 +469,9 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   // Warnings exist only in check mode, after every phase has had its chance to report.
   diagnostics.unshift(...graph.warnings ?? []);
   if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError(diagnostics);
+
+  const graphStyleAssets = compileComponentGraphStyleAssetsForBuild([...graph.nodes.values()].map(node => node.definition));
+  if (sharedStyles.length > 0) styles.set(`\0${combinedStyleId}`, graphStyleAssets.css);
 
   const publicEntries = graph.roots.map((url) => {
     const node = graph.nodes.get(url)!;
@@ -476,6 +513,34 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     }));
   const sortedSupportImports = Object.freeze([...supportImports].sort());
   const sortedCapabilities = Object.freeze([...allCapabilities].sort());
+  const client = analyzeClientPlan(sortedNodes.map(node => node.definition), {
+    entries: publicEntries.map(entry => entry.tag),
+    ...options.client,
+    // Library callers can reach every exported host, regardless of their current server data.
+    ...delivery === "library" ? { publicRoots: options.client?.publicRoots === "all" ? "all" as const
+      : [...publicEntries.map(entry => entry.tag), ...options.client?.publicRoots ?? []] } : {},
+  });
+  const selected = client.adoption.map(tag => graph.nodes.get(graph.tags.get(tag)!)!);
+  const hydration = [
+    // Static output still needs its CSS, even when none of its factories reach the browser.
+    ...(sharedStyles.length > 0 ? [combinedStyleId] : sortedNodes.map(node => `${stylePrefix}${encodeURIComponent(node.id)}.css`))
+      .map(style => `import ${JSON.stringify(style)};`),
+    ...selected.map((node, index) => `import { create${node.definition.contract.name} as c${index} } from ${JSON.stringify(componentId(node.id))};`),
+    ...(options.client?.creationRoots === "all" ? client.creation : options.client?.creationRoots ?? []).map(tag => {
+      const node = graph.nodes.get(graph.tags.get(tag)!)!;
+      return `export { create${node.definition.contract.name} } from ${JSON.stringify(componentId(node.id))};`;
+    }),
+    ...selected.length === 0 ? ["export function hydrate() {}"] : [
+      `const factories = new Map([${selected.map((node, index) => `[${JSON.stringify(node.definition.contract.tag)}, c${index}]`).join(", ")}]);`,
+      "export function hydrate(root = document) {",
+      '  for (const element of [...root.nodeType === 1 ? [root] : [], ...root.querySelectorAll("[data-html-next-instance]")]) {',
+      '    if (!element.hasAttribute("data-html-next-instance")) continue;',
+      '    const identity = element.getAttribute("component") ?? element.getAttribute("data-component") ?? "";',
+      '    factories.get(identity.split(/\\s+/)[0])?.({}, undefined, element);',
+      "  }",
+      "}",
+    ],
+  ].join("\n");
 
   return Object.freeze({
     graph,
@@ -487,10 +552,15 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     styles,
     support: supportSource(supportImports),
     preparation,
+    hydration,
     sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...graph.stylesheetInputs.map(url => fileURLToPath(url)), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
+      server: Object.freeze({ version: 1, hydrate: options.hydrate === true, hasStyles: graphStyleAssets.css !== "",
+        sources: Object.freeze([...sourceRecords.values()].sort((a, b) => a.source.localeCompare(b.source) || a.kind.localeCompare(b.kind))),
+        stateNames: graphStyleAssets.stateNames, stylesheets: Object.freeze([]) }),
       mode: "native-application-or-library-build",
       delivery,
+      client: Object.freeze({ ...client, module: hydrationModule }),
       entries: Object.freeze(entryURLs.map((url) => displayPath(root, url))),
       publicEntries: Object.freeze(publicEntries),
       components: Object.freeze(manifestComponents),
@@ -600,6 +670,10 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
       if (id === componentsModule) return resolvedComponentsModule;
       if (id === supportModule) return resolvedSupportModule;
       if (id === preparationModule) return resolvedPreparationModule;
+      if (id === hydrationModule) {
+        if (!options.hydrate) diagnostic("HN014", "The hydration entry requires hydrate: true.");
+        return resolvedHydrationModule;
+      }
       if (id.startsWith(publicComponentPrefix)) {
         return publicComponentId(decodeURIComponent(id.slice(publicComponentPrefix.length)));
       }
@@ -613,6 +687,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
         id !== resolvedComponentsModule &&
         id !== resolvedSupportModule &&
         id !== resolvedPreparationModule &&
+        id !== resolvedHydrationModule &&
         !id.startsWith(resolvedPublicComponentPrefix) &&
         !id.startsWith(resolvedComponentPrefix) &&
         !id.startsWith(resolvedStylePrefix) &&
@@ -622,6 +697,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
         if (id === resolvedComponentsModule) return current.entry;
         if (id === resolvedSupportModule) return current.support;
         if (id === resolvedPreparationModule) return current.preparation;
+        if (id === resolvedHydrationModule) return current.hydration;
         if (id.startsWith(resolvedPackagePrefix)) return current.packages.get(id.slice(resolvedPackagePrefix.length)) ?? null;
         if (id.startsWith(resolvedPublicComponentPrefix)) {
           if (current.manifest.delivery !== "library") {
@@ -641,15 +717,20 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
         return current.styles.get(id) ?? null;
       });
     },
-    async generateBundle() {
-      const fileName = options.manifestFile === undefined ? "html-next.manifest.json" : options.manifestFile;
-      if (fileName === false) return;
-      const current = await graph();
-      (this as unknown as { emitFile(file: { type: "asset"; fileName: string; source: string }): string }).emitFile({
-        type: "asset",
-        fileName,
-        source: `${JSON.stringify(current.manifest, null, 2)}\n`,
-      });
+    generateBundle: {
+      order: "post",
+      async handler(_outputOptions: unknown, bundle: Readonly<Record<string, { readonly type: "asset" | "chunk"; readonly fileName: string }>>) {
+        const fileName = options.manifestFile === undefined ? "html-next.manifest.json" : options.manifestFile;
+        if (fileName === false) return;
+        const current = await graph();
+        const stylesheets = Object.values(bundle).filter(asset => asset.type === "asset" && asset.fileName.toLowerCase().endsWith(".css"))
+          .map(asset => asset.fileName).sort();
+        const manifest: HtmlNextBuildManifest = { ...current.manifest,
+          server: { ...current.manifest.server, stylesheets } };
+        (this as unknown as { emitFile(file: { type: "asset"; fileName: string; source: string }): string }).emitFile({
+          type: "asset", fileName, source: `${JSON.stringify(manifest, null, 2)}\n`,
+        });
+      },
     },
   };
 });

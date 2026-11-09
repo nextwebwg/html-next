@@ -55,7 +55,7 @@ export const angularControls = `<template component="ui-button"><defs>
     <state name="rows" type="list(string)" value="['Ada', 'Bea']"></state>
     <state name="divisor" type="integer" value="1"></state>
     <handler name="invalidate"><set name="divisor" expr:value="0"></set></handler>
-  </defs><ul on:dblclick="invalidate"><slot name="row" $each="row of $rows" $key="$row" from:item="$row" from:index="$loop.index / $divisor"><li>Missing</li></slot></ul></template>
+  </defs><ul on:dblclick="invalidate"><slot name="row" $each="row, index of $rows" $key="$row" from:item="$row" from:index="$index / $divisor"><li>Missing</li></slot></ul></template>
   <template component="ui-slot-app"><defs><prop name="prefix" type="string" default="Team">Prefix.</prop></defs>
     <nav><ui-scoped><template slot="row"><li><b>{$item}</b><em>{$prefix}</em><small>{$index}</small></li></template></ui-scoped></nav></template>
   <template component="ui-typed" module="./typed.ts"><div></div></template>

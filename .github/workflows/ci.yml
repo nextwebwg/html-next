@@ -29,6 +29,7 @@ jobs:
       has_packages: ${{ steps.plan.outputs.has_packages }}
       playwright: ${{ steps.plan.outputs.playwright }}
       generated: ${{ steps.plan.outputs.generated }}
+      dotnet: ${{ steps.plan.outputs.dotnet }}
       converters: ${{ steps.plan.outputs.converters }}
       browser_reused: ${{ steps.reuse.outputs.reused }}
       browser_image: ${{ steps.reuse.outputs.image }}
@@ -75,6 +76,38 @@ jobs:
       - run: pnpm --filter @nextwebwg/html-next check:release
       - if: needs.changes.outputs.generated == 'true'
         run: pnpm check:generated
+
+  dotnet:
+    name: Native .NET renderer
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.changes.outputs.browser_image }}
+      options: --user 1001 --ipc=host --init
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: dotnet restore packages/html-next-dotnet/tests/HtmlNext.Tests --locked-mode
+      - run: dotnet test packages/html-next-dotnet/tests/HtmlNext.Tests -c Release --no-restore --nologo
+      - run: dotnet restore packages/html-next-dotnet/benchmarks --locked-mode
+      - run: dotnet run --project packages/html-next-dotnet/benchmarks -c Release --no-restore -- --validate
+      - name: Adopt native output in Chromium, Firefox and WebKit
+        env:
+          HTMLNEXT_BROWSER_TEST: "1"
+        run: node scripts/test-dotnet-client.ts
 
   verify:
     name: Test ${{ matrix.name }}
@@ -158,39 +191,6 @@ jobs:
           HTMLNEXT_PACKAGE_TEST: ${{ matrix.package }}
         run: pnpm test:package
 
-  runtimes:
-    name: Deno and Bun runtime
-    needs: changes
-    if: contains(fromJSON(needs.changes.outputs.packages), 'htmlkit')
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: npm install --global --ignore-scripts --force corepack@0.34.0
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter '@nextwebwg/htmlkit...' build
-      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version: v2.x
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - name: Install the affected application packages in a consumer
-        run: |
-          mkdir -p "$RUNNER_TEMP/packs" "$RUNNER_TEMP/consumer"
-          (cd packages/html-next && pnpm pack --pack-destination "$RUNNER_TEMP/packs")
-          (cd packages/htmlkit && pnpm pack --pack-destination "$RUNNER_TEMP/packs")
-          cd "$RUNNER_TEMP/consumer"
-          echo '{"private":true,"type":"module"}' > package.json
-          npm install --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/packs/*.tgz
-          cp "$GITHUB_WORKSPACE/packages/htmlkit/scripts/runtime-smoke.mjs" .
-      - working-directory: ${{ runner.temp }}/consumer
-        # Node builds the application whose server entry Deno and Bun then run.
-        run: node runtime-smoke.mjs && deno run -A runtime-smoke.mjs && bun runtime-smoke.mjs
-
   converters:
     name: Converter catalog gate
     needs: changes
@@ -200,7 +200,7 @@ jobs:
   required:
     name: Required
     if: always()
-    needs: [changes, repository, verify, browser, packages, runtimes, converters]
+    needs: [changes, repository, dotnet, verify, browser, packages, converters]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -220,8 +220,8 @@ jobs:
           }
           const converters = results.changes.outputs.converters === 'true' ? 'success' : 'skipped';
           if (results.converters.result !== converters) process.exit(1);
-          const runtimes = JSON.parse(results.changes.outputs.packages).includes('htmlkit') ? 'success' : 'skipped';
-          if (results.runtimes.result !== runtimes) process.exit(1);
+          const dotnet = results.changes.outputs.dotnet === 'true' ? 'success' : 'skipped';
+          if (results.dotnet.result !== dotnet) process.exit(1);
           JS
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: receipt

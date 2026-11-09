@@ -1,5 +1,101 @@
 # Changelog
 
+## 1.0.0-alpha.92
+
+### Breaking
+
+- Bind iteration indices explicitly with `$each="item, index of $items"`. The implicit `$loop` value has been removed; list `.length` supplies the size.
+- Apply unconsumed invocation attributes before authored root attributes by default. Use `noforward` and an explicit trailing `$attributes` when caller attributes must override authored defaults.
+
+### Changes
+
+- Preserve child-authored root classes through React and Preact delegation. Keep committed plain-slot claims when outlets reopen, release removed outlets through public hooks, and discard claims from abandoned renders.
+
+- Keep native once listeners attached through React and Preact style-priority updates, and preserve authored order for mixed whole-class and keyed class writes. Resolve Vue accepted-child order from current template roots and keep Firefox component styles inside empty-class boundaries.
+
+- Reject ready producer results that do not satisfy a prop's declared type, while preserving explicit null clears and the last accepted value.
+
+- Preserve native and controller-owned control attributes across unrelated framework updates while retaining ordered forwarding precedence.
+
+- Preserve authored empty `class` attributes in Svelte roots and compile guarded iteration filters with strict framework type checking. Restore visible document order when Angular slot destinations reconnect. Keep the photo morph guide's grid visible when no photo is selected.
+
+- Connect React and Preact controller listeners when a previously detached subtree enters the document, before its first painted interaction.
+- Retain Vue iteration output after invalid expressions and preserve delegated style ownership independently of caller class forwarding, including server markup.
+- Keep native two-way control values separate from logical invocation attributes and authored reset defaults. Preserve those distinctions in Svelte mount, hydration and root switching.
+
+- Keep application tooling in the independent Threadlabs MarkupKit repository. Publish and verify the three HTML Next SDK packages together. Pin catalog qualification to the compatible Looma migration and its three-package test loader.
+
+- Compare text and keywords in lexical UTF-16 order across interpreted, compiled Vanilla and framework expressions, without numeric coercion. Preserve absence, quantity types and invalid-result retention.
+
+- Release unreachable component callbacks held by shared script entries while keeping retained disconnected instances synchronized with shared script status.
+
+- Compile React and Preact components when a keyed style precedes a trailing `$attributes` destination, preserving the authored style order.
+
+- Bind native named and inline conditional prop types after their prop or initialized state selectors, preserving selected structured types, literal fallbacks, defaults and request isolation. Refuse non-null dependent inputs under null selectors in both shared JavaScript runtimes, and resolve selected dimensions from the current values in Node and live scopes.
+
+- Consume the compiler-owned client plan in native .NET rendering and emit interoperable instance records on request. Preserve caller input ownership, state seeds, shared references, forwarded attributes, shared roots, structural ranges and keyed rows through generated-client adoption. Verify early control edits, hidden projection and subsequent prop updates in Chromium, Firefox and WebKit; keep native application preparation and full catalog qualification in progress.
+
+- Preserve the live and Vanilla plain-slot owner through whole-mount disconnect and reconnect. Keep paused claims distinct from permanently stopped effects, and release stopped claims through their existing ownership registration.
+
+- Use normal framework reconciliation and hydration in React, Preact, Vue, Svelte and Angular. Remove private tree rewrites, custom portal event relays, internal renderer hooks and detached view retention used for exact lifecycle matching. Keep ordinary slot content at one destination and render lazy templates afresh through supported framework APIs.
+- Preserve generated Svelte slot and accepted-entry props during ordered attribute forwarding, including delegated component roots and presets.
+- Refresh borrowed Svelte slot contexts when a populated outlet switches entries, and release the latest entry when that outlet closes.
+
+- Share plain slot content between own, borrowed and repeated outlets in Node and compiled Vanilla. Retain native nodes and control edits through transfers, hydration and reconnect, and instantiate authored lazy templates at each outlet. Angular uses ordinary template view creation and destruction for those destinations.
+
+- Preserve accepted-child entry identity through indexed, computed and structural aliases, conditional selection across lists, and null fallbacks in Node, native C# and generated targets. Select slot-prop conversion from every possible accepted tag. Keep Angular computed references intact, Vue slot props clear of generated helpers, and compiled Vanilla slot routing independent of root attributes.
+
+- Render native accepted-child `as` lists and borrowed slots with caller scope, stable prop snapshots, preset resolution and shared plain-content ownership. Preserve aliases through structural collection, keep collection state specific to explicit lists, and support implicit slot declarations and repeated ordinary outlets.
+- Preserve native controller changes to input names and types through React updates. Keep native input ownership in one component, retain dirty value/default behavior and StrictMode ref lifecycles, and avoid replacing style refs when no important declaration needs applying.
+- Preserve non-ASCII case in public prop names, reflected attributes, invocation matching and style name resolution across Node, C# and generated targets. Allocate distinct React locals and emit valid JSX for Unicode prop inputs.
+- Filter Node, live and native .NET slot content declared with `accepts`, including structural content and delegated component lineage, without creating an `as` list. Omit rejected ordinary content from carriers. Keep forwarded fallback subscriptions independent and follow fallback component roots through lowering.
+- Enroll React and Svelte components in child-list bookkeeping only when a receiving slot declares an `as` list. Keep ordinary slot content on the frameworks' normal children paths.
+- Forward unconsumed invocation attributes first on each rendered root by default. The defining template's boolean `noforward` attribute disables that default so authors can place `$attributes` explicitly. Preserve source-order precedence on roots, inner elements and delegated invocations, and retain whole-attribute class/style replacement. Keep application-owned layer identity on rendered roots, independently of authored forwarding.
+- Apply native-element class bindings in authored order across generated targets, retaining each binding's accepted value and classes added through the DOM. Preserve raw class text for no-op toggles and scoped styles through replacements, server rendering and framework hydration. Keep class-only React and Preact rows as native elements with direct refs.
+- Render native keyed class bindings with literal and `from:class` composition, authored binding order, invalid-result retention and DOM token semantics. Fold constants and reuse request storage across rows. Accept non-ASCII spaces within class tokens, and correct literal-token removal in generated Vanilla, React, Preact, Vue and Angular components. Share class serialization with Svelte.
+- Bind only the authored item and optional index aliases in Node, native C# and compiled targets. Use list `.length` for size and CSS structural selectors for first/last presentation. Remove the implicit `$loop` binding, preserve lexical shadowing, and give item/index aliases their own types. Ordinary declarations named `loop` or `index` remain valid.
+- Compile native iteration index aliases, stable `$sort`, `$limit`, and `$key` checks. Apply filtering, sorting and limits before row indices, reject duplicate keys, use a surrounding template for an iteration guard, and preserve nested scopes, projected content and deferred carriers. Keep simple loops on their existing allocation path and cache sort keys before comparison.
+
+- Render caller-owned bindings, conditions, loops, fragments and forwarding slots inside native deferred component carriers while keeping unplaced component setup and original lazy templates deferred. Preserve literal prop fallbacks for invalid or waiting inputs, distinguish available null and absence, and verify placed prop bindings in either attribute order against Node output.
+
+- Validate and consume native `$ref` directives on element and component roots, descendants, repeated content and lazy projections. Reject invalid names and authored duplicates, allow reuse across root `$match` alternatives, and retain reference directives in original inert template bodies. Keep reference validation out of request binding.
+
+- Compile native scoped slot declarations and typed outlet props, preserving consumer guards, lazy outer bindings, repeated placement and request isolation. Cache constant conversions during compilation and dynamic snapshots between buffered output passes; report rejected types once per authored outlet and prop. Accepted-child projection remains in progress.
+- Preserve scoped prop defaults/null on an initially invalid numeric expression and retain each outlet's previous accepted value through later invalid results in live, Vanilla, React, Preact, Vue, Svelte and Angular rendering. Normalize missing unknown inputs to default/null and preserve the consumer's outer binding when an optional prop is omitted. Share object-key generation for prototype-named props, ignore inherited entries in declared type lookup, and include null in accepted slot prop types when no default is declared. Add public red-to-green framework coverage and Node hydration checks across all three engines.
+
+- Render native default, named and lazy template projection with fallback selection, consumer scope, parser-safe outlets and unused-content carriers. Preserve carrier ownership through delegated roots and defer unplaced child component setup. Retain inert consumer template source in Node carriers and freshly rendered browser instances. Complete rendered-form records and native hydration remain in progress.
+
+- Validate native event and request declarations during compilation, including structured payloads, JavaScript-only payload types, answer forms, reserved names and collisions. Keep this metadata out of request binding and HTML output. Reject empty entries in native finite value choices. Align Node event-name checks and scalar interface constraints, reject obsolete `nullable` markers on compact requests, untyped state and computed declarations, and preserve browser parser warnings for fetched resources.
+- Let native literal attributes supply the fallback for a `from:` binding that evaluates to an invalid value. Preserve removal for null, absence, false on ordinary attributes, and unsafe URLs; escape fallbacks once during compilation and keep streamed URL writes. Cache invalid constant expressions with their declared types so nested concatenation and joining compile without request storage.
+- Preserve SVG XML/XLink attribute namespaces during live and compiled DOM creation, framework conversion, updates and server output. Share native DOM writers and URL filtering through standalone converter helpers; emit the helper in Vue CLI builds and retain authored fallbacks for invalid initial Vue bindings.
+- Align native attribute binding with Node's boolean presence, enumerated values, token lists and URL filtering. Generate native attribute tables from the JavaScript owners and stream concatenated/joined URLs without temporary output strings. Preserve foreign attribute prefixes in the Node source parser and .NET output. Report malformed server asset versions through the asset diagnostic.
+- Reject executable `on*` targets in JavaScript `from:` and `bind:` attribute bindings.
+- Emit versioned server style metadata with source fingerprints and built stylesheet filenames. Let .NET plans consume matching assets, serialize the selected root values, and preserve style ownership through delegated roots. Validate stale assets and browser-compatible state-token encoding; recognize kebab-case child prop attributes. Standalone native CSS compilation and full hydration remain in progress.
+
+- Share generated binding acceptance, declared-reference metadata, and native scalar format predicates. React, Preact, Vue, Svelte and Angular check executed fields once, preserve lazy branches and safe missing paths, and clear absent bindings while retaining invalid results. Avoid duplicate Preact host commits and repeated text evaluation; parenthesize object-valued framework state seeds. Preserve scalar and event checks when the compiler is bundled and minified.
+- Keep missing and null fields absent through generated operators, preserve invalid results through text and attribute serialization, and read generic operands once during initialization and binding. Generate expression locals without shadowing authored names.
+- Propagate missing operands through equality in Node and generated renderers while keeping explicit null distinct. Preserve ordinary binary operand order when a result is invalid. Prepare Svelte state seeds before template derived reads and preserve Angular seed fields for checks at their read locations.
+- Preserve enumerated HTML attribute tokens such as `draggable="false"` in Preact output, with the same invalid-result retention as other bindings.
+- Check live and Node references when their expression branch actually executes. Computed and quoted keys use the selected field's type, intermediate missing paths remain absent, and getters run once per read. Reuse cached reference plans without retaining request values.
+- Apply actual-read checks in generated Vanilla DOM expressions, preserving lazy branches, computed field types, safe missing paths and single getter evaluation. Emit reusable schema metadata and retain the last accepted binding until recovery.
+- Generate valid expression bodies for object-literal state seeds in Vanilla DOM output.
+- Check typed references through loop aliases in the live, Node, and compiled native renderers, retaining valid siblings and the last accepted value until a conforming update arrives. Cache live checks per lexical type layer while sharing component-level checks across instances and rows.
+- Align generated prop inputs, accepted-value types, and required-prop clearing with the public null/default contract. Required props report validity while their content renders; Angular no longer suppresses missing-input content. Exercise null writes across live, compiled native, and all five converter targets.
+- Release native compiler/parser data after expression planning, and preserve valid sibling reads and shared identities in structured state seeds.
+- Add request-local native state `from` initialization, structured seed copies, available fallbacks, and lazy derived declarations with actual-read cycle checks. Preparation and hydration ownership remain implementation work.
+- Add shared compiler analysis for browser adoption and later component creation, with a native hydration entry and manifest retention reasons. Static component trees omit factory code while preserving CSS; retained factories keep future branches, projection, context, and native control edits. Opaque modules retain possible public API targets conservatively.
+- Add an experimental native .NET rendering package with reusable inert template plans, typed C# data binding, conditions, loops, escaped HTML output, and concurrent rendering tests. Bind without per-row diagnostic strings or intermediate array buffers, and render to one exact-size string with stack-based numeric formatting. Include validated Fluid and Node template/data-binding benchmarks, allocation attribution, and native CI selection. Hydration and complete component-language support remain planned work.
+- Extend the experimental native renderer with pure expressions, dimensional arithmetic, compact structured defaults, lexical aliases, wrapper-free templates, `$match` arms, and per-row `$where` filters. Whole-iteration `$if` guards read the enclosing scope, and authored text supports escaped braces and backslashes.
+- Add native resource graph compilation through an application source resolver, with canonical-source deduplication, fingerprints, cancellation, inert metadata handling, and duplicate-definition checks. Basic nested and recursive component calls bind typed props once per buffered render and isolate request-local child snapshots.
+- Resolve null and omitted native inputs through their declared defaults, preserve empty strings, zero and false, and report missing or nonconforming data through a per-render diagnostic callback while continuing to render.
+
+- Initialize native literal state and computed declarations per instance, resolve forward dependencies, and reject computed cycles. Add root prop validity reporting for scalar choices, numeric bounds, text lengths, and required inputs; retain declared module metadata for client builds.
+- Treat non-finite numeric expression results as invalid in Node rendering and generated components, matching native rendering. Preserve previous/default/null destinations through overflow, division by zero, and recovery.
+
+- Bind native expanded list/object declarations, optional fields, open records, and nested scalar constraints. Preserve unknown-value aliases within request-local snapshots while reading getters once; keep closed typed binding on its existing allocation path.
+
+- Export shared compiler style artifacts containing scoped CSS and the root values its local, imported, and foreign state selectors require. Compile shared styles once while preserving stylesheet order and conditions.
+
 ## 1.0.0-alpha.91
 
 - Hand-written React and Preact consumers get complete `as` lists. An accepting component reads its accepted children from its own slot content, through arrays, fragments, conditions and keyed loops, on the first render, in server output and through hydration. Entries, `slots` content, `<slot of>` takeover, context, `host.state` and `HR007` warnings match a compiled consumer's.

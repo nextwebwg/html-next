@@ -1,3 +1,9 @@
+import { entryTags } from "../entry-origin.js";
+import { literalValueSource } from "./shared.js";
+import { ITERATION_INDEX } from "../expression.js";
+import { attributeNamespace } from "../dom-attributes.js";
+import { namespacedAttributeSource } from "./shared.js";
+import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
 import { TypeScriptLowering } from "./typed-lowering.js";
 /** React output is compiled from the same checked component definition as the browser runtime. */
 import { bindingRevertSource, controllerInitials, revertSource, withRevert } from "./state-roots.js";
@@ -5,19 +11,21 @@ import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { compilePath, isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
-import { componentName, kebabCase, propAttribute } from "../names.js";
+import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
+import { orderedAttributeWrites, repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
-import { formatReact } from "./vue-format.js";
+import { formatReact, jsxAttributeRecord } from "./vue-format.js";
+import { invocationSchema } from "./invocation-attributes.js";
+import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { compileComponentStylesForConversion, componentStateNames } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
 import { frameworkRequestSource, REQUEST_CHECK, REQUEST_HELPERS, REQUEST_TYPES, requestListenerType, respondersSource, responderType } from "./requests-target.js";
-import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { condenseWhitespace, dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, NUMERIC_ATTRIBUTES, objectKey, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, slotPropDefaultSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { category, inputScope, Lowering, mayProduceInvalidResult, present, provenSlotProp, type Scope, slotPropStatic, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
 import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, provenWrite, refusing, selfStep, writeCheck } from "./type-guards.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, parseTypedValue, type TypeNode } from "../type-system.js";
@@ -39,9 +47,9 @@ const REACT_RESERVED = new Set([
   "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
   "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
   "document", "console", "globalThis",
-  "htmlNextPrepared", "props", "renderedIdentity", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "styleObject", "styleBinding", "styleText", "applyNamespacedAttributes", "namespacedAttributeProps", "htmlNextPrepared", "props", "renderedIdentity", "rootMetadata", "htmlAttributeInputs", "invocationProps", "forwardedAttributes", "nativeAttrs", "nativeAttributes", "_nativeConstructor", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
   "propInputValues", "reflectedAttrs", "hostState", "rootRef", "ownedRootRef", "propValidityContract", "propValidityElement",
-  "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
+  "applyClassBindingRef", "classText", "propInputs", "usePropInputs", "checkPropInput", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput",
   "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
   "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
@@ -50,16 +58,21 @@ const REACT_RESERVED = new Set([
   "selectedPropNode", "acceptsControllerWrite",
   "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
   "useComponentHost", "useLifecycle", "componentContext", "NestedDepthContext", "ScopedAttachment",
-  "htmlNextChildSlots", "htmlNextOutletProps", "htmlNextLists", "htmlNextContent", "_htmlNextAs", "_htmlNextEntry",
+  "htmlNextChildSlots", "htmlNextOutletProps", "htmlNextLists", "htmlNextContent", "htmlNextSlots", "_htmlNextAs", "_htmlNextEntry",
   ...REACT_RENDER_EXPORTS, ...REACT_EVENTS_EXPORTS,
 ]);
 
 /** Names a template local (a loop item or `$with` alias) must not shadow inside the markup it scopes. */
 const REACT_LOCAL_RESERVED = new Set([...REACT_RENDER_EXPORTS, "dispatchDeclaredTargets", "htmlNextAuthoredCheck",
-  "htmlNextAuthoredCheckReported", "Symbol", "Object", "String", "Number", "Array", "Math"]);
+  "htmlNextAuthoredCheckReported", "applyClassBindingRef", "classText", "Symbol", "Object", "String", "Number", "Array", "Math"]);
 
 /** A generated name the component builds from an index, such as `attachEvents2`, or a private `__` name. */
 const GENERATED_NAME = /^(?:__|_|attachEvents\d|controlRef|controlValue|previousProperty|propertyRef|genericCleanup|HtmlNextContext_)/;
+
+function componentPropAttribute(name: string, value: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) && name !== "__proto__"
+    ? `${name}={${value}}` : `{...{ ${objectKey(name)}: ${value} }}`;
+}
 
 /** The component tags a template invokes, whose imported names the component's scope holds. */
 function componentTagsIn(node: TemplateNode, tags = new Set<string>()): Set<string> {
@@ -86,10 +99,11 @@ function pascal(name: string): string {
 
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
+const STYLE_IMPORT = "\u0000style-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
 const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextValueInput", "HtmlNextValueTextarea", "HtmlNextValueSelect", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
-  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle",
-  "identityKey", "useChildLists", "useChildEntry", "ChildSlot", "ChildEntries"] as const;
+  "rootMetadata", "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle",
+  "identityKey", "useChildLists", "useChildEntry", "ChildSlot", "ChildEntries", "useSlotClaims"] as const;
 
 export interface ReactConversionOptions {
   readonly modulePreparation?: { readonly source: string };
@@ -109,6 +123,8 @@ export interface ReactConversionOptions {
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
+  readonly attributesSpecifier?: string;
+  readonly styleSpecifier?: string;
   readonly eventsSpecifier?: string;
   readonly controlSpecifier?: string;
   readonly dataSpecifier?: string;
@@ -127,7 +143,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head")[];
+  readonly helpers: readonly ("attributes" | "bindings" | "props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render" | "requests" | "head" | "style")[];
 }
 
 interface RootAttributes {
@@ -148,7 +164,9 @@ interface EventAttachment {
   readonly bindings: readonly EventBinding[];
   readonly forward: boolean;
   readonly ref?: string;
-  readonly properties: readonly { readonly name: string; readonly value: string; readonly accepts?: string }[];
+  readonly orderedClasses?: boolean;
+  readonly style?: string;
+  readonly properties: readonly { readonly name: string; readonly value: string; readonly accepts?: string; readonly namespace?: string; readonly url?: boolean; readonly target?: "class" | "attribute" }[];
   readonly importantStyles: readonly { readonly name: string; readonly value: string }[];
   readonly genericWrites: readonly { readonly state: string; readonly path: string; readonly dynamic: boolean }[];
   readonly control?: {
@@ -172,6 +190,9 @@ interface RenderState {
   readonly componentGraph: ReadonlyMap<string, ComponentDefinition> | undefined;
   /** Columns as markup: the component declares an `as` list, whose entries key by identity. */
   readonly lists: boolean;
+  readonly claimSlots: boolean;
+  /** Row indexes distinguish repeated outlets; the source site makes rerenders idempotent. */
+  readonly slotPath: string[];
   /** Each accepted child the consumer gives an entry, by its attributes: its entry's key segments (`entryKeySource`). */
   readonly entrySites: Map<readonly unknown[], readonly KeySegment[]>;
   /** The key of the row each `$each` is rendering, by that `$each`'s attributes, as source. */
@@ -181,12 +202,15 @@ interface RenderState {
   afterOutlet?: boolean;
   /** Each `<slot of>` outlet's props checks, by accepted tag: `htmlNextOutletProps0`, … */
   readonly outletProps: string[];
+  readonly classOwners: string[];
   nextSlotAlias: number;
   nextRetainedAlias: number;
   usesHtml: boolean;
   usesPlainSlots: boolean;
   usesScopedSlots: boolean;
   usesSlotPropChecks?: boolean;
+  usesHtmlInputs?: boolean;
+  usesStyle?: boolean;
   usesKeyedLists: boolean;
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
@@ -313,18 +337,18 @@ function withoutAuthoredSelection(node: TemplateNode): TemplateNode {
   };
 }
 
-function localScope(scope: RenderScope, names: readonly (readonly [string, Static, (string | undefined)?])[]): RenderScope {
+function localScope(scope: RenderScope, names: readonly (readonly [string, Static, (string | undefined)?, (TypeNode | undefined)?])[]): RenderScope {
   const code = new Map(scope.code);
   const types = new Map(scope.types);
   for (const [name, type, alias] of names) {
     code.set(name, alias ?? name);
     types.set(name, type);
   }
-  return { code, types, local: true };
+  return withReferenceTypes({ ...scope, code, types, local: true }, names.map(([name, , , type]) => [name, type]));
 }
 
 function localIdentifier(name: string, scope: RenderScope, state: RenderState): string {
-  if (isScriptIdentifier(name) && !REACT_LOCAL_RESERVED.has(name)) return name;
+  if (isScriptIdentifier(name) && !REACT_LOCAL_RESERVED.has(name) && !GENERATED_NAME.test(name)) return name;
   let alias: string;
   do alias = `__htmlNextLocal${state.nextRetainedAlias++}`;
   while ([...scope.code.values()].includes(alias) || scope.code.has(alias));
@@ -366,7 +390,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const text = nullableText(lowering.text(plan.ast, scope), lowering);
     if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
       state.usesRetainedText = true;
-      return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+      return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
     }
     return `{${text}}`;
   }
@@ -391,7 +415,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const value = flow.binding === undefined ? read : `requireInputStatus(${Object.hasOwn(state.definition.contract.props, flow.binding.name)
         ? `propInputs.status(${quote(flow.binding.name)})` : computedStatus ?? state.status(flow.binding.name, read) ?? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)`}, ${flow.binding.handlesError})`;
       const alias = localIdentifier(flow.alias, scope, state);
-      const scoped = localScope(scope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, scope) : present(flow.aliasType), alias]]);
+      const scoped = localScope(scope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, scope) : present(flow.aliasType), alias, flow.aliasType ?? referenceType(flow.expressionPlan.ast, scope)]]);
       const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
       if (flow.binding !== undefined || !mayProduceInvalidResult(flow.expressionPlan.ast, scope)) return `{(() => { const ${alias} = ${value}; return (${content}); })()}`;
       state.usesRetainedValue = true;
@@ -402,22 +426,20 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const item = localIdentifier(flow.item, scope, state);
       const index = localIdentifier(flow.index ?? "index", scope, state);
       const itemType = typeOf(flow.listPlan.ast, scope).type;
-      const scoped = localScope(scope, [
-        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item],
-        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
-        ["loop", { type: { kind: "object", open: false, fields: [
-          { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
-          { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
-          { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
-          { name: "count", type: { kind: "terminal", name: "number" }, optional: false },
-        ] }, nullable: false }],
+      const itemContract = referenceType(flow.listPlan.ast, scope);
+      const filterScope = localScope(scope, [
+        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item, itemContract?.kind === "list" ? itemContract.item : undefined],
+      ]);
+      const scoped = localScope(filterScope, [
+        [flow.index ?? ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+        [ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
       ]);
       const retainedList = mayProduceInvalidResult(flow.listPlan.ast, scope);
       const listAlias = retainedList ? `__retained${state.nextRetainedAlias++}` : undefined;
       const listScope = listAlias === undefined ? scope : localScope(scope, [[listAlias, typeOf(flow.listPlan.ast, scope)]]);
       const list = lowering.list(listAlias === undefined ? flow.listPlan.ast : { kind: "id", name: listAlias }, listScope, item, {
         ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-        itemScope: scoped,
+        itemScope: filterScope,
         sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
@@ -426,10 +448,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const key = state.lists && flow.keyPlan !== undefined && typeOf(flow.keyPlan.ast, scoped).type.kind === "object" ? `identityKey(${keyed})` : keyed;
       // An accepted child in these rows keys its entry by the row's key.
       if (node.kind === "element") state.rowKeys.set(node.attributes, key);
+      state.slotPath.push(index);
       const child = renderNode(body, scoped, lowering, imports, handlers, attachments, state, undefined, projected, inSvg);
-      const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
+      state.slotPath.pop();
+      const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}) => ${key}`);
       const rows = lowering.eachRows(checked);
-      const renderRows = `${rows}.map(({ item: ${item}, index: ${index}, loop }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
+      const renderRows = `${rows}.map(({ item: ${item}, index: ${index} }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
       const content = flow.keyPlan === undefined
         ? listAlias === undefined ? `{${renderRows}}` : `<>{${renderRows}}</>`
         : `<KeyedBoundary renderRows={() => ${renderRows}} />`;
@@ -443,7 +467,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       if (node.name !== "template") return renderNode(elementMatchRoot(node), scope, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
       const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, scope, state);
       const scoped = flow.alias === undefined ? scope : localScope(scope, [[flow.alias,
-        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, scope), alias]]);
+        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, scope), alias, flow.expressionPlan === undefined ? undefined : referenceType(flow.expressionPlan.ast, scope)]]);
       const withAlias = (content: string): string => {
         if (flow.alias === undefined) return content;
         if (flow.expressionPlan === undefined) fail("HT030", `Uncompiled expression ${flow.expr}.`);
@@ -499,7 +523,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     // `<slot of>` places a slot of the accepted child its entry stands for (components#columns-as-markup).
     // A static prop is given as its text; the child's slot declaration converts it (`outletPropsSource`).
     state.usesChildSlots = true;
-    const values = (node.props ?? []).map((prop) => `${quote(prop.name)}: ${prop.raw !== undefined ? quote(prop.raw) : lowering.value(prop.expressionPlan.ast, scope)}`);
+    const values = (node.props ?? []).map((prop) => `${objectKey(prop.name)}: ${prop.raw !== undefined ? quote(prop.raw) : lowering.value(prop.expressionPlan.ast, scope)}`);
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("");
     const shapes = outletPropsSource(node, state);
     return `<ChildSlot entry={${lowering.value(node.of.expressionPlan.ast, scope)}} name=${quote(node.name ?? "")}${values.length === 0 ? "" : ` values={{ ${values.join(", ")} }}`} slots={htmlNextChildSlots}${shapes === undefined ? "" : ` shapes={${shapes}}`} file=${quote(state.definition.source.file)} fallback={<>${fallback}</>} />`;
@@ -517,18 +541,28 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       // A null value, and one its declared type rejects, takes the prop's default, or null; a value whose
       // static type is the declared one needs no check.
       let checked = false;
+      const retained: { alias: string; value: string }[] = [];
       const values = node.props!.map((prop) => {
         const value = lowering.value(prop.expressionPlan.ast, scope);
         const proven = prop.type !== undefined && provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, scope));
-        const source = proven ? undefined : slotPropValueSource(state.definition, node.name, prop);
+        const source = proven ? undefined : slotPropValueSource(state.definition, node.name, prop, true);
         if (source !== undefined) checked = true;
         if (source !== undefined && prop.type !== undefined) state.usesSlotPropChecks = true;
-        return `${quote(prop.name)}: ${source === undefined ? value : `(${source})(${value})`}`;
+        const given = source === undefined ? value : `(${source})(${value})`;
+        if (!mayProduceInvalidResult(prop.expressionPlan.ast, scope)) return `${objectKey(prop.name)}: ${given}`;
+        state.usesRetainedValue = true;
+        const alias = `__retained${state.nextRetainedAlias++}`;
+        retained.push({ alias, value: given });
+        return `${objectKey(prop.name)}: ${alias}Ready ? ${alias} : ${slotPropDefaultSource(prop)}`;
       }).join(", ");
-      return `{renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)}`;
+      let content = `renderScopedSlot(${supplied}, { ${values} }${checked ? " as any" : ""}, ${name}, <>${fallback}</>)`;
+      for (const part of retained.toReversed()) content = `<RetainedValue value={${part.value}} render={(${part.alias}, ${part.alias}Ready) => ${content}} />`;
+      return retained.length === 0 ? `{${content}}` : content;
     }
     state.usesPlainSlots = true;
-    return `{renderPlainSlot(${supplied}, <>${fallback}</>)}`;
+    if (!state.claimSlots) return `{renderPlainSlot(${supplied}, <>${fallback}</>)}`;
+    const outlet = [quote(String(state.nextSlotAlias++)), ...state.slotPath].join(' + ":" + ');
+    return `{htmlNextSlots(${name}, ${supplied}, <>${fallback}</>, ${outlet})}`;
   }
   if (node.name === "template") {
     const html = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "html");
@@ -548,7 +582,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const guard = declaredReferenceGuard(value.expressionPlan, scope, state.definition, undefined, lowering);
       if (mayProduceInvalidResult(value.expressionPlan.ast, scope) || guard !== undefined) {
         state.usesRetainedText = true;
-        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
+        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
       }
       return `<>{${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}</>`;
     }
@@ -576,7 +610,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   if (component) imports.add(node.name);
   const componentContracts = component ? state.propContractsByTag?.get(node.name) : undefined;
   const findComponentPropName = (attributeName: string): string | undefined => componentContracts === undefined ? undefined
-    : Object.keys(componentContracts).find((name) => name.toLowerCase() === attributeName || kebabCase(name) === attributeName);
+    : Object.keys(componentContracts).find((name) => asciiLowerCase(name) === attributeName || kebabCase(name) === attributeName);
   const boundPropAliases = new Map<string, string>();
   const boundPropSnapshots = new Set<string>();
   if (componentContracts !== undefined) for (const attribute of node.attributes) {
@@ -594,37 +628,101 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const literals: string[] = [];
   const bindings: string[] = [];
   const inputBindings: string[] = [];
-  const retainedBindings: Array<{ readonly alias: string; readonly value: string; readonly accepts?: string; readonly propName?: string }> = [];
+  const retainedBindings: Array<{ readonly alias: string; readonly value: string; readonly accepts?: string; readonly propName?: string; readonly initial?: string; readonly ready?: string }> = [];
   const classes: string[] = [];
+  const classRules: string[] = [];
   const literalStyles: string[] = [];
   const reactiveStyles: string[] = [];
   const importantStyles: Array<{ readonly name: string; readonly value: string }> = [];
-  const properties: Array<{ readonly name: string; readonly value: string; readonly accepts?: string }> = [];
+  const properties: Array<EventAttachment["properties"][number]> = [];
   // HTML attribute names are case-insensitive; uppercase bypasses Preact's case-sensitive
   // DOM-property lookup for attributes whose property has different behavior (output.value, constructor).
   const nativeAttribute = (name: string): boolean => state.preact && !component && !svg &&
-    (name === "constructor" || name === "value");
-  const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string => {
-    const value = lowering.attribute(node, valueScope, name);
-    return state.preact && isEnumeratedBoolean(name) ? `(${value})?.toString()` : value;
-  };
+    (name === "constructor" || name === "value" || name === "draggable");
+  const serializedAttribute = (name: string): boolean => isEnumeratedBoolean(name) ||
+    !component && (name === "type" || isNativeBooleanAttribute(name));
+  const attributeValue = (node: ExpressionNode, valueScope: Scope, name: string): string =>
+    lowering.attribute(node, valueScope, name, { enumeratedBooleanTokens: state.preact });
   // Serialized HTML attributes may have values outside JSX's ARIA enums. Keep their
   // DOM string representation without narrowing the public component prop types.
   const attributeBinding = (name: string, value: string): string => nativeAttribute(name)
     ? `{...{ ${quote(name.toUpperCase())}: ${value} }}`
-    : state.preact && isEnumeratedBoolean(name)
+    : serializedAttribute(name)
       ? `{...({ ${quote(reactAttribute(name, svg))}: ${value} } as Record<string, unknown>)}`
       : `${reactAttribute(name, svg)}={${value}}`;
   const genericWrites: Array<{ readonly state: string; readonly path: string; readonly dynamic: boolean }> = [];
   let scopedAttachment: { readonly attachment: EventAttachment; readonly ref: string; readonly paths: readonly string[] } | undefined;
   let control: EventAttachment["control"];
   let content: string | undefined;
+  const forwards = node.attributes.some(attribute => attribute.kind === "forward");
+  const componentStyle = component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  const htmlInputs = component && (forwards || componentStyle) && Object.keys(componentContracts ?? {}).length > 0 ? invocationSchema(componentContracts!, reactAttribute) : undefined;
+  if (htmlInputs !== undefined) state.usesHtmlInputs = true;
+  const orderedClasses = orderedAttributeWrites(node.attributes) && node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class"));
+  const boundStyle = !component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.name === "style" && attribute.target === undefined && !attribute.twoWay);
+  const orderedStyles = !component && forwards;
+  if (componentStyle || boundStyle || forwards && !component) state.usesStyle = true;
+  let orderedStyleValue = "undefined";
+  const addStyle = (property: string): void => {
+    if (orderedStyles) orderedStyleValue = orderedStyleValue === "undefined"
+      ? `{ ${property} }` : `{ ...(${orderedStyleValue}), ${property} }`;
+    else reactiveStyles.push(property);
+  };
+  const ordered: string[] = [];
+  let capturedBindings = 0;
   for (const attribute of node.attributes) {
+    const literalStart = literals.length, bindingStart = bindings.length;
+    try {
+    if (attribute.kind === "forward") {
+      importantStyles.length = 0;
+      if (orderedStyles) orderedStyleValue = `(Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : ${orderedStyleValue})`;
+      if (orderedClasses) {
+        const read = "Object.hasOwn(forwardedAttributes(nativeAttrs), 'className') ? nativeAttrs.className : Symbol.for('html-next.no-attribute')";
+        if (!component) properties.push({ name: "class", value: read, target: "attribute" });
+        classRules.push(`{ kind: "attribute", name: "class", read: () => ${read} }`);
+      }
+      const forwarded = `forwardedAttributes(${state.preact && !svg ? "nativeAttributes" : "nativeAttrs"}${component ? "" : ", [\"style\"]"})`;
+      literals.push(`{...${htmlInputs === undefined ? forwarded : `htmlAttributeInputs(${forwarded}, ${htmlInputs})`}}`);
+      continue;
+    }
+    if (componentStyle && isStyleWrite(attribute)) continue;
+    if (!component && attribute.kind === "attribute" && !attribute.twoWay && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class")) {
+      const plan = attribute.expressionPlan!;
+      const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
+      const value = attribute.target === "class" ? lowering.condition(plan.ast, scope) : attributeValue(plan.ast, scope, "class");
+      const target = attribute.target === "class" ? "class" : "attribute";
+      properties.push({ name: attribute.name, value, ...(guard === undefined ? {} : { accepts: guard }), target });
+      classRules.push(`{ kind: ${quote(target)}, name: ${quote(attribute.name)}, read: () => ${guard === undefined ? value : `(${guard}) ? ${value} : Symbol.for("html-next.invalid-result")`} }`);
+      continue;
+    }
+    const namespace = !component && (attribute.kind === "literal" || attribute.kind === "attribute" && attribute.target === undefined && !attribute.twoWay) ? attributeNamespace(attribute.name) : undefined;
+    if (namespace !== undefined && (attribute.kind === "literal" || attribute.kind === "attribute")) {
+      const value = attribute.kind === "literal" ? quote(attribute.value) : attributeValue(attribute.expressionPlan!.ast, scope, attribute.name);
+      properties.push({ name: attribute.name, value, namespace, url: attribute.name === "xlink:href" });
+      const serverName = attribute.name.replace(/:([a-z])/g, (_, letter: string) => letter.toUpperCase());
+      literals.push(`{...(typeof document === "undefined" ? namespacedAttributeProps([${namespacedAttributeSource(attribute.name, value, serverName)}]) : {})}`);
+      continue;
+    }
     if (attribute.kind === "literal") {
+      if (forwards && node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
       const componentProp = component ? Object.entries(componentContracts ?? {})
-        .find(([name]) => name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+        .find(([name]) => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       if (projected && attribute.name === "data-slotted") continue;
-      if (attribute.name === "class") classes.push(quote(attribute.value));
+      if (componentProp !== undefined && attribute.name === "style") {
+        const [name, contract] = componentProp;
+        const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
+        const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
+        literals.push(componentPropAttribute(name, accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`));
+      }
+      else if (component && attribute.name === "style") literals.push(`style={${quote(attribute.value)} as any}`);
+      else if (attribute.name === "class" && orderedClasses) {
+        if (!component) properties.push({ name: "class", value: quote(attribute.value), target: "attribute" });
+        classRules.push(`{ kind: "attribute", name: "class", read: () => ${quote(attribute.value)} }`);
+      }
+      else if (attribute.name === "class" && forwards) literals.push(`className=${quote(attribute.value)}`);
+      else if (attribute.name === "style" && orderedStyles) orderedStyleValue = `{ ${literalStyle(attribute.value, importantStyles).join(", ")} }`;
+      else if (attribute.name === "style" && forwards) literals.push(`style={{ ${literalStyle(attribute.value, importantStyles).join(", ")} }}`);
+      else if (attribute.name === "class") classes.push(quote(attribute.value));
       else if (attribute.name === "style") literalStyles.push(...literalStyle(attribute.value, importantStyles));
       else if (controlledNames.has(attribute.name)) continue;
       else if (nativeValueAttribute && attribute.name === "value") literals.push(state.preact ? attributeBinding(attribute.name, quote(attribute.value)) : `htmlNextValue=${quote(attribute.value)}`);
@@ -632,8 +730,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const [name, contract] = componentProp;
         const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
         const accepted = parsed.ok && (contract.values === undefined || contract.values.includes(parsed.value as string | number | boolean));
-        literals.push(`${propKey(name)}={${accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`}}`);
+        literals.push(componentPropAttribute(name, accepted ? JSON.stringify(parsed.value) : `${quote(attribute.value)} as any`));
       }
+      else if (attribute.name === "__proto__") literals.push(componentPropAttribute("__Proto__", quote(attribute.value)));
       else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) literals.push(attributeBinding(attribute.name, quote(attribute.value)));
       else if (isNativeBooleanAttribute(attribute.name)) literals.push(`${node.name === "input" && attribute.name === "checked" ? "defaultChecked" : reactAttribute(attribute.name, svg)}={true}`);
       else if (NUMERIC_ATTRIBUTES.has(attribute.name) && /^[+-]?\d+$/.test(attribute.value)) literals.push(`${reactAttribute(attribute.name, svg)}={${Number(attribute.value)}}`);
@@ -644,26 +743,26 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else if (attribute.kind === "attribute" && attribute.target === "class") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) classes.push(`${lowering.condition(attribute.expressionPlan.ast, scope)} ? ${quote(attribute.name)} : ""`);
+      if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) classRules.push(`{ kind: "class", name: ${quote(attribute.name)}, read: () => ${lowering.condition(attribute.expressionPlan.ast, scope)} }`);
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;
         retainedBindings.push({ alias, value: lowering.condition(attribute.expressionPlan.ast, scope), ...(guard === undefined ? {} : { accepts: `() => ${guard}` }) });
-        classes.push(`${alias} ? ${quote(attribute.name)} : ""`);
+        classRules.push(`{ kind: "class", name: ${quote(attribute.name)}, read: () => ${alias} ?? Symbol.for("html-next.invalid-result") }`);
       }
     } else if (attribute.kind === "attribute" && attribute.target === "style") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
         const text = lowering.text(attribute.expressionPlan.ast, scope);
-        reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: String(${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${text}) ?? ""` : text})`);
+        addStyle(`${quote(reactStyleProperty(attribute.name))}: String(${typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${text}) ?? ""` : text})`);
       }
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;
         retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope), ...(guard === undefined ? {} : { accepts: `() => ${guard}` }) });
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
-        reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: ${alias} == null ? undefined : String(${lowering.text({ kind: "id", name: alias }, aliasScope)})`);
+        addStyle(`${quote(reactStyleProperty(attribute.name))}: ${alias} == null ? undefined : String(${lowering.text({ kind: "id", name: alias }, aliasScope)})`);
       }
       const overridden = importantStyles.findIndex((style) => style.name === attribute.name);
       if (overridden >= 0) importantStyles.splice(overridden, 1);
@@ -699,7 +798,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else if (attribute.kind === "attribute" && attribute.twoWay !== true && attribute.target === undefined) {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
       const componentPropName = component ? [...state.propsByTag?.get(node.name) ?? []]
-        .find((name) => name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+        .find((name) => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       const componentPropContract = componentPropName === undefined ? undefined : componentContracts?.[componentPropName];
       const value = component && (componentPropName !== undefined || state.propsByTag?.get(node.name) === undefined)
         ? lowering.value(attribute.expressionPlan.ast, scope)
@@ -740,7 +839,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
             accepts: `(snapshot) => { const ${input} = snapshot as ReturnType<typeof evaluateInput>; return !${input}.status.ready || (${accepts})(${input}.value); }`, propName: componentPropName! });
           inputBindings.push(`${quote(componentPropName!)}: () => ${alias}`);
         } else retainedBindings.push({ alias, value, accepts, propName: componentPropName! });
-        bindings.push(`${componentPropName}={${alias}${snapshot ? "?.value" : ""}}`);
+        bindings.push(componentPropAttribute(componentPropName!, `${alias}${snapshot ? "?.value" : ""}`));
         const expression = attribute.expressionPlan.ast;
         if (expression.kind === "id") {
           const read = scope.code.get(expression.name);
@@ -749,15 +848,36 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           if (prop || computed && read?.endsWith(".get()")) inputBindings.push(`${quote(componentPropName!)}: () => ({ value: ${alias}, status: ${prop ? `propInputs.status(${quote(expression.name)})` : read!.replace(/\.get\(\)$/, ".status()")} })`);
         }
       }
+      else if (!component && attribute.name === "style") {
+        let rendered = nativeValue;
+        if (sourceGuard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
+          const alias = `__retained${state.nextRetainedAlias++}`;
+          const fallback = node.attributes.find(binding => binding.kind === "literal" && binding.name === "style");
+          state.usesRetainedValue = true;
+          retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope),
+            ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }),
+            ...(fallback?.kind === "literal" ? { initial: quote(fallback.value) } : {}) });
+          rendered = alias;
+        }
+        importantStyles.length = 0;
+        if (orderedStyles) orderedStyleValue = `styleObject(${rendered})`;
+        else bindings.push(`style={styleObject(${rendered})}`);
+      }
       else if (!component && (sourceGuard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope))) {
         const alias = `__retained${state.nextRetainedAlias++}`;
         state.usesRetainedValue = true;
+        const fallback = node.attributes.find(binding => binding.kind === "literal" && binding.name === attribute.name);
+        const initial = forwards && fallback?.kind === "literal" ? quote(fallback.value) : undefined;
+        const ready = forwards && initial === undefined ? `${alias}Ready` : undefined;
         retainedBindings.push({ alias, value: lowering.value(attribute.expressionPlan.ast, scope),
-          ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }) });
+          ...(sourceGuard === undefined ? {} : { accepts: `() => ${sourceGuard}` }), ...(initial === undefined ? {} : { initial }), ...(ready === undefined ? {} : { ready }) });
         const aliasScope = localScope(scope, [[alias, typeOf(attribute.expressionPlan.ast, scope)]]);
         const rendered = attributeValue({ kind: "id", name: alias }, aliasScope, attribute.name);
-        bindings.push(attributeBinding(attribute.name, typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered));
-      } else if (nativeAttribute(attribute.name) || state.preact && isEnumeratedBoolean(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
+        const serialized = typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${rendered}) ?? undefined` : rendered;
+        bindings.push(ready === undefined ? attributeBinding(attribute.name, serialized)
+          : `{...(${ready} ? { ${quote(reactAttribute(attribute.name, svg))}: ${serialized} } : {})}`);
+      } else if (attribute.name === "__proto__") bindings.push(componentPropAttribute("__Proto__", nativeValue));
+      else if (nativeAttribute(attribute.name) || serializedAttribute(attribute.name)) bindings.push(attributeBinding(attribute.name, nativeValue));
       else bindings.push(`${componentPropName ?? reactAttribute(attribute.name, svg)}={${NUMERIC_ATTRIBUTES.has(attribute.name) && !component ? `(${value}) as any` : nativeValue}}`);
     } else if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled property ${attribute.expression}.`);
@@ -792,7 +912,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
         if (guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
           state.usesRetainedText = true;
-          content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+          content = `<RetainedText value={${value}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
         } else content = `{${nullableText(value, lowering)}}`;
       }
       else {
@@ -815,17 +935,15 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const retained = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) || guard !== undefined;
       const raw = lowering.value(attribute.expressionPlan.ast, scope);
       const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering);
-      const defined = attribute.expressionPlan.ast.kind === "array" || attribute.expressionPlan.ast.kind === "object"
-        ? undefined : `(${raw}) !== undefined`;
-      const accepts = [defined, guard === undefined ? undefined : `(${guard})`].filter(Boolean).join(" && ");
+      const accepts = guard;
       if (outputValue) {
         // Each output owns its synchronization, including outputs rendered inside $each.
         state.usesOutputValue = true;
-        bindings.push(`htmlNextValue={${raw}}`, `htmlNextText={${text}}`, `htmlNextRetain={${retained}}`);
-        if (accepts !== "") bindings.push(`htmlNextAccepts={${accepts}}`);
+        bindings.push(`htmlNextValue={${raw}}`, `htmlNextText={${lowering.use("text")}}`, `htmlNextRetain={${retained}}`);
+        if (accepts !== undefined) bindings.push(`htmlNextAccepts={${accepts}}`);
       } else if (retained) {
         state.usesRetainedText = true;
-        content = `<RetainedText value={${raw}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+        content = `<RetainedText value={${raw}} text={${lowering.use("text")}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
       } else content = `{${text}}`;
     } else if (attribute.kind === "directive" && attribute.name === "html") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled HTML ${attribute.expression}.`);
@@ -839,16 +957,22 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else {
       fail("HT030", `React conversion of ${attribute.kind === "directive" ? `$${attribute.name}` : `:${attribute.name}`} is not implemented.`);
     }
+    } finally {
+      if (forwards) ordered.push(...literals.slice(literalStart), ...bindings.slice(bindingStart));
+      capturedBindings = bindings.length;
+    }
   }
   let componentChildren = node.children;
+  let defaultTemplate = false;
   if (component) {
     const { slots, defaults } = slotGroups(node.children);
     // A slot's first `<template slot>` is its whole content, and the slot renders that template's children.
     const defaultCarrier = defaults.find((child): child is ElementNode => child.kind === "element" && child.name === "template"
       && child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot"));
     componentChildren = defaultCarrier?.children ?? defaults;
+    defaultTemplate = defaultCarrier !== undefined;
     // `templates`: a `<template slot>` for a slot without props renders afresh at each `<slot of>` outlet, so an entry gives it as a function.
-    const slotsSource = (tag: string, groups: ReadonlyMap<string, readonly TemplateNode[]>, slotScope: RenderScope, templates = false): string => `{ ${[...groups].map(([name, children]) => {
+    const slotsSource = (tag: string, groups: ReadonlyMap<string, readonly TemplateNode[]>, slotScope: RenderScope, _templates = false): string => `{ ${[...groups].map(([name, children]) => {
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
       const contracts = state.slotsByTag?.get(tag);
       // A slot declared with props that no outlet of the component renders is placed by its parent's `<slot of>`.
@@ -857,15 +981,16 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         ?? (declared === undefined ? undefined : { name, required: false, props: Object.keys(declared.props), declared: declared.props });
       if ((contract?.props?.length ?? 0) > 0) {
         const alias = `__slotProps${state.nextSlotAlias++}`;
-        const projectedScope: RenderScope = {
+        const projectedScope: RenderScope = withReferenceTypes({
+          ...slotScope,
           code: new Map([...slotScope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
           types: new Map([...slotScope.types, ...contract!.props!.map((prop) => [prop, slotPropStatic(contract!.declared?.[prop])] as const)]),
           local: true,
-        };
+        }, contract!.props!.map(prop => [prop, contract!.declared?.[prop] === undefined ? undefined : normalizeType(contract!.declared[prop]!.type)]));
         if (carrier !== undefined) return `${quote(name)}: (${alias}: Record<string, any>) => <>${carrier.children.map((child) => renderNode(child, projectedScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
       }
       const content = carrier === undefined ? children : carrier.children;
-      if (templates && carrier !== undefined) return `${quote(name)}: () => <>${content.map((child) => renderNode(child, slotScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
+      if (carrier !== undefined) return `${quote(name)}: () => <>${content.map((child) => renderNode(child, slotScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`;
       return `${quote(name)}: ${content.length === 0 ? "undefined" : `<>${content.map((child) => renderNode(child, slotScope, lowering, imports, handlers, attachments, state, undefined, true, inSvg)).join("")}</>`}`;
     }).join(", ")} }`;
     // Columns as markup: a slot with `accepts` and `as` takes one entry per accepted child, which the
@@ -885,26 +1010,63 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (lists !== undefined) bindings.push(lists);
     // An accepted child that provides contexts gives them to its entry, found by the entry's key.
     const site = state.entrySites.get(node.attributes);
-    if (site !== undefined && providesContexts(node.name, state.componentGraph)) bindings.push(`htmlNextEntry={${entryKeySource(site, state.rowKeys)}}`);
+    if (site !== undefined) bindings.push(`htmlNextEntry={${entryKeySource(site, state.rowKeys)}}`);
   }
-  if (classes.length > 0) bindings.push(`className={[${classes.join(", ")}${rootTag === undefined ? "" : ", nativeAttrs.className"}].filter(Boolean).join(" ")}`);
-  if (literalStyles.length > 0 || reactiveStyles.length > 0) bindings.push(`style={{ ${[
+  if (classRules.length > 0) {
+    const base = [...classes];
+    const text = classes.length === 0 ? "undefined"
+      : base.length === 1 ? base[0]! : `[${base.join(", ")}].filter(value => value != null).join(" ")`;
+    const initial = `${lowering.use("classText")}(${text}, [${classRules.join(", ")}])`;
+    const value = component || orderedClasses ? initial : `typeof document === "undefined" ? ${initial} : ${text}`;
+    const prop = component ? findComponentPropName("class") : undefined;
+    bindings.push(prop === undefined ? `className={${value}}` : componentPropAttribute(prop, value));
+  } else if (classes.length > 0) {
+    const value = `[${classes.join(", ")}].filter(Boolean).join(" ")`;
+    const prop = component ? findComponentPropName("class") : undefined;
+    bindings.push(prop === undefined ? `className={${value}}` : componentPropAttribute(prop, value));
+  }
+  if (componentStyle) {
+    const rules = styleWriteRules(node.attributes, (attribute, fallback) => {
+      const plan = attribute.expressionPlan!;
+      const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
+      const source = attribute.target === "style" ? lowering.text(plan.ast, scope) : attributeValue(plan.ast, scope, "style");
+      if (guard === undefined && !mayProduceInvalidResult(plan.ast, scope)) return source;
+      const alias = `__retained${state.nextRetainedAlias++}`;
+      state.usesRetainedValue = true;
+      retainedBindings.push({ alias, value: guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for("html-next.invalid-result")`, initial: fallback === undefined ? 'Symbol.for("html-next.invalid-result")' : quote(fallback) });
+      return alias;
+    }, "nativeAttrs");
+    const value = `styleText("", ${rules})`;
+    bindings.push(htmlInputs === undefined ? `style={${value} as any}` : `{...htmlAttributeInputs({ style: ${value} }, ${htmlInputs})}`);
+  }
+  if (orderedStyles) {
+    importantStyles.length = 0;
+    bindings.push(`style={(${orderedStyleValue}) as React.CSSProperties}`);
+  }
+  else if (literalStyles.length > 0 || reactiveStyles.length > 0) bindings.push(`style={{ ${[
     ...literalStyles,
-    ...(rootTag === undefined ? [] : ["...nativeAttrs.style"]),
     ...reactiveStyles,
   ].join(", ")} } as unknown as React.CSSProperties}`);
-  if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || node.ref !== undefined) {
+  const styleValue = boundStyle || orderedStyles ? orderedStyles ? orderedStyleValue : bindings.find(binding => binding.startsWith("style={"))?.slice(7, -1) ?? "{}" : undefined;
+  const classOnly = styleValue === undefined && !component && rootTag === undefined && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0 && importantStyles.length === 0 && node.ref === undefined
+    && properties.length > 0 && properties.every(property => property.target !== undefined);
+  if (classOnly) {
+    const owner = state.allocate("__htmlNextClassOwner");
+    state.classOwners.push(owner);
+    const values = properties.map(property => `[${property.target === "class" ? quote(property.name) : "null"}, ${property.accepts === undefined ? property.value : `(${property.accepts}) ? ${property.value} : Symbol.for("html-next.invalid-result")`}]`);
+    bindings.push(`ref={element => applyClassBindingRef(element, ${owner}, { ${orderedClasses ? "ordered: true, " : ""}bindings: [${values.join(", ")}] })}`);
+  } else if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || styleValue !== undefined || node.ref !== undefined) {
     for (const event of node.events ?? []) if (!handlers.has(event.handler)) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
     const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
       ? `() => ${write.path} as unknown as readonly (string | number)[]` : "undefined");
     // A path that depends on the render goes through ScopedAttachment, whose ref stays the same between renders.
-    const scoped = scope.local === true && (control !== undefined || properties.length > 0) || dynamicPaths.some((path) => path !== "undefined");
+    const scoped = scope.local === true && (control !== undefined || properties.length > 0 || styleValue !== undefined) || styleValue !== undefined && retainedBindings.length > 0 || dynamicPaths.some((path) => path !== "undefined");
     const listensOnly = (node.events?.length ?? 0) > 0 && rootTag === undefined && control === undefined && genericWrites.length === 0
-      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined;
+      && properties.length === 0 && importantStyles.length === 0 && styleValue === undefined && node.ref === undefined;
     const forwardsOnly = rootTag !== undefined && !component && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0
-      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined && rootArms(state.definition.template) === undefined;
+      && properties.length === 0 && importantStyles.length === 0 && styleValue === undefined && node.ref === undefined && rootArms(state.definition.template) === undefined;
     const name = forwardsOnly ? "ownedRootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
-    const attachment: EventAttachment = { name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
+    const attachment: EventAttachment = { ...(orderedClasses ? { orderedClasses: true } : {}), ...(styleValue === undefined ? {} : { style: styleValue }), name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
       ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
     attachments.push(attachment);
     if (scoped) {
@@ -915,9 +1077,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   }
   const preformatted = state.preformatted;
   if (isPreformattedElement(node.name)) state.preformatted = true;
-  const children = outputValue || node.name === "textarea" && control?.name === "value" ? ""
+  let children = outputValue || node.name === "textarea" && control?.name === "value" ? ""
     : content ?? componentChildren.map((child) => renderNode(node.name === "select" && control?.name === "value" ? withoutAuthoredSelection(child) : child,
       scope, lowering, imports, handlers, attachments, state, undefined, component, svg && node.name !== "foreignObject")).join("");
+  if (defaultTemplate) children = `{() => <>${children}</>}`;
   state.preformatted = preformatted;
   const boundReflections = rootTag === undefined ? [] : Object.keys(state.definition.contract.props).flatMap((name) => {
     const attributeName = propAttribute(state.definition.contract.tag, name);
@@ -929,20 +1092,23 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const reflections = boundReflections.length === 0 ? rootTag?.reflections ?? []
     : [`{...(Object.assign({}, reflectedAttrs, { ${boundReflections.join(", ")} }) as Record<string, unknown>)}`];
   if (inputBindings.length > 0) bindings.push(`{...{ [BINDING_INPUTS_PROP]: { ${inputBindings.join(", ")} } }}`);
-  const attributes = [...literals, ...(rootTag === undefined ? [] : [state.preact && !svg ? "{...(nativeAttributes as Record<string, unknown>)}" : "{...nativeAttrs}"]), ...bindings, ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
+  const attributes = [...rootTag === undefined ? [] : ["{...rootMetadata(nativeAttrs)}"], ...(forwards ? [...ordered, ...bindings.slice(capturedBindings)] : [...literals, ...bindings]), ...(projected ? [`data-slotted=${quote(projectedOwner(node))}`] : []),
     ...reflections, ...(rootTag === undefined ? [] : [
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
       `{...{ component: [renderedIdentity, ${quote(rootTag.tag)}].filter(Boolean).join(" ") }}`,
     ])];
-  const opening = `<${tag}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}`;
+  const finalAttributes = htmlInputs === undefined ? attributes : [`{...(invocationProps(${jsxAttributeRecord(attributes)}, ${htmlInputs}) as any)}`];
+  const renderedAttributes = !state.preact && (tag === "HtmlNextInput" || tag === "HtmlNextValueInput")
+    ? [`htmlNextAttributes={${jsxAttributeRecord(finalAttributes)}}`] : finalAttributes;
+  const opening = `<${tag}${renderedAttributes.length === 0 ? "" : ` ${renderedAttributes.join(" ")}`}`;
   const markup = component && children === "" || !component && isVoidElement(node.name)
     ? `${opening} />` : `${opening}>${children}</${tag}>`;
   const selectorNames = new Set(Object.values(componentContracts ?? {}).flatMap((contract) => contract.select === undefined ? [] : [contract.select.from]));
-  const scopedMarkup = scopedAttachment === undefined ? markup : `<ScopedAttachment attach={${scopedAttachment.attachment.name}} paths={[${scopedAttachment.paths.join(", ")}]} properties={[${scopedAttachment.attachment.properties.map((property) =>
-    `{ name: ${quote(property.name)}, value: ${property.value}, accepted: ${property.accepts ?? "true"} }`).join(", ")}]}${scopedAttachment.attachment.control === undefined ? "" :
+  const scopedMarkup = scopedAttachment === undefined ? markup : `<ScopedAttachment attach={${scopedAttachment.attachment.name}}${!scopedAttachment.paths.some(path => path !== "undefined") ? "" : ` paths={[${scopedAttachment.paths.join(", ")}]}`}${scopedAttachment.attachment.style === undefined ? "" : ` style={(${scopedAttachment.attachment.style}) as React.CSSProperties}`}${scopedAttachment.attachment.orderedClasses ? " orderedClasses" : ""} properties={[${scopedAttachment.attachment.properties.map((property) =>
+    `{ name: ${quote(property.name)}, value: ${property.value}, accepted: ${property.accepts ?? "true"}${property.target === undefined ? "" : `, target: ${quote(property.target)}`}${property.namespace === undefined ? "" : `, namespace: ${quote(property.namespace)}, localName: ${quote(property.name.slice(property.name.indexOf(":") + 1))}, url: ${property.url === true}`} }`).join(", ")}]}${scopedAttachment.attachment.control === undefined ? "" :
     ` control={{ name: ${quote(scopedAttachment.attachment.control.name)}, value: ${scopedAttachment.attachment.control.value}, defaults: ${scopedAttachment.attachment.control.defaults}, nativeProperty: ${scopedAttachment.attachment.control.nativeProperty}, accepted: ${scopedAttachment.attachment.control.accepts ?? "true"} }}`} render={(${scopedAttachment.ref}) => ${markup}} />`;
   return retainedBindings.toSorted((a, b) => Number(selectorNames.has(b.propName ?? "")) - Number(selectorNames.has(a.propName ?? ""))).reduceRight((result, retained) =>
-    `<RetainedValue value={${retained.value}}${retained.accepts === undefined ? "" : ` accepts={${retained.accepts}}`} render={(${retained.alias}) => ${result}} />`, scopedMarkup);
+    `<RetainedValue value={${retained.value}}${retained.accepts === undefined ? "" : ` accepts={${retained.accepts}}`} render={(${retained.initial === undefined ? retained.alias : `${retained.alias}Read`}${retained.ready === undefined && retained.initial === undefined ? "" : `, ${retained.ready ?? `${retained.alias}Ready`}`}) => ${retained.initial === undefined ? result : `{ const ${retained.alias} = ${retained.alias}Ready ? ${retained.alias}Read : ${retained.initial}; return ${result}; }`}} />`, scopedMarkup);
 }
 
 /** A component invocation's children by the slot each is assigned to; `slot=""` names the default slot, as no `slot` does. */
@@ -968,12 +1134,6 @@ function listed(names: readonly string[]): string {
   return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
 }
 
-/** Whether the graph reads a component's states as context, so content placed from its slots needs its providers. */
-function providesContexts(tag: string, graph: ReadonlyMap<string, ComponentDefinition> | undefined): boolean {
-  return (graph?.get(tag)?.declarations ?? []).some((declaration) => declaration.kind === "state") &&
-    [...graph!.values()].some((definition) => (definition.declarations ?? []).some((declaration) => declaration.kind === "context" && declaration.from === tag));
-}
-
 /**
  * A `<slot of>` outlet's props, by accepted tag, as live's `childSlotProps` checks them against the
  * child's slot declaration: a static prop converts by its declared type, a bound one its type rejects
@@ -986,7 +1146,7 @@ function outletPropsSource(node: SlotNode, state: RenderState): string | undefin
   const given = node.props ?? [];
   const outlet = `<slot of name="${name}">`;
   const file = state.definition.source.file;
-  const accepts = Object.values(state.definition.contract.slots ?? {}).find((declared) => declared.as === node.of!.list)?.accepts ?? [];
+  const accepts = entryTags(state.definition.contract, node.of!);
   const shapes = accepts.flatMap((tag) => {
     const accepted = state.componentGraph?.get(tag);
     const declared = accepted?.contract.slots?.[name]?.props ?? {};
@@ -1069,7 +1229,7 @@ function childDescriptors(
       const declared = state.componentGraph?.get(body.name)?.contract.props ?? {};
       const props = Object.entries(declared).map(([name, contract]) => {
         const attribute = body.attributes.find((candidate) => (candidate.kind === "literal" || candidate.kind === "attribute" && candidate.target === undefined && candidate.twoWay !== true) &&
-          (candidate.name === name.toLowerCase() || candidate.name === kebabCase(name)));
+          (candidate.name === asciiLowerCase(name) || candidate.name === kebabCase(name)));
         const absent = "default" in contract ? JSON.stringify(contract.default) : "null";
         if (attribute?.kind === "literal") {
           const parsed = parseTypedValue(attribute.value, contract.type, "$", "html");
@@ -1085,30 +1245,33 @@ function childDescriptors(
     if (flow.kind === "if" && flow.testPlan !== undefined) return [`(${lowering.condition(flow.testPlan.ast, itemScope)} ? ${entry(itemScope, segments, rowKeys)} : [])`];
     if (flow.kind === "with" && flow.expressionPlan !== undefined) {
       const alias = localIdentifier(flow.alias, itemScope, state);
-      const aliasScope = localScope(itemScope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, itemScope) : present(flow.aliasType), alias]]);
+      const aliasScope = localScope(itemScope, [[flow.alias, flow.aliasType === undefined ? typeOf(flow.expressionPlan.ast, itemScope) : present(flow.aliasType), alias, flow.aliasType ?? referenceType(flow.expressionPlan.ast, itemScope)]]);
       return [`(() => { const ${alias} = ${lowering.value(flow.expressionPlan.ast, itemScope)}; return ${entry(aliasScope, segments, rowKeys)}; })()`];
     }
     if (flow.kind === "each" && flow.listPlan !== undefined) {
       const item = localIdentifier(flow.item, itemScope, state);
       const index = localIdentifier(flow.index ?? "index", itemScope, state);
       const itemType = typeOf(flow.listPlan.ast, itemScope).type;
-      const rowScope = localScope(itemScope, [
-        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item],
-        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
-        ["loop", UNKNOWN],
+      const itemContract = referenceType(flow.listPlan.ast, itemScope);
+      const filterScope = localScope(itemScope, [
+        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item, itemContract?.kind === "list" ? itemContract.item : undefined],
+      ]);
+      const rowScope = localScope(filterScope, [
+        [flow.index ?? ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+        [ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
       ]);
       const list = lowering.list(flow.listPlan.ast, itemScope, item, {
-        ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }), itemScope: rowScope,
+        ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }), itemScope: filterScope,
         sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
       const keys = new Map(rowKeys).set(child.attributes, flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, rowScope));
-      return [`${lowering.eachRows(list)}.flatMap(({ item: ${item}, index: ${index}, loop }) => ${entry(rowScope, [...segments, child.attributes], keys)})`];
+      return [`${lowering.eachRows(list)}.flatMap(({ item: ${item}, index: ${index} }) => ${entry(rowScope, [...segments, child.attributes], keys)})`];
     }
     if (flow.kind === "match" && body.name === "template") {
       const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, itemScope, state);
       const armScope = flow.alias === undefined ? itemScope : localScope(itemScope, [[flow.alias,
-        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, itemScope), alias]]);
+        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, itemScope), alias, flow.expressionPlan === undefined ? undefined : referenceType(flow.expressionPlan.ast, itemScope)]]);
       const arms = body.children.filter((arm): arm is ElementNode => arm.kind === "element");
       let chosen = "[]";
       for (const [index, arm] of [...arms.entries()].toReversed()) {
@@ -1176,8 +1339,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const lists = Object.entries(definition.contract.slots ?? {}).flatMap(([slot, declared]) => declared.as === undefined ? [] : [{ slot, as: declared.as, accepts: declared.accepts ?? [] }]);
   const listNames = new Map(lists.map((list) => [list.as, allocate(identifierFor(list.as), "List")] as const));
   const acceptedTags = new Set([...options.componentGraph?.values() ?? []].flatMap((other) => Object.values(other.contract.slots ?? {}).flatMap((declared) => declared.accepts ?? [])));
-  const acceptedBy = acceptedTags.has(definition.contract.tag);
+  const acceptedBy = [...options.componentGraph?.values() ?? []].some(other =>
+    Object.values(other.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(definition.contract.tag)));
   // A hand-written consumer's accepting parent finds this component among its children by its tag, and a preset by its root's.
+  const claimSlots = acceptedBy || repeatedSlotNames(definition).size > 0;
   const childTags = [definition.contract.tag];
   for (let root = definition.root; root?.kind === "component" && !childTags.includes(root.tag); root = options.componentGraph?.get(root.tag)?.root) childTags.push(root.tag);
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
@@ -1270,7 +1435,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const imports = new Set<string>();
   const attachments: EventAttachment[] = [];
   const root: ElementNode = template;
-  const scope = { code, types };
+  const scope = { code, types, ...referenceContext(definition) };
   const declarationStatus = (name: string, read: string, canonical = false): string | undefined => {
     if (initializedNames.has(name)) return `${stateOwners.get(name)!}.${canonical ? "readStatus" : "status"}()`;
     const entry = contextEntries.get(name);
@@ -1292,8 +1457,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
       : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : declarationStatus(name, read)), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
-    componentGraph: options.componentGraph, lists: lists.length > 0, entrySites: new Map(), rowKeys: new Map(), outletProps: [],
-    nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
+    componentGraph: options.componentGraph, lists: lists.length > 0, claimSlots, slotPath: [], entrySites: new Map(), rowKeys: new Map(), outletProps: [],
+    classOwners: [], nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
     { tag: definition.contract.tag, reflections, captureRoot: true, hostState: hostStateNames.length > 0 });
@@ -1303,6 +1468,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const usesControls = attachments.some((attachment) => attachment.control !== undefined || attachment.genericWrites.length > 0);
   const usesNativeControls = attachments.some((attachment) => attachment.control !== undefined);
   const usesScopedAttachments = attachments.some((attachment) => attachment.scoped);
+  const usesScopedPaths = attachments.some(attachment => attachment.scoped && (attachment.control?.write?.dynamic === true || attachment.genericWrites.some(write => write.dynamic)));
+  const usesScopedControls = attachments.some(attachment => attachment.scoped && attachment.control !== undefined);
+  const usesScopedStyles = attachments.some(attachment => attachment.scoped && attachment.style !== undefined);
   const usesGenericBindings = attachments.some((attachment) => attachment.genericWrites.length > 0);
   const usesNestedControlWrites = attachments.some((attachment) =>
     attachment.control?.write?.path !== undefined && attachment.control.write.path !== "[]" ||
@@ -1336,7 +1504,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...Object.entries(definition.contract.slots ?? {}).flatMap(([name, declared]) => name === "" || (definition.slots ?? []).some((slot) => slot.name === name) ? []
       : [{ name, required: false, props: Object.keys(declared.props), declared: declared.props }])];
   const slotValueType = (slot: SlotContract): string => (slot.props?.length ?? 0) === 0
-    ? "ReactNode"
+    ? "ReactNode | (() => ReactNode)"
     : `(props: ${slot.declared === undefined ? `Readonly<{ ${slot.props!.map((prop) => `${propKey(prop)}: any;`).join(" ")} }>` : slotPropsType(slot.declared)}) => ReactNode`;
   const slotsType = namedSlots.length === 0
     ? "Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>"
@@ -1362,6 +1530,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(checksControllerWrites || initializedStates.length > 0 ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
     ...(!renderState.usesSlotPropChecks ? [] : [`import { ${SLOT_PROP_IMPORT} } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(!renderState.usesStyle ? [] : [STYLE_IMPORT]),
+    ...(!renderState.usesHtmlInputs ? [] : [`import { htmlAttributeInputs, invocationProps } from ${quote(options.propsSpecifier ?? "./props")};`]),
+    ...(templateForwardsAttributes(definition.template) ? [`import { forwardedAttributes } from ${quote(options.attributesSpecifier ?? "./attributes")};`] : []),
+    ...(!attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? [] : [`import { applyNamespacedAttributes, namespacedAttributeProps } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
+    ...(renderState.classOwners.length === 0 && !attachments.some(attachment => attachment.orderedClasses) ? [] : [`import { applyClassBindingRef } from ${quote(options.attributesSpecifier ?? "./attributes")};`]),
     ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
@@ -1404,7 +1577,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(states.filter((state) => providedContexts.has(state.name)).map((state) =>
       `export const ${contextExportName(definition.contract.tag, state.name)} = componentContext<${stateType(state)}>(${quote(definition.contract.tag)}, ${quote(state.name)});`)),
     "",
-    `export type ${name}Props${genericDeclaration} = Omit<${nativeProps}, ${["style", ...target.props.map((prop) => prop.name)].map(quote).join(" | ")}> & {`,
+    `export type ${name}Props${genericDeclaration} = Omit<${nativeProps}, ${["style", "children", ...target.props.map((prop) => prop.name)].map(quote).join(" | ")}> & {`,
     ...props,
     // Each request is a function prop that answers it, and an event form that hears it.
     ...target.requests.flatMap((request) => [
@@ -1412,7 +1585,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `  ${propKey(request.callbackName)}?: (${requestListenerType(request)}) | null;`,
     ]),
     ...(target.props.some((prop) => prop.name === "style") ? [] : ["  style?: React.CSSProperties | (React.CSSProperties & { [name: `--${string}`]: string | number | undefined });"]),
-    "  children?: ReactNode;",
+    "  children?: ReactNode | (() => ReactNode);",
     `  slots?: ${slotsType};`,
     `  ref?: React.Ref<${publicRootType}>;`,
     "  [name: string]: unknown;",
@@ -1433,7 +1606,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  }",
     ]),
     `  const { children: _children, slots: _slots, ${lists.length === 0 ? "" : "htmlNextAs: _htmlNextAs, "}${acceptedBy ? "htmlNextEntry: _htmlNextEntry, " : ""}${target.props.length === 0 ? "" : "[BINDING_INPUTS_PROP]: _inputBindings, "}${[...target.props.map((prop) => prop.name), ...target.requests.flatMap((request) => [request.propName, request.callbackName])]
-      .map((prop) => `${propKey(prop)}: _${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
+      .map((prop) => `${propKey(prop)}: ${allocate(`_${prop.replace(/[^A-Za-z0-9_$]/g, "_")}`)}`).join(", ")}${target.props.length + target.requests.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     '  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];',
     '  delete nativeAttrs["component"];',
     '  delete nativeAttrs["data-component"];',
@@ -1488,7 +1661,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     // Handlers read a state's latest write through its getter; rendering reads the value React has.
     ...states.map((state) => {
       // A state without value reads null until written, as in every target (types#null-and-missing-values).
-      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope);
+      const initial = state.expression === undefined ? "null" : lowering.value(state.expression.ast, uncheckedReferences(scope));
       if (state.initializer !== undefined) {
         const canonicalCode = new Map(scope.code);
         for (const prop of target.props) canonicalCode.set(prop.name, `propInputs.committed.read<${typeScript(types.get(prop.name)!)}>(${quote(prop.name)})`);
@@ -1496,7 +1669,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         for (const item of computed) canonicalCode.set(item.name, `${controllerComputedNames.get(item.name)!}.get()`);
         for (const [alias, entry] of contextEntries) canonicalCode.set(alias, `((${entry}.read === undefined ? ${entry}.value : ${entry}.read())${types.get(alias) === UNKNOWN ? " as any" : ""})`);
         const expression = lowering.value(state.initializer.ast, observedScope(scope));
-        const canonical = lowering.value(state.initializer.ast, observedScope({ code: canonicalCode, types: scope.types }, "propInputs.committed"));
+        const canonical = lowering.value(state.initializer.ast, observedScope({ ...scope, code: canonicalCode }, "propInputs.committed"));
         const declared = declarationTypeNode(state.type, state.shape);
         return `  const ${stateOwners.get(state.name)!}: ReturnType<typeof useInitializedState<${stateType(state)}>> = useInitializedState<${stateType(state)}>(() => evaluateInput(() => ${expression}), () => evaluateInput(() => ${canonical}), value => ${declared === undefined ? "true" : `acceptsControllerWrite(value, ${JSON.stringify(declared)}, []) || ${lowering.use("warnUnless")}(false, ${quote(`initializer:${state.name}`)}, ${quote(`State \`${state.name}\` does not satisfy its declared type.`)})`}, cycleCheckedComputed${stateWritesName === "" ? contexts.length === 0 ? "" : ", undefined, undefined" : `, ${stateWritesName}.current, ${quote(state.name)}`}${contexts.length === 0 ? "" : `, [${[...contextEntries.values()].join(", ")}]`});\n  const ${stateSetters.get(state.name)!} = ${stateOwners.get(state.name)!}.set, ${stateGetters.get(state.name)!} = ${stateOwners.get(state.name)!}.read;`;
       }
@@ -1568,7 +1741,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(attachments.some(attachment => attachment.forwardsOnly) ? ["  const ownedRootRef = useOwnedRootRef(rootRef);"] : []),
     ] : []),
     ...(target.props.length === 0 ? [] : [
-      `  const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { ...prop, type: validityType(prop) }])) })} as const;`,
+      `  const propValidityContract = ${literalValueSource({ props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [name, { ...prop, type: validityType(prop) }])) })} as const;`,
       "  const propValidityElement = React.useRef<Element | null>(null);",
       "  const propValidityCleanup = React.useRef<(() => void) | null>(null);",
       "  React.useLayoutEffect(() => {",
@@ -1690,11 +1863,16 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         "  }",
       ].join("\n");
     }),
+    ...renderState.classOwners.map(owner => `  const ${owner} = React.useRef<object>({}).current;`),
     ...attachments.flatMap((attachment) => attachment.control === undefined || attachment.scoped ? [] : [
       `  const controlRef${attachment.name} = React.useRef<Element | null>(null);`,
       `  const controlValue${attachment.name} = React.useRef(${attachment.control.value});`,
       `  controlValue${attachment.name}.current = ${attachment.control.value};`,
       `  React.useLayoutEffect(() => { syncBoundControl(controlRef${attachment.name}.current, ${quote(attachment.control.name)}, ${attachment.control.value}, ${attachment.control.defaults}, ${attachment.control.nativeProperty}, ${attachment.control.accepts ?? "true"}); });`,
+    ]),
+    ...attachments.flatMap(attachment => attachment.style === undefined || attachment.scoped ? [] : [
+      `  const styleRef${attachment.name} = React.useRef<Element | null>(null);`,
+      `  React.useLayoutEffect(() => { applyStylePriority(styleRef${attachment.name}.current, ${attachment.style}); });`,
     ]),
     ...attachments.flatMap((attachment) => attachment.properties.length === 0 || attachment.scoped ? [] : [
       `  const propertyRef${attachment.name} = React.useRef<Element | null>(null);`,
@@ -1702,12 +1880,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `  const previousPropertyValues${attachment.name} = React.useRef<unknown[] | undefined>(undefined);`,
       `  React.useLayoutEffect(() => {`,
       `    const element = propertyRef${attachment.name}.current;`,
-      `    const values = [${attachment.properties.map((property) => property.value).join(", ")}];`,
+      `    const values: unknown[] = [${attachment.properties.map((property) => property.value).join(", ")}];`,
       `    const previous = previousPropertyValues${attachment.name}.current ?? [];`,
       `    if (element !== null) {`,
-      ...attachment.properties.map((property, index) =>
-        `      if ((${property.accepts ?? "true"}) && ${["scrollTop", "scrollLeft"].includes(property.name) ? `previousPropertyValues${attachment.name}.current !== undefined && ` : ""}(element !== previousPropertyElement${attachment.name}.current || !Object.is(values[${index}], previous[${index}]))) (element as unknown as Record<string, unknown>)[${quote(property.name)}] = values[${index}];`),
-      ...attachment.properties.map((property, index) => `      if (${property.accepts ?? "true"}) previous[${index}] = values[${index}];`),
+      ...(attachment.orderedClasses ? [`      applyClassBindingRef(element, previousPropertyElement${attachment.name}, { ordered: true, bindings: [${attachment.properties.flatMap((property, index) => property.target === undefined ? [] : [`[${property.target === "class" ? quote(property.name) : "null"}, ${property.accepts === undefined ? `values[${index}]` : `(${property.accepts}) ? values[${index}] : Symbol.for("html-next.invalid-result")`}]`]).join(", ")}] });`] : []),
+      ...attachment.properties.flatMap((property, index) => attachment.orderedClasses && property.target !== undefined ? [] : [
+        `      if ((${property.accepts ?? "true"}) && ${property.target === undefined ? "" : `values[${index}] !== Symbol.for("html-next.invalid-result") && `}${["scrollTop", "scrollLeft"].includes(property.name) ? `previousPropertyValues${attachment.name}.current !== undefined && ` : ""}(element !== previousPropertyElement${attachment.name}.current || !Object.is(values[${index}], previous[${index}]))) ${property.target === "class" ? `element.classList.toggle(${quote(property.name)}, Boolean(values[${index}]));` : property.target === "attribute" ? `values[${index}] == null ? element.removeAttribute("class") : element.setAttribute("class", String(values[${index}]));` : property.namespace === undefined ? `(element as unknown as Record<string, unknown>)[${quote(property.name)}] = values[${index}];` : `applyNamespacedAttributes(element, [${namespacedAttributeSource(property.name, `values[${index}]`)}]);`}`]),
+      ...attachment.properties.map((property, index) => `      if ((${property.accepts ?? "true"})${property.target === undefined ? "" : ` && values[${index}] !== Symbol.for("html-next.invalid-result")`}) previous[${index}] = values[${index}];`),
       `    }`,
       `    previousPropertyElement${attachment.name}.current = element;`,
       `    previousPropertyValues${attachment.name}.current = previous;`,
@@ -1747,7 +1926,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
             : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, ${written}), path); }`;
           return `const genericCleanup${index} = attachGenericBinding(element, ${source});`;
         });
-        const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.ref === undefined ? attach : [
+        const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.style === undefined && attachment.ref === undefined ? attach : [
           "{",
           ...(attachment.remembersParent ? ["const restoreParent = rememberParent(element);"] : []),
           ...(attachment.forward ? [`rootRef.current = element as ${publicRootType} | null;`] : []),
@@ -1759,12 +1938,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           ]),
           ...(control === undefined || attachment.scoped ? [] : [`controlRef${attachment.name}.current = element;`]),
           ...(attachment.properties.length === 0 || attachment.scoped ? [] : [`propertyRef${attachment.name}.current = element;`]),
+          ...(attachment.style === undefined || attachment.scoped ? [] : [`styleRef${attachment.name}.current = element;`]),
           ...attachment.importantStyles.map((style) =>
             `if (element !== null && ((element as HTMLElement).style.getPropertyValue(${quote(style.name)}) !== ${quote(style.value)} || (element as HTMLElement).style.getPropertyPriority(${quote(style.name)}) !== "important")) (element as HTMLElement).style.setProperty(${quote(style.name)}, ${quote(style.value)}, "important");`),
           ...(bindings.length === 0 ? [] : [`const nativeCleanup = ${attach};`]),
           ...(control === undefined ? [] : [`const controlCleanup = attachBoundControl(element, ${quote(control.name)}, ${attachment.scoped ? "scoped?.control" : `controlValue${attachment.name}.current`}, ${control.defaults}, ${update}, ${control.nativeProperty}, ${attachment.scoped ? "scoped?.controlAccepted ?? true" : control.accepts ?? "true"});`]),
           ...genericUpdates,
-          `return () => { ${attachment.remembersParent ? "restoreParent(); " : ""}${attachment.forward && preservesRootFocus ? "rootFocusPending.current = element?.ownerDocument.activeElement === element; " : ""}${attachment.forward ? "rootRef.current = null; " : ""}${attachment.ref === undefined ? "" : `refElements.current.get(${quote(attachment.ref)})?.delete(element!); `}${control === undefined ? "" : `${attachment.scoped ? "" : `controlRef${attachment.name}.current = null; `}controlCleanup?.(); `}${attachment.genericWrites.map((_write, index) => `genericCleanup${index}?.();`).join(" ")} ${attachment.properties.length === 0 || attachment.scoped ? "" : `propertyRef${attachment.name}.current = null; `}${bindings.length === 0 ? "" : "nativeCleanup?.();"} };`,
+          `return () => { ${attachment.remembersParent ? "restoreParent(); " : ""}${attachment.forward && preservesRootFocus ? "rootFocusPending.current = element?.ownerDocument.activeElement === element; " : ""}${attachment.forward ? "rootRef.current = null; " : ""}${attachment.ref === undefined ? "" : `refElements.current.get(${quote(attachment.ref)})?.delete(element!); `}${control === undefined ? "" : `${attachment.scoped ? "" : `controlRef${attachment.name}.current = null; `}controlCleanup?.(); `}${attachment.genericWrites.map((_write, index) => `genericCleanup${index}?.();`).join(" ")} ${attachment.properties.length === 0 || attachment.scoped ? "" : `propertyRef${attachment.name}.current = null; `}${attachment.style === undefined || attachment.scoped ? "" : `styleRef${attachment.name}.current = null; `}${bindings.length === 0 ? "" : "nativeCleanup?.();"} };`,
           "}",
         ].join(" ");
         return `  const ${attachment.name} = React.useCallback((element: Element | null, paths?: readonly (((() => readonly (string | number)[]) | undefined))[]${attachment.scoped ? ", scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }" : ""}) => ${callback}, []);`;
@@ -1826,7 +2006,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       // A handler that reads $event gets a connection event, as a controller's host.on callback does.
       return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
-    ...(!acceptedBy ? [] : [`  useChildEntry(_htmlNextEntry, ${name}.htmlNextChild, props${providedContexts.size === 0 ? "" : `, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")}`});`]),
+    ...(!claimSlots ? [] : [`  const htmlNextSlots = useSlotClaims(${!acceptedBy ? "" : `useChildEntry(_htmlNextEntry, ${name}.htmlNextChild, props${providedContexts.size === 0 ? "" : `, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")}`})`});`]),
     // Server rendering reads how many head-declaring components enclose each one from this context.
     `  return (${definition.head !== undefined ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",
@@ -1835,39 +2015,54 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(usesScopedAttachments ? [
       "",
       "type ScopedPath = (() => readonly (string | number)[]) | undefined;",
-      "type ScopedProperty = { readonly name: string; readonly value: unknown; readonly accepted: boolean };",
+      "type ScopedProperty = { readonly name: string; readonly value: unknown; readonly accepted: boolean; readonly namespace?: string; readonly localName?: string; readonly url?: boolean; readonly target?: 'class' | 'attribute' };",
       "type ScopedControl = { readonly name: 'value' | 'checked'; readonly value: unknown; readonly defaults: { readonly value?: string; readonly checked?: boolean; readonly options?: readonly boolean[] }; readonly nativeProperty: boolean; readonly accepted: boolean };",
-      "function ScopedAttachment({ attach, paths, properties, control, render }: {",
+      `function ScopedAttachment({ attach, paths, properties, control, ${usesScopedStyles ? "style, " : ""}orderedClasses, render }: {`,
       "  readonly attach: (element: Element | null, paths?: readonly ScopedPath[], scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }) => void | (() => void);",
-      "  readonly paths: readonly ScopedPath[]; readonly properties: readonly ScopedProperty[]; readonly control?: ScopedControl;",
+      "  readonly paths?: readonly ScopedPath[]; readonly properties: readonly ScopedProperty[]; readonly control?: ScopedControl;",
+      "  readonly orderedClasses?: boolean;",
+      ...(usesScopedStyles ? ["  readonly style?: React.CSSProperties;"] : []),
       "  readonly render: (ref: (element: Element | null) => void) => ReactNode;",
       "}): ReactNode {",
       "  const element = React.useRef<Element | null>(null);",
-      "  const currentPaths = React.useRef(paths);",
-      "  const currentControl = React.useRef(control);",
+      ...(usesScopedPaths ? ["  const currentPaths = React.useRef(paths);"] : []),
+      ...(usesScopedControls ? ["  const currentControl = React.useRef(control);"] : []),
       "  const previousValues = React.useRef<unknown[] | undefined>(undefined);",
       "  const previousElement = React.useRef<Element | null>(null);",
       "  const ref = React.useCallback((node: Element | null) => {",
       "    element.current = node;",
-      "    const stablePaths = currentPaths.current.map((_, index) => () => currentPaths.current[index]?.() ?? []);",
-      "    const selected = currentControl.current;",
-      "    const cleanup = attach(node, stablePaths, { control: selected?.value, controlAccepted: selected?.accepted });",
+      ...(usesScopedPaths ? ["    const stablePaths = currentPaths.current?.map((_, index) => () => currentPaths.current?.[index]?.() ?? []);"] : []),
+      ...(usesScopedControls ? ["    const selected = currentControl.current;"] : []),
+      `    const cleanup = attach(node${usesScopedPaths ? ", stablePaths" : usesScopedControls ? ", undefined" : ""}${usesScopedControls ? ", { control: selected?.value, controlAccepted: selected?.accepted }" : ""});`,
       "    return () => { element.current = null; cleanup?.(); };",
       "  }, [attach]);",
       "  React.useLayoutEffect(() => {",
-      "    currentPaths.current = paths; currentControl.current = control;",
+      ...(usesScopedPaths ? ["    currentPaths.current = paths;"] : []),
+      ...(usesScopedControls ? ["    currentControl.current = control;"] : []),
       "    const node = element.current;",
       "    if (node === null) return;",
-      ...(usesNativeControls ? [
+      ...(usesScopedControls ? [
         "    if (control !== undefined) syncBoundControl(node, control.name, control.value, control.defaults, control.nativeProperty, control.accepted);",
       ] : []),
       "    const previous = previousValues.current ?? [];",
+      ...(attachments.some(attachment => attachment.scoped && attachment.orderedClasses) ? [
+        "    if (orderedClasses) applyClassBindingRef(node, previousElement, { ordered: true, bindings: properties.flatMap(property => property.target === undefined ? [] : [[property.target === 'class' ? property.name : null, property.accepted ? property.value : Symbol.for('html-next.invalid-result')] as const]) });",
+      ] : []),
       "    for (const [index, property] of properties.entries()) {",
-      "      if (property.accepted && (!['scrollTop', 'scrollLeft'].includes(property.name) || previousValues.current !== undefined) &&",
+      "      if (!(orderedClasses && property.target !== undefined) && property.accepted && (property.target === undefined || property.value !== Symbol.for('html-next.invalid-result')) && (!['scrollTop', 'scrollLeft'].includes(property.name) || previousValues.current !== undefined) &&",
       "        (node !== previousElement.current || !Object.is(property.value, previous[index])))",
-      "        (node as unknown as Record<string, unknown>)[property.name] = property.value;",
-      "      if (property.accepted) previous[index] = property.value;",
+      "        {",
+      "          if (property.target === 'class') node.classList.toggle(property.name, Boolean(property.value));",
+      "          else if (property.target === 'attribute') { if (property.value == null) node.removeAttribute('class'); else node.setAttribute('class', String(property.value)); }",
+      ...(!attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? ["          else"] : [
+        "          else if (property.namespace !== undefined) applyNamespacedAttributes(node, [[property.namespace, property.name, property.localName!, property.value, property.url === true]]);",
+        "          else",
+      ]),
+      "          (node as unknown as Record<string, unknown>)[property.name] = property.value;",
+      "        }",
+      "      if (property.accepted && (property.target === undefined || property.value !== Symbol.for('html-next.invalid-result'))) previous[index] = property.value;",
       "    }",
+      ...(usesScopedStyles ? ["    applyStylePriority(node, style);"] : []),
       "    previousElement.current = node; previousValues.current = previous;",
       "  });",
       "  return render(ref);",
@@ -1884,14 +2079,18 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // The shared module's helpers this component calls: the expression helpers its lowering used,
   // and the rendering components and functions its markup and handlers name.
   const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
-  const component = formatReact(body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
-    : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`), `${name}.tsx`);
+  const styledBody = !renderState.usesStyle ? body : body.replace(STYLE_IMPORT,
+    `import { ${["styleObject", "applyStylePriority", "styleText"].filter(helper => new RegExp(`\\b${helper}\\b`).test(body)).join(", ")} } from ${quote(options.styleSpecifier ?? "./style/style.js")};`);
+  const component = formatReact(styledBody.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
+    : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`) + "\n" + lowering.referenceDeclarations().join("\n"), `${name}.tsx`);
   return {
     component,
     css: styles.css,
     helpers: [
+      ...(renderState.usesStyle ? ["style" as const] : []),
+      ...(templateForwardsAttributes(definition.template) || renderState.classOwners.length > 0 || attachments.some(attachment => attachment.properties.some(property => property.namespace !== undefined)) ? ["attributes" as const] : []),
       ...(options.modulePreparation === undefined ? [] : ["bindings" as const]),
-      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
+      ...(target.props.length === 0 && target.events.length === 0 && !checksControllerWrites && !renderState.usesSlotPropChecks && !renderState.usesHtmlInputs && !renderState.usesInputStatus && computed.length === 0 && initializedStates.length === 0 && contexts.length === 0 && !(usesController && target.requests.length > 0) ? [] : ["props" as const]),
       ...(usesEvents ? ["events" as const] : []),
       ...(usesControls ? ["control" as const] : []),
       ...(data.length === 0 ? [] : ["data" as const]),

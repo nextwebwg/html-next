@@ -39,6 +39,18 @@ async function create(props: object = {}, html = "", compiled = code) {
 }
 
 describe("compiled one-time state initialization", () => {
+  it("returns an object literal from a seed and keeps the initialized draft writable", async () => {
+    const definition = parseComponent(`<template component="x-seed"><defs>
+      <prop name="label" type="string" default="Label">Label.</prop>
+      <state name="draft" type="object({ name: string, count: number })" from="{ name: 'Seeded', count: 1 }"></state>
+      </defs><section><output>{$draft.name}:{$draft.count}</output></section></template>`);
+    const compiled = await compiledFixtures("esm", "", [definition]);
+    const { root, host } = await create({}, "", compiled);
+    assert.equal(root.querySelector("output")?.textContent, "Seeded:1");
+    (host.state.draft as { name: string }).name = "Edited";
+    await tick();
+    assert.equal(root.querySelector("output")?.textContent, "Edited:1");
+  });
   it("passes an empty dirty map to scoped slots in initially seeded rows", async () => {
     const seededRows = parseComponent(`<template component="x-seed"><defs>
       <prop name="product" type="list(string)">Rows.</prop>

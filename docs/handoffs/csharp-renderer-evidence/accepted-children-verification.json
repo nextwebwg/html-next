@@ -1,0 +1,331 @@
+{
+  "recordedAt": "2026-11-06T23:09:55.747387+00:00",
+  "baseCommit": "97eaf7432c9aaf68633f74c7088e9ec362669659",
+  "scope": "Incremental accepted-child filtering checkpoint. Keep accepts-only projection separate from as lists, preserve deferred setup and whitespace, and fix forwarded fallback/adoption ownership. The full ship-ready goal remains incomplete.",
+  "authority": {
+    "proposal": [
+      "https://nextwebwg.org/declarative-components/components#slot-accepts-as",
+      "https://nextwebwg.org/declarative-components/templating#whitespace"
+    ],
+    "ownerDirection": "Make sure you're not forcing something like forcing components into read children slots when they don't have to",
+    "interpretation": "accepts filters content without constructing child entries; as alone requests the list. Preserve authored whitespace and assigned empty text.",
+    "approvalStatus": "Implementation within the explicitly authorized renderer goal. No new language or release authorization inferred."
+  },
+  "verification": {
+    "finalGate": {
+      "command": "corepack pnpm verify:pr",
+      "result": "pass",
+      "javascriptPassed": 1998,
+      "gatedSkips": 4799,
+      "nativePassed": 725,
+      "nativeSkipped": 0,
+      "fluidCompleteOutputsValidated": 5,
+      "packedConsumersPassed": 8
+    },
+    "supplementaryRegression": {
+      "command": "corepack pnpm exec vitest run --config vitest.config.ts packages/html-next/tests/compiled-hydration.test.ts -t 'adopts accepted children after rejected siblings' --maxWorkers=1",
+      "passed": 1,
+      "note": "Added after the broad gate; lint and project-wide types passed afterward. Production code is identical to the broad-gate source.",
+      "reversedChangeProof": [
+        {
+          "label": "old projection walk",
+          "error": "page.evaluate: HtmlDiagnosticError: HR007: Scoped projection requires the live delivery's parser or a compiled consumer template."
+        },
+        {
+          "label": "candidate",
+          "labels": [
+            "Kept",
+            "Kept"
+          ],
+          "same": true,
+          "rejected": 0
+        }
+      ]
+    },
+    "browser": {
+      "columnScenariosPassed": 33,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "includes": [
+        "fresh rendering",
+        "actual Node hydration",
+        "structural accepted/rejected content without as",
+        "fallback component lowering",
+        "repeated pause/resume",
+        "compiled columns behavior"
+      ]
+    },
+    "nativeNodeOutputs": {
+      "fixtures": 30,
+      "comparisonsPassed": 180,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "assertions": "Full visible output after removing only known renderer metadata/marks; rejected ordinary content cannot reappear in carriers; native Render and Write match.",
+      "nativeHydrationClaim": false
+    },
+    "review": {
+      "status": "complete",
+      "method": "One bounded inline ce-code-review pass, following owner single-agent and cross-model-off instructions. No independent review claimed.",
+      "actionableFindings": 0,
+      "independentOrCrossModelReview": false,
+      "wholeGoalComplete": false
+    },
+    "simplification": {
+      "method": "One bounded inline pass using ce-simplify-code rubrics under owner instructions.",
+      "reuse": "Shared rejection owner and existing hydration walk.",
+      "efficiency": "Projection-owned native filter state; one fallback scan with subscription revisions.",
+      "proofTestsPreserved": true
+    }
+  },
+  "costs": {
+    "coreAllocations": [
+      {
+        "name": "card",
+        "repetitions": 200,
+        "nativeTotalBytes": 240,
+        "fluidTotalBytes": 704,
+        "nativeBindingBytes": 64,
+        "nativeWriterBytes": 64,
+        "nativeOutputBufferAndStringBytes": 176,
+        "fluidWriterBytes": 464,
+        "fluidOutputBufferAndStringBytes": 240
+      },
+      {
+        "name": "list-10",
+        "repetitions": 200,
+        "nativeTotalBytes": 1984,
+        "fluidTotalBytes": 4648,
+        "nativeBindingBytes": 784,
+        "nativeWriterBytes": 784,
+        "nativeOutputBufferAndStringBytes": 1200,
+        "fluidWriterBytes": 3384,
+        "fluidOutputBufferAndStringBytes": 1264
+      },
+      {
+        "name": "list-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19264,
+        "fluidTotalBytes": 37770.52,
+        "nativeBindingBytes": 7264,
+        "nativeWriterBytes": 7264,
+        "nativeOutputBufferAndStringBytes": 12000,
+        "fluidWriterBytes": 25706.52,
+        "fluidOutputBufferAndStringBytes": 12063.999999999996
+      },
+      {
+        "name": "list-1000",
+        "repetitions": 200,
+        "nativeTotalBytes": 195664,
+        "fluidTotalBytes": 502853.8,
+        "nativeBindingBytes": 72064,
+        "nativeWriterBytes": 72064,
+        "nativeOutputBufferAndStringBytes": 123600,
+        "fluidWriterBytes": 248921.64,
+        "fluidOutputBufferAndStringBytes": 253932.15999999997
+      },
+      {
+        "name": "cart-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19072,
+        "fluidTotalBytes": 54253.04,
+        "nativeBindingBytes": 10592,
+        "nativeWriterBytes": 10592,
+        "nativeOutputBufferAndStringBytes": 8480,
+        "fluidWriterBytes": 45706.52,
+        "fluidOutputBufferAndStringBytes": 8546.520000000004
+      }
+    ],
+    "coreNativeBytesUnchanged": true,
+    "invocationControlCases": 32,
+    "invocationControlUnchanged": 30,
+    "invocationProjectionCosts": [
+      {
+        "name": "deferred-caller-attributes",
+        "beforeBytes": 672,
+        "afterBytes": 680
+      },
+      {
+        "name": "deferred-waiting-ordinary",
+        "beforeBytes": 832,
+        "afterBytes": 840
+      }
+    ],
+    "allocationLimitations": "Warmed per-thread allocation only. No retained/RSS/peak or end-to-end speed claim.",
+    "liveBundle": {
+      "bytes": 278735,
+      "gzip": 93724
+    },
+    "generatedGzipIncreases": {
+      "static-card": 24,
+      "prop-button": 18,
+      "controller-lifecycle": 26,
+      "controller-request": 29
+    },
+    "sizeLimits": "Only those four exact measured correctness costs added; all other limits unchanged. No reserve.",
+    "ordinarySlotProbe": {
+      "base": "97eaf7432c9aaf68633f74c7088e9ec362669659",
+      "rows": 200,
+      "toggles": 40,
+      "samples": 7,
+      "outputProof": {
+        "live:named:closed": {
+          "characters": 14019,
+          "sha256": "c938533c7ce0a3fc10e36d622ddbc2f972c1c4977f61bffb754ab8a11243cc5c",
+          "rows": 200
+        },
+        "live:named:open": {
+          "characters": 17219,
+          "sha256": "b4898d9343e85b2bffe2828bcd973a123494f4f788732ab1feb82a0f7794aa2b",
+          "rows": 200
+        },
+        "live:default:closed": {
+          "characters": 14019,
+          "sha256": "c938533c7ce0a3fc10e36d622ddbc2f972c1c4977f61bffb754ab8a11243cc5c",
+          "rows": 200
+        },
+        "live:default:open": {
+          "characters": 16219,
+          "sha256": "94590f953a899d50f3938008e20c215792ae049ab171aa66224d5f81e7b2483e",
+          "rows": 200
+        },
+        "live:pair:closed": {
+          "characters": 16819,
+          "sha256": "da6c34373c86428f9f1331c6874eed36fa2c63555bc0a6c788d597f5668859d2",
+          "rows": 200
+        },
+        "live:pair:open": {
+          "characters": 16219,
+          "sha256": "94590f953a899d50f3938008e20c215792ae049ab171aa66224d5f81e7b2483e",
+          "rows": 200
+        },
+        "live:plain:closed": {
+          "characters": 1419,
+          "sha256": "68f58a27538cd7c36d0e420178058107872822618f3a3f75fa15a337ac074f24",
+          "rows": 200
+        },
+        "live:plain:open": {
+          "characters": 3619,
+          "sha256": "6b15d0f05b699ece6d6196806da9709764356725f15418e4ff414246a6c6a40c",
+          "rows": 200
+        },
+        "compiled:named:closed": {
+          "characters": 14019,
+          "sha256": "c938533c7ce0a3fc10e36d622ddbc2f972c1c4977f61bffb754ab8a11243cc5c",
+          "rows": 200
+        },
+        "compiled:named:open": {
+          "characters": 17219,
+          "sha256": "b4898d9343e85b2bffe2828bcd973a123494f4f788732ab1feb82a0f7794aa2b",
+          "rows": 200
+        },
+        "compiled:default:closed": {
+          "characters": 14019,
+          "sha256": "c938533c7ce0a3fc10e36d622ddbc2f972c1c4977f61bffb754ab8a11243cc5c",
+          "rows": 200
+        },
+        "compiled:default:open": {
+          "characters": 16219,
+          "sha256": "94590f953a899d50f3938008e20c215792ae049ab171aa66224d5f81e7b2483e",
+          "rows": 200
+        },
+        "compiled:pair:closed": {
+          "characters": 16819,
+          "sha256": "da6c34373c86428f9f1331c6874eed36fa2c63555bc0a6c788d597f5668859d2",
+          "rows": 200
+        },
+        "compiled:pair:open": {
+          "characters": 16219,
+          "sha256": "94590f953a899d50f3938008e20c215792ae049ab171aa66224d5f81e7b2483e",
+          "rows": 200
+        },
+        "compiled:plain:closed": {
+          "characters": 1419,
+          "sha256": "68f58a27538cd7c36d0e420178058107872822618f3a3f75fa15a337ac074f24",
+          "rows": 200
+        },
+        "compiled:plain:open": {
+          "characters": 3619,
+          "sha256": "6b15d0f05b699ece6d6196806da9709764356725f15418e4ff414246a6c6a40c",
+          "rows": 200
+        }
+      },
+      "msPerToggle": {
+        "live named": {
+          "base": 0.517,
+          "candidate": 0.583,
+          "ratio": 1.126
+        },
+        "live default": {
+          "base": 0.375,
+          "candidate": 0.38,
+          "ratio": 1.013
+        },
+        "live pair": {
+          "base": 0.813,
+          "candidate": 0.82,
+          "ratio": 1.009
+        },
+        "live plain": {
+          "base": 0.365,
+          "candidate": 0.37,
+          "ratio": 1.014
+        },
+        "compiled named": {
+          "base": 0.305,
+          "candidate": 0.298,
+          "ratio": 0.975
+        },
+        "compiled default": {
+          "base": 0.14,
+          "candidate": 0.138,
+          "ratio": 0.982
+        },
+        "compiled pair": {
+          "base": 0.253,
+          "candidate": 0.255,
+          "ratio": 1.01
+        },
+        "compiled plain": {
+          "base": 0.095,
+          "candidate": 0.092,
+          "ratio": 0.974
+        }
+      },
+      "method": "Seven alternating base/candidate fresh-page samples in Chromium. Full open and closed output validated outside timing. One bounded candidate after CPU attribution; no confidence interval or broader speed claim."
+    }
+  },
+  "remainingQualification": [
+    "Native as/of, conditional delegation qualification, native preparation/hydration, full Looma and fair Fluid/Node speed/retained/peak memory gates remain open.",
+    "Forwarded all-rejected content with a producer fallback has an unanswered contract question; no new expected rule is claimed.",
+    "Manual DOM rehoming of previously rejected nodes is outside this qualification.",
+    "Owner has now authorized explicit-only ordered $attributes forwarding, only for invocation attributes not assigned to props. This is the next required unit across the proposal and every renderer/target.",
+    "No package publication or visibility change authorized."
+  ],
+  "sourceSha256": {
+    "CHANGELOG.md": "93adeda9c6bd9c1d1939d430590c4f568156fdc3f3274769bf19b91be20951f4",
+    "packages/html-next-dotnet/README.md": "8d6cadd630b464b32f3f648798c350d260033ecd955e270707f7cbb4a1e2c764",
+    "packages/html-next-dotnet/src/HtmlNext/AcceptedChildren.cs": "3ac8fa9cae154f6ee5fdc3efeededce86dc654238bc041a2df66531009b87ea7",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "f031b235c53c5d97f39bb5498e62b29cf6ef69a73c326fd4731039cde07162f2",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentGraph.cs": "d83d87318d86a8269cdb43cf561d117739d33ee9af0fb3fb3bbeb55d21b4267d",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "84c17ab75e950d731b8912e1ea3bae4269328b305c966c73adc8abb196526ab5",
+    "packages/html-next-dotnet/src/HtmlNext/ScopedSlots.cs": "d5635c791faa256daf00ab2fd10e0d432337d94c85f5585ef41fea2f1a935476",
+    "packages/html-next-dotnet/src/HtmlNext/SlotRendering.cs": "1a73c0c4ce4fe9b23be37a4abadcf1e9c3149326eae5b468da6f5da02c413c4e",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/AcceptedChildTests.cs": "a18efe7f817a0f085611ad2acb5a7b9ecdbb367df65cca38825c767cbaff74db",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "ed4b813b30c711570f82a3fa5ed57a9e7f51fc0e75c11ed78126779bb7b76c9d",
+    "packages/html-next-dotnet/tests/fixtures/accepted-children.json": "e9e4b9eb075d4c5ebe0f0732384bf1adeb59edc383d73e1f7e0cfc8d169bc551",
+    "packages/html-next/scripts/measure-runtime-size.ts": "32ff33a00429490621130d96ef9f36ae583497d9266d05d726f4c291907bb655",
+    "packages/html-next/src/generated-runtime.ts": "fc3e5146cf687401526f6618999bc7f20ff334ddc6add4d31fd164c65be35c2d",
+    "packages/html-next/src/rendered-form.ts": "8d9aa0553bcd905c2bc4a184a7a5f191771f1e5e628fc0edbf4f9464f6f9b9e2",
+    "packages/html-next/src/runtime.ts": "d7bd0fe01a78f8aef557833e887a68dd1afc899676121309a21165954453b846",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "654b05be7fcf708cb9f31f995356d85ce67ac0b8bfc95422368dc161616e875c",
+    "packages/html-next/tests/columns-browser.test.ts": "7b607c7a7ee0e5c4d816d9699aec547128185382af5debfd78b08774888188d5",
+    "packages/html-next/tests/compiled-hydration.test.ts": "6ead7d84b171b0a6356ccaf492edd43ccbb3d59ab23e325a7644554facf02c3b",
+    "packages/html-next/tests/native-accepted-children.test.ts": "ec01d45b67da26c4fd8ed96379463266526b0439e5910056c5fcbc96ab30e092"
+  }
+}

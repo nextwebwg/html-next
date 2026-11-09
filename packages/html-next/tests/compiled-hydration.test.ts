@@ -37,8 +37,17 @@ async function page(html: string, bundle = code): Promise<{ document: Document; 
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** Compiled rows are their element; live keeps item markers around each (owner decision 2a). */
-const comparable = (html: string): string => html.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "");
+/** Compare DOM attributes by name/value; renderer write timing can change their serialized order. */
+const comparable = (html: string): string => {
+  const template = document.createElement("template");
+  template.innerHTML = html.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "");
+  for (const element of template.content.querySelectorAll("*")) {
+    const attributes = Array.from(element.attributes).sort((left, right) => left.name.localeCompare(right.name));
+    for (const attribute of attributes) element.removeAttribute(attribute.name);
+    for (const attribute of attributes) element.setAttribute(attribute.name, attribute.value);
+  }
+  return template.innerHTML;
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -88,6 +97,26 @@ describe("compiled hydration of Node output", () => {
       assert.equal(live.getAttribute(attribute), "ssr-delegate ssr-counter");
     });
   }
+
+  it("adopts accepted children after rejected siblings without losing their consumer templates", async () => {
+    const components = [
+      `<template component="x-accepted"><defs><prop name="label" type="string">Label.</prop>
+        <slot name="note"><prop name="text" type="string">Text.</prop></slot></defs><b><slot name="note" from:text="$label"></slot></b></template>`,
+      `<template component="x-filter"><defs><slot accepts="x-accepted"></slot></defs><section><slot></slot></section></template>`,
+      `<template component="x-page"><main><x-filter>rejected text<p>Rejected element</p><x-accepted label="Kept"><template slot="note"><em>{$text}</em></template></x-accepted></x-filter></main></template>`,
+    ].map(source => parseComponent(source));
+    const rendered = await renderComponents("<x-page></x-page>", { definitions: components });
+    const bundle = await compiledFixtures("esm", 'export { registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";', components);
+    const { document, runtime } = await page(rendered.html, bundle);
+    const originals = Array.from(document.querySelectorAll("b, em"));
+    runtime.registerComponentDefinitions(components);
+    runtime.lowerDocument();
+    await flush();
+    assert.equal(document.querySelectorAll("em").length, 2);
+    assert.ok(Array.from(document.querySelectorAll("em")).every(element => element.textContent === "Kept"));
+    assert.ok(originals.every(element => document.body.contains(element)));
+    assert.equal(document.querySelector("p"), null);
+  });
 
   it("attaches a framework-owned legacy root without adding a canonical mirror", async () => {
     const rendered = await renderComponents('<ssr-inline id="subject"></ssr-inline>', { definitions });
@@ -156,7 +185,7 @@ describe("compiled hydration of Node output", () => {
         <tbody><tr $each="row of $rows" $key="$row"><td $each="note of $notes" $key="$note"><slot of="$note" name="detail">none</slot></td></tr></tbody></table></template>`,
       `<template component="x-page"><defs><state name="rows" type="list(number)" value="[1, 2, 3]"></state>
         <handler name="drop"><set name="rows" expr:value="$rows.length = 3 ? [2, 3] : [3]"></set></handler></defs>
-        <main><button class="drop" on:click="drop">Drop</button><x-notes from:rows="$rows"><x-note><b slot="detail">kept</b></x-note></x-notes></main></template>`,
+        <main $attributes><button class="drop" on:click="drop">Drop</button><x-notes from:rows="$rows"><x-note><b slot="detail">kept</b></x-note></x-notes></main></template>`,
     ].map(source => parseComponent(source));
     const rendered = await renderComponents('<x-page id="subject"></x-page>', { definitions: components });
     const code = await compiledFixtures("esm", 'export { registerComponentDefinitions, lowerDocument } from "@nextwebwg/html-next/runtime";', components);
@@ -291,7 +320,7 @@ describe("compiled hydration of Node output", () => {
   it("runs a controller once, on its adopted root, after the whole tree is adopted", async () => {
     const controlled = { ...parseComponent(`<template component="ssr-controlled" controller="./controlled.js"><defs>
       <state name="count" type="number" value="0"></state></defs>
-      <section><button type="button" $ref="increment">Add</button><output $value="$count"></output><ssr-classed></ssr-classed></section></template>`),
+      <section $attributes><button type="button" $ref="increment">Add</button><output $value="$count"></output><ssr-classed></ssr-classed></section></template>`),
     controller: "./controlled.js" };
     const nested = definitions.find((definition) => definition.contract.tag === "ssr-classed")!;
     const bundle = await compiledFixtures("esm", "", [controlled, nested], { "./controlled.js": `export default function (host) {

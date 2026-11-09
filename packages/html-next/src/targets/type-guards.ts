@@ -110,6 +110,7 @@ export function handlerDestinationCheck(
 
 /** Declared types constrain expressions at the point each reference is read. */
 export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, strict?: StrictTypePredicate, lowering?: Lowering): string | undefined {
+  if (scope.references !== undefined) return undefined;
   const checks = typeCheckedDependencies(plan).flatMap((path) => {
     const [root, ...steps] = path.split(".");
     const source = scope.code.get(root!);

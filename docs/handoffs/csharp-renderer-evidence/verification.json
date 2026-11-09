@@ -1,0 +1,103 @@
+{
+  "status": "passed-local-pr-gate",
+  "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+  "exitCode": 0,
+  "sourceHashes": "source-hashes.json",
+  "sourceHashesSha256": "0fbaa621c0fe5f2b4c3a42421f7025854f9b25986aaad7043dc6d73c315ea3f5",
+  "sourceFiles": 172,
+  "sourceDifferences": [],
+  "documentationOnlyCorrection": "One README subject/verb correction after gate start; all implementation/test hashes unchanged.",
+  "productionChangesAfterGateStart": [],
+  "nativeAssemblySha256": "922d760e3a91f81efbcc29cf1d1191cf5d4f48e9e73890789913c296f9835032",
+  "javascript": {
+    "passed": 1792,
+    "suiteGatedSkipped": 4637,
+    "durationSeconds": 583.76
+  },
+  "native": {
+    "passed": 505,
+    "skipped": 0
+  },
+  "packedConsumers": {
+    "passed": 8,
+    "durationSeconds": 120.3
+  },
+  "validatedNativeFluidOutputs": 5,
+  "browser": {
+    "exitCode": 0,
+    "report": "Original detailed report is machine-local: .context/native-refs-browser-results.json",
+    "scenarios": 60,
+    "engines": [
+      "Chromium",
+      "Firefox",
+      "WebKit"
+    ],
+    "skipped": 0,
+    "scope": "Complete actual native Render/Write and Node SSR output parsed in all three engines. Visible HTML and inert carrier reference names compared to independent expectations. No native hydration or controller-host qualification."
+  },
+  "allocationComparison": {
+    "unchangedControls": 19,
+    "measurement": "Warmed per-thread allocated bytes, old DLL on source-stripped controls versus current DLL on both stripped and authored reference inputs; complete output bytes checked outside measurement.",
+    "baselineAssemblySha256": "e5f5fd3a56c007bc891e4a609e90cea4000c63cc20af71ae181614f70776244b",
+    "currentAssemblySha256": "922d760e3a91f81efbcc29cf1d1191cf5d4f48e9e73890789913c296f9835032"
+  },
+  "unchangedAllocationControls": 19,
+  "coreAllocations": {
+    "nativeTotalBytes": [
+      240,
+      1984,
+      19264,
+      195664,
+      19072
+    ],
+    "nativeBindingBytes": [
+      64,
+      784,
+      7264,
+      72064,
+      10592
+    ],
+    "cases": [
+      "card",
+      "list-10",
+      "list-100",
+      "list-1000",
+      "cart-100"
+    ],
+    "scope": "Unchanged warmed per-thread allocation counts. No latency/throughput or retained/peak/RSS conclusion."
+  },
+  "catalog": {
+    "report": "Captured-source compilation summary only; detailed report remains machine-local: .context/native-refs-catalog-summary.json",
+    "compiled": 56,
+    "total": 106,
+    "newlyCompiled": 15,
+    "firstDiagnosticsAdvanced": 21,
+    "scope": "Captured sources and supplied styles; compilation only."
+  },
+  "review": "Bounded single-agent unit reviews performed; final project shipping review remains open.",
+  "cleanup": "Owned private probe/catalog bin/obj and temporary browser homes removed; production build outputs and source/results retained.",
+  "remainingJudgment": [
+    "Seven deferred-content carrier mismatches remain, recorded in deferred-content.json beside this receipt. They are characterization, not public regressions yet.",
+    "Full native language, standalone CSS, preparation, identity/rendered form/native hydration, refreshed all-target/all-engine Looma and complete performance/memory qualification remain open.",
+    "No native hydration/controller-host proof from this output probe. No speed/throughput or retained/peak/RSS claim from allocation observations.",
+    "Full goal is active/incomplete; bounded unit review is not final project shipping review."
+  ],
+  "goalStatus": "active-incomplete",
+  "receiptScope": "Portable summary of a completed local verification run before this handoff. Full implementation and test source hashes are included. Raw logs remain machine-local and are not required to resume.",
+  "machineLocalRawLog": ".context/native-refs-verify-pr-final.log in the originating workspace",
+  "proposalWording": {
+    "repository": "https://github.com/nextwebwg/specs",
+    "branch": "matthew-dean/html-next-null-contract",
+    "commit": "69af60b1a1ec1d514bd30fee649e1665e234c0a6",
+    "scope": "Two types.md clarifications of the settled null/default/required contract; not merged into public main.",
+    "verification": {
+      "command": "corepack pnpm verify:pr",
+      "environment": "Node v24.20.0; CI=true for non-interactive dependency setup",
+      "chaptersCompiled": 298,
+      "chaptersTotal": 298,
+      "testsPassed": 400,
+      "skipped": 0,
+      "exitCode": 0
+    }
+  }
+}

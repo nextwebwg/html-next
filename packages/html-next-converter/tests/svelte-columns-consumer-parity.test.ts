@@ -1,3 +1,4 @@
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { chromium, webkit, type BrowserType, type Page } from "playwright";
+import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
@@ -24,7 +25,7 @@ import { sveltePlugin } from "./helpers/svelte.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 
-const source = `<template component="x-column" status="early" summary="One column of x-datatable." controller="./column.js"><th scope="col"><slot name="header">{$header}</slot></th>
+const source = `<template component="x-column" status="early" summary="One column of x-datatable." controller="./column.js"><th $attributes scope="col"><slot name="header">{$header}</slot></th>
   <defs>
     <prop name="field" type="string">The row field a cell shows when no cell content is given.</prop>
     <prop name="header" type="string">The header text.</prop>
@@ -67,7 +68,7 @@ const source = `<template component="x-column" status="early" summary="One colum
   </defs>
   <b>{$text}:{$tone}:{$density}</b>
 </template>
-<template component="x-column-preset" status="early" summary="A preset of x-column."><x-column field="price" header="Preset"></x-column></template>
+<template component="x-column-preset" status="early" summary="A preset of x-column."><x-column field="price" header="Preset"><input slot="note" value="Preset"></x-column></template>
 <template component="page-products" status="early" summary="Products, as the Svelte consumer writes them.">
   <defs>
     <state name="products" type="list(object({ id: number, name: string, price: number }))"
@@ -170,6 +171,7 @@ describe.skipIf(!enabled)("Svelte columns as markup from a Svelte consumer", () 
   let directory = "";
   let liveBundle = "";
   let svelteBundle = "";
+  let wrappedBundle = "";
   let serverMarkup = "";
   let wrappedMarkup = "";
   const serverWarnings: string[] = [];
@@ -192,6 +194,13 @@ const target = document.querySelector("#mount")!;
 if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });`);
     svelteBundle = join(directory, "svelte.js");
     await build({ entryPoints: [join(out, "mount.ts")], outfile: svelteBundle, bundle: true, format: "iife", platform: "browser",
+      target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")] });
+    await writeFile(join(out, "wrapped-client.ts"), `import { mount, hydrate, unmount } from "svelte"; import App from "./Wrapped.svelte";
+const target = document.querySelector("#mount")!;
+const app = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, { target });
+(window as unknown as { finishWrapped(): Promise<void> }).finishWrapped = () => unmount(app);`);
+    wrappedBundle = join(directory, "wrapped.js");
+    await build({ entryPoints: [join(out, "wrapped-client.ts")], outfile: wrappedBundle, bundle: true, format: "iife", platform: "browser",
       target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")] });
     await writeFile(join(out, "server.ts"), `import { render } from "svelte/server"; import App from "./Products.svelte"; import Wrapped from "./Wrapped.svelte";
 export const html = () => render(App).body;
@@ -226,6 +235,36 @@ export const wrapped = () => render(Wrapped).body;`);
     assert.deepEqual([...wrappedMarkup.matchAll(/<tbody>.*?<\/tbody>/gs)].flatMap(([body]) => [...body.matchAll(/<td>(?:<!--.*?-->)*([^<]+)/g)].map((cell) => cell[1])), ["Desk lamp", "1", "49"]);
   });
 
+  for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    for (const hydrate of [false, true]) {
+      it(`${engine} ${hydrate ? "hydrates" : "mounts"} and disposes a preset's editable plain content`, async () => {
+        const browser = await launchParityBrowser(browserType);
+        try {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.setContent(`<div id="mount">${hydrate ? wrappedMarkup : ""}</div>`);
+          await page.addScriptTag({ path: wrappedBundle });
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+          assert.deepEqual(errors, []);
+          const input = page.locator('tfoot input');
+          assert.equal(await input.count(), 1, await page.locator("#mount").innerHTML());
+          await input.fill("Edited");
+          await page.evaluate(`window.tableHosts[0].state.notes = false`);
+          await page.waitForFunction(`document.querySelector('tfoot input') === null`);
+          await page.evaluate(`window.tableHosts[0].state.notes = true`);
+          await input.waitFor();
+          await input.fill("Reopened"); assert.equal(await input.inputValue(), "Reopened");
+          await page.evaluate(`window.finishWrapped()`);
+          await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+          assert.equal(await page.locator('#mount').textContent(), "");
+          assert.equal(await page.evaluate(`document[Symbol.for('@nextwebwg/html-next.runtime.v1')]?.mutationHub?.subscribers.size ?? 0`), 0);
+          assert.deepEqual(errors, []);
+        } finally { await browser.close(); }
+      });
+    }
+  }
+
   const open = async (page: Page, target: "live" | "svelte", hydrate: boolean, warnings: string[], errors: string[]): Promise<void> => {
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
@@ -250,7 +289,7 @@ export const wrapped = () => render(Wrapped).body;`);
   for (const [engine, browserType] of [["Chromium", chromium], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const hydrate of [false, true]) {
       it(`${engine} ${hydrate ? "hydrates" : "mounts"} the table as live renders it, following {#if}, keyed {#each}, props and context`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const live = await browser.newPage();
           const svelte = await browser.newPage();

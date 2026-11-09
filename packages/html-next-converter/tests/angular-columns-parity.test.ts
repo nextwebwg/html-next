@@ -12,6 +12,8 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
+import { dynamicPlainSource, plainSlotExpected, plainSlotFiles, plainSlotInvocations, repeatedPlainSource } from "../../html-next/tests/fixtures/plain-slot-ownership.js";
 
 /**
  * Columns as markup (https://nextwebwg.org/declarative-components/components#columns-as-markup) in
@@ -24,7 +26,7 @@ const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const livePath = fileURLToPath(new URL("../../html-next/src/live.ts", import.meta.url));
 
 // A table-part root comes before its <defs>, so the HTML parser keeps the <th>.
-const column = `<template component="x-column" summary="One column."><th scope="col"><slot name="header">{$header}</slot></th><defs>
+const column = `<template component="x-column" summary="One column."><th $attributes scope="col"><slot name="header">{$header}</slot></th><defs>
   <prop name="field" type="string">The row field a cell shows when no cell content is given.</prop>
   <prop name="header" type="string">The header text.</prop>
   <state name="tone" type="string" value="quiet"></state>
@@ -73,7 +75,8 @@ const warnings = `<link rel="component" href="./column.html"><link rel="componen
   <x-column><span slot="cell">plain</span></x-column></x-datatable></section></template>`;
 // The controller reads the entries through host.state.
 const controller = `export default function (host) { host.effect(() => { host.root.dataset.columns = Array.from(host.state.columns, (entry) => entry.header ?? entry.field ?? "-").join(); }); }`;
-const files: Readonly<Record<string, string>> = { "table.js": controller, "column.html": column, "table.html": table, "badge.html": badge, "products.html": products, "warnings.html": warnings };
+const files: Readonly<Record<string, string>> = { "table.js": controller, "column.html": column, "table.html": table, "badge.html": badge, "products.html": products, "warnings.html": warnings,
+  ...plainSlotFiles, "plain.html": `${dynamicPlainSource}${repeatedPlainSource}<template component="x-plain-page"><main>${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page></main></template>` };
 const WARNED = [
   /`x-datatable`'s default slot accepts `x-column`; this `<x-colum>` is left out\./,
   /`x-datatable`'s default slot accepts `x-column`; this text is left out\./,
@@ -125,7 +128,7 @@ describe.skipIf(!enabled)("columns as markup in converted Angular", () => {
     await build({ entryPoints: [livePath], outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
 
     const out = join(directory, "out");
-    const manifest = await convertComponents({ mode: "application", target: "angular", root: directory, outDirectory: out, entries: ["products.html", "warnings.html"] });
+    const manifest = await convertComponents({ mode: "application", target: "angular", root: directory, outDirectory: out, entries: ["products.html", "warnings.html", "plain.html", ...Object.keys(plainSlotFiles)] });
     const artifact = (tag: string): string => `./out/${manifest.components.find((entry) => entry.tag === tag)!.artifact.replace(/\.ts$/, "")}`;
     const app = join(directory, "app.ts");
     // Hand-written consumers of the same table, in an Angular component template: one declares the columns in the
@@ -134,7 +137,7 @@ describe.skipIf(!enabled)("columns as markup in converted Angular", () => {
     const columns = `@if (showId()) { <th x-column field="id" header="Id"></th> }
   <th x-column [field]="nameField()" [header]="nameHeader()"><i slot="note">kept</i></th>
   <th x-column class="numeric"><abbr slot="header" title="Price in US dollars">Price</abbr>
-    <ng-template x-column-cell let-row="row" let-width="width" let-label="label"><b x-badge [text]="$any(row.name)"></b>{{ row.price }}|{{ width! + 1 }}|{{ label }}</ng-template>
+    <ng-template x-column-cell let-row="row" let-width="width" let-label="label"><b x-badge [text]="$any(row?.name)"></b>{{ row?.price }}|{{ width! + 1 }}|{{ label }}</ng-template>
     <ng-template x-column-sum let-unit="unit"><em>{{ unit }}</em></ng-template></th>
   @if (showId()) { <th x-column field="id" header="M"></th> } @else { <th x-column header="Q"><ng-template x-column-cell let-label="label"><b x-badge [text]="label"></b></ng-template></th> }
   @if (!showId()) { <th x-column field="price" header="W"></th> }
@@ -157,7 +160,9 @@ import PageWarnings from "${artifact("page-warnings")}";
 import XDatatable from "${artifact("x-datatable")}";
 import XColumn, { XColumnCellSlot, XColumnSumSlot } from "${artifact("x-column")}";
 import XBadge from "${artifact("x-badge")}";
+import PlainPage from "${artifact("x-plain-page")}";
 @Component({ selector: "app-root", standalone: true, imports: [PageProducts, PageWarnings], template: '<main page-products></main><section page-warnings></section>' }) export class App {}
+@Component({ selector: "plain-root", standalone: true, imports: [PlainPage], template: '<main x-plain-page></main>' }) export class PlainApp {}
 ${consumer("hand-products", `<table x-datatable [rows]="products()">${columns}</table>`)}
 ${consumer("outlet-products", `<table x-datatable [rows]="products()"><ng-container [ngTemplateOutlet]="columns"></ng-container></table><ng-template #columns>${columns}</ng-template>`)}
 @Component({ selector: "hand-root", standalone: true, imports: [HandProducts, PageWarnings], template: '<main hand-products></main><section page-warnings></section>' }) export class HandApp {}
@@ -177,23 +182,24 @@ ${consumer("outlet-products", `<table x-datatable [rows]="products()"><ng-contai
     const browserEntry = join(directory, "browser.ts");
     await writeFile(browserEntry, `import "@angular/compiler";
 import { bootstrapApplication, provideClientHydration } from "@angular/platform-browser";
-import { App, HandApp, OutletApp, WarnApp } from ${JSON.stringify(compiled)};
-const [selector, root] = ([["app-root", App], ["hand-root", HandApp], ["outlet-root", OutletApp], ["warn-root", WarnApp]] as const).find(([selector]) => document.querySelector(selector) !== null)!;
-bootstrapApplication(root, { providers: document.querySelector(selector)!.hasAttribute("ngh") ? [provideClientHydration()] : [] }).then(() => { document.body.dataset.ready = "true"; });`);
+import { App, HandApp, OutletApp, WarnApp, PlainApp } from ${JSON.stringify(compiled)};
+const [selector, root] = ([["app-root", App], ["hand-root", HandApp], ["outlet-root", OutletApp], ["warn-root", WarnApp], ["plain-root", PlainApp]] as const).find(([selector]) => document.querySelector(selector) !== null)!;
+bootstrapApplication(root, { providers: document.querySelector(selector)!.hasAttribute("ngh") ? [provideClientHydration()] : [] }).then(app => { window.destroyTarget = () => { app.destroy(); return app.viewCount; }; document.body.dataset.ready = "true"; });`);
     angularBundle = join(directory, "angular.js");
     await build({ entryPoints: [browserEntry], outfile: angularBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], loader: { ".css": "empty" }, nodePaths: [nodeModules] });
     const serverEntry = join(directory, "server.ts");
     await writeFile(serverEntry, `import "@angular/compiler";
 import { renderApplication, provideServerRendering } from "@angular/platform-server";
 import { bootstrapApplication, provideClientHydration } from "@angular/platform-browser";
-import { App, HandApp, OutletApp } from ${JSON.stringify(compiled)};
-const roots = { "app-root": App, "hand-root": HandApp, "outlet-root": OutletApp };
+import { App, HandApp, OutletApp, PlainApp } from ${JSON.stringify(compiled)};
+const roots = { "app-root": App, "hand-root": HandApp, "outlet-root": OutletApp, "plain-root": PlainApp };
 export const render = (selector: keyof typeof roots) => renderApplication(context => bootstrapApplication(roots[selector], { providers: [provideServerRendering(), provideClientHydration()] }, context),
   { document: \`<html><head><base href="http://localhost/"></head><body><\${selector}></\${selector}></body></html>\`, url: "http://localhost/", allowedHosts: ["localhost"] });`);
     const serverBundle = join(directory, "server.mjs");
     await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node", packages: "external", loader: { ".css": "empty" } });
     const { render } = await import(pathToFileURL(serverBundle).href) as { render(selector: string): Promise<string> };
     for (const [, selector] of CONSUMERS) servers[selector] = await render(selector);
+    servers["plain-root"] = await render("plain-root");
   }, 240_000);
 
   afterAll(async () => { if (directory !== "" && process.env.HTMLNEXT_KEEP !== "1") await rm(directory, { recursive: true, force: true }); });
@@ -201,7 +207,7 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     describe(engine, () => {
       let browser: Browser;
-      beforeAll(async () => { browser = await browserType.launch({ headless: true }); });
+      beforeAll(async () => { browser = await launchParityBrowser(browserType); });
       afterAll(async () => { await browser?.close(); });
 
       /** Each step's table, the first row's cells kept across the keyed reorder, and the warnings, as a page shows them. */
@@ -270,12 +276,66 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
         } finally { await page.close(); }
       });
 
+      it("hydrates own and borrowed plain ranges with editable controls through transfers and reconnect", async () => {
+        const { page, errors } = await open(async page => { await page.setContent(servers["plain-root"]!); });
+        const read = () => page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent])));
+        try {
+          assert.deepEqual(await read(), plainSlotExpected);
+          for (const [name, text] of [["data-repeated-lazy", "Fresh"], ["data-default-lazy", "DefaultFresh"]]) {
+            assert.deepEqual(await page.locator(`[${name}] i`).allTextContents(), [text, text]);
+          }
+          await page.locator("[data-moving-plain] input").fill("Before hydration");
+          await page.locator("[data-repeated-plain] input").fill("Kept");
+          await page.addScriptTag({ path: angularBundle });
+          await page.waitForFunction(() => document.body.dataset.ready === "true");
+          await frames(page);
+          assert.deepEqual(errors, []);
+          assert.deepEqual(await read(), plainSlotExpected);
+          assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
+          assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+          const editable = async (): Promise<void> => {
+            for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input"]) {
+              const input = page.locator(selector); assert.equal(await input.count(), 1);
+              await input.fill("Edited"); assert.equal(await input.inputValue(), "Edited");
+              assert.ok(await input.evaluate(node => node === node.ownerDocument.activeElement));
+            }
+          };
+          await editable();
+          const placed = () => page.locator("[data-moving-plain] > b, [data-moving-plain] > p").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
+          for (const [action, expected] of [
+            ["borrowed", [["b", "Plain"]]],
+            ["borrowed", [["p", "BorrowedFallback"], ["b", "Plain"]]],
+            ["root", [["p", "Plain"]]],
+            ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
+          ] as const) {
+            await page.locator(`[data-plain-action="${action}"]`).click(); await frames(page);
+            assert.deepEqual(await placed(), expected); await editable();
+          }
+          for (const expected of ["", "Plain"]) {
+            await page.locator('[data-plain-action="content"]').click(); await frames(page);
+            assert.equal(await page.locator("[data-moving-plain] > p").textContent(), expected); await editable();
+          }
+          await page.locator('[data-plain-action="first"]').click(); await frames(page); await editable();
+          assert.ok(await page.locator("[data-repeated-plain] footer").evaluate(node => node.matches(":last-child")));
+          await page.evaluate(async () => {
+            const root = document.querySelector("plain-root")!, parent = root.parentNode!, next = root.nextSibling;
+            root.remove(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            parent.insertBefore(root, next);
+          });
+          await frames(page); await editable();
+          assert.equal(await page.evaluate(() => (window as any).destroyTarget()), 0);
+          assert.equal(await page.evaluate(() => (document as any)[Symbol.for("@nextwebwg/html-next.runtime.v1")]?.mutationHub?.subscribers.size ?? 0), 0);
+          assert.deepEqual(errors, []);
+        } finally { await page.close(); }
+      });
+
       for (const [consumer, selector] of CONSUMERS) {
         it(`renders the ${consumer} consumer's columns, follows its conditions and keyed loop, and keeps cells by key like live`, async () => {
           const { page, errors, warned } = await open(async (page) => {
             await page.setContent(`<base href="http://localhost/"><${selector}></${selector}>`);
             await page.addScriptTag({ path: angularBundle });
-            await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
+            try { await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 }); }
+            catch (error) { throw new Error(`${String(error)}; page errors: ${errors.join("; ")}`, { cause: error }); }
           });
           try {
             assert.deepEqual(await run(page, warned), live);
@@ -291,7 +351,8 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
             assert.equal(await page.evaluate(READ), (live as { steps: string[] }).steps[0]!.replace(/ data-columns="[^"]*"/, ""));
             await page.evaluate(`window.server = Array.from(document.querySelectorAll("th, td, td *"))`);
             await page.addScriptTag({ path: angularBundle });
-            await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 });
+            try { await page.waitForFunction(() => document.body.dataset.ready === "true" && document.querySelector("table")?.dataset.columns !== undefined, undefined, { timeout: 5_000 }); }
+            catch (error) { throw new Error(`${String(error)}; page errors: ${errors.join("; ")}`, { cause: error }); }
             assert.equal(await page.evaluate(`window.server.every((node) => node.isConnected)`), true, "hydration keeps the server's cells");
             const result = await run(page, warned) as { warned: boolean[] };
             // Hydration warns again in the browser for left-out children, as each runtime does when it creates the component.

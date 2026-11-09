@@ -88,7 +88,7 @@ describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
     const module = vanilla(benchmarkShape);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
-    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, visitSelected, writeAttribute, writeText, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(module, /^import \{ attachGeneratedController, checkedReferenceValue, equalValue, buildTemplate, clearRegion, KeyedList, NONCONFORMING, readMember, toAttribute, toText, trackContainer, truthy, visitSelected, writeAttribute, writeText, forwardAttributes, resetForwardedAttributes, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
     const { inputs } = await bundle(module, true);
     const forbidden = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
@@ -117,9 +117,9 @@ describe("direct-extend Vanilla generation", () => {
       <main><x-card title="A"><p $if="$open">Body</p><small slot="footer">F</small></x-card></main></template>`;
     const { modules } = graph([page, card]);
     for (const module of modules.values()) {
-      assert.doesNotMatch(module, /\b(?:childList|childOutlet|listChanged|borrowedSlots)\b|const OF =/);
+      assert.doesNotMatch(module, /\b(?:childList|childOutlet|listChanged|borrowedSlots|initializeSlot|invokeAccepted|projectAccepted|sharePlainSlots)\b|const OF =/);
     }
-    assert.match(modules.get("./XCards.js")!, /^import \{ attachGeneratedController, buildTemplate, clearRegion, dispose, invoke, projected, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(modules.get("./XCards.js")!, /^import \{ attachGeneratedController, buildTemplate, clearRegion, dispose, invoke, projected, forwardAttributes, resetForwardedAttributes, defineComponent \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
   });
 
   it("compiles every component without the general runtime", () => {
@@ -442,6 +442,24 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("checks each loop alias's declared type and recovers without discarding valid siblings", async () => {
+    const result = await same(component(`
+      <state name="strings" type="list(object({ label: string, note: string }))" value="[{ label: 'A', note: 'safe' }]"></state>
+      <state name="numbers" type="list(object({ label: number, note: string }))" value="[{ label: 7, note: 'safe' }]"></state>`, `
+      <section><p class="strings"><b $each="row of $strings">[{$row.label}|{$row.note}]</b></p>
+      <p class="numbers"><b $each="row of $numbers">[{$row.label}|{$row.note}]</b></p></section>`), [
+      (host) => { host.state.strings = [{ label: 7, note: "changed" }]; host.state.numbers = [{ label: 8, note: "changed" }]; },
+      (host) => { host.state.strings = [{ label: "B", note: "restored" }]; host.state.numbers = [{ label: 9, note: "restored" }]; },
+    ]);
+    const text = result.snapshots.map(html => {
+      const dom = new JSDOM(html);
+      try { return ["strings", "numbers"].map(name => dom.window.document.querySelector(`.${name}`)?.textContent); }
+      finally { dom.window.close(); }
+    });
+    assert.deepEqual(text, [["[A|safe]", "[7|safe]"], ["[A|changed]", "[8|changed]"],
+      ["[B|restored]", "[9|restored]"], ["[B|restored]", "[9|restored]"]]);
+  });
+
   it("re-renders container conversions written through any path, not only through the row's item", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
@@ -611,7 +629,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <b $if="$rows.length">some</b><i $if="$rows">truthy</i><s $if="$rows[0].tags">tagged</s>
         <span $with="$rows[0] as first"><em $value="$first.label"></em> <u $value="$first.tags.length"></u></span>
         <template $match="$selected as chosen"><b $when="$chosen = 1">one</b><i $when="$chosen > 1">many {$chosen}</i><u $else>none</u></template>
-        <ol><li $each="row, i of $rows" from:data-id="$row.id" class:first="$loop.first" class:last="$loop.last">{$i}/{$loop.count} {$row.label}
+        <ol><li $each="row, i of $rows" from:data-id="$row.id">{$i}/{$rows.length} {$row.label}
           <button $ref="picks" on:click.stop="pick">{$row.label}</button><em $if="$row.tags.length > 0 and $ready">{$row.tags}</em>
           <ul><li $each="tag of $row.tags" $key="$tag">{$tag}</li></ul></li></ol>
         <menu><li $each="row of $rows" $key="concat($prefix, $row.id)" $where="$row.label" $sort="-row.label,row.id" $limit="$limit" from:data-key="$row.id">{$row.label}</li></menu>
@@ -840,7 +858,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="title" type="string" value="a"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
       <section><ul><li $each="row, i of $rows" $key="$row.id"><b $each="n of [1]">{$i}:{$row.label}</b></li></ul>
-        <ol><li $each="row, i of $rows" $key="$row.id"><p $each="n of [1]"><s $if="$row.id > 1"><b $each="m of [1]">{$i}/{$loop.count}</b></s></p><i>{$row.label} {$loop.last}</i></li></ol>
+        <ol><li $each="row, i of $rows" $key="$row.id"><p $each="n of [1]"><s $if="$row.id > 1"><b $each="m of [1]">{$i}/{$rows.length}</b></s></p><i>{$row.label}</i></li></ol>
         <dl><template $each="row of $rows"><dt $each="n of [1]">{$title}{$row.id}</dt><dd><b $each="m of [1]"><i $each="k of [1]">{$title}</i></b></dd></template></dl></section>`);
     await same(text, [
       (host) => { host.state.rows = [1, 2, 3].map((id) => ({ id, label: `l${id}` })); },
@@ -1394,6 +1412,26 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], { mode: "number", value: "7" });
   });
 
+  it("refuses an initial non-null dependent value when the selector is null", async () => {
+    const text = propsShape(`
+      <type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type>
+      <prop name="value" type="input-value">Value.</prop>
+      <prop name="mode" type="keyword" values="text, number" required>Mode.</prop>`,
+      `<section><output>{$value}:{$value = 3}</output></section>`);
+    const result = await same(text, [], { mode: null, value: 3 });
+    for (const snapshot of result.snapshots) assert.match(snapshot, /<output>:false<\/output>/);
+  });
+
+  it("keeps selected string values out of dimensional arithmetic", async () => {
+    const text = propsShape(`
+      <type name="input-value" from="mode"><option value="length" type="length"></option><option value="text" type="string"></option></type>
+      <prop name="value" type="input-value">Value.</prop>
+      <prop name="mode" type="keyword" values="length, text" default="length">Mode.</prop>`,
+      `<section><output>{$value * 2}</output></section>`);
+    const result = await same(text, [], { mode: "text", value: "2px" });
+    for (const snapshot of result.snapshots) assert.match(snapshot, /<output><\/output>/);
+  });
+
   const slotsShape = (defs: string, body: string): string =>
     `<template component="x-shape" controller="./slots-controller.js" status="early" summary="Shape.">
     <defs><state name="open" type="boolean" value="false"></state><state name="label" type="string" value="L"></state>${defs}</defs>${body}</template>`;
@@ -1420,14 +1458,18 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], projection);
   });
 
-  it("gives projected nodes to the outlet live's assembly appends last when rows share a name", async () => {
-    // Slot names are unique, so outlets share one only in rows.
-    await same(slotsShape(`<state name="rows" type="list(integer)" value="[1, 2]"></state>`,
+  it("keeps plain content at its first active outlet across repeated rows", async () => {
+    const run = await same(slotsShape(`<state name="rows" type="list(integer)" value="[1, 2]"></state>`,
       '<section><ul><li $each="n of $rows" $key="$n" from:data-id="$n"><slot name="head">row</slot></li></ul></section>'), [
       (host) => { host.state.open = false; },
       (host) => { host.state.open = true; host.state.rows = [2, 1, 3]; },
       (host) => { host.state.rows = [4]; },
     ], projection);
+    assert.deepEqual(run.snapshots.map(html => {
+      const dom = new JSDOM(html);
+      try { return Array.from(dom.window.document.querySelectorAll("li"), row => row.textContent); }
+      finally { dom.window.close(); }
+    }), [["Titlesub", "row"], ["Titlesub", "row"], ["row", "Titlesub", "row"], ["Titlesub"], ["Titlesub"]]);
   });
 
   const armsShape = propsShape(`
@@ -1485,7 +1527,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
       <prop name="count" type="integer" default="0">Count.</prop><prop name="label" type="string">Label.</prop>
       <prop name="open" type="boolean" default="false">Open.</prop></defs>
-    <span class="badge" from:data-tone="$tone"><b>{$count}</b><i $if="$open">{$label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
+    <span class="badge" $attributes from:data-tone="$tone"><b>{$count}</b><i $if="$open">{$label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
   const parent = (body: string, defs = ""): string => propsShape(`
     <prop name="flag" type="boolean" default="false">Flag.</prop>
     <state name="label" type="string" value="L"></state><state name="count" type="integer" value="1"></state>
@@ -1556,7 +1598,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("follows an invoked component's root switch with the parent's bindings", async () => {
     const action = `<template component="x-action" status="early" summary="Action.">
       <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
-      <template $match><a $when="$as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
+      <template $match><a $when="$as = 'a'" $attributes href="#"><slot></slot></a><button $else $attributes type="button"><slot></slot></button></template></template>`;
     await same([parent(`
       <section><x-action from:as="$flag ? 'a' : 'button'" class:hot="$count > 1" from:title="$label" on:click="bump" $ref="action">Go {$count}</x-action></section>`), action], [
       (host) => { host.root.querySelector("button").click(); },
@@ -1725,8 +1767,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ];
     for (const body of [
       `<section><p></p><dl><template $each="row of $rows" $key="$row.id"><dt from:data-id="$row.id">{$row.label}</dt><dd $if="$row.id = $selected">sel</dd>text</template></dl></section>`,
-      `<section><p></p><dl><template $each="row of $rows"><dt from:data-id="$row.id">{$row.label}</dt><dd>{$loop.index}</dd></template></dl></section>`,
-      `<section><p></p><dl><template $each="row, i of $rows" $key="$row.id"><dt from:data-id="$row.id">{$i}</dt><dd>{$loop.count}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row, i of $rows"><dt from:data-id="$row.id">{$row.label}</dt><dd>{$i}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row, i of $rows" $key="$row.id"><dt from:data-id="$row.id">{$i}</dt><dd>{$rows.length}</dd></template></dl></section>`,
     ]) {
       await same(component(rows, body), steps);
     }
@@ -1836,7 +1878,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("writes is=, content directives and two-way bindings on invocations like live", async () => {
     const field = `<template component="x-field" status="early" summary="Field.">
-      <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="$value"></template>`;
+      <defs><prop name="value" type="string" default="">Value.</prop></defs><input $attributes .value="$value"></template>`;
     await same([parent(`
       <section><button is="x-fancy" from:title="$label">is</button>
         <x-badge $value="$label" from:count="$count"></x-badge><x-badge $html="'<b>' + $label + '</b>'"></x-badge>
@@ -1863,7 +1905,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   });
 
   it("applies projected row component attributes only after its placeholder is placed", async () => {
-    const leaf = `<template component="x-leaf"><defs><prop name="text" type="string" default="">Visible text.</prop></defs><button $value="$text"></button></template>`;
+    const leaf = `<template component="x-leaf"><defs><prop name="text" type="string" default="">Visible text.</prop></defs><button $attributes $value="$text"></button></template>`;
     const host = `<template component="x-host"><div><slot></slot></div></template>`;
     const page = `<template component="x-page"><defs>
       <state name="items" type="list(object({ id: integer, label: string }))" value="[{ id: 1, label: 'First' }]"></state>

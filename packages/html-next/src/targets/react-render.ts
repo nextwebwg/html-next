@@ -5,6 +5,7 @@
  * only the ones a component imports. Preact output reuses these with its compatibility API.
  */
 import type { GeneratedArtifact } from "../generate.js";
+import { ROOT_METADATA_SOURCE } from "../generated/dom-attributes-source.js";
 import { NATIVE_VALUE_ATTRIBUTE, nativeValueCss } from "../native-value.js";
 import { closureFreeFunctionSource } from "./format-source.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
@@ -20,6 +21,7 @@ import type { ReactNode } from "react";
 ${preact ? 'import { createElement as nativeElement } from "preact";' : ""}
 
 ${expressionHelpersSource()}
+${ROOT_METADATA_SOURCE}
 
 /** React removes a node from its declared parent even when a controller has temporarily moved it. */
 export function rememberParent(element: Element | null): () => void {
@@ -50,15 +52,18 @@ export function useRootHandle<T extends Element>(root: { current: T | null }, re
     if (previous.current?.element === element && previous.current?.ref === ref) return;
     dispose.current?.(); dispose.current = undefined;
     previous.current = { element, ref };
-    if (!ref || !element) return;
-    if (typeof ref === "function") {
-      const cleanup = ref(element);
-      dispose.current = typeof cleanup === "function" ? cleanup : () => { ref(null); };
-    } else {
-      ref.current = element;
-      dispose.current = () => { ref.current = null; };
-    }
+    dispose.current = bindRootHandle(element, ref);
   });
+}
+
+function bindRootHandle<T extends Element>(element: T | null, ref: React.Ref<T> | undefined): (() => void) | undefined {
+  if (!ref || !element) return undefined;
+  if (typeof ref === "function") {
+    const cleanup = ref(element);
+    return typeof cleanup === "function" ? cleanup : () => { ref(null); };
+  }
+  ref.current = element;
+  return () => { ref.current = null; };
 }
 
 /** Structured prop metadata keeps its initial value; rendered bindings read current inputs. */
@@ -121,12 +126,73 @@ function useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial
   return htmlNextDefault === undefined || htmlNextDefault === "defaultChecked" && mounted.current ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };`}
 }
 /** Inputs and textareas render through these, so React DOM, which rewrites an input's name and type and a textarea's default whenever it commits one, commits nothing to them on an unrelated render. */
-export const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>
-  <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
-export const HtmlNextTextarea = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
+${preact ? `export const HtmlNextInput = /* @__PURE__ */ React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"input"> & ControlDefaults) =>
+  <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);` : ""}
+export const HtmlNextTextarea = /* @__PURE__ */ React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<"textarea"> & ControlDefaults) =>
   <textarea {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 
-${preact ? "" : `/** Native value attributes retain the browser's dirty-value flag and textarea attribute semantics. */
+${preact ? "" : `type NativeInputAttributes = React.ComponentProps<"input"> & ControlDefaults & Readonly<Record<string, unknown>> & { readonly htmlNextValue?: unknown };
+interface NativeInputProps { readonly htmlNextAttributes: NativeInputAttributes }
+type NativeInputSnapshot = Partial<Record<'name' | 'type', string | null>> | null;
+/** One input owner preserves controller edits before React commits its native fields. */
+const NativeInput = /* @__PURE__ */ (() => class extends React.Component<NativeInputProps, {}, NativeInputSnapshot> {
+  private readonly root = React.createRef<HTMLInputElement>();
+  private mounted = false;
+  private currentRef: React.Ref<HTMLInputElement> | undefined;
+  private cleanup: (() => void) | undefined;
+  private commit(previous?: NativeInputAttributes): void {
+    const element = this.root.current;
+    const attributes = this.props.htmlNextAttributes;
+    if ('htmlNextValue' in attributes && (!previous || !Object.is(previous.htmlNextValue, attributes.htmlNextValue))) {
+      if (attributes.htmlNextValue == null) element?.removeAttribute('value');
+      else element?.setAttribute('value', String(attributes.htmlNextValue));
+    }
+    if (this.currentRef !== attributes.ref) {
+      this.cleanup?.();
+      this.currentRef = attributes.ref;
+      this.cleanup = bindRootHandle(element, attributes.ref);
+    }
+  }
+  componentDidMount(): void {
+    this.commit();
+    this.mounted = true;
+    if (this.props.htmlNextAttributes.htmlNextDefault !== undefined) this.forceUpdate();
+  }
+  componentWillUnmount(): void {
+    this.cleanup?.();
+    this.cleanup = undefined;
+    this.currentRef = undefined;
+  }
+  getSnapshotBeforeUpdate(previous: NativeInputProps): NativeInputSnapshot {
+    const element = this.root.current;
+    if (element === null) return null;
+    const before = previous.htmlNextAttributes, after = this.props.htmlNextAttributes;
+    let name = before.name === after.name ? element.getAttribute('name') : undefined;
+    let type = before.type === after.type ? element.getAttribute('type') : undefined;
+    if (name === (before.name == null ? null : String(before.name))) name = undefined;
+    if (type === (before.type == null ? null : String(before.type))) type = undefined;
+    return name === undefined && type === undefined ? null : { name, type };
+  }
+  componentDidUpdate(previous: NativeInputProps, _state: {}, attributes: NativeInputSnapshot): void {
+    const element = this.root.current;
+    if (element !== null && attributes !== null) for (const name of ['name', 'type'] as const) {
+      const value = attributes[name];
+      if (value === undefined || element.getAttribute(name) === value) continue;
+      if (value === null) element.removeAttribute(name); else element.setAttribute(name, value);
+    }
+    this.commit(previous.htmlNextAttributes);
+  }
+  render(): ReactNode {
+    const { htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref: _ref, ...props } = this.props.htmlNextAttributes;
+    const defaults = htmlNextDefault === undefined || htmlNextDefault === 'defaultChecked' && this.mounted
+      ? {} : { [htmlNextDefault]: this.mounted ? htmlNextAuthored : htmlNextInitial };
+    return <input {...props} defaultValue={typeof document === 'undefined' && htmlNextValue != null ? String(htmlNextValue) : props.defaultValue} {...defaults} ref={this.root} />;
+  }
+})();
+export const HtmlNextInput: React.NamedExoticComponent<NativeInputProps> = /* @__PURE__ */ React.memo(NativeInput, (before, after) => sameControlProps(before.htmlNextAttributes, after.htmlNextAttributes));
+export const HtmlNextValueInput = HtmlNextInput;
+
+/** Native value attributes retain the browser's dirty-value flag and textarea attribute semantics. */
 ${closureFreeFunctionSource(nativeValueCss, "nativeValueCss")}
 function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(value: unknown, ref: React.Ref<T> | undefined, style?: React.CSSProperties): { ref: React.RefObject<T | null>; style?: React.CSSProperties } {
   const root = React.useRef<T | null>(null);
@@ -151,8 +217,6 @@ function useValueAttribute<T extends HTMLInputElement | HTMLTextAreaElement | HT
   useRootHandle(root, ref);
   return { ref: root, style: represented };
 }
-export const HtmlNextValueInput = /* @__PURE__ */ React.memo(({ htmlNextValue, htmlNextDefault, htmlNextAuthored, htmlNextInitial, ref, ...props }: React.ComponentProps<"input"> & ControlDefaults & { readonly htmlNextValue?: unknown }) =>
-  <input {...props} ref={useValueAttribute<HTMLInputElement>(htmlNextValue, ref).ref} defaultValue={typeof document === "undefined" && htmlNextValue != null ? String(htmlNextValue) : undefined} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);
 interface NativeTextareaProps extends React.ComponentPropsWithoutRef<"textarea"> { readonly htmlNextRoot: React.RefObject<HTMLTextAreaElement | null> }
 /** React rewrites an uncontrolled textarea's default on every commit. Snapshot controller-owned defaults before that mutation. */
 const NativeTextarea = /* @__PURE__ */ (() => class extends React.Component<NativeTextareaProps, {}, string | null> {
@@ -208,25 +272,27 @@ export function HtmlNextSelect({ htmlNextDefault, htmlNextAuthored, htmlNextInit
 ` : ""}
 
 /** Text that keeps its last accepted value while an expression is invalid. */
-export function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {
-  const accepted = value !== Symbol.for("html-next.invalid-result") && (accepts?.() ?? true);
-  const last = React.useRef(accepted ? text : "");
-  React.useLayoutEffect(() => { if (accepted) last.current = text; }, [accepted, text]);
-  return accepted ? text : last.current;
+export function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string | ((value: unknown) => string); readonly accepts?: () => boolean }): ReactNode {
+  const accepted = acceptsBindingResult(value, accepts);
+  const shown = accepted ? typeof text === "function" ? text(value) : text : "";
+  const last = React.useRef(shown);
+  React.useLayoutEffect(() => { if (accepted) last.current = shown; }, [accepted, shown]);
+  return accepted ? shown : last.current;
 }
 
 /** A value that keeps its last accepted value while an expression is invalid, rendered through \`render\`. */
 export function RetainedValue({ value, accepts, render }: { readonly value: unknown; readonly accepts?: (value: unknown) => boolean; readonly render: (value: any, hasValue: boolean) => ReactNode }): ReactNode {
-  const accepted = value !== Symbol.for("html-next.invalid-result") && (accepts === undefined ? value !== undefined : accepts(value));
+  const accepted = acceptsBindingResult(value, accepts);
   const last = React.useRef<{ value: unknown; hasValue: boolean }>({ value: undefined, hasValue: false });
   React.useLayoutEffect(() => { if (accepted) last.current = { value, hasValue: true }; }, [accepted, value]);
   return render(accepted ? value : last.current.value, accepted || last.current.hasValue);
 }
 
 /** An \`<output>\` whose text React and the form's own resets both write, kept in step. */
-export function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlNextAccepts = true, ref, ...attrs }: React.OutputHTMLAttributes<HTMLOutputElement> & { readonly htmlNextValue: unknown; readonly htmlNextText: string; readonly htmlNextRetain: boolean; readonly htmlNextAccepts?: boolean; readonly ref?: React.Ref<HTMLOutputElement> }): ReactNode {
-  const accepted = !htmlNextRetain || (htmlNextValue !== undefined && htmlNextValue !== Symbol.for("html-next.invalid-result") && htmlNextAccepts);
-  const last = React.useRef(accepted ? htmlNextText : "");
+export function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlNextAccepts = true, ref, ...attrs }: React.OutputHTMLAttributes<HTMLOutputElement> & { readonly htmlNextValue: unknown; readonly htmlNextText: string | ((value: unknown) => string); readonly htmlNextRetain: boolean; readonly htmlNextAccepts?: boolean; readonly ref?: React.Ref<HTMLOutputElement> }): ReactNode {
+  const accepted = !htmlNextRetain || (acceptsBindingResult(htmlNextValue) && htmlNextAccepts);
+  const next = accepted ? typeof htmlNextText === "function" ? htmlNextText(htmlNextValue) : htmlNextText : "";
+  const last = React.useRef(next);
   const output = React.useRef<HTMLOutputElement | null>(null);
   const attach = React.useCallback((element: HTMLOutputElement | null) => {
     output.current = element;
@@ -237,9 +303,9 @@ export function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlN
     if (ref != null) (ref as { current: HTMLOutputElement | null }).current = element;
     return () => { output.current = null; if (ref != null) (ref as { current: HTMLOutputElement | null }).current = null; };
   }, [ref]);
-  const shown = accepted ? htmlNextText : last.current;
+  const shown = accepted ? next : last.current;
   React.useLayoutEffect(() => {
-    if (accepted) last.current = htmlNextText;
+    if (accepted) last.current = next;
     if (output.current !== null && output.current.textContent !== shown) output.current.textContent = shown;
   });
   return <output {...attrs} ref={attach}>{shown}</output>;
@@ -287,9 +353,48 @@ function KeyedRows(props: { readonly renderRows: KeyedRowsRender }): ReactNode {
 
 export ${HOST_STATE_TOKENS_SOURCE.trim()}
 
+type SlotClaim = { readonly owner: object; committed: boolean };
+
+function discardUncommittedClaims(link: ChildLink): void {
+  for (const [name, claim] of link.claims) if (!claim.committed) link.claims.delete(name);
+}
+
+function releaseSlotClaims(link: ChildLink | undefined, owner: object, keep?: ReadonlyMap<string, string>): void {
+  if (link === undefined) return;
+  let changed = false;
+  for (const [name, claim] of link.claims) if (claim.owner === owner && !keep?.has(name)) { link.claims.delete(name); changed = true; }
+  if (changed) { link.stamp = link.claimStamp = {}; for (const listener of link.listeners) listener(); }
+}
+
+/** Mounted outlets retain their claims; React owns the rendered nodes and their lifetime. */
+export function useSlotClaims(link?: ChildLink): (name: string, slot: ReactNode | (() => ReactNode) | undefined, fallback: ReactNode, outlet: string) => ReactNode {
+  const site = React.useRef({}).current;
+  React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.claimStamp, () => link?.claimStamp);
+  const claims = link?.claims;
+  const placed = new Map<string, string>();
+  React.useLayoutEffect(() => {
+    releaseSlotClaims(link, site, placed);
+    for (const name of placed.keys()) {
+      const claim = claims?.get(name);
+      if (claim === undefined) claims?.set(name, { owner: site, committed: true });
+      else if (claim.owner === site) claim.committed = true;
+    }
+  });
+  React.useLayoutEffect(() => () => releaseSlotClaims(link, site), [link, site]);
+  return (name, slot, fallback, outlet) => {
+    if (typeof slot === "function") return renderPlainSlot(slot, fallback);
+    if (!hasSlotContent(slot) || placed.has(name) && placed.get(name) !== outlet) return fallback;
+    placed.set(name, outlet);
+    const claim = claims?.get(name);
+    if (claim !== undefined && claim.owner !== site) return fallback;
+    if (claim === undefined) claims?.set(name, { owner: site, committed: false });
+    return renderPlainSlot(slot, fallback);
+  };
+}
+
 /** A plain slot's content, or its fallback when the consumer passed none. */
 export function renderPlainSlot(slot: ReactNode | ((props: Record<string, any>) => ReactNode) | undefined, fallback: ReactNode): ReactNode {
-  if (typeof slot === "function") return null;
+  if (typeof slot === "function") return markProjected(slot({}));
   return hasSlotContent(slot) ? markProjected(slot) : fallback;
 }
 
@@ -339,7 +444,9 @@ type ChildLink = {
   wrap?: (content: ReactNode) => ReactNode;
   /** Replaced when the child gives new contexts or slots, which an outlet rendered before it reads again. */
   stamp?: object;
-  claims: Map<string, object>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
+  /** Changes only when a mounted outlet releases content, independently of context publication. */
+  claimStamp?: object;
+  readonly claims: Map<string, SlotClaim>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
 };
 const childLinks = new WeakMap<object, ChildLink>();
 /** A new stable entry for one accepted child: its props' names are fixed, and reads go through its link. */
@@ -383,7 +490,7 @@ const markedProps = (mark: ChildMark, given: Readonly<Record<string, unknown>>):
  * renders them, so content after the outlet reads it complete.
  */
 export function useChildLists(given: unknown, lists: ChildListSlots, tag: string, file: string,
-  props: { readonly children?: ReactNode; readonly slots?: Readonly<Record<string, unknown>> }): {
+  props: { readonly children?: unknown; readonly slots?: Readonly<Record<string, unknown>> }): {
   readonly lists: Readonly<Record<string, readonly object[]>>; readonly entries: ChildOwner; readonly content: Readonly<Record<string, ReactNode>>;
 } {
   const parent = React.useContext(ChildEntries);
@@ -403,7 +510,10 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
       content[slot] = typeof supplied === "function" ? supplied : childDescriptors(supplied, tag, slot, accepts, name, derived[name] = []);
     }
     descriptors = derived;
-  } else for (const [slot] of Object.values(lists)) content[slot] = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
+  } else for (const [name, [slot, accepts]] of Object.entries(lists)) {
+    const supplied = (slot === "" ? props.children : props.slots?.[slot]) as ReactNode;
+    content[slot] = typeof supplied === "function" ? supplied : childDescriptors(supplied, tag, slot, accepts, name, undefined);
+  }
   const current = new Map<string, object>();
   const result: Record<string, object[]> = {};
   for (const name of Object.keys(lists)) {
@@ -415,14 +525,14 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
       let entry = kept.get(descriptor.key);
       if (entry === undefined || childLinks.get(entry)!.tag !== descriptor.tag) entry = childEntry(descriptor.tag, descriptor.props);
       const link = childLinks.get(entry)!;
-      // Plain content is claimed afresh each render by the first outlet that places it.
-      link.props = descriptor.props; link.slots = descriptor.slots; link.claims = new Map();
+      discardUncommittedClaims(link);
+      link.props = descriptor.props; link.slots = descriptor.slots;
       current.set(descriptor.key, entry);
       return entry;
     });
     result[name] = given === undefined && mounted.size > 0 ? withMounted(direct, committed.current[name], mounted) : direct;
   }
-  for (const entry of mounted) childLinks.get(entry)!.claims = new Map();
+  for (const entry of mounted) discardUncommittedClaims(childLinks.get(entry)!);
   kept.clear();
   for (const [key, entry] of current) kept.set(key, entry);
   if (given !== undefined) for (const name of Object.keys(result)) Object.freeze(result[name]);
@@ -462,16 +572,17 @@ function withMounted(direct: object[], last: readonly object[] | undefined, moun
  * renders joins through \`useChildEntry\`. The content returns with each accepted element given its
  * entry's key, so it finds its entry when it renders.
  */
-function childDescriptors(content: ReactNode, tag: string, slot: string, accepts: readonly string[], as: string, descriptors: ChildDescriptor[]): ReactNode {
+function childDescriptors(content: ReactNode, tag: string, slot: string, accepts: readonly string[], as: string, descriptors: ChildDescriptor[] | undefined): ReactNode {
   const named = "\`" + tag + "\`'s " + (slot === "" ? "default slot" : "\`" + slot + "\` slot");
   const quoted = accepts.map((name) => "\`" + name + "\`");
   const listed = named + " accepts " + (quoted.length < 2 ? quoted.join("") : quoted.slice(0, -1).join(", ") + " and " + quoted.at(-1));
-  const leftOut = (name: string, message: string): void => { descriptors.push({ leftOut: tag + ":accepts:" + slot + ":" + name, message }); };
+  const leftOut = (name: string, message: string): void => { descriptors?.push({ leftOut: tag + ":accepts:" + slot + ":" + name, message }); };
   const walk = (node: ReactNode, key: string): ReactNode => {
     if (Array.isArray(node)) return node.map((item: ReactNode, index) => walk(item, key + "." + (isElement(item) && item.key != null ? "$" + item.key : index)));
     if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
-      if (!/^[\\t\\n\\f\\r ]*$/.test(String(node))) leftOut("#text", listed + "; this text is left out.");
-      return node;
+      if (/^[\\t\\n\\f\\r ]*$/.test(String(node))) return node;
+      leftOut("#text", listed + "; this text is left out.");
+      return null;
     }
     if (!isElement(node)) return node;
     if (node.type === React.Fragment) {
@@ -480,15 +591,18 @@ function childDescriptors(content: ReactNode, tag: string, slot: string, accepts
     }
     const mark = (node.type as unknown as { readonly htmlNextChild?: ChildMark }).htmlNextChild;
     if (mark !== undefined && accepts.includes(mark.tags[0]!)) {
-      descriptors.push({ key, tag: mark.tags[0]!, props: markedProps(mark, node.props), slots: node.props.slots as Readonly<Record<string, unknown>> | undefined });
-      return React.cloneElement(node, { htmlNextEntry: key });
+      descriptors?.push({ key, tag: mark.tags[0]!, props: markedProps(mark, node.props), slots: node.props.slots as Readonly<Record<string, unknown>> | undefined });
+      return descriptors === undefined ? node : React.cloneElement(node, { htmlNextEntry: key });
     }
     const preset = mark?.tags.find((candidate) => accepts.includes(candidate));
     if (preset !== undefined) {
       leftOut(mark!.tags[0]!, "\`<" + mark!.tags[0]! + ">\` is a preset of \`" + preset + "\`, which " + named + " accepts; a preset among accepted children is not supported yet, so it is left out.");
       return React.createElement(ChildEntries, { key: node.key, value: undefined }, markProjected(node));
     }
-    if (typeof node.type === "string") leftOut(node.type, listed + "; this \`<" + node.type + ">\` is left out.");
+    if (typeof node.type === "string") {
+      leftOut(node.type, listed + "; this \`<" + node.type + ">\` is left out.");
+      return null;
+    }
     return node;
   };
   return walk(content, as + ":");
@@ -504,7 +618,7 @@ function childDescriptors(content: ReactNode, tag: string, slot: string, accepts
  * Limit: an outlet that renders before the child's own root reads the child's contexts only after the
  * child commits, and not in server output.
  */
-export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<Record<string, unknown>>, wrap?: (content: ReactNode) => ReactNode): void {
+export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<Record<string, unknown>>, wrap?: (content: ReactNode) => ReactNode): ChildLink | undefined {
   const nearest = React.useContext(ChildEntries);
   const own = React.useRef<{ entry?: object; owner?: ChildOwner }>({}).current;
   const tag = mark.tags[0]!;
@@ -558,6 +672,7 @@ export function useChildEntry(given: unknown, mark: ChildMark, props: Readonly<R
     if (!list!.includes(entry!)) owner!.changed();
     return () => { mounted.delete(entry!); owner!.changed(); };
   }, [mounted]);
+  return link;
 }
 
 /** Each accepted tag's slots: those its own template places, those with props, all it declares, and those names as text. */
@@ -578,14 +693,23 @@ export function ChildSlot(props: {
   const link = entry !== null && typeof entry === "object" ? childLinks.get(entry) : undefined;
   React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.stamp, () => link?.stamp);
   const claim = React.useRef({}).current;
+  const known = link === undefined ? undefined : slots[link.tag];
+  const slot = link?.slots?.[name];
+  const plain = (known === undefined || known[2].includes(name)) && typeof slot !== "function" && hasSlotContent(slot as ReactNode)
+    && values === undefined && known?.[1].includes(name) !== true;
+  React.useLayoutEffect(() => {
+    if (link === undefined || !plain) return;
+    const current = link.claims.get(name);
+    if (current === undefined) link.claims.set(name, { owner: claim, committed: true });
+    else if (current.owner === claim) current.committed = true;
+    return () => releaseSlotClaims(link, claim);
+  }, [link, name, plain, claim]);
   if (link === undefined) return fallback;
-  const known = slots[link.tag];
   const location = file + "#of:" + link.tag + ":" + name;
   if (known !== undefined && !known[2].includes(name)) {
     warnUnless(false, location, prefix + "\`" + link.tag + "\` declares the slots " + known[3] + "; \`" + name + "\` is unknown.");
     return fallback;
   }
-  const slot = link.slots?.[name];
   let content: ReactNode;
   // A \`<template slot>\` renders afresh at every outlet; plain content renders at one.
   if (typeof slot === "function") content = (slot as (values: Record<string, unknown>) => ReactNode)(shapes?.[link.tag]?.(values ?? {}) ?? values ?? {});
@@ -594,9 +718,8 @@ export function ChildSlot(props: {
     warnUnless(false, location + ":plain", prefix + "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
     return fallback;
   } else {
-    if (known?.[0].includes(name) === true) return fallback;
-    if (!link.claims.has(name)) link.claims.set(name, claim);
-    if (link.claims.get(name) !== claim) return fallback;
+    if (!link.claims.has(name)) link.claims.set(name, { owner: claim, committed: false });
+    if (link.claims.get(name)!.owner !== claim) return fallback;
     content = slot as ReactNode;
   }
   const placed = markProjected(content);

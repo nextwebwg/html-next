@@ -55,7 +55,7 @@ const shell = `<link rel="component" href="./checkout-form.html">
 const typedController = `import type { Host } from "./checkout-form.host.js";
 
 export default function controller(host: Host) {
-  const key: string = host.props.pk.value;
+  const key: string | null = host.props.pk.value;
   const currency: string = host.props.currency.value;
   const limit: number | null = host.props.limit.value;
   host.state.lines.push({ sku: "A1", qty: 2 });
@@ -72,7 +72,7 @@ export default function controller(host: Host) {
   const theme: "light" | "dark" = host.state.theme;
   const usd: number | undefined = host.data.rates.value?.usd;
   const pending: boolean = host.data.rates.pending || host.scripts.stripe.pending;
-  host.refs.email.value = key;
+  host.refs.email.value = key ?? "";
   host.refs.hint?.append(currency);
   const rows: readonly HTMLLIElement[] = host.refs.rows;
   const item: HTMLElement = host.refs.item;
@@ -138,6 +138,14 @@ describe("typed controller hosts", () => {
   });
   afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
+  it("keeps required props nullable without a default and defaulted props non-null", () => {
+    assert.deepEqual(typeErrors("checkout-form.ts", typedController), []);
+    const missing = typeErrors("checkout-form.ts", typedController.replace("const key: string | null", "const key: string"));
+    assert.ok(missing.some(message => message.includes("null") && message.includes("string")));
+    const defaulted = typeErrors("checkout-form.ts", typedController.replace("const currency: string", "const currency: null"));
+    assert.ok(defaulted.some(message => message.includes("string") && message.includes("null")));
+  });
+
   it("types a TypeScript controller's host from its <defs>", () => {
     assert.deepEqual(typeErrors("checkout-form.ts", typedController), []);
   });
@@ -147,7 +155,7 @@ describe("typed controller hosts", () => {
   });
 
   it("types a named connect's signal, mutable state and readonly props", () => {
-    const source = 'import type { Connect } from "./x-module.host.js"; export const connect: Connect = (host, { signal }) => { const abort: AbortSignal = signal; host.state.count += 1; const title: string = host.props.title.value; return () => { void [abort, title]; }; };';
+    const source = 'import type { Connect } from "./x-module.host.js"; export const connect: Connect = (host, { signal }) => { const abort: AbortSignal = signal; host.state.count += 1; const title: string | null = host.props.title.value; return () => { void [abort, title]; }; };';
     assert.deepEqual(typeErrors("module.ts", source), []);
     assert.match(typeErrors("module.ts", source.replace('host.state.count += 1;', 'host.state.count = "wrong";'))[0]!, /Type 'string' is not assignable to type 'number'/);
     assert.match(typeErrors("module.ts", source.replace('host.state.count += 1;', 'host.props.title.value = "wrong";'))[0]!, /read-only/);

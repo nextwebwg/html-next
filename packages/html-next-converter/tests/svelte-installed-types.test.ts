@@ -21,7 +21,10 @@ it("checks an independently installed Svelte library with native consumers", asy
     await Promise.all([mkdir(source), mkdir(pkg), mkdir(consumer)]);
     await writeFile(join(source, 'types.html'), `<template component="x-typed" status="early" summary="Typed consumer." controller="./types.js"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot><prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop><event name="change" type="boolean">Change.</event></defs><button><slot name="row" from:item="'Ada'"></slot></button></template>
       <template component="x-plain" status="early" summary="Unscoped slots."><section><slot name="title"></slot><slot></slot></section></template>
-      <template component="x-pair" status="early" summary="Two scoped slots."><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot><slot name="fixed"><prop name="index" type="number" required>The index.</prop></slot></defs><section><slot name="fixed" from:index="2"></slot><slot name="row" from:item="'Ada'"></slot></section></template>`);
+      <template component="x-pair" status="early" summary="Two scoped slots."><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot><slot name="fixed"><prop name="index" type="number" required>The index.</prop></slot></defs><section><slot name="fixed" from:index="2"></slot><slot name="row" from:item="'Ada'"></slot></section></template>
+      <template component="x-shared"><section><slot name="title"></slot><slot name="title"></slot><slot $if="true"></slot></section></template>
+      <template component="x-entry"><article><slot name="cell"></slot></article></template>
+      <template component="x-owner"><defs><slot accepts="x-entry" as="entries"></slot></defs><section><slot></slot></section></template>`);
     await writeFile(join(source, 'types.js'), 'export default function initialize(host) {}');
     const manifest = await convertComponents({ target: 'svelte', mode: 'library', root: source, outDirectory: pkg, entries: ['types.html'] });
     await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@example/svelte-types-probe', version: '0.0.0', private: true, license: 'MIT', type: 'module', files: ['svelte'], exports: { '.': './svelte/index.ts', './XTyped': './svelte/XTyped.svelte' }, dependencies: manifest.package.dependencies, peerDependencies: manifest.package.peerDependencies }));
@@ -39,12 +42,15 @@ it("checks an independently installed Svelte library with native consumers", asy
       ['declared-event-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script><XTyped onchange={(event: CustomEvent<string>) => {}} />'],
       ['slot-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: unknown})}{props.item}{/snippet}<XTyped slots={{row}} />'],
       ['default-and-named-slot-positive', '<script lang="ts">import { XPlain } from "@example/svelte-types-probe";</script>{#snippet title()}Title{/snippet}<XPlain slots={{title}}>Default</XPlain>'],
+      ['retained-plain-slots-positive', '<script lang="ts">import { XShared } from "@example/svelte-types-probe";</script>{#snippet title()}Title{/snippet}<XShared slots={{title}}>Default</XShared>'],
+      ['accepted-plain-slots-positive', '<script lang="ts">import { XOwner, XEntry } from "@example/svelte-types-probe";</script>{#snippet cell()}Cell{/snippet}<XOwner><XEntry slots={{cell}} /></XOwner>'],
       ['pair-slot-positive', '<script lang="ts">import { XPair } from "@example/svelte-types-probe";</script>{#snippet row(props: {item: unknown})}{props.item}{/snippet}{#snippet fixed(props: {index: unknown})}{props.index}{/snippet}<XPair slots={{row, fixed}} />'],
       ['pair-slot-negative', '<script lang="ts">import { XPair } from "@example/svelte-types-probe";</script>{#snippet row(props: {wrong: unknown})}{props.wrong}{/snippet}<XPair slots={{row}} />'],
       ['declared-event-capture-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script><XTyped onchangecapture={(event) => { const detail: boolean = event.detail; }} />'],
       ['slot-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {wrong: unknown})}{props.wrong}{/snippet}<XTyped slots={{row}} />'],
-      // A declared slot prop has its declared type.
-      ['declared-slot-prop-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: string})}{props.item.toUpperCase()}{/snippet}<XTyped slots={{row}} />'],
+      // A required slot prop without a default can read as null.
+      ['declared-slot-prop-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: string | null})}{props.item?.toUpperCase()}{/snippet}<XTyped slots={{row}} />'],
+      ['nullable-slot-prop-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: string | null})}{props.item.toUpperCase()}{/snippet}<XTyped slots={{row}} />'],
       ['declared-slot-prop-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: number})}{props.item.toFixed(1)}{/snippet}<XTyped slots={{row}} />'],
     ];
     const expectedErrors: Record<string, RegExp> = {
@@ -53,6 +59,7 @@ it("checks an independently installed Svelte library with native consumers", asy
       "declared-event-negative": /string.*boolean|CustomEvent<string>/,
       "slot-negative": /wrong|item/,
       "pair-slot-negative": /wrong|item|index/,
+      "nullable-slot-prop-negative": /null/,
       "declared-slot-prop-negative": /number.*string|string.*number/,
     };
     const config = join(consumer, "tsconfig.json");

@@ -3,13 +3,30 @@ import { compileStyle } from "@vue/compiler-sfc";
 import { compile as compileSvelte } from "svelte/compiler";
 import { describe, it } from "vitest";
 
-import { normalizeConversionStyleIdentities, compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
+import { normalizeConversionStyleIdentities, compileComponentGraphStyleAssetsForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue, componentStateNames, definitionGraph, nestedRootStyleWarnings } from "../src/component-styles-build.js";
 import { loadNodeComponents } from "../src/node-loader.js";
-import { guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
+import { componentStyleNameResolver, guardComponentPseudoElements, renameComponentPseudoClasses, restoreStatePseudoClasses, rewriteComponentSelector, stateAttributeValue } from "../src/component-styles.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
+const scopeIdentityCss = (tag: string, global = false): string => {
+  const selector = (value: string) => global ? `:global(${value})` : value;
+  return `@supports (-moz-appearance: none) { ${selector(":where([data-hn], [data-slotted])")} { --html-next-scope-owner: boundary; } ${selector(":where([data-slotted]:not([data-hn]))")} { --html-next-scope-owner: projected !important; } ${selector("." + tag)} { --html-next-scope-owner: "${tag}" !important; } }`;
+};
+
+it("preserves non-ASCII names when resolving CSSOM attribute casing", () => {
+  const definition = parseComponent('<template component="x-case"><defs><prop name="é" type="string">Lower.</prop><prop name="É" type="string">Upper.</prop><state name="à" type="boolean" value="true"></state><state name="À" type="boolean" value="false"></state></defs><p></p></template>');
+  const resolve = componentStyleNameResolver(definition, undefined, true);
+  for (const name of ["é", "É"]) assert.equal(resolve(name, "prop"), name);
+  for (const name of ["à", "À"]) assert.equal(resolve(name, "state"), name);
+  for (const compile of compilers) {
+    const result = compile(':host([é="one"]) { color: red; } :host([É="TWO"]:state(À)) { color: blue; }', definition);
+    assert.deepEqual(result.stateNames, ["é", "É", "À"]);
+    assert.match(result.css, /é=one/);
+    assert.match(result.css, /É=TWO/);
+  }
+});
 
 it("keeps Svelte ownership separate in mixed own and slotted selector lists", () => {
   const definition = parseComponent('<template component="x-image"><figure><div class="frame"><img><slot></slot></div></figure></template>');
@@ -38,7 +55,7 @@ it("scopes Svelte selectors by the hash Svelte gives the component's own markup"
       :global(.item *)${own}::before, :global(p)${own}:after { color: blue; }
       :global(:is(.projected) a):not(:scope, * *, [data-html-next-owner~="x-svelte-scope"])::marker { color: green; }
       :global(:is(x-child, :where(.x-child)))${own} { color: navy; }
-    }`));
+    }` + scopeIdentityCss("x-svelte-scope", true)));
   assert.equal(compiled.hashed, true);
   // Without slots nothing is projected, so the native scope alone bounds the rules and Svelte hashes nothing.
   const unslotted = compileComponentStylesForSvelte("span { color: red; }", parseComponent('<template component="x-plain"><p><span></span></p></template>'));
@@ -252,7 +269,7 @@ it("gives Vue host subjects the live runtime's selectors, with the owner test in
     + '.wide :scope:where([data-hn-ui-x])::after { content: "x"; }'
     + ".wide > :scope.a:where([data-hn-ui-x]) { color: blue; }"
     + ".wide :scope:not(.c):where([data-hn-ui-x]) { color: green; }"
-    + ".wide :scope .in:where([data-hn-ui-x]) { color: navy; } }");
+    + ".wide :scope .in:where([data-hn-ui-x]) { color: navy; } }" + scopeIdentityCss("ui-x"));
 });
 
 it("selects a component by tag with the live runtime's selectors in Vue and Svelte, without slots", () => {
@@ -263,9 +280,9 @@ it("selects a component by tag with the live runtime's selectors in Vue and Svel
   // Live: `:is(x-kid, :where([component~="x-kid"]))`, the type selector's (0,0,1).
   // Without slots nothing is projected, so a subject needs no owner test.
   assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
-    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
+    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }" + scopeIdentityCss("ui-x"));
   assert.equal(svelte.replace(/\s+/g, " "), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
-    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
+    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }" + scopeIdentityCss("ui-x"));
 });
 
 it("keeps a nested Vue rule's own declarations in place, at its specificity", () => {
@@ -274,7 +291,7 @@ it("keeps a nested Vue rule's own declarations in place, at its specificity", ()
   // Vue's own wrapper would be a first `&[data-v-1] { … }`, one class heavier than the rule.
   assert.equal(vueScoped(css, button), "@scope (.ui-x) to ([data-hn]) {:scope:where([data-hn-ui-x]) { &:where([data-hn-ui-x]) { color: red; }"
     + " & b:where([data-hn-ui-x]) { color: blue; } @media (min-width: 0px) { &:where([data-hn-ui-x]) { margin: 0; } }"
-    + " &:where([data-hn-ui-x]) { padding: 0; } } }");
+    + " &:where([data-hn-ui-x]) { padding: 0; } } }" + scopeIdentityCss("ui-x"));
 });
 
 it("selects projected content in Vue as what lacks the owner's attribute, inside grouping rules", () => {
@@ -282,7 +299,7 @@ it("selects projected content in Vue as what lacks the owner's attribute, inside
   const css = ":slotted(p) { color: red; } @media (min-width: 0px) { @supports (display: grid) { @layer base { :slotted(.a), .own { color: blue; } } } }";
   // Live: `:where([data-slotted], [data-slotted] *):is(p)`, in a scope bounded by component roots.
   assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:where(:not([data-hn-ui-x])):is(p) { color: red; }"
-    + "@media (min-width: 0px) { @supports (display: grid) { @layer base { :where(:not([data-hn-ui-x])):is(.a),.own:where([data-hn-ui-x]) { color: blue; } } } } }");
+    + "@media (min-width: 0px) { @supports (display: grid) { @layer base { :where(:not([data-hn-ui-x])):is(.a),.own:where([data-hn-ui-x]) { color: blue; } } } } }" + scopeIdentityCss("ui-x"));
 });
 
 it("keeps a component type selector's namespace in Vue's class form", () => {
@@ -316,4 +333,22 @@ it("preserves native value reads in nested rules and animated content", () => {
   assert.match(normalized, /:where\(\[data-html-next-native-value\]:not\(\[value\]\)\)::after/);
   assert.match(normalized, /content: attr\(data-html-next-native-value\); content: "last" !important/);
   assert.equal(normalizeConversionStyleIdentities(normalized, "component", options), normalized);
+});
+
+
+it("collects the root values required by local, foreign, and shared imported styles in one graph artifact", () => {
+  const provider = parseComponent(`<template component="x-style-provider"><defs><state name="open" type="boolean" value="true"></state></defs><section></section></template>`);
+  const reader = parseComponent(`<template component="x-style-reader"><defs><prop name="size" type="keyword" default="sm">Size.</prop></defs><div><x-style-provider></x-style-provider></div>
+    <style>:host([size=sm]) { color: red; } x-style-provider:state(open of x-style-provider) { color: blue; }</style></template>`);
+  const shared = { url: "https://example.test/shared.css", css: ":host([size=sm]) { padding: 1rem; }", conditions: [{ layer: "controls" }] };
+  const other = parseComponent(`<template component="x-style-other"><defs><prop name="size" type="keyword" default="sm">Size.</prop></defs><aside></aside></template>`);
+  const definitions = [provider, { ...reader, stylesheets: [shared] }, { ...other, stylesheets: [shared] }];
+  const compiled = compileComponentGraphStyleAssetsForBuild(definitions);
+  assert.equal(compiled.css, compileComponentGraphStylesForBuild(definitions));
+  assert.deepEqual(compiled.stateNames, { "x-style-provider": ["open"], "x-style-reader": ["size"], "x-style-other": ["size"] });
+  assert.match(compiled.css, /@layer controls/);
+  assert.match(compiled.css, /data-x-style-provider-state/);
+  assert.ok(Object.isFrozen(compiled) && Object.isFrozen(compiled.stateNames) && Object.isFrozen(compiled.stateNames["x-style-reader"]));
+  const partial = compileComponentGraphStyleAssetsForBuild([reader], definitionGraph(definitions));
+  assert.deepEqual(partial.stateNames, { "x-style-reader": ["size"], "x-style-provider": ["open"] });
 });

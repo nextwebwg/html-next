@@ -20,6 +20,9 @@ import htmlNext from "../src/vite.js";
 import { syncHtmlNext } from "../src/framework.js";
 import { installSourcePackage } from "./source-package.js";
 
+// Server CSSOM uses parseComponentValue; generated output still excludes HTML parsing and unused components.
+const forbiddenRuntime = /UNUSED_COMPONENT_MARKER|parseComponent(?!Value)|parse5|html-next\/live/;
+
 const run = promisify(execFile);
 const require = createRequire(import.meta.url);
 const temporary: string[] = [];
@@ -50,7 +53,7 @@ async function fixture({ optionalEditor = false }: { optionalEditor?: boolean } 
     <state name="count" type="integer" value="0"></state>
     <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
   </defs>
-  <button on:click="increment"><span $value="$label"></span><output $value="$count"></output><ui-badge></ui-badge><slot></slot></button>
+  <button $attributes on:click="increment"><span $value="$label"></span><output $value="$count"></output><ui-badge></ui-badge><slot></slot></button>
   <style>:host { color: rgb(1, 2, 3); }</style>
 </template>
 <template component="ui-badge" status="early" summary="Badge."><span>Badge</span></template>
@@ -59,6 +62,15 @@ async function fixture({ optionalEditor = false }: { optionalEditor?: boolean } 
   if (optionalEditor) await writeFile(join(library, "optional-editor.js"), 'import { extension } from "@example/optional-editor"; export function connect() { extension(); }');
   return { root, library };
 }
+
+it.each(["react", "preact"] as const)("checks keyed styles before trailing attributes in %s declarations", async target => {
+  const { root, library } = await fixture();
+  if (target === "preact") await symlink(join(modules, "preact"), join(root, "node_modules", "preact"), "dir");
+  const file = join(library, "controls.html");
+  await writeFile(file, (await readFile(file, "utf8")).replace("<button $attributes", `<button style:--probe="'2px'" $attributes`));
+  const prepared = await syncHtmlNext({ root, target });
+  assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
+}, 60_000);
 
 it("prepares concurrent framework consumers of the same source cache", async () => {
   const { root } = await fixture();
@@ -102,7 +114,7 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
     const output = await import(pathToFileURL(join(root, "dist", "folder.js")).href) as { render(): string | Promise<string> };
     assert.match(await output.render(), /Save.*Badge.*Nested card/s);
     const bundle = await readFile(join(root, "dist", "folder.js"), "utf8");
-    assert.doesNotMatch(bundle, /UNUSED_COMPONENT_MARKER|parseComponent|parse5/);
+    assert.doesNotMatch(bundle, forbiddenRuntime);
     const prepared = await syncHtmlNext({ root, target });
     const declarations = await readFile(prepared.declarationsFile, "utf8");
     assert.match(declarations, /export const UiButton:/);
@@ -139,7 +151,7 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
     assert.match(declarations, /declare module "@example\/controls"/);
     assert.match(declarations, /export const Button:/);
     assert.match(declarations, /export const UiButton:/);
-    assert.doesNotMatch(await readFile(join(root, "dist", "entry.js"), "utf8"), /parseComponent|parse5|html-next\/live|UNUSED_COMPONENT_MARKER/);
+    assert.doesNotMatch(await readFile(join(root, "dist", "entry.js"), "utf8"), forbiddenRuntime);
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: {
       strict: true, skipLibCheck: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx", noEmit: true,
     }, include: ["src"] }));
@@ -392,7 +404,7 @@ describe("svelte source adapter", () => {
       build: { ssr: entry, outDir: "dist", minify: false } });
     const output = await import(pathToFileURL(join(root, "dist", "folder.js")).href) as { markup(): string };
     assert.match(output.markup(), /Save.*Badge.*Nested card/s);
-    assert.doesNotMatch(await readFile(join(root, "dist", "folder.js"), "utf8"), /UNUSED_COMPONENT_MARKER|parseComponent|parse5/);
+    assert.doesNotMatch(await readFile(join(root, "dist", "folder.js"), "utf8"), forbiddenRuntime);
     const prepared = await syncHtmlNext({ root, target: "svelte" });
     const declarations = await readFile(prepared.declarationsFile, "utf8");
     assert.match(declarations, /export const UiButton:/);
@@ -494,7 +506,7 @@ describe("svelte source adapter", () => {
         <template component="ui-no-controller" status="early" summary="Controller-free native output."><button class="">Ping</button></template>
         <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="$activeCount + 1"></computed></defs><output $value="$twice"></output></template>
         <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="$linked" $ref="link" href="#next">Link</a><button $else $ref="button">Button</button></template></template>
-        <template component="ui-controlled" status="early" summary="Controller events." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><event name="increment-request" type="event">Native input event.</event><handler name="increment"><dispatch event="increment-request" expr:value="$$event"></dispatch></handler></defs><section><button on:click="increment" $ref="button" $value="$count"></button><span $each="row of [$count]" $ref="rows" $value="$row"></span></section></template>
+        <template component="ui-controlled" status="early" summary="Controller events." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><event name="increment-request" type="event">Native input event.</event><handler name="increment"><dispatch event="increment-request" expr:value="$$event"></dispatch></handler></defs><section $attributes><button on:click="increment" $ref="button" $value="$count"></button><span $each="row of [$count]" $ref="rows" $value="$row"></span></section></template>
         <template component="ui-reserved" status="early" summary="Public slot names."><defs><prop name="children" type="string">Public children.</prop><prop name="slots" type="string">Public slots.</prop></defs><section><output $value="concat($children, '/', $slots)"></output><slot name="title"></slot><slot></slot></section></template>
         <template component="ui-names" status="early" summary="Import collisions."><defs><state name="UiReserved" value="Ready"></state><state name="Map" value="1"></state><state name="String" value="Ready"></state><state name="Symbol" value="Kept"></state><state name="absent" type="number"></state><handler name="UiControlled"><set name="absent" expr:value="1"></set></handler></defs><section><ui-reserved from:children="$UiReserved" slots="Public"><b slot="title">Title</b><span $value="$UiReserved"></span></ui-reserved><ui-controlled $ref="controlled" on:click="UiControlled"></ui-controlled><output .title="$absent" $value="concat($String, '/', $Map, '/', $Symbol)"></output></section></template>
         <template component="ui-bound" status="early" summary="Component binding."><defs><state name="form" type="object({ amount: number })" value="{ amount: 2 }"></state></defs><section><ui-controlled bind:amount="form.amount"></ui-controlled><ui-native-delegate bind:value="form.amount"></ui-native-delegate><ui-owned-input bind:value="form.amount"></ui-owned-input><ui-untyped-number bind:value="form.amount"></ui-untyped-number><ui-untyped-output bind:value="form.amount"></ui-untyped-output><ui-untyped-output bind:__proto__="form.amount" bind:constructor="form.amount"></ui-untyped-output><ui-untyped-output from:value="$form.amount"></ui-untyped-output><ui-untyped-flag bind:checked="form.amount"></ui-untyped-flag><ui-untyped-radio bind:checked="form.amount"></ui-untyped-radio><ui-untyped-file bind:value="form.amount"></ui-untyped-file><ui-untyped-area bind:value="form.amount"></ui-untyped-area><ui-untyped-select bind:value="form.amount"></ui-untyped-select><ui-untyped-select from:value="$form.amount"></ui-untyped-select><ui-plain-select from:value="$form.amount"></ui-plain-select><select from:value="$form.amount"><option value="1" selected>One</option><option value="2">Two</option></select><ui-untyped-multiple bind:value="form.amount"></ui-untyped-multiple><ui-selected kind="number" bind:value="form.amount"></ui-selected><ui-state-selected bind:value="form.amount"></ui-state-selected></section></template>

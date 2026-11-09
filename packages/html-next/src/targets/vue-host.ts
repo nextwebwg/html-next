@@ -1,3 +1,4 @@
+import { VUE_PLAIN_SOURCE } from "./vue-plain-source.js";
 /**
  * The one module every converted Vue component shares: the controller host, the event dispatcher,
  * and the helpers its templates render and bind values with. They are the same for every
@@ -6,6 +7,7 @@
  * depends on Vue alone.
  */
 import { formatVue } from "./vue-format.js";
+import { ROOT_METADATA_SOURCE } from "../generated/dom-attributes-source.js";
 import { MODULE_CONNECTION_SOURCE } from "../generated/module-connection-source.js";
 import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE, INPUT_STATUS_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
@@ -23,9 +25,10 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { camelize, Comment, computed, createCommentVNode, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, isVNode, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, provide, ref, renderSlot, shallowRef, Text, useSlots, watch, watchEffect } from "vue";
+import { camelize, Comment, computed, cloneVNode, createCommentVNode, createTextVNode, customRef, defineComponent, Fragment, getCurrentInstance, h, inject, isVNode, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, provide, ref, renderSlot, shallowRef, Text, useSlots, watch, watchEffect } from "vue";
 import type { ComponentInternalInstance, FunctionalComponent, PropType, Ref, Slots, VNode } from "vue";
 ${INPUT_STATUS_SOURCE}
+${ROOT_METADATA_SOURCE}
 
 ${MODULE_CONNECTION_SOURCE}
 ${CONTROLLER_STATE_SOURCE}
@@ -600,6 +603,10 @@ export function createDispatch(
  * \`constructor\`, as a DOM property; capitalized, it stays an attribute, which HTML lowercases.
  */
 export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const style = attrs.style;
+  if (style !== null && typeof style === "object" && Object.hasOwn(style, "__htmlNextPropInput")) {
+    attrs = { ...attrs, style: (style as { __htmlNextPropInput: unknown }).__htmlNextPropInput };
+  }
   const names = Object.keys(attrs);
   if (!names.some((name) => Object.hasOwn(Object.prototype, name))) return attrs;
   return Object.fromEntries(names.map((name) => [
@@ -609,9 +616,9 @@ export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unkn
 }
 
 /** Hydrating server markup needs its root to be the element this component renders. */
-export function checkHydratedRoot(expected: string | undefined, tag: string): void {
+export function checkHydratedRoot(expected: string | null | undefined, tag: string): void {
   const node = getCurrentInstance()?.vnode.el;
-  if (typeof window === "undefined" || node == null || node instanceof Element && node.localName === expected) return;
+  if (expected === null || typeof window === "undefined" || node == null || node instanceof Element && node.localName === expected) return;
   const message = \`Server markup for <\${tag}> has an incompatible root.\`;
   throw Object.assign(new Error(\`HR005: \${message}\`), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR005", message }) });
 }
@@ -732,7 +739,7 @@ export function useScopedSlotName() {
 export type InlineTextSegment = { readonly value: unknown; readonly text: string; readonly accepted: boolean };
 
 export function inlineTextSegment(value: unknown, accepted: boolean, text: (value: any) => string): InlineTextSegment {
-  return { value, accepted, text: accepted && value !== Symbol.for("html-next.invalid-result") ? text(value) ?? "" : "" };
+  return { value, accepted, text: accepted && acceptsBindingResult(value) ? text(value) ?? "" : "" };
 }
 
 export const RetainedInlineText = /* @__PURE__ */ defineComponent({
@@ -741,11 +748,38 @@ export const RetainedInlineText = /* @__PURE__ */ defineComponent({
     const previous: string[] = [];
     return () => {
       const text = props.segments.map((segment, index) => {
-        if (segment.accepted && segment.value !== Symbol.for("html-next.invalid-result")) previous[index] = segment.text;
+        if (segment.accepted && acceptsBindingResult(segment.value)) previous[index] = segment.text;
         return previous[index] ?? "";
       }).join("");
       // Empty text has no serialized SSR node; a comment preserves this component's hydration position.
       return text === "" ? createCommentVNode() : createTextVNode(text);
+    };
+  },
+});
+
+/** Each outlet keeps its own accepted values, including inside repeated template scopes. */
+// Vue's compiled <slot v-bind> merges into an ordinary object, dropping __proto__ keys.
+export const ScopedSlotOutlet = /* @__PURE__ */ defineComponent({
+  props: {
+    content: { type: Object as PropType<Slots>, required: true },
+    name: { type: String, required: true },
+    values: { type: Object as PropType<Record<string, unknown>>, required: true },
+  },
+  setup(props, { slots }) {
+    return () => renderSlot(props.content, props.name, props.values, slots.default);
+  },
+});
+
+export const RetainedSlotValues = /* @__PURE__ */ defineComponent({
+  props: {
+    values: { type: Object as PropType<Record<string, unknown>>, required: true },
+    defaults: { type: Object as PropType<Record<string, unknown>>, required: true },
+  },
+  setup(props, { slots }) {
+    const previous = { ...props.defaults };
+    return () => {
+      for (const [name, value] of Object.entries(props.values)) if (acceptsBindingResult(value)) previous[name] = value;
+      return slots.default?.(previous);
     };
   },
 });
@@ -784,11 +818,17 @@ type ChildKind = readonly [component: unknown, tag: string, resolve: (given: Rec
 interface ChildRecord {
   readonly tag: string; readonly slots: ChildSlotNames; readonly prefix: string;
   readonly claims: Map<string, object>; readonly released: Ref<number>;
+  contexts?: Readonly<Record<string, unknown>>;
+  readonly contextKey: Ref<symbol>;
+  root?: Readable<Element | null>;
   node: VNode; props: Record<string, unknown>; entry: object; read(): VNode;
   /** A wrapped child's place in the list. */
   at?: number;
 }
 const childRecords = new WeakMap<object, ChildRecord>();
+const vnodeRecords = new WeakMap<object, ChildRecord>();
+const projectionClaims = /* @__PURE__ */ new WeakMap<object, SlotClaims>();
+${VUE_PLAIN_SOURCE}
 /** A slot's content as vnodes: a render function's slot may return one node, text or nothing, where a template's returns a list. */
 const slotContent = (value: unknown): VNode[] => (Array.isArray(value) ? value : [value]).map((child) => isVNode(child) ? child
   : Array.isArray(child) ? h(Fragment, slotContent(child)) : child == null || typeof child === "boolean" ? createCommentVNode() : createTextVNode(String(child)));
@@ -800,26 +840,33 @@ const renderChildSlot = (given: Slots, name: string, props: Record<string, unkno
 /** The empty slot a consumer adds beside a \`<template slot>\` it gives an accepted child, which places it afresh at every outlet. */
 const TEMPLATE_SLOT = "html-next-template-";
 /** What an accepted child finds through inject: the nearest accepting parent, which takes it if it accepts its component. */
-interface ChildOwner { readonly kinds: ReadonlyMap<unknown, ChildKind>; readonly parent: ChildOwner | undefined; add(instance: ComponentInternalInstance, nearest: boolean): void }
+interface ChildOwner { readonly kinds: ReadonlyMap<unknown, ChildKind>; readonly parent: ChildOwner | undefined; add(instance: ComponentInternalInstance, nearest: boolean): ChildRecord | undefined }
 const ACCEPTING = Symbol.for("html-next:accepting");
 const givenProps = (node: VNode): Record<string, unknown> => {
   const given: Record<string, unknown> = {};
   for (const key in node.props) given[camelize(key)] = node.props[key];
   return given;
 };
-const nodeRoot = (entry: object): Node | null => childRecords.get(entry)!.node.el as Node | null;
+const nodeRoot = (entry: object): Node | null => { const record = childRecords.get(entry)!; return record.root?.value ?? record.node.el as Node | null; };
 
 /**
  * An accepted child's place in its parent's list, which every accepted component takes as it sets up.
  * A child the parent read from its slot's vnodes holds its place; any other, such as one inside the
  * consumer's own wrapper component, joins the nearest ancestor that accepts its component.
  */
-export function useChildEntry(): void {
+export function useChildEntry(contexts: Readonly<Record<string, unknown>> = {}, root?: Readable<Element | null>): ChildRecord | undefined {
   const instance = getCurrentInstance()!;
   const nearest = inject<ChildOwner | undefined>(ACCEPTING, undefined);
   let owner = nearest;
   while (owner !== undefined && !owner.kinds.has(instance.type)) owner = owner.parent;
-  owner?.add(instance, owner === nearest);
+  const record = owner?.add(instance, owner === nearest);
+  if (record !== undefined) {
+    if (root !== undefined) record.root = rootElement(root);
+    const replaced = record.contexts !== undefined && Object.keys(contexts).length > 0;
+    record.contexts = contexts;
+    if (replaced) record.contextKey.value = Symbol();
+  }
+  return record;
 }
 
 /**
@@ -837,14 +884,13 @@ export function useChildEntry(): void {
  * \`prefix\` begins each warning, as live's do.
  */
 export function useChildList<List>(
-  slot: string, accepted: readonly ChildKind[], presets: Record<string, string>, prefix: string, named: string, listed: string,
+  slot: string, accepted: readonly ChildKind[], presets: Record<string, string>, prefix: string, named: string, listed: string, singlePlacement = false,
 ): readonly [Readonly<Ref<List>>, Readonly<Ref<VNode[]>>] {
   const slots = useSlots();
-  const instance = getCurrentInstance()!;
-  // A consumer's render that reads its values outside the slot function gives the table new vnodes
-  // without a change the list tracks: each new vnode from the consumer reads the slot afresh.
-  const source = shallowRef(instance.vnode);
-  onBeforeUpdate(() => { source.value = instance.vnode; });
+  // Read slots afresh for every component update. Cached mounted VNodes cannot be hydrated again
+  // when a conditional outlet recreates its ordinary subtree.
+  const source = shallowRef(0);
+  onBeforeUpdate(() => { source.value++; });
   const kinds = new Map(accepted.map((kind) => [kind[0], kind]));
   const leftOut = (key: string, message: string): void => { warnUnless(false, prefix + "accepts:" + slot + ":" + key, prefix + message); };
   const ids = new WeakMap<object, number>();
@@ -860,17 +906,26 @@ export function useChildList<List>(
   let placed = 0;
   let observer: MutationObserver | undefined;
   const newRecord = (kind: ChildKind, node: VNode): ChildRecord => {
-    const made: ChildRecord = { tag: kind[1], slots: kind[3], prefix, claims: new Map(), released: shallowRef(0), node, props: {}, entry: {},
+    const made: ChildRecord = { tag: kind[1], slots: kind[3], prefix, claims: new Map(), released: shallowRef(0), contextKey: shallowRef(Symbol()), node, props: {}, entry: {},
       read: () => { void state.value; void version.value; return made.node; } };
     // Reading an entry's prop reads the list, so it follows the consumer's changes.
     made.entry = Object.freeze(Object.create(null, Object.fromEntries(Object.keys(kind[2]({})).map((name) =>
       [name, { enumerable: true, get: () => { void state.value; void version.value; return made.props[name]; } }]))) as object);
     childRecords.set(made.entry, made);
+    vnodeRecords.set(node, made); if (node.props !== null) vnodeRecords.set(node.props, made);
     return made;
   };
   const state = computed(() => {
     const next = new Map<string, ChildRecord>();
     const entries: object[] = [];
+    const omitted = new Set<VNode>();
+    const projected = (nodes: readonly VNode[]): VNode[] => nodes.filter(node => !omitted.has(node)).map(node => {
+      if (node.type !== Fragment) return node;
+      const copy = cloneVNode(node);
+      copy.children = projected(slotContent(node.children));
+      (copy as VNode & { dynamicChildren: VNode[] | null }).dynamicChildren = null; copy.patchFlag = -2;
+      return copy;
+    });
     // A keyed child (a keyed v-for's, a v-if branch, a render function's) is known by key; anything else by its place.
     const visit = (nodes: readonly unknown[], path: string): void => nodes.forEach((child, index) => {
       if (!isVNode(child)) return;
@@ -881,28 +936,31 @@ export function useChildList<List>(
         let record = records.get(at);
         if (record === undefined || record.tag !== kind[1]) record = newRecord(kind, node);
         record.node = node;
+        vnodeRecords.set(node, record); if (node.props !== null) vnodeRecords.set(node.props, record);
         record.props = kind[2](givenProps(node));
         next.set(at, record);
         entries.push(record.entry);
       } else if (node.type === Comment) {
         // A v-if that renders nothing.
       } else if (node.type === Text) {
-        if (/[^\\t\\n\\f\\r ]/.test(String(node.children))) leftOut("#text", named + " accepts " + listed + "; this text is left out.");
+        if (/[^\\t\\n\\f\\r ]/.test(String(node.children))) { omitted.add(node); leftOut("#text", named + " accepts " + listed + "; this text is left out."); }
       } else if (node.type === Fragment) {
-        visit(slotContent(node.children), at);
+        const children = slotContent(node.children); node.children = children;
+        visit(children, at);
       } else if (node.type === KeyedBoundary) {
         // The boundary renders the vnodes read here, so each entry keeps its child's instance.
         const children = node.children as { default?: () => VNode[] } | null;
         try {
           const inner = children?.default?.() ?? [];
           visit(inner, at);
-          node.children = { default: () => inner } as never;
+          const content = projected(inner);
+          node.children = { default: () => content } as never;
         } catch (error) {
           node.children = { default: () => { throw error; } } as never;
         }
       } else {
         const tag = tagOf(node.type);
-        if (typeof node.type === "string") leftOut(tag, named + " accepts " + listed + "; this \`<" + tag + ">\` is left out.");
+        if (typeof node.type === "string") { omitted.add(node); leftOut(tag, named + " accepts " + listed + "; this \`<" + tag + ">\` is left out."); }
         else if (presets[tag] !== undefined) leftOut(tag, "\`<" + tag + ">\` is a preset of \`" + presets[tag] + "\`, which " + named + " accepts; a preset among accepted children is not supported yet, so it is left out.");
       }
     });
@@ -910,7 +968,7 @@ export function useChildList<List>(
     const nodes = (slots[slot === "" ? "default" : slot]?.() ?? []) as VNode[];
     visit(nodes, "");
     records = next;
-    return { entries: Object.freeze(entries) as List, nodes };
+    return { entries: Object.freeze(entries) as List, nodes: projected(nodes) };
   });
   let previous: readonly object[] = [];
   const list = computed(() => {
@@ -928,7 +986,13 @@ export function useChildList<List>(
   });
   provide(ACCEPTING, { kinds, parent: inject<ChildOwner | undefined>(ACCEPTING, undefined), add(child, isNearest) {
     const top = outletChild(child);
-    if (isNearest && top === child) { placed++; return; }
+    if (isNearest && top === child) {
+      placed++;
+      const record = vnodeRecords.get(child.vnode) ?? (child.vnode.props === null ? undefined : vnodeRecords.get(child.vnode.props))
+        ?? [...records.values()].find(record => record.node.type === child.type && record.node.key === child.vnode.key && (record.node.component == null || record.node.component.isUnmounted));
+      if (record !== undefined) record.node = child.vnode;
+      return record;
+    }
     if (isNearest && presets[tagOf(top.type)] !== undefined) return;
     const record = newRecord(kinds.get(child.type)!, child.vnode);
     const update = (): void => { record.node = child.vnode; record.props = kinds.get(child.type)![2](givenProps(child.vnode)); };
@@ -943,11 +1007,17 @@ export function useChildList<List>(
       reread();
     });
     onBeforeUnmount(() => { joined.splice(joined.indexOf(record), 1); reread(); });
+    return record;
   } } satisfies ChildOwner);
   onMounted(() => { filling = false; if (joined.length > 0) reread(); });
   onUpdated(() => { if (joined.length > 0) reread(); });
+  const projection = singlePlacement ? newSlotClaims() : undefined;
   onBeforeUnmount(() => { observer?.disconnect(); });
-  return [list as unknown as Readonly<Ref<List>>, computed(() => state.value.nodes)];
+  return [list as unknown as Readonly<Ref<List>>, computed(() => {
+    const nodes = state.value.nodes;
+    if (projection !== undefined && slots[TEMPLATE_SLOT + slotKey(slot)] === undefined) projectionClaims.set(nodes, projection);
+    return nodes;
+  })];
 }
 
 /** A component type's tag, as a warning names it. */
@@ -959,16 +1029,23 @@ const outletChild = (instance: ComponentInternalInstance): ComponentInternalInst
   for (let up = instance.parent; up !== null; up = up.parent) {
     const type: unknown = up.type;
     if (type === ChildNodes) break;
-    if (type !== KeyedBoundary) top = up;
+    if (type !== KeyedBoundary && type !== PlainPlacement) top = up;
   }
   return top;
 };
+
+/** Vue owns clones of collected slot VNodes through its ordinary renderer. */
+function childNodes(nodes: readonly VNode[]): VNode[] { return nodes.map(node => cloneVNode(node)); }
 
 /** An accepting slot's outlet: the consumer's vnodes the slot's \`as\` list read, or the fallback. */
 export const ChildNodes = /* @__PURE__ */ defineComponent({
   props: { nodes: { type: Array as PropType<VNode[]>, required: true } },
   setup(props, { slots }) {
-    return () => props.nodes.some((node) => node.type !== Comment) ? h(Fragment, props.nodes) : slots.default?.();
+    return () => {
+      const owner = projectionClaims.get(props.nodes);
+      return owner !== undefined ? h(PlainPlacement, { owner, read: () => childNodes(props.nodes) }, slots)
+        : plainFilled(props.nodes) ? h(Fragment, childNodes(props.nodes)) : slots.default?.();
+    };
   },
 });
 
@@ -976,23 +1053,11 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
   props: { record: { type: Object as PropType<ChildRecord>, required: true }, name: { type: String, required: true }, given: { type: Object, required: true } },
   setup(props, { slots }) {
     const { record, name } = props;
-    const instance = getCurrentInstance()!;
-    // Content placed here injects from the child first, then the child's own ancestors. Vue has no public
-    // API to read another instance's provided values, so this takes the child's internal \`provides\`,
-    // which every Vue 3 release (3.0 through 3.5, tested with 3.5.43) keeps on the internal instance and
-    // children inject from; vue-columns-parity reads a column's context from cell content to catch a change.
-    // The child's instance exists only once its outlet rendered: a table renders the slot's outlet before its cells.
-    const child = record.node.component as { provides?: object } | null;
-    if (child?.provides !== undefined) (instance as unknown as { provides: object }).provides = child.provides;
-    onBeforeUnmount(() => {
-      if (record.claims.get(name) !== instance) return;
-      // Another outlet takes the plain content this one placed.
-      record.claims.delete(name);
-      record.released.value += 1;
-    });
+    for (const [key, value] of Object.entries(record.contexts ?? {})) provide(key, value);
+
     return () => {
       const node = record.read();
-      const [outlets, scoped, known, listed] = record.slots;
+      const [, scoped, known, listed] = record.slots;
       const warn = (key: string, message: string): void => { warnUnless(false, record.prefix + "of:" + record.tag + ":" + key, record.prefix + message); };
       const fallback = () => slots.default?.() ?? [];
       if (!known.includes(name)) {
@@ -1000,21 +1065,17 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
         return fallback();
       }
       const given = node.children as Slots | null;
-      const slot = given?.[name];
+      const slot = given?.[slotKey(name)];
       const withProps = scoped.includes(name) || Object.keys(props.given).length > 0;
       // The child's \`<template slot>\` renders afresh at every outlet. Vue's own idiom for a slot that
       // declares props, \`<template #cell="{ row }">\` or a render function's \`cell\`, is that template.
-      if (slot !== undefined && (given?.[TEMPLATE_SLOT + name] !== undefined || scoped.includes(name))) {
-        return renderChildSlot(given!, name, props.given, fallback);
+      if (slot !== undefined && (given?.[TEMPLATE_SLOT + slotKey(name)] !== undefined || scoped.includes(name))) {
+        return renderChildSlot(given!, slotKey(name), props.given, fallback);
       }
       const plain = slot !== undefined || (given?.default === undefined ? [] : slotContent(given.default())).some((content) => content.props?.slot === name);
       if (plain && withProps) warn(name + ":plain", "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
-      if (given?.[name] === undefined || withProps || outlets.includes(name)) return fallback();
-      // Plain content is placed once: by the child's own outlet, else by the first \`<slot of>\` that renders it.
-      void record.released.value;
-      if ((record.claims.get(name) ?? instance) !== instance) return fallback();
-      record.claims.set(name, instance);
-      return renderChildSlot(given, name, {}, fallback);
+      if (given?.[slotKey(name)] === undefined || withProps) return fallback();
+      return h(PlainPlacement, { owner: record, name, read: () => [renderChildSlot(given!, slotKey(name), {}, fallback)] }, slots);
     };
   },
 });
@@ -1024,16 +1085,19 @@ const ChildPlacement = /* @__PURE__ */ defineComponent({
  * whose entry \`of\` is, given the outlet's props as \`shapes\` checks them for the child's tag; else the
  * outlet's fallback.
  */
-export const ChildSlot: FunctionalComponent<{
+export const ChildSlot = /* @__PURE__ */ (() => {
+const slot: FunctionalComponent<{
   of: unknown; name: string; given: Record<string, unknown>;
   shapes?: Record<string, (given: Record<string, unknown>) => Record<string, unknown>> | undefined;
 }> = (props, { slots }) => {
   const record = props.of !== null && typeof props.of === "object" ? childRecords.get(props.of) : undefined;
   if (record === undefined) return slots.default?.();
   const given = props.shapes?.[record.tag]?.(props.given) ?? props.given;
-  return h(ChildPlacement, { key: props.of as never, record, name: props.name, given }, slots);
+  return h(ChildPlacement, { key: record.contextKey.value, record, name: props.name, given }, slots);
 };
-ChildSlot.props = ["of", "name", "given", "shapes"];
+slot.props = ["of", "name", "given", "shapes"];
+return slot;
+})();
 `;
 
 /** Every name the shared module exports, which a component's own identifiers must not take. */

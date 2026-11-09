@@ -8,24 +8,30 @@
  * type chooses the inline form. Only a value whose type cannot be known falls back to a small named
  * function in the component, emitted when used.
  */
-import { isEnumeratedBoolean, wholeNumber, type ExpressionNode } from "../expression.js";
+import { CLASS_TEXT_SOURCE } from "./class-text.js";
+import { finiteStep, isEnumeratedBoolean, referencePath, wholeNumber, type ReferencePath, type ExpressionNode } from "../expression.js";
 import { formattingType } from "../format.js";
 import { DECIMAL_SOURCE } from "../generated/decimal-source.js";
 import { formattingHelperSource } from "./format-source.js";
-import { formatType, normalizeType, type TypeNode } from "../type-system.js";
+import { ReferenceSchemas } from "./reference-schema.js";
+import { referenceCanFail, type ReferenceEnvironment } from "./reference-types.js";
+import { REFERENCE_FORMATS, referencePredicatesSource } from "./reference-predicates.js";
+import { formatType, normalizeType, typeAtKey, type TypeNode } from "../type-system.js";
 import type { PropContract, PropType } from "../types.js";
 import { NUMERIC_ATTRIBUTES, quote } from "./shared.js";
 
 /** How each root name is read, and its static type, in one scope. */
-export interface Scope {
+export interface Scope extends ReferenceEnvironment {
   readonly code: ReadonlyMap<string, string>;
   readonly types: ReadonlyMap<string, Static>;
   readonly observesInputs?: boolean;
+  readonly unobservedCode?: ReadonlyMap<string, string>;
+  readonly referenceExpression?: number;
 }
 
 /** Only expression reads in this scope report prerequisites to an enclosing evaluation. */
 export function inputScope<T extends Scope>(scope: T, status: (name: string, read: string) => string | undefined): T {
-  return { ...scope, observesInputs: true, code: new Map([...scope.code].map(([name, read]) => {
+  return { ...scope, observesInputs: true, unobservedCode: scope.unobservedCode ?? scope.code, code: new Map([...scope.code].map(([name, read]) => {
     const input = status(name, read);
     return [name, input === undefined ? read : `inputRead(${read}, ${input})`];
   })) };
@@ -36,6 +42,17 @@ export interface Static {
   readonly type: TypeNode;
   readonly nullable: boolean;
   readonly null?: boolean;
+}
+
+function temporaryName(scope: Scope, name: string): string {
+  const taken = [...scope.code.values()].join(" ");
+  let result = `__htmlNext${name}`;
+  while (new RegExp(`\\b${result}\\b`).test(taken)) result += "_";
+  return result;
+}
+
+function mayBeAbsent(node: ExpressionNode, scope: Scope): boolean {
+  return node.kind === "literal" ? typeof node.value === "symbol" : typeOf(node, scope).nullable;
 }
 
 export const UNKNOWN: Static = { type: { kind: "terminal", name: "unknown" }, nullable: true, null: true };
@@ -129,7 +146,9 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       } else if (node.kind === "index" && type.kind === "list") {
         result = { ...present(type.item), nullable: true };
       }
-      return object.nullable ? { ...result, nullable: true } : result;
+      const path = scope.references === undefined ? undefined : referencePath(node);
+      const checked = path !== undefined && scope.references?.get(path.root) !== undefined;
+      return object.nullable || checked ? { ...result, nullable: true } : result;
     }
     case "unary": {
       if (node.op === "not") return terminal("boolean");
@@ -153,7 +172,9 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
           return { type: (leftDimensional ? left : right).type, nullable: true };
         }
       }
-      return ["+", "-", "*", "/", "%"].includes(node.op) ? { ...terminal("number"), nullable: true } : terminal("boolean");
+      if (["+", "-", "*", "/", "%"].includes(node.op)) return { ...terminal("number"), nullable: true };
+      return { ...terminal("boolean"), nullable: node.op !== "and" && node.op !== "or" &&
+        (mayBeAbsent(node.left, scope) || mayBeAbsent(node.right, scope)) };
     }
     case "conditional": {
       const consequent = typeOf(node.consequent, scope);
@@ -212,16 +233,12 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
 
 /** Whether a generated expression can produce an invalid result that must retain its destination. */
 export function mayProduceInvalidResult(node: ExpressionNode, scope: Scope): boolean {
+  const path = scope.references === undefined ? undefined : referencePath(node);
+  if (path !== undefined) return referenceCanFail(path, scope) || path.steps.some(step => typeof step.key === "object" && mayProduceInvalidResult(step.key, scope));
   switch (node.kind) {
     case "call": return true;
     case "binary": {
-      if (["+", "-", "*", "/"].includes(node.op)) {
-        const dimensional = (operand: ExpressionNode): boolean => {
-          const type = typeOf(operand, scope).type;
-          return type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name);
-        };
-        if (dimensional(node.left) || dimensional(node.right)) return true;
-      }
+      if (["+", "-", "*", "/", "%"].includes(node.op) && !finiteStep(node, operand => category(typeOf(operand, scope).type) === "number")) return true;
       return mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope);
     }
     case "unary": {
@@ -272,6 +289,38 @@ export function typeScript(value: Static): string {
 
 /** Fallback functions for values whose type is unknown: HTML Next's value rules, written plainly. */
 const FALLBACKS: Readonly<Record<string, string>> = {
+  classText: CLASS_TEXT_SOURCE,
+  acceptsBindingResult: `function acceptsBindingResult(value: unknown, accepts?: (value: unknown) => boolean): boolean {
+  return value !== Symbol.for("html-next.invalid-result") && (accepts?.(value) ?? true);
+}`,
+  separatedKeywords: `function separatedKeywordItem(value: unknown): boolean {
+  return typeof value === "string" && keywordFormat(value);
+}
+function separatedKeywords(value: unknown, space: boolean): boolean {
+  const items = typeof value === "string" ? value.split(space ? /\\s+/ : /\\s*,\\s*/) : value;
+  return Array.isArray(items) && items.length > 0 && items.every(separatedKeywordItem);
+}`,
+  referenceMember: `function referenceMember(object: any, key: string): any {
+  if (object === Symbol.for("html-next.invalid-result")) return object;
+  if (key === "length" && (Array.isArray(object) || typeof object === "string")) return object.length;
+  return object !== null && typeof object === "object" && !Array.isArray(object) ? object[key] : undefined;
+}`,
+  referenceIndex: `function referenceIndex(object: any, key: any): any {
+  if (object === Symbol.for("html-next.invalid-result") || key === Symbol.for("html-next.invalid-result")) return Symbol.for("html-next.invalid-result");
+  if (object == null || key == null) return undefined;
+  return typeof object === "object" && (typeof key === "string" || typeof key === "number") ? object[key] : undefined;
+}`,
+  referenceSchemaAt: `const referenceNumericKey = /^\\d+$/;
+function referenceSchemaAt(schema: any, key: unknown): any {
+  if (schema === 0 || typeof key !== "string" && typeof key !== "number") return 0;
+  if (schema[2] !== undefined && Object.hasOwn(schema[2], key)) return schema[2][key];
+  return (typeof key === "number" || referenceNumericKey.test(key) ? schema[3] : schema[4]) ?? 0;
+}`,
+  referenceValue: `function referenceValue(value: any, schema: any, location: string, name: string, file: string): any {
+  if (schema === 0 || value == null || !acceptsBindingResult(value) || schema[0](value)) return value;
+  warnUnless(false, location, file + ": HR007: Reference \`" + name + "\` must satisfy " + schema[1] + ".");
+  return Symbol.for("html-next.invalid-result");
+}`,
   truthy: `function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (value instanceof Error) return true;
@@ -295,7 +344,10 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   return Array.isArray(value) ? value : [];
 }`,
   number: `function number(value: unknown): number | undefined {
-  return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}`,
+  finite: `function finite(value: number): number | symbol {
+  return Number.isFinite(value) ? value : Symbol.for("html-next.invalid-result");
 }`,
   concat: `// A nonempty scalar call cannot produce the invalid-result sentinel.
 type ConcatResult<T extends unknown[]> = T extends [boolean] ? "true" | "false" : T extends [string | number | boolean | null | undefined, ...(string | number | boolean | null | undefined)[]]
@@ -412,13 +464,13 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
     return 0;
   });
 }`,
-  eachRows: `function eachRows<T>(items: readonly T[]): { item: T; index: number; loop: { index: number; first: boolean; last: boolean; count: number } }[] {
-  return items.map((item, index) => ({ item, index, loop: { index, first: index === 0, last: index === items.length - 1, count: items.length } }));
+  eachRows: `function eachRows<T>(items: readonly T[]): { item: T; index: number }[] {
+  return items.map((item, index) => ({ item, index }));
 }`,
-  uniqueKeys: `function uniqueKeys<T>(items: readonly T[], keyOf: (item: T, index: number, loop: { index: number; first: boolean; last: boolean; count: number }) => unknown): readonly T[] {
+  uniqueKeys: `function uniqueKeys<T>(items: readonly T[], keyOf: (item: T, index: number) => unknown): readonly T[] {
   const seen = new Set<unknown>();
   for (let index = 0; index < items.length; index += 1) {
-    const key = keyOf(items[index]!, index, { index, first: index === 0, last: index === items.length - 1, count: items.length });
+    const key = keyOf(items[index]!, index);
     if (seen.has(key)) {
       const message = \`A keyed list produced duplicate key \\\`\${text(key)}\\\`.\`;
       throw Object.assign(new Error(\`HR004: \${message}\`), {
@@ -431,7 +483,7 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
 }`,
 };
 
-const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
+const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { referenceValue: ["acceptsBindingResult"], separatedKeywords: ["keywordFormat"], attribute: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
 
 /** The shared module's decimal operation for each arithmetic operator (`src/decimal.ts`). */
 const DECIMAL_HELPERS: Readonly<Record<string, string>> = {
@@ -473,6 +525,7 @@ export const isNumber = (value: unknown): value is number => typeof value === "n
 export const isInteger = (value: unknown): value is number => Number.isInteger(value);
 export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";`,
     ...Object.values(FALLBACKS),
+    referencePredicatesSource(),
     DECIMAL_SOURCE,
     formattingHelperSource("formatValue"),
   ].join("\n\n").replace(/^(function|type|const formatValue) /gm, "export $1 ")
@@ -493,7 +546,78 @@ export class Lowering {
 
   readonly #direct = new Set<string>();
 
+  private readonly referenceExpressions = new WeakMap<ExpressionNode, number>();
+  private expressionIds = 0;
+  private readonly referenceSelections = new Map<string, string>();
+  private readonly referenceSchemas = new ReferenceSchemas(type => `(value: any) => ${this.referencePredicate(type, "value")}`, "__htmlNextReference");
+
   constructor(readonly warningName = "htmlNextAuthoredCheck") {}
+
+  /** Intern component contracts once in the scope chosen by the target. */
+  referenceDeclarations(): string[] {
+    return [...this.referenceSchemas.sources.map((source, index) => `const __htmlNextReference${index} = ${source};`),
+      ...[...this.referenceSelections].map(([source, name]) => `const ${name} = (choice: unknown) => ${source};`)];
+  }
+
+  private referencePredicate(type: TypeNode, value: string): string {
+    switch (type.kind) {
+      case "terminal": {
+        if (type.name === "unknown") return "true";
+        if (type.name === "null") return `${value} === null`;
+        if (type.name === "absent") return `${value} === undefined`;
+        if (type.name === "integer") return `Number.isInteger(${value})`;
+        if (type.name === "number") return `(typeof ${value} === "number" && Number.isFinite(${value}))`;
+        if (["string", "boolean", "function"].includes(type.name)) return `typeof ${value} === ${quote(type.name)}`;
+        if (type.name === "event") return `${this.use("referenceEvent")}(${value})`;
+        if (type.name === "trusted-html" || type.name === "trusted-script") return `${this.use("referenceTrusted")}(${value}, ${quote(type.name)})`;
+        const format = REFERENCE_FORMATS[type.name];
+        if (format === undefined) throw new Error(`Missing reference predicate for ${type.name}`);
+        return `(typeof ${value} === "string" && ${this.use(format)}(${value}))`;
+      }
+      case "keyword": return `${value} === ${JSON.stringify(type.value)}`;
+      case "list": return `Array.isArray(${value})`;
+      case "record":
+      case "object": return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}))`;
+      case "union": return `(${type.members.map(type => this.referencePredicate(type, value)).join(" || ")})`;
+      case "selected": return `(${type.options.map(option => this.referencePredicate(option.type, value)).join(" || ")})`;
+      case "constrained": return this.referencePredicate(type.base, value);
+      case "separated-list": return `${this.use("separatedKeywords")}(${value}, ${type.separator === "space"})`;
+    }
+  }
+
+  private reference(node: ExpressionNode, path: ReferencePath, scope: Scope): string {
+    const contract = scope.references?.get(path.root);
+    if (contract === undefined || path.steps.length === 0 && contract.trusted === true) return this.value(node, scope, true);
+    const dynamic = path.staticKeys === undefined;
+    const schema = (type: TypeNode | undefined): string => {
+      if (!dynamic) for (const key of path.staticKeys!) type = type === undefined ? undefined : typeAtKey(type, key);
+      return this.referenceSchemas.reference(type, dynamic ? path.steps.length : 0);
+    };
+    const select = contract.select;
+    let descriptor = select === undefined ? schema(contract.type) : "0";
+    if (select !== undefined) {
+      const selector = (scope.unobservedCode ?? scope.code).get(select.from) ?? "undefined";
+      const source = `(${select.options.map(option => `choice === ${JSON.stringify(option.value)} ? ${schema(normalizeType(option.type))} : `).join("")}${schema({ kind: "terminal", name: "null" })})`;
+      let selection = this.referenceSelections.get(source);
+      if (selection === undefined) { selection = `__htmlNextSelection${this.referenceSelections.size}`; this.referenceSelections.set(source, selection); }
+      descriptor = `${selection}(${selector})`;
+    }
+    if (descriptor === "0") return this.value(node, scope, true);
+    this.use("warnUnless");
+    const helper = this.use("referenceValue");
+    const file = scope.referenceFile ?? "<source>";
+    const location = JSON.stringify([file, scope.referenceTag, scope.referenceExpression, path.name]);
+    const checked = (value: string, schema: string): string => `${helper}(${value}, ${schema}, ${quote(location)}, ${quote(path.name)}, ${quote(file)})`;
+    if (!dynamic && select === undefined) return checked(this.value(node, scope, true), descriptor);
+    const value = temporaryName(scope, "Receiver"), type = temporaryName(scope, "Schema"), key = temporaryName(scope, "Key");
+    const lines = [`let ${value}: any = ${this.value({ kind: "id", name: path.root }, scope, true)}, ${type}: any = ${descriptor}${path.steps.length === 0 ? "" : `, ${key}: any`};`];
+    for (const step of path.steps) {
+      lines.push(`${key} = ${typeof step.key === "object" ? this.value(step.key, scope) : JSON.stringify(step.key)};`,
+        `${value} = ${this.use(step.member ? "referenceMember" : "referenceIndex")}(${value}, ${key});`,
+        ...dynamic ? [`${type} = ${this.use("referenceSchemaAt")}(${type}, ${key});`] : []);
+    }
+    return `(() => { ${lines.join(" ")} return ${checked(value, type)}; })()`;
+  }
 
   /** Warn once for an authored location while retaining the existing acceptance predicate. */
   authoredCheck(check: string, location: string, message: string): string {
@@ -524,7 +648,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
 
   /** The fallback functions the emitted code calls. */
   fallbacks(): string[] {
-    return Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!);
+    return [...Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!), referencePredicatesSource(this.#used).replace(/^export /gm, "")].filter(Boolean);
   }
 
   /** Stateful Intl reuse belongs to the module, outside component setup or render. */
@@ -538,13 +662,21 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
   }
 
   /** The expression's value. */
-  value(node: ExpressionNode, scope: Scope): string {
+  value(node: ExpressionNode, scope: Scope, base = false): string {
+    if (scope.references !== undefined && scope.referenceExpression === undefined) {
+      let expression = this.referenceExpressions.get(node);
+      if (expression === undefined) { expression = this.expressionIds++; this.referenceExpressions.set(node, expression); }
+      scope = { ...scope, referenceExpression: expression };
+    }
+    const path = !base && scope.references !== undefined ? referencePath(node) : undefined;
+    if (path !== undefined) return this.reference(node, path, scope);
     switch (node.kind) {
       case "literal":
         return node.value === undefined ? "undefined" : JSON.stringify(node.value);
       case "id":
         return scope.code.get(node.name) ?? "undefined";
       case "member": {
+        if (scope.references !== undefined) return `${this.use("referenceMember")}(${this.value(node.object, scope, true)}, ${quote(node.key)})`;
         const object = this.#operand(node.object, scope);
         const objectType = typeOf(node.object, scope);
         const access = objectType.nullable ? "?." : ".";
@@ -558,6 +690,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
           : read;
       }
       case "index": {
+        if (scope.references !== undefined) return `${this.use("referenceIndex")}(${this.value(node.object, scope, true)}, ${this.value(node.index, scope)})`;
         const object = this.#operand(node.object, scope);
         // TypeScript rejects a nullable key; the read itself is unchanged.
         const index = typeOf(node.index, scope).nullable ? `(${this.value(node.index, scope)})!` : this.value(node.index, scope);
@@ -580,31 +713,41 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
         if (type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name)) {
           return `(${this.use("math")}("negate", [${quote(type.name)}], [${this.value(node.operand, scope)}]) as string | undefined)`;
         }
+        if (mayProduceInvalidResult(node.operand, scope)) {
+          const value = this.value(node.operand, scope);
+          const known = typeOf(node.operand, scope);
+          const result = category(known.type) === "number" && !known.nullable ? "-operand" : `(${this.use("number")}(operand) === undefined ? undefined : -${this.use("number")}(operand)!)`;
+          return `((operand: any) => operand === Symbol.for("html-next.invalid-result") ? operand : ${result})(${value})`;
+        }
         const operand = this.#numeric(node.operand, scope);
         if (operand !== undefined) return `-${operand}`;
         const number = this.use("number");
-        return `(${number}(${this.value(node.operand, scope)}) === undefined ? undefined : -${number}(${this.value(node.operand, scope)})!)`;
+        const value = this.value(node.operand, scope);
+        return `((operand: any) => ${number}(operand) === undefined ? undefined : -${number}(operand)!)(${value})`;
       }
       case "binary":
         return this.#binary(node, scope);
       case "conditional":
         if (mayProduceInvalidResult(node.test, scope)) {
           const test = this.condition(node.test, scope);
-          return `(() => { const condition: any = ${test}; if (condition === Symbol.for("html-next.invalid-result")) return condition; return condition ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}; })()`;
+          const condition = temporaryName(scope, "Condition");
+          return `(() => { const ${condition}: any = ${test}; if (${condition} === Symbol.for("html-next.invalid-result")) return ${condition}; return ${condition} ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}; })()`;
         }
         return `${this.condition(node.test, scope)} ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}`;
       case "call":
         return this.#call(node, scope);
       case "object": {
         const value = `{ ${node.pairs.map((pair) => `${/^[A-Za-z_$][\w$]*$/.test(pair.key) ? pair.key : quote(pair.key)}: ${this.value(pair.value, scope)}`).join(", ")} }`;
+        const local = temporaryName(scope, "Value");
         return node.pairs.some((pair) => mayProduceInvalidResult(pair.value, scope))
-          ? `(() => { const value = ${value}; return Object.values(value).some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : value; })()`
-          : value;
+          ? `(() => { const ${local} = ${value}; return Object.values(${local}).some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : ${local}; })()`
+          : `(${value})`;
       }
       case "array": {
         const value = `[${node.items.map((item) => this.value(item, scope)).join(", ")}]`;
+        const local = temporaryName(scope, "Value");
         return node.items.some((item) => mayProduceInvalidResult(item, scope))
-          ? `(() => { const value = ${value}; return value.some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : value; })()`
+          ? `(() => { const ${local} = ${value}; return ${local}.some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : ${local}; })()`
           : value;
       }
     }
@@ -621,9 +764,10 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       if (mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope)) {
         const left = this.condition(node.left, scope);
         const right = this.condition(node.right, scope);
-        const shortCircuit = node.op === "and" ? "!left" : "left";
+        const a = temporaryName(scope, "Left"), b = temporaryName(scope, "Right");
+        const shortCircuit = node.op === "and" ? `!${a}` : a;
         const shortValue = node.op === "and" ? "false" : "true";
-        return `(() => { const left: any = ${left}; if (left === Symbol.for("html-next.invalid-result")) return left; if (${shortCircuit}) return ${shortValue}; const right: any = ${right}; return right; })()`;
+        return `(() => { const ${a}: any = ${left}; if (${a} === Symbol.for("html-next.invalid-result")) return ${a}; if (${shortCircuit}) return ${shortValue}; const ${b}: any = ${right}; return ${b}; })()`;
       }
       const join = node.op === "and" ? "&&" : "||";
       const side = (side: ExpressionNode): string => {
@@ -637,8 +781,8 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     const code = this.value(node, scope);
     if (node.kind === "literal" && (typeof node.value === "string" || typeof node.value === "number")) return `Boolean(${code})`;
     const type = typeOf(node, scope);
-    // A closed object with a required field always has keys, so only its absence makes it false.
-    const filled = type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
+    const filled = node.kind === "object" ? node.pairs.some(pair => pair.key !== "__proto__")
+      : scope.references === undefined && type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
     if (filled || type.type.kind === "terminal" && type.type.name === "event") return code;
     switch (category(type.type)) {
       case "boolean": case "string": case "number": case "scalar": return code;
@@ -655,19 +799,17 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     const type = typeOf(node, scope);
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
     if (isScalar(type)) return code;
-    if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
-      ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
-      : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
-    return `${this.use("text")}(${code})`;
+    if (item !== undefined && isScalar(item)) return this.#joined(node, scope, code, type);
+    return this.#serialized(node, scope, code, value => `${this.use("text")}(${value})`);
   }
 
   /** The expression bound to an attribute of a native element. */
-  attribute(node: ExpressionNode, scope: Scope, name: string): string {
+  attribute(node: ExpressionNode, scope: Scope, name: string, options: { readonly enumeratedBooleanTokens?: boolean } = {}): string {
     const code = this.value(node, scope);
     const type = typeOf(node, scope);
     const kind = category(type.type);
     if (kind === "boolean" && !BOOLEAN_ATTRIBUTES.has(name) && !isEnumeratedBoolean(name)) {
-      return `${this.#wrap(node, this.condition(node, scope))} ? "" : undefined`;
+      return this.#serialized(node, scope, this.condition(node, scope), value => `${this.#wrap(node, value)} ? "" : undefined`);
     }
     // A number bound to an attribute typed as text is the text the DOM stores, as live writes it.
     // Frameworks leave `data-*` attributes untyped.
@@ -676,15 +818,17 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     }
     // Vue removes an attribute bound to null, but its attribute types accept only undefined.
     const plain = type.null === true ? `${this.#wrap(node, code)} ?? undefined` : code;
+    if (kind === "boolean" && isEnumeratedBoolean(name) && options.enumeratedBooleanTokens) {
+      return this.#serialized(node, scope, code, value => `${this.#wrap(node, value)}?.toString()`);
+    }
     if (kind === "boolean" || kind === "string" || kind === "number") return plain;
     // A string-or-number union serializes as Vue writes it; one with a boolean member needs the rule.
     if (kind === "scalar" && !hasBoolean(type.type)) return plain;
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
-    if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
-      ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
-      : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
-    if (isEnumeratedBoolean(name)) return `typeof (${code}) === "boolean" ? String(${code}) : ${this.use("attribute")}(${code})`;
-    return `${this.use("attribute")}(${code})`;
+    if (item !== undefined && isScalar(item)) return this.#joined(node, scope, code, type);
+    if (isEnumeratedBoolean(name)) return this.#serialized(node, scope, code,
+      value => `typeof (${value}) === "boolean" ? String(${value}) : ${this.use("attribute")}(${value})`, true);
+    return this.#serialized(node, scope, code, value => `${this.use("attribute")}(${value})`);
   }
 
   /** The list a `$each` iterates, filtered, sorted, and limited as declared. */
@@ -696,16 +840,18 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     source = this.value(node, scope),
   ): string {
     const type = typeOf(node, scope);
-    // An absent list, such as an omitted optional prop, iterates as nothing; anything but a list must too.
-    let code = type.type.kind === "list" ? source : `${this.use("list")}(${source})`;
-    if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
-    if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
-    if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
-    if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
-    return code;
+    return this.#serialized(node, scope, source, (value) => {
+      // Normalize absent inputs after retaining the invalid-result signal for the binding owner.
+      let code = type.type.kind === "list" ? value : `${this.use("list")}(${value})`;
+      if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
+      if (options.where !== undefined) code = `${code}.filter((${item}${mayProduceInvalidResult(node, scope) ? ": any" : ""}) => ${this.condition(options.where, options.itemScope)})`;
+      if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
+      if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
+      return code;
+    });
   }
 
-  /** Bind an already-shaped list and its loop metadata once for Vue's iteration. */
+  /** Bind an already-shaped list and its item and index once for Vue's iteration. */
   eachRows(code: string): string {
     return `${this.use("eachRows")}(${code})`;
   }
@@ -714,13 +860,27 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     return `${this.use("uniqueKeys")}(${items}, ${keyOf})`;
   }
 
+  #joined(node: ExpressionNode, scope: Scope, code: string, type: Static): string {
+    return this.#serialized(node, scope, code, value => `${this.#wrap(node, value)}${type.nullable ? "?." : "."}join(" ")`);
+  }
+
+  #serialized(node: ExpressionNode, scope: Scope, code: string, render: (value: string) => string, repeated = false): string {
+    const canFail = mayProduceInvalidResult(node, scope);
+    if (!canFail && !repeated) return render(code);
+    const value = temporaryName(scope, "Value");
+    return `((${value}: any) => ${canFail ? `${value} === Symbol.for("html-next.invalid-result") ? ${value} : ` : ""}${render(value)})(${code})`;
+  }
+
   #not(node: ExpressionNode, scope: Scope): string {
     if (mayProduceInvalidResult(node, scope)) {
       const value = this.condition(node, scope);
-      return `(() => { const operand: any = ${value}; return operand === Symbol.for("html-next.invalid-result") ? operand : !operand; })()`;
+      const operand = temporaryName(scope, "Operand");
+      return `(() => { const ${operand}: any = ${value}; return ${operand} === Symbol.for("html-next.invalid-result") ? ${operand} : !${operand}; })()`;
     }
-    if (node.kind === "binary" && node.op === "=") return `${this.#operand(node.left, scope)} !== ${this.#operand(node.right, scope)}`;
-    if (node.kind === "binary" && node.op === "!=") return `${this.#operand(node.left, scope)} === ${this.#operand(node.right, scope)}`;
+    if (node.kind === "binary" && !mayBeAbsent(node.left, scope) && !mayBeAbsent(node.right, scope)) {
+      if (node.op === "=") return `${this.#operand(node.left, scope)} !== ${this.#operand(node.right, scope)}`;
+      if (node.op === "!=") return `${this.#operand(node.left, scope)} === ${this.#operand(node.right, scope)}`;
+    }
     const code = this.condition(node, scope);
     return IDENTIFIER_PATH.test(code) || /^[\w$]+\(.*\)$/.test(code) ? `!${code}` : `!(${code})`;
   }
@@ -728,32 +888,59 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
   #binary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope): string {
     if (node.op === "and" || node.op === "or") {
       const code = this.condition(node, scope);
-      const both = category(typeOf(node.left, scope).type) === "boolean" && category(typeOf(node.right, scope).type) === "boolean";
-      return both ? code : `Boolean(${code})`;
+      const leftType = typeOf(node.left, scope), rightType = typeOf(node.right, scope);
+      const both = category(leftType.type) === "boolean" && !leftType.nullable && category(rightType.type) === "boolean" && !rightType.nullable;
+      if (both) return code;
+      const value = temporaryName(scope, "Value");
+      return mayProduceInvalidResult(node, scope)
+        ? `(() => { const ${value}: any = ${code}; return ${value} === Symbol.for("html-next.invalid-result") ? ${value} : Boolean(${value}); })()`
+        : `Boolean(${code})`;
     }
     const left = this.#operand(node.left, scope);
     const right = this.#operand(node.right, scope);
     if (mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope)) {
-      const body = this.#binaryOperands(node, scope, "left", "right");
-      return `(() => { const left: any = ${left}; if (left === Symbol.for("html-next.invalid-result")) return left; const right: any = ${right}; if (right === Symbol.for("html-next.invalid-result")) return right; return ${body}; })()`;
+      const a = temporaryName(scope, "Left"), b = temporaryName(scope, "Right");
+      const body = this.#binaryOperands(node, scope, a, b, true);
+      return `(() => { const ${a}: any = ${left}; const ${b}: any = ${right}; if (${a} === Symbol.for("html-next.invalid-result") || ${b} === Symbol.for("html-next.invalid-result")) return Symbol.for("html-next.invalid-result"); return ${body}; })()`;
     }
     return this.#binaryOperands(node, scope, left, right);
   }
 
-  #binaryOperands(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope, left: string, right: string): string {
+  #binaryOperands(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope, left: string, right: string, captured = false): string {
+    const once = (body: (left: string, right: string) => string): string => {
+      if (captured) return body(left, right);
+      const a = temporaryName(scope, "Left"), b = temporaryName(scope, "Right");
+      return `((${a}: any, ${b}: any) => ${body(a, b)})(${left}, ${right})`;
+    };
     const { op } = node;
     if (op === "=" || op === "!=") {
       const leftCategory = category(typeOf(node.left, scope).type);
       const rightCategory = category(typeOf(node.right, scope).type);
-      const compared = leftCategory !== rightCategory && leftCategory !== "unknown" && rightCategory !== "unknown"
-        ? `(${left} as unknown)` : left;
-      return `${compared} ${op === "=" ? "===" : "!=="} ${right}`;
+      const compare = (left: string, right: string): string => {
+        const compared = leftCategory !== rightCategory && leftCategory !== "unknown" && rightCategory !== "unknown"
+          ? `(${left} as unknown)` : left;
+        return `${compared} ${op === "=" ? "===" : "!=="} ${right}`;
+      };
+      if (!mayBeAbsent(node.left, scope) && !mayBeAbsent(node.right, scope)) return compare(left, right);
+      return once((left, right) => `(${left} === undefined || ${right} === undefined ? undefined : ${compare(left, right)})`);
     }
     if (op === "^=" || op === "$=" || op === "*=") {
       const method = op === "^=" ? "startsWith" : op === "$=" ? "endsWith" : "includes";
       const strings = category(typeOf(node.left, scope).type) === "string" && category(typeOf(node.right, scope).type) === "string";
       if (strings && !typeOf(node.right, scope).nullable) return `${left}${typeOf(node.left, scope).nullable ? "?." : "."}${method}(${right})`;
-      return `(typeof ${left} === "string" && typeof ${right} === "string" ? ${left}.${method}(${right}) : undefined)`;
+      return once((left, right) => `(typeof ${left} === "string" && typeof ${right} === "string" ? ${left}.${method}(${right}) : undefined)`);
+    }
+    if (["<", "<=", ">", ">="].includes(op)) {
+      const leftType = typeOf(node.left, scope), rightType = typeOf(node.right, scope);
+      if ([leftType.type, rightType.type].some(type => type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name))) return "undefined";
+      const leftCategory = category(leftType.type), rightCategory = category(rightType.type);
+      if (leftCategory === "string" && rightCategory === "string" && !leftType.nullable && !rightType.nullable &&
+        !mayBeAbsent(node.left, scope) && !mayBeAbsent(node.right, scope)) return `${left} ${op} ${right}`;
+      if (leftCategory !== "number" && rightCategory !== "number") {
+        const textOnly = leftCategory === "string" || rightCategory === "string";
+        const number = textOnly ? undefined : this.use("number");
+        return once((left, right) => `(typeof ${left} === "string" && typeof ${right} === "string"${number === undefined ? "" : ` || ${number}(${left}) !== undefined && ${number}(${right}) !== undefined`} ? ${left} ${op} ${right} : undefined)`);
+      }
     }
     if (["+", "-", "*", "/"].includes(op)) {
       const leftType = typeOf(node.left, scope).type;
@@ -772,18 +959,24 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       ? this.use(DECIMAL_HELPERS[op]!) : undefined;
     const x = this.#numeric(node.left, scope);
     const y = this.#numeric(node.right, scope);
+    const arithmetic = ["+", "-", "*", "/", "%"].includes(op) &&
+      !finiteStep(node, operand => category(typeOf(operand, scope).type) === "number");
+    const checked = (result: string): string => arithmetic ? `${this.use("finite")}(${result})` : result;
     if (x !== undefined && y !== undefined) {
-      if (decimal === undefined) return `${left} ${op} ${right}`;
+      if (decimal === undefined) return checked(`${left} ${op} ${right}`);
       // A call argument needs none of the parentheses an operand has for an operator.
       const argument = (operand: ExpressionNode, code: string): string => {
         const value = this.value(operand, scope);
         return code === `(${value})` ? value : code;
       };
-      return `${decimal}(${argument(node.left, left)}, ${argument(node.right, right)})`;
+      return checked(`${decimal}(${argument(node.left, left)}, ${argument(node.right, right)})`);
     }
     const number = this.use("number");
-    return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${decimal === undefined
-      ? `${number}(${left})! ${op} ${number}(${right})!` : `${decimal}(${number}(${left})!, ${number}(${right})!)`})`;
+    return once((left, right) => {
+      const result = decimal === undefined ? `${number}(${left})! ${op} ${number}(${right})!`
+        : `${decimal}(${number}(${left})!, ${number}(${right})!)`;
+      return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${checked(result)})`;
+    });
   }
 
   #call(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): string {
@@ -796,7 +989,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     }
     if (node.fn === "default") {
       if (node.args.length !== 2) return "undefined";
-      if (node.args[0]?.kind === "literal" && node.args[0].value === null) return this.value(node.args[1]!, scope);
+      if (node.args[0]?.kind === "literal") return this.value(node.args[0].value == null || typeof node.args[0].value === "symbol" ? node.args[1]! : node.args[0], scope);
       return scope.observesInputs
         ? `inputDefault(() => ${this.value(node.args[0]!, scope)}, () => ${this.value(node.args[1]!, scope)})`
         : `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})`;
@@ -810,7 +1003,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       return type.name === "integer" ? "number" : type.name;
     });
     if (kinds.length > 0 && kinds.every((kind) => kind === "number") &&
-      node.args.every((argument) => !typeOf(argument, scope).nullable)) {
+      node.args.every((argument) => !typeOf(argument, scope).nullable && !mayProduceInvalidResult(argument, scope))) {
       const args = node.args.map((argument) => this.value(argument, scope));
       if (node.fn === "abs" && args.length === 1) return `Math.abs(${args[0]})`;
       if (node.fn === "round" && args.length === 1) return `Math.round(${args[0]})`;

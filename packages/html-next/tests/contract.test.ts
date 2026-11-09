@@ -244,7 +244,20 @@ describe("defineContract", () => {
     }
   });
 
-  it("rejects case-insensitive prop collisions", () => {
+  it("preserves non-ASCII case in public prop names and attribute targets", () => {
+    const input = validContract();
+    input.props = Object.fromEntries(["é", "É"].map(name => [name, {
+      type: "string", target: { attribute: `DATA-${name}` }, description: name,
+    }]));
+    const contract = defineFromButtonFile(input);
+    for (const name of ["é", "É"]) {
+      assert.deepEqual(serializePropTarget(contract.props[name]!, name), {
+        kind: "attribute", name: `data-${name}`, value: name,
+      });
+    }
+  });
+
+  it("rejects ASCII case-insensitive prop collisions", () => {
     const input = validContract();
     input.props = {
       variant: input.props.variant,

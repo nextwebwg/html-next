@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, it, vi } from "vitest";
 import { build, createBuilder } from "vite";
@@ -14,6 +15,7 @@ import {
   componentModule,
   componentsModule,
   htmlNext,
+  hydrationModule,
   preparationModule,
   supportModule,
 } from "../src/index.js";
@@ -37,6 +39,107 @@ afterEach(async () => {
 });
 
 describe("HTML Next unplugin", () => {
+  it("emits a CSS-preserving static hydration entry without the component runtime", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-static-client-")); temporary.push(root);
+    const source = '<template component="ui-poster"><defs><prop name="title" type="string" default="Hello">Title.</prop><state name="active" type="boolean" value="true"></state></defs><article>{$title}</article><style>:host(:state(active)) { color: rebeccapurple; }</style></template>';
+    await writeFile(join(root, "poster.html"), source);
+    await writeFile(join(root, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["poster.html"], hydrate: true })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } } });
+    const bundle = await readFile(join(root, "dist/app.js"), "utf8");
+    assert.doesNotMatch(bundle, /attachGeneratedController|createElement|MutationObserver|parse5/);
+    assert.match(await readFile(join(root, "dist/components.css"), "utf8"), /rebeccapurple|#639/);
+    const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8"));
+    assert.deepEqual(manifest.client.adoption, []);
+    assert.deepEqual(manifest.client.creation, []);
+    assert.equal(manifest.client.module, hydrationModule);
+    assert.equal(manifest.server?.version, 1);
+    assert.equal(manifest.server.hasStyles, true);
+    assert.deepEqual(manifest.server.stylesheets, ["components.css"]);
+    assert.deepEqual(manifest.server.stateNames, { "ui-poster": ["active"] });
+    assert.deepEqual(manifest.server.sources, [{ source: "poster.html", kind: "component", sha256: createHash("sha256").update(source).digest("hex") }]);
+  });
+
+  it("records one physical stylesheet fingerprint across import queries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-server-style-sources-")); temporary.push(root);
+    const css = ':host { color: rebeccapurple; }';
+    await writeFile(join(root, "shared.css"), css);
+    for (const name of ["a", "b"]) await writeFile(join(root, `${name}.html`), `<template component="x-${name}"><div></div><style>@import "./shared.css?v=${name}";</style></template>`);
+    await writeFile(join(root, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["a.html", "b.html"], hydrate: true })],
+      resolve: { alias: generatedRuntimeAlias }, build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } } });
+    const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8"));
+    assert.deepEqual(manifest.server.sources.filter((source: { kind: string }) => source.kind === "stylesheet"),
+      [{ source: "shared.css", kind: "stylesheet", sha256: createHash("sha256").update(css).digest("hex") }]);
+    assert.deepEqual(manifest.server.stylesheets, ["components.css"]);
+  });
+
+  it("prunes a static tree while adopting live roots and preserving future invoked children", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-selected-client-")); temporary.push(root);
+    const label = '<template component="ui-label"><span>FutureLabelFactoryMarker</span></template>';
+    const counter = '<link rel="component" href="./label.html"><template component="ui-counter"><defs><state name="count" type="number" value="0"></state><handler name="add"><set name="count" expr:value="$count + 1"></set></handler></defs><section><button on:click="add">{$count}</button><ui-label $if="$count > 2"></ui-label></section></template>';
+    const poster = '<template component="ui-poster"><article>StaticOnlyFactoryMarker</article><style>article { color: blue; }</style></template>';
+    await writeFile(join(root, "label.html"), label);
+    await writeFile(join(root, "counter.html"), counter);
+    await writeFile(join(root, "poster.html"), poster);
+    await writeFile(join(root, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["counter.html", "poster.html"], hydrate: true })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["iife"], name: "SelectedClient", fileName: () => "app.js", cssFileName: "components" } } });
+    const bundle = await readFile(join(root, "dist/app.js"), "utf8");
+    assert.doesNotMatch(bundle, /StaticOnlyFactoryMarker/);
+    assert.match(bundle, /FutureLabelFactoryMarker/);
+    const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8"));
+    assert.deepEqual(manifest.client.adoption, ["ui-counter", "ui-label"]);
+    assert.equal(manifest.server.hydrate, true);
+    const rendered = await renderComponents("<ui-poster></ui-poster><ui-counter></ui-counter>", {
+      definitions: [parseComponent(poster), parseComponent(counter.replace(/^<link[^>]+>/, "")), parseComponent(label)], state: { '[component~="ui-counter"]': { count: 2 } },
+    });
+    const { window } = new JSDOM(rendered.html, { runScripts: "dangerously" });
+    try {
+      const before = window.document.querySelector("button")!;
+      const staticRoot = window.document.querySelector("article")!;
+      window.eval(bundle);
+      const fixture = (window as unknown as { SelectedClient: { hydrate(root?: ParentNode): void } }).SelectedClient;
+      fixture.hydrate();
+      fixture.hydrate(window.document.querySelector("section")!);
+      before.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(window.document.querySelector("button"), before);
+      assert.equal(before.textContent, "3");
+      assert.equal(window.document.querySelector("span")!.textContent, "FutureLabelFactoryMarker");
+      assert.equal(window.document.querySelector("article"), staticRoot);
+      assert.equal(staticRoot.textContent, "StaticOnlyFactoryMarker");
+    } finally { window.close(); }
+  });
+
+  it("requires adoption generation for the hydration entry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-client-options-")); temporary.push(root);
+    await writeFile(join(root, "poster.html"), '<template component="ui-poster"><div></div></template>');
+    await writeFile(join(root, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)};`);
+    await assert.rejects(build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["poster.html"] })],
+      build: { lib: { entry: join(root, "main.js"), formats: ["es"] } } }), /hydration entry requires hydrate: true/);
+  });
+
+  it("exposes explicitly retained creation roots without adopting their server instances", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-client-creation-")); temporary.push(root);
+    await writeFile(join(root, "poster.html"), '<template component="ui-poster"><article>Created later</article></template>');
+    await writeFile(join(root, "main.js"), `export { hydrate, createUiPoster } from ${JSON.stringify(hydrationModule)};`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["poster.html"], hydrate: true, client: { creationRoots: ["ui-poster"] } })],
+      resolve: { alias: generatedRuntimeAlias }, build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["iife"], name: "CreationClient", fileName: () => "app.js", cssFileName: "components" } } });
+    const { window } = new JSDOM("<article>Existing server content</article>", { runScripts: "dangerously" });
+    try {
+      window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
+      const fixture = (window as unknown as { CreationClient: { hydrate(): void; createUiPoster(options: object): Element } }).CreationClient;
+      const original = window.document.querySelector("article");
+      fixture.hydrate();
+      assert.equal(window.document.querySelector("article"), original);
+      assert.equal(fixture.createUiPoster({}).textContent, "Created later");
+      const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8"));
+      assert.deepEqual(manifest.client.adoption, []);
+      assert.deepEqual(manifest.client.creation, ["ui-poster"]);
+    } finally { window.close(); }
+  });
+
   it("keeps module stylesheet identities compatible with canonical native roots", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-module-css-"));
     temporary.push(root);
@@ -463,7 +566,11 @@ describe("HTML Next unplugin", () => {
     // +1 B: the unused hydration helper changes minified symbol allocation.
     // +6 B: identical native attributes are left alone during updates.
     // -18 B: a definition replaces a registered one instead of raising HR001; replacing instances ships only in hot output.
-    assert.ok(gzip <= 9_382, `direct benchmark entry is ${gzip} B gzip-6`);
+    // +218 B: declared row-field checks retain invalid results and warn once at their read sites.
+    // Namespace-aware prototype attribute keys add 20 B here. Namespace writers and URI tables
+    // remain absent; keep the limit at this exact measurement.
+    // Automatic root forwarding adds its invocation input channel (+316 B gzip-6).
+    assert.ok(gzip <= 9_955, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
@@ -891,8 +998,8 @@ describe("HTML Next unplugin", () => {
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname } },
       build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
     });
-    // `label` is not one of x-child's props, so it is an attribute the parent keeps writing on its root.
-    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b[\s\S]*writeAttribute\(r\.a\d+, "label"/);
+    // The parent updates the child's invocation inputs; its template controls forwarding.
+    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b[\s\S]*writeInvocationAttribute\(r\.h\d+, "label"/);
   });
 
   it("carries a literal prop named like a factory option as HTML input", async () => {

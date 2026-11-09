@@ -1,3 +1,4 @@
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -97,7 +98,7 @@ import Picker from "./${artifact}"; export const markup = render(Picker).body;`)
     for (const mode of ["application", "library"] as const) {
       for (const timing of ["same batch", "later edit"] as const) {
         it(`${engine} ${mode} ${timing} keeps independent hydration root snapshots`, async () => {
-          const browser = await type.launch();
+          const browser = await launchParityBrowser(type);
           const pages = await Promise.all([browser.newPage(), browser.newPage()]);
           const [native, converted] = pages as [Page, Page];
           const errors: string[] = [];
@@ -150,7 +151,7 @@ import Picker from "./${artifact}"; export const markup = render(Picker).body;`)
       for (const fixture of ["late", "rich", "siblings"] as const) {
         for (const edited of fixture !== "rich" ? [false, true] : [false]) {
           it(`${engine} ${mode} ${fixture}${edited ? " edited" : ""} preserves selection and reset defaults`, async () => {
-            const browser = await type.launch();
+            const browser = await launchParityBrowser(type);
             const pages = await Promise.all([browser.newPage(), browser.newPage()]);
             const [native, converted] = pages as [Page, Page];
             const errors: string[] = [];

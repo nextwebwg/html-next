@@ -7,6 +7,7 @@ import { dependentPropTypeSource, selectorGenerics, slotPropsType } from "./shar
 import { targetComponent } from "./backend.js";
 import { blockPlan, emitBlocks } from "./vanilla-blocks.js";
 import type { Invoked } from "../generate.js";
+import { attributeNamespace } from "../dom-attributes.js";
 
 function js(value: string): string {
   return JSON.stringify(value);
@@ -106,6 +107,8 @@ export function generateVanilla(
     if (attribute.kind !== "literal") return [];
     const name = js(attribute.name);
     const value = js(attribute.value);
+    const namespace = attributeNamespace(attribute.name);
+    if (namespace !== undefined) return [`  if (!element.hasAttributeNS(${js(namespace)}, ${js(attribute.name.slice(attribute.name.indexOf(":") + 1))})) element.setAttributeNS(${js(namespace)}, ${name}, ${value});`];
     return [attribute.name === "class" || attribute.name === "style"
       ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
       : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];

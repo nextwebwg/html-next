@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
@@ -12,6 +15,8 @@ import { chromium, firefox, webkit, type BrowserType } from "playwright";
 import { generateComponent, parseComponentResource, type ComponentDefinition } from "@nextwebwg/html-next";
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
+import { plainSlotFiles, plainSlotInvocations, plainSlotExpected, dynamicPlainSource, repeatedPlainSource } from "../../html-next/tests/fixtures/plain-slot-ownership.js";
+import { ownedEntryFiles, ownedEntryInvocation, ownedEntryInitial, ownedEntryChanged } from "../../html-next/tests/fixtures/owned-entry-expressions.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 /**
@@ -26,18 +31,35 @@ const list = (tag: string, row: string, later?: string) => `<template component=
   <slot name="row"><prop name="row" type="object" required>The row.<prop name="id" required type="string">Id.</prop><prop name="label" required type="string">Label.</prop></prop></slot>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', label: 'A' }, ${row}]"></state>
   ${later === undefined ? "" : `<handler name="change"><set name="rows" expr:value="[{ id: 'a', label: 'A' }, ${later}]"></set></handler>`}</defs>
-  <div><ul class="${tag}"><slot $each="r of $rows" $key="$loop.index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
+  <div><ul class="${tag}"><slot $each="r, index of $rows" $key="$index" name="row" from:row="$r"></slot></ul>${later === undefined ? "" : `<button type="button" on:click="change">Change</button>`}</div></template>`;
 const cases = { extra: "{ id: 'b', label: 'B', index: 1 }", missing: "{ id: 'b' }", wrong: "{ id: 2, label: 'B' }", later: "{ id: 'b', label: 'B' }" } as const;
-const page = `${[...Object.keys(cases), "defaults"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
-<template component="x-page" status="early" summary="Page."><main>${Object.keys(cases).map((name) =>
+const page = `${[...Object.keys(cases), "defaults", "finite", "optional", "entries", ...Object.keys(plainSlotFiles).map(name => name.slice(0, -5)), "moving-plain", "repeated-plain"].map((name) => `<link rel="component" href="./${name}.html">`).join("")}
+<template component="x-page" status="early" summary="Page."><defs><state name="label" type="string" value="Outer"></state><state name="count" type="number" value="99"></state><state name="empty" type="number" value="98"></state>
+<state name="loop" type="string" value="declared"></state><state name="index" type="string" value="named"></state>
+<state name="values" type="list(number)" from="[4, 5]"></state><state name="position" type="length" value="8px"></state><state name="edits" type="list(object({ label: string }))" from="[{ label: 'A' }, { label: 'B' }]"></state><handler name="change-aliases"><set name="values" expr:value="[5, 4, 3]"></set></handler></defs><main>${Object.keys(cases).map((name) =>
   `<x-${name}><template slot="row"><li $value="$row.label"></li></template></x-${name}>`).join("")}
-  <x-defaults><template slot="row"><li><b $value="$label"></b><i $value="$note"></i></li></template></x-defaults></main></template>`;
+  <x-defaults><template slot="row"><li><b $value="$label"></b><i $value="$note"></i></li></template></x-defaults><x-finite><template slot="row"><li>{$count}:{$empty}:{$missing = null}:{$__proto__}</li></template></x-finite><x-optional><template slot="row"><li>{$label}</li></template></x-optional>
+<ol data-iteration><p $each="item, position of $values" $key="concat($loop, $index, $item)" $sort="-item" $limit="2">{$loop}:{$index}:{$position}:{$item}:{$values.length}</p></ol>
+<div data-shadow><b $each="loop, index of $values" $where="$index = 'named'" $key="$loop">{$loop}:{$index + 1}</b><i>{$loop}:{$index}</i></div>
+<div data-dimension><p $each="position of $values" $where="round($position, 1) > 3">{round($position, 1)}</p><b $each="value, position of $values">{round($position, 1)}</b><i>{$position}</i></div>
+<div data-edits><label $each="entry of $edits" $key="$entry.label"><input bind:value="entry.label"><span>{$entry.label}</span></label></div>
+<div data-classes><b class="one two" class:one two="$values.length > 2"></b><i class:one two="$values.length > 2"></i></div>
+${ownedEntryInvocation}${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page><button id="change-aliases" on:click="change-aliases">Change aliases</button></main></template>`;
 // A default fills a rejected value and a null or missing one, typed or `unknown`.
 const defaults = `<template component="x-defaults" status="early" summary="Defaults."><defs>
   <slot name="row"><prop name="label" type="string" default="Fallback">Label.</prop><prop name="note" type="unknown" default="n">Note.</prop></slot>
   <state type="list(unknown)" name="rows" value="[{ label: 'A', note: 'x' }, { label: 3 }, { label: null, note: null }]"></state></defs>
-  <div><ul class="x-defaults"><slot $each="r of $rows" $key="$loop.index" name="row" from:label="$r.label" from:note="$r.note"></slot></ul></div></template>`;
-const files: Readonly<Record<string, string>> = { "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
+  <div><ul class="x-defaults"><slot $each="r, index of $rows" $key="$index" name="row" from:label="$r.label" from:note="$r.note"></slot></ul></div></template>`;
+const finite = `<template component="x-finite"><defs>
+  <slot name="row"><prop name="count" type="number" default="7">Count.</prop><prop name="empty" type="number" required>Empty.</prop><prop name="missing" type="unknown" required>Missing.</prop><prop name="__proto__" type="number" default="9">Prototype name.</prop></slot>
+  <state name="denominator" type="number" value="0"></state><state name="record" type="object({ ... })" value="{}"></state>
+  <handler name="valid"><set name="denominator" value="2"></set></handler>
+  <handler name="invalid"><set name="denominator" value="0"></set></handler>
+  <handler name="recover"><set name="denominator" value="4"></set></handler>
+</defs><div><ul class="x-finite"><slot name="row" $each="offset, index of [0, 1]" $key="$index" from:count="1 / ($denominator + $offset)" from:empty="1 / ($denominator + $offset)" from:missing="$record.absent" from:__proto__="1 / ($denominator + $offset)"></slot></ul>
+<button id="finite-valid" on:click="valid">Valid</button><button id="finite-invalid" on:click="invalid">Invalid</button><button id="finite-recover" on:click="recover">Recover</button></div></template>`;
+const optional = `<template component="x-optional"><defs><slot name="row"><prop name="label" type="string">Label.</prop></slot></defs><div><ul class="x-optional"><slot name="row"></slot></ul></div></template>`;
+const files: Readonly<Record<string, string>> = { ...ownedEntryFiles, ...plainSlotFiles, "moving-plain.html": dynamicPlainSource, "repeated-plain.html": repeatedPlainSource, "optional.html": optional, "finite.html": finite, "defaults.html": defaults, ...Object.fromEntries(Object.entries(cases).map(([name, row]) => [`${name}.html`, list(`x-${name}`, row, name === "later" ? "{ id: 'b', label: 'B', extra: true }" : undefined)])), "page.html": page };
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const htmlNextSource = fileURLToPath(new URL("../../html-next/src/", import.meta.url));
@@ -70,10 +92,10 @@ describe.skipIf(!enabled)("bound slot props are checked in full against their de
     }
     await writeFile(join(directory, "vanilla-entry.js"), `import { createXPage } from "./XPage.js";\ndocument.querySelector("#mount").append(createXPage());\n`);
     const forms = new Map<string, string>();
-    for (const target of ["vue", "react", "svelte"] as const) {
+    for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) {
       const out = join(directory, target);
       const manifest = await convertComponents({ mode: "application", target, root: directory, outDirectory: out, entries: ["page.html"], publicRootURL: "/" });
-      forms.set(target, manifest.components.find((component) => component.tag === "x-page")!.artifact);
+      forms.set(target, target === "angular" ? manifest.output.entry : manifest.components.find((component) => component.tag === "x-page")!.artifact);
       if (target === "vue") {
         for (const component of manifest.components) {
           const path = join(out, component.artifact);
@@ -86,6 +108,22 @@ createApp({ render: () => h(Form) }).mount(document.querySelector("#mount")!);\n
       } else if (target === "react") {
         await writeFile(join(out, "entry.tsx"), `import { createRoot } from "react-dom/client"; import Form from "./${forms.get(target)}";
 createRoot(document.querySelector("#mount")!).render(<Form />);\n`);
+      } else if (target === "preact") {
+        await writeFile(join(out, "entry.tsx"), `import { h, render } from "preact"; import Form from "./${forms.get(target)}";
+render(h(Form, {}), document.querySelector("#mount")!);\n`);
+      } else if (target === "angular") {
+        const app = join(out, "app.ts");
+        await writeFile(app, `import { Component } from "@angular/core"; import { XPage } from "./${forms.get(target)!.replace(/\.ts$/, "")}";
+@Component({ selector: "app-root", standalone: true, imports: [XPage], template: '<main x-page></main>' }) export class App {}`);
+        const config = join(out, "tsconfig.json");
+        await writeFile(config, JSON.stringify({ compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", strict: true, skipLibCheck: true,
+          experimentalDecorators: true, rewriteRelativeImportExtensions: true, rootDir: out, outDir: join(out, "compiled"), types: [] }, angularCompilerOptions: { strictTemplates: true }, files: [app] }));
+        const require = createRequire(import.meta.url);
+        const ngc = join(dirname(require.resolve("@angular/compiler-cli/package.json")), "bundles/src/bin/ngc.js");
+        try { await promisify(execFile)(process.execPath, [ngc, "-p", config], { cwd: out }); }
+        catch (error) { assert.fail((error as { stderr?: string }).stderr ?? String(error)); }
+        await writeFile(join(out, "entry.ts"), `import "@angular/compiler"; import { bootstrapApplication } from "@angular/platform-browser"; import { App } from "./compiled/app.js";
+document.querySelector("#mount")!.append(document.createElement("app-root")); bootstrapApplication(App).then(app => { window.destroyTarget = () => { app.destroy(); return app.viewCount; }; });\n`);
       } else {
         await writeFile(join(out, "entry.ts"), `import { mount } from "svelte"; import Form from "./${forms.get(target)}";
 mount(Form, { target: document.querySelector("#mount")! });\n`);
@@ -98,14 +136,16 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
         alias: { "@nextwebwg/html-next/generated-runtime": join(htmlNextSource, "generated-runtime.ts") }, plugins: [emptyStyles] }, mode);
       await build({ entryPoints: [join(directory, "vue", "entry.ts")], outfile: bundle("vue"), nodePaths: [nodeModules], plugins: [vuePlugin] }, mode);
       await build({ entryPoints: [join(directory, "react", "entry.tsx")], outfile: bundle("react"), jsx: "automatic", nodePaths: [nodeModules] }, mode);
+      await build({ entryPoints: [join(directory, "preact", "entry.tsx")], outfile: bundle("preact"), jsx: "automatic", jsxImportSource: "preact", nodePaths: [nodeModules] }, mode);
+      await build({ entryPoints: [join(directory, "angular", "entry.ts")], outfile: bundle("angular"), nodePaths: [nodeModules] }, mode);
       await build({ entryPoints: [join(directory, "svelte", "entry.ts")], outfile: bundle("svelte"), plugins: [sveltePlugin("client")] }, mode);
-      for (const target of ["live", "vanilla", "vue", "react", "svelte"]) bundles.set(`${target}-${mode}`, bundle(target));
+      for (const target of ["live", "vanilla", "vue", "react", "preact", "svelte", "angular"]) bundles.set(`${target}-${mode}`, bundle(target));
     }
   }, 240_000);
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-    for (const target of ["live", "vanilla", "vue", "react", "svelte"] as const) {
+    for (const target of ["live", "vanilla", "vue", "react", "preact", "svelte", "angular"] as const) {
       for (const mode of modes) {
         it(`${engine} ${target} ${mode} gives only conforming rows and warns once for each rejected slot prop`, async () => {
           const browser = await launchParityBrowser(browserType);
@@ -131,15 +171,117 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             }
             const rows = () => page.evaluate(() => Array.from(document.querySelectorAll("ul"), (list) => [list.className, Array.from(list.children, (row) => row.textContent)]));
             const filled = ["x-defaults", ["Ax", "Fallbackn", "Fallbackn"]];
-            await page.waitForFunction(() => document.querySelectorAll("li").length === 11);
-            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", "B"]], filled]);
-            assert.equal(warnings.length, 4);
+            await page.waitForFunction(() => document.querySelectorAll("li").length === 14).catch(error => { throw new Error(`${error}\n${errors.join("\n")}`); });
+            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", "B"]], filled, ["x-finite", ["7::true:9", "1:1:true:1"]], ["x-optional", ["Outer"]]]);
+            assert.equal(warnings.length, 4, warnings.join("\n"));
+            const ownedEntries = () => page.locator("[data-owned]").allTextContents();
+            assert.deepEqual(await ownedEntries(), ownedEntryInitial);
+            const plainSlots = () => page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent])));
+            assert.deepEqual(await plainSlots(), plainSlotExpected);
+            assert.equal(await page.locator("[data-plain-case] i").count(), 4);
+            const moving = await page.locator("[data-moving-plain] input").elementHandle();
+            const coreRuntime = target === "live" || target === "vanilla";
+            const editControl = async (selector: string, value: string): Promise<void> => {
+              const input = page.locator(selector);
+              assert.equal(await input.count(), 1);
+              await input.fill(value);
+              assert.equal(await input.inputValue(), value);
+              assert.ok(await input.evaluate(node => node === node.ownerDocument.activeElement));
+            };
+            await page.locator("[data-moving-plain] input").fill("Edited");
+            const placed = () => page.locator("[data-moving-plain] > b, [data-moving-plain] > p").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
+            assert.deepEqual(await placed(), [["p", "Plain"], ["b", "OwnFallback"]]);
+            const toggleContent = async (owner: "p" | "b"): Promise<void> => {
+              for (const text of ["", "Plain"]) {
+                await page.locator('[data-plain-action="content"]').click();
+                await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+                assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text);
+                const value = await page.locator("[data-moving-plain] input").inputValue();
+                const diagnostic = value === "Edited" ? undefined : await moving!.evaluate(node => {
+                  const current = document.querySelector<HTMLInputElement>("[data-moving-plain] input")!;
+                  return { same: node === current, previousConnected: node.isConnected, value: current.value, attribute: current.getAttribute("value"), defaultValue: current.defaultValue };
+                });
+                assert.equal(value, "Edited", JSON.stringify(diagnostic));
+              }
+            };
+            await toggleContent("p");
+            for (const [action, expected] of [
+              ["borrowed", [["b", "Plain"]]],
+              ["borrowed", [["p", "BorrowedFallback"], ["b", "Plain"]]],
+              ["root", [["p", "Plain"]]],
+              ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
+            ] as const) {
+              await page.locator(`[data-plain-action="${action}"]`).click();
+              await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+              assert.deepEqual(await placed(), expected);
+              // Frameworks may remount an outlet. Its current control must accept edits and focus;
+              // ordinary content updates below must preserve those edits in place.
+              if (!coreRuntime) await editControl("[data-moving-plain] input", "Edited");
+              await toggleContent(expected.some(([tag, text]) => tag === "b" && text === "Plain") ? "b" : "p");
+              assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
+              if (coreRuntime) assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+            }
+            const repeated = await page.locator("[data-repeated-plain] input").elementHandle();
+            await page.locator("[data-repeated-plain] input").fill("Kept");
+            await page.locator('[data-plain-action="first"]').click();
+            await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+            assert.equal(await page.locator("[data-repeated-plain] footer").textContent(), "Tail");
+            if (!coreRuntime) await editControl("[data-repeated-plain] input", "Kept");
+            assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+            if (coreRuntime) assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
+            assert.equal(await page.locator("[data-repeated-lazy] input").count(), 2);
+            assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
+            await page.evaluate(async () => {
+              const mount = document.querySelector("#mount")!, parent = mount.parentNode!, after = mount.nextSibling;
+              mount.remove();
+              await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+              parent.insertBefore(mount, after);
+              await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            });
+            assert.deepEqual(await placed(), [["p", "Plain"], ["b", "OwnFallback"]]);
+            if (!coreRuntime) {
+              await editControl("[data-moving-plain] input", "Edited");
+              await editControl("[data-repeated-plain] input", "Kept");
+            }
+            await toggleContent("p");
+            if (coreRuntime) {
+              assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+              assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            }
+            assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+            assert.deepEqual(await plainSlots(), plainSlotExpected);
+            const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));
+            assert.deepEqual(await iteration(), [["declared:named:0:5:2", true, false], ["declared:named:1:4:2", false, true]]);
+            const classes = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-classes] > *'), element => [...element.classList]));
+            assert.deepEqual(await classes(), [[], []]);
+            await page.locator('[data-edits] input').nth(1).fill("Edited");
+            await page.waitForFunction(() => document.querySelectorAll('[data-edits] span')[1]?.textContent === "Edited");
+            assert.deepEqual(await page.locator('[data-edits] span').allTextContents(), ["A", "Edited"]);
+            const dimensions = () => page.evaluate(() => ({ items: Array.from(document.querySelectorAll('[data-dimension] p'), row => row.textContent), indices: Array.from(document.querySelectorAll('[data-dimension] b'), row => row.textContent), outer: document.querySelector('[data-dimension] i')!.textContent }));
+            assert.deepEqual(await dimensions(), { items: ["4", "5"], indices: ["0", "1"], outer: "8px" });
+            const shadows = () => page.locator('[data-shadow]').innerText();
+            assert.equal((await shadows()).replace(/\s/g, ""), "4:15:2declared:named");
+            await page.click("#change-aliases");
+            await page.waitForFunction(() => document.querySelector('[data-iteration] p')?.textContent === "declared:named:0:5:3");
+            assert.deepEqual(await iteration(), [["declared:named:0:5:3", true, false], ["declared:named:1:4:3", false, true]]);
+            assert.deepEqual(await classes(), [["one\u00a0two"], ["one\u00a0two"]]);
+            assert.deepEqual(await ownedEntries(), ownedEntryChanged);
+            assert.deepEqual(await plainSlots(), plainSlotExpected);
+            assert.equal((await shadows()).replace(/\s/g, ""), "5:14:23:3declared:named");
+            assert.deepEqual(await dimensions(), { items: ["5", "4"], indices: ["0", "1", "2"], outer: "8px" });
             await page.click("button");
             await page.waitForFunction(() => document.querySelector(".x-later")!.textContent === "A");
-            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", ""]], filled]);
+            assert.deepEqual(await rows(), [["x-extra", ["A", ""]], ["x-missing", ["A", ""]], ["x-wrong", ["A", ""]], ["x-later", ["A", ""]], filled, ["x-finite", ["7::true:9", "1:1:true:1"]], ["x-optional", ["Outer"]]]);
             const message = "HR007: Slot `row` prop `row` does not satisfy its declared type `object({ id: string, label: string })`.";
             assert.deepEqual(warnings.map((warning) => [warning.match(/extra|missing|wrong|later|defaults/i)?.[0].toLowerCase(), warning.slice(warning.indexOf("HR007"))]).sort(),
               [...Object.keys(cases).map((name) => [name, message]), ["defaults", "HR007: Slot `row` prop `label` does not satisfy its declared type `string`."]].sort());
+            for (const [button, expected] of [["valid", ["0.5:0.5:true:0.5", "0.3333333333333333:0.3333333333333333:true:0.3333333333333333"]], ["invalid", ["0.5:0.5:true:0.5", "1:1:true:1"]], ["recover", ["0.25:0.25:true:0.25", "0.2:0.2:true:0.2"]]] as const) {
+              await page.click(`#finite-${button}`);
+              await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+              assert.deepEqual(await page.locator(".x-finite li").allTextContents(), expected);
+            }
+            if (target === "angular") assert.equal(await page.evaluate(() => (window as any).destroyTarget()), 0);
             assert.deepEqual(errors, []);
           } finally {
             await browser.close();

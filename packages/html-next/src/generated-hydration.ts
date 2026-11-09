@@ -142,12 +142,12 @@ export function adoptProjection(spec: Spec, root: Element, tag: string, invoked:
   regions: Readonly<Record<number, string>> = {}, borrowed?: (root: Element) => readonly HydrationRange[]): Node[] | undefined {
   const server = serverRanges(root, false, tag);
   const runs = new Map<string, Cursor>();
-  for (const range of [...server?.ranges ?? [], ...borrowed?.(root) ?? []]) {
+  for (const range of [...borrowed?.(root) ?? [], ...server?.ranges ?? []]) {
     if (range.scoped || runs.has(range.slot)) continue;
     // A range showing its fallback ends with the marks of the slot's regions that render nothing, two each.
     const empty = range.fallback ? Object.values(regions).filter((slot) => slot === range.slot).length * 2 : 0;
     if (range.fallback && empty === 0) continue;
-    runs.set(range.slot, { node: range.fallback ? range.content[range.content.length - empty]! : range.markers[0]!.nextSibling,
+    runs.set(range.slot, { node: range.fallback ? range.content[range.content.length - empty] ?? null : range.markers[0]!.nextSibling,
       end: range.markers[1] ?? range.markers[0]!, parent: range.markers[0]!.parentNode! });
   }
   const carried = server?.carried ?? [];

@@ -1,3 +1,5 @@
+import { entryLists } from "../entry-origin.js";
+import { ITERATION_INDEX } from "../expression.js";
 /**
  * The direct-extend Vanilla planner: components with a controller, declared state, `$if` and keyed
  * `$each` compile to cloned prototypes, compile-time site walks and fused, compare-before-write
@@ -12,23 +14,27 @@ import { propInputOrder } from "./backend.js";
 import {
   compileExpression,
   dimensionType,
+  finiteStep,
   expressionFormattingType,
   mathArity,
-  typeCheckedDependencies,
+  referencePath,
+  type ReferencePath,
   wholeNumber,
   type CompiledExpression,
   type ExpressionNode,
   type Scope as TypeScope,
 } from "../expression.js";
+import { ReferenceSchemas } from "./reference-schema.js";
 import type { ArmRoot, CompactType } from "../generated-runtime.js";
 import { componentStateNames } from "../component-styles-build.js";
 import type { ComponentStyleGraph } from "../component-styles.js";
 import { PROJECTED_ATTRIBUTE, stateAttribute } from "../component-styles.js";
-import { foreignContent } from "parse5";
+import { objectKey, svgAttributeName } from "./shared.js";
+import { attributeNamespace } from "../dom-attributes.js";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { repeatedSlotNames, orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ScriptDeclaration, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
 import { fail } from "../diagnostics.js";
 import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
@@ -36,7 +42,7 @@ import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
 import { hasBounds } from "../validate.js";
 import { invocationValue } from "../prop-values.js";
-import { kebabCase, propAttribute } from "../names.js";
+import { asciiLowerCase, kebabCase, propAttribute } from "../names.js";
 import { conformingStates, declaredStateLiteral, literalInitial, NotLiteral } from "./state-roots.js";
 import type { Invoked } from "../generate.js";
 
@@ -44,7 +50,7 @@ import type { Invoked } from "../generate.js";
 const NESTED = 1 << 30;
 /** Roots from index 29 on share this bit; which of them changed is in the written map (`d`). */
 const OVERFLOW = 1 << 29;
-/** A row's position changed: what reads an index or `loop` re-runs (keyed.ts `POSITION`). */
+/** A row's position changed: what reads an index re-runs (keyed.ts `POSITION`). */
 const POSITION = 1 << 31;
 
 /** A loop's bit in a position mask, by its rows' level; levels past 30 share one bit, which only over-approximates. */
@@ -55,13 +61,6 @@ const rootBit = (index: number): number => index < 29 ? 1 << index : OVERFLOW;
 
 /** Elements whose children the live runtime manages itself (scoped slot and `$match` carriers). */
 const EXCLUDED = new Set(["template"]);
-
-/** A bound attribute's name on an SVG element, case-adjusted as the HTML parser adjusts it. */
-function svgAttributeName(name: string): string {
-  const token = { attrs: [{ name, value: "" }] };
-  foreignContent.adjustTokenSVGAttrs(token as Parameters<typeof foreignContent.adjustTokenSVGAttrs>[0]);
-  return token.attrs[0]!.name;
-}
 
 interface Root {
   readonly prop?: boolean;
@@ -110,10 +109,8 @@ interface Lowered {
   readonly contents: boolean;
   /** May evaluate to NONCONFORMING, which a binding then does not write. */
   readonly fails: boolean;
-  /** The loops whose index or `loop` record it reads, one `levelBit` each. */
+  /** The loops whose index it reads, one `levelBit` each. */
   readonly positional?: number;
-  /** The loops whose row count it reads (through `loop`, except `loop.index` and `loop.first`). */
-  readonly counted?: number;
   /** The blocks whose item or alias value it reads, one `levelBit` each: rows below an outer one follow its item. */
   readonly items?: number;
   /** Roots from index 29 on that it reads, whose changes share the overflow bit. */
@@ -122,9 +119,13 @@ interface Lowered {
   readonly key: string;
 }
 
-type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range" | "hoststate";
+type BindingKind = "forward" | "prop" | "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range" | "hoststate";
 
 interface Binding {
+  readonly receiver?: number;
+  readonly ordered?: boolean;
+  readonly fallback?: string;
+  readonly prop?: { readonly index: number; readonly name: string; readonly input: boolean };
   readonly site: number;
   readonly kind: BindingKind;
   readonly name: string;
@@ -163,10 +164,8 @@ interface Region {
   /** Keyed rows' key, or undefined for rows that follow positions. */
   readonly key?: Lowered | undefined;
   readonly alias?: string;
-  /** Something in the rows, below them, or their key reads their index or `loop`. */
+  /** Something in the rows, below them, or their key reads their index. */
   readonly positional?: boolean;
-  /** Rows (or their key) read the row count. */
-  readonly counted?: boolean;
   /** A slot's name. */
   readonly slot?: string;
   /** The slot the region's element names (`slot`), which its marks and content are projected into. */
@@ -184,7 +183,7 @@ interface Region {
   readonly of?: Lowered;
   /** `<slot of>`: each static prop's text, which converts by the type the child's slot declares. */
   readonly propRaws?: readonly (string | undefined)[];
-  readonly listRoot?: number;
+  readonly listRoots?: readonly number[];
   /** A consumer region at the top of content for a slot with `accepts`: that slot's list follows it. */
   readonly listed?: boolean;
 }
@@ -242,6 +241,8 @@ const inProjection = (block: Block | undefined): boolean =>
  * live lowering puts the component's root in place of the invocation.
  */
 interface Invocation {
+  readonly ordered: boolean;
+  readonly names: readonly (readonly [string, string])[];
   readonly site: number;
   readonly factory: string;
   /** Literal prop attributes, which the component reads as HTML input. */
@@ -250,6 +251,7 @@ interface Invocation {
   readonly attributes: readonly (readonly [string, string])[];
   /** Bound props: each starts as its attribute text, then applies as its value whenever what it read changes. */
   readonly props: readonly { readonly name: string; readonly attribute: string; readonly expression: Lowered; readonly record: string;
+    readonly fallback?: string;
     readonly availability?: string;
     readonly snapshot?: boolean;
     /** The prop's compact type, as source, which a bound value must satisfy to be written (none, 0, for a select prop). */
@@ -285,6 +287,8 @@ export interface BlockPlan {
   /** Initializer statements, in declaration order. */
   readonly initializers: readonly string[];
   readonly handlers: readonly HandlerPlan[];
+  /** Immutable reference checks emitted once per module. */
+  readonly referenceSchemas: readonly string[];
   /** Each computed root's index and lowered expression. */
   readonly computeds: readonly { readonly index: number; readonly source: string }[];
   readonly seeds: readonly { readonly index: number; readonly source: string }[];
@@ -376,6 +380,17 @@ export function compactType(node: TypeNode): CompactType {
       // A selected type depends on another declaration; a separated list checks its items.
       return ["p", { js: `detailCheck(${checkSource(node)})` } satisfies CompactCheck];
   }
+}
+
+function compactReferenceType(type: TypeNode): CompactType {
+      switch (type.kind) {
+        case "list": return ["l"];
+        case "record": return ["r"];
+        case "object": return ["o"];
+        case "union": return ["u", ...type.members.map(compactReferenceType)];
+        case "constrained": return compactReferenceType(type.base);
+        default: return compactType(type);
+      }
 }
 
 /** JavaScript for a compact type: JSON, with each predicate's check written as code. */
@@ -497,15 +512,15 @@ function valueSource(value: unknown): string {
   if (typeof value === "number") return numberSource(value);
   if (Array.isArray(value)) return `[${value.map(valueSource).join(", ")}]`;
   return `{ ${Object.entries(value as Record<string, unknown>)
-    .map(([key, item]) => `${JSON.stringify(key)}: ${valueSource(item)}`).join(", ")} }`;
+    .map(([key, item]) => `${objectKey(key)}: ${valueSource(item)}`).join(", ")} }`;
 }
 
-/** A local name: a row's item, index or `loop` record, or a `$with`/`$match` alias. */
+/** A local name: a row's item, index, or a `$with`/`$match` alias. */
 interface AliasEntry {
   readonly name: string;
   /** The level of the block whose record holds it. */
   readonly level: number;
-  readonly kind: "item" | "index" | "loop";
+  readonly kind: "item" | "index";
   /** A variable that holds it where it is evaluated (a function's parameter), not the record chain. */
   readonly source?: string;
   /** The holder record's field for it, as a scoped slot's prop values are held. */
@@ -514,6 +529,7 @@ interface AliasEntry {
 
 interface Scope {
   readonly observesInputs?: boolean;
+  readonly reference?: (node: ExpressionNode, path: ReferencePath, scope: Scope) => Lowered;
   readonly roots: readonly Root[];
   /** Local names, innermost last. */
   readonly aliases: readonly AliasEntry[];
@@ -544,7 +560,6 @@ function aliasSource(scope: Scope, entry: AliasEntry): string {
   const record = `r${".u".repeat(up)}`;
   if (entry.field !== undefined) return `${record}.${entry.field}`;
   if (entry.kind === "index") return `${record}.j`;
-  if (entry.kind === "loop") return `loopRecord(${record})`;
   return up === 0 && scope.closure !== true ? "o" : `${record}.i`;
 }
 
@@ -565,7 +580,13 @@ function none(key: string, source: string): Lowered {
   return { source, bits: 0, nested: false, item: false, boolean: false, deep: false, contents: false, fails: false, key };
 }
 
-function lower(node: ExpressionNode, scope: Scope): Lowered {
+function lower(node: ExpressionNode, scope: Scope, base = false): Lowered {
+  const path = !base && scope.reference !== undefined ? referencePath(node) : undefined;
+  if (path !== undefined) return scope.reference!(node, path, scope);
+  return lowerUnchecked(node, scope);
+}
+
+function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
   // A recorded evaluation is never shared: its reads array is its own.
   const key = `${scope.record ?? ""}${JSON.stringify(node)}`;
   switch (node.kind) {
@@ -575,7 +596,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       return { ...none(key, valueSource(value)), boolean: typeof value === "boolean" };
     }
     case "id": {
-      // The innermost local of that name: an item, an index or a `loop` record, which follow positions.
+      // The innermost local of that name: an item, an index, which follow positions.
       const entry = scope.aliases.findLast((candidate) => candidate.name === node.name);
       if (entry !== undefined && entry.field !== undefined) {
         // A scoped slot's prop, by name; one this rendering's slot does not give is the consumer's own.
@@ -589,7 +610,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         const source = read(scope, aliasSource(scope, entry));
         return entry.kind === "index" ? { ...none(key, source), item: true, positional: levelBit(entry.level) }
           : { ...none(key, source), item: true, deep: true,
-            ...entry.kind === "loop" ? { positional: levelBit(entry.level), counted: levelBit(entry.level) } : { items: levelBit(entry.level) } };
+            items: levelBit(entry.level) };
       }
       if (node.name === "$$event" && scope.event === true) return { ...none(key, "e"), deep: true };
       const index = scope.roots.findIndex((root) => root.name === node.name);
@@ -612,18 +633,16 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       };
     }
     case "member": {
-      const { counted, ...object } = lower(node.object, scope);
-      // `loop.index` and `loop.first` follow the row's index only, not the count.
-      const indexOnly = node.object.kind === "id" && (node.key === "index" || node.key === "first");
+      const object = lower(node.object, scope, true);
       return {
-        ...object, ...counted === undefined || indexOnly ? {} : { counted }, key, boolean: false, deep: true,
+        ...object, key, boolean: false, deep: true,
         source: read(scope, `${object.fails ? "readFailing" : "readMember"}(${object.source}, ${JSON.stringify(node.key)})`),
         // A read below a root follows that root's data; a read below the item is item data.
         nested: object.nested || !object.item && object.bits !== 0,
       };
     }
     case "index": {
-      const object = lower(node.object, scope);
+      const object = lower(node.object, scope, true);
       const index = lower(node.index, scope);
       const both = merge(object, index);
       return {
@@ -650,16 +669,20 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         const a = truthiness(left, scope.record);
         const b = truthiness(right, scope.record);
         return fails
-          ? { ...none(key, `logicValue(${node.op === "and"}, ${a.source}, ${b.source})`), ...merge(a, b), fails: true }
+          ? { ...none(key, `((q) => q === NONCONFORMING ? q : ${node.op === "and" ? `q ? ${b.source} : false` : `q ? true : ${b.source}`})(${a.source})`), ...merge(a, b), fails: true }
           : { ...none(key, `(${a.source} ${node.op === "and" ? "&&" : "||"} ${b.source})`), ...merge(a, b), boolean: true };
       }
-      if ((node.op === "=" || node.op === "!=") && !fails) {
-        // Identity comparison reads no contents, and both sides share the interpreter's ABSENT.
-        return { ...none(key, `(${left.source} ${node.op === "=" ? "===" : "!=="} ${right.source})`), ...merge(left, right), boolean: true };
+      if (node.op === "=" || node.op === "!=") {
+        const present = (node: ExpressionNode, value: Lowered): boolean =>
+          node.kind === "literal" && typeof node.value !== "symbol" || value.boolean && !value.fails;
+        const direct = !fails && present(node.left, left) && present(node.right, right);
+        return { ...none(key, direct ? `(${left.source} ${node.op === "=" ? "===" : "!=="} ${right.source})`
+          : `equalValue(${left.source}, ${right.source}${node.op === "!=" ? ", true" : ""})`), ...merge(left, right), boolean: direct };
       }
       const arithmetic = ARITHMETIC.has(node.op);
-      const leftDimension = arithmetic ? dimensionType(node.left, scope.types) : undefined;
-      const rightDimension = arithmetic ? dimensionType(node.right, scope.types) : undefined;
+      const dimensional = arithmetic || ["<", "<=", ">", ">="].includes(node.op);
+      const leftDimension = dimensional ? dimensionType(node.left, scope.types) : undefined;
+      const rightDimension = dimensional ? dimensionType(node.right, scope.types) : undefined;
       const whole = (operand: ExpressionNode): boolean =>
         wholeNumber(operand, (read) => declaredExpressionType({ ast: read }, scope.types));
       const decimal = DECIMAL[node.op] !== undefined && !(whole(node.left) && whole(node.right)) ? DECIMAL[node.op] : undefined;
@@ -667,7 +690,10 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         : `, ${dimensionSource(leftDimension)}, ${dimensionSource(rightDimension)}`;
       return {
         ...none(key, `binaryValue(${JSON.stringify(node.op)}, ${left.source}, ${right.source}${dimensions}${decimal === undefined ? "" : `, ${decimal}`})`),
-        ...merge(left, right), fails: fails || leftDimension !== undefined || rightDimension !== undefined,
+        ...merge(left, right), fails: fails || arithmetic && !finiteStep(node, operand => {
+          const type = declaredExpressionType({ ast: operand }, scope.types);
+          return type?.kind === "terminal" && (type.name === "number" || type.name === "integer");
+        }),
       };
     }
     case "conditional": {
@@ -677,7 +703,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const both = merge(test, merge(consequent, alternate));
       return {
         ...none(key, test.fails
-          ? `chooseValue(${test.source}, ${consequent.source}, ${alternate.source})`
+          ? `((q) => q === NONCONFORMING ? q : q ? ${consequent.source} : ${alternate.source})(${test.source})`
           : `(${test.source} ? ${consequent.source} : ${alternate.source})`),
         ...both, boolean: consequent.boolean && alternate.boolean, deep: consequent.deep || alternate.deep,
       };
@@ -691,7 +717,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         return {
           ...none(key, scope.observesInputs
             ? `inputDefault(() => ${value.source}, () => ${fallback.source}, ABSENT)`
-            : `defaultValue(${value.source}, ${fallback.source})`), ...reads,
+            : `((q) => q === ABSENT || q == null ? ${fallback.source} : q)(${value.source})`), ...reads,
           boolean: value.boolean && fallback.boolean, deep: value.deep || fallback.deep,
         };
       }
@@ -738,7 +764,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   }
 }
 
-type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "counted" | "items" | "overflow">;
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "items" | "overflow">;
 
 /** What reads nothing: the seed of reads merged over a literal's or call's parts, which may be none. */
 const NO_READS: Reads = { bits: 0, nested: false, item: false, contents: false, fails: false };
@@ -747,7 +773,7 @@ function merge(left: Reads, right: Reads): Reads {
   return {
     bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item,
     contents: left.contents || right.contents, fails: left.fails || right.fails,
-    positional: (left.positional ?? 0) | (right.positional ?? 0), counted: (left.counted ?? 0) | (right.counted ?? 0),
+    positional: (left.positional ?? 0) | (right.positional ?? 0),
     items: (left.items ?? 0) | (right.items ?? 0),
     ...left.overflow === undefined && right.overflow === undefined ? {}
       : { overflow: [...new Set([...left.overflow ?? [], ...right.overflow ?? []])] },
@@ -890,6 +916,8 @@ class Planner {
   private readonly computing = new Set<number>();
   /** Initializer statements, in declaration order. */
   readonly initializers: string[] = [];
+  private readonly referenceMetadata = new ReferenceSchemas(type => compactSource(compactReferenceType(type)), "RC");
+  readonly referenceSchemas = this.referenceMetadata.sources;
   readonly handlers = new Map<string, HandlerPlan>();
   /** The projection being planned, and the component it is projected into, whose slots name its carriers' props. */
   private projecting: { block: Block; readonly definition: ComponentDefinition } | undefined;
@@ -970,70 +998,56 @@ class Planner {
     return plan;
   }
 
-  /**
-   * Lowers an expression the live runtime evaluates with `evalConforming`: a declared path below a
-   * root is checked against its own type first, and a failing one warns once and leaves the
-   * expression nonconforming. A root's own value is checked on every write, so it always passes.
-   */
-  checked(plan: CompiledExpression, scope: Scope): Lowered {
-    const value = lower(plan.ast, scope);
-    let paths: readonly string[] = [];
-    try { paths = typeCheckedDependencies(plan); } catch { /* evaluated as written */ }
-    const checks: string[] = [];
-    let reads: Reads = value;
-    for (const path of paths) {
-      const declared = declaredTypeAt(this.definition, path);
-      if (declared === undefined) continue;
-      const [name, ...steps] = path.split(".");
-      const index = this.roots.findIndex((root) => root.name === name);
-      if (index < 0) unreachable(`declared reference \`${path}\` reads a root`);
-      const root = this.roots[index]!;
-      const key = JSON.stringify(`expression:${plan.source}:${path}`);
-      const select = this.definition.contract.props[name!]?.select;
-      /** The check of a read: a select prop's against the type its selector's current value chooses. */
-      const check = (read: string): string => {
-        if (select === undefined) {
-          const type = compactType(declared);
-                return `checkReference(S, ${read}, ${compactSource(type)}, ${key}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`;
-        }
-        const from = this.roots.findIndex((candidate) => candidate.name === select.from);
-        if (from < 0) unreachable(`a select prop's selector \`${select.from}\` is a root`);
-        reads = merge(reads, { bits: rootBit(from), nested: false, item: false, contents: false, fails: true, ...from >= 29 ? { overflow: [from] } : {} });
-        const choice = (type: TypeNode | undefined): string => {
-          for (const step of steps) type = type === undefined ? undefined : typeAtKey(type, step);
-          if (type === undefined) return "0, \"\"";
-          const compact = compactType(type);
-          return `${compactSource(compact)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(type)}.`)}`;
-        };
-        // The last choice is the one no option matches, or a null selector: the null type.
-        const options = [...select.options.map((option) => `[${JSON.stringify(option.value)}, ${choice(normalizeType(option.type))}]`),
-          `[null, ${choice({ kind: "terminal", name: "null" })}]`];
-        return `checkSelected(S, ${read}, v[${from}], [${options.join(", ")}], ${key})`;
-      };
-      // A local that shadows a root is still checked against the root's declared type, as live does.
-      const shadow = scope.aliases.findLast((candidate) => candidate.name === name);
-      if (shadow !== undefined) {
-        // A scoped slot's prop reads by name, falling back to the consumer's own (see `lower`).
-        const local = shadow.field === undefined ? aliasSource(scope, shadow) : lower({ kind: "id", name: name! }, { ...scope, record: undefined }).source;
-        const localRead = steps.length === 0 ? local : `readDeclared(${local}, ${JSON.stringify(steps)}${scope.record === undefined ? "" : `, ${scope.record}`})`;
-        checks.push(check(scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`));
-        reads = merge(reads, { bits: 0, nested: false, item: true, contents: false, fails: true });
-        continue;
-      }
-      // A state root's own value is checked on every write, unless its initial value may not conform.
-      if (steps.length === 0 && root.checked !== true) continue;
-      const base = root.computed === undefined ? `v[${index}]` : `g(${index})`;
-      const declaredRead = scope.record === undefined
-        ? steps.length === 0 ? base : `readDeclared(${base}, ${JSON.stringify(steps)})`
-        : `rec(${scope.record}, readDeclared(${base}, ${JSON.stringify(steps)}, ${scope.record}))`;
-      checks.push(check(declaredRead));
-      const rootReads: Reads = root.computed === undefined
-        ? { bits: rootBit(index), nested: steps.length > 0, item: false, contents: false, fails: true, ...index >= 29 ? { overflow: [index] } : {} }
-        : this.computedLowered(index);
-      reads = merge(reads, { ...rootReads, item: false, contents: false, fails: true });
+  /** Reuses the compiler's finite, immutable schema encoding. */
+  private schema(type: TypeNode | undefined, depth: number): string {
+    return this.referenceMetadata.reference(type, depth);
+  }
+
+  /** Checks the final reference where it executes, without checking intermediate containers. */
+  private reference(expression: string, node: ExpressionNode, path: ReferencePath, scope: Scope): Lowered {
+    const shadow = scope.aliases.findLast(candidate => candidate.name === path.root);
+    const type = shadow === undefined ? declaredTypeAt(this.definition, [path.root]) : scope.types.typeOfDeclaredPath?.(path.root);
+    const select = shadow === undefined ? this.definition.contract.props[path.root]?.select : undefined;
+    const root = this.roots.findIndex(root => root.name === path.root);
+    if (select === undefined && (type === undefined || shadow === undefined && path.steps.length === 0 && this.roots[root]?.checked !== true)) {
+      return lower(node, scope, true);
     }
-    if (checks.length === 0) return value;
-    return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
+    const dynamic = path.staticKeys === undefined;
+    const schema = (root: TypeNode | undefined): string => {
+      if (!dynamic) for (const key of path.staticKeys!) root = root === undefined ? undefined : typeAtKey(root, key);
+      return this.schema(root, dynamic ? path.steps.length : 0);
+    };
+    let descriptor = select === undefined ? schema(type) : "0";
+    let selector: Reads = NO_READS;
+    if (select !== undefined) {
+      const index = this.roots.findIndex(root => root.name === select.from);
+      if (index < 0) unreachable(`a select prop's selector \`${select.from}\` is a root`);
+      selector = { ...NO_READS, bits: rootBit(index), ...index >= 29 ? { overflow: [index] } : {} };
+      descriptor = `(${select.options.map(option => `v[${index}] === ${JSON.stringify(option.value)} ? ${schema(normalizeType(option.type))} : `).join("")}${schema({ kind: "terminal", name: "null" })})`;
+    }
+    const key = JSON.stringify(`expression:${expression}:${path.name}`);
+    const name = JSON.stringify(path.name);
+    if (descriptor === "0") return lower(node, scope, true);
+    if (!dynamic) {
+      const value = lower(node, scope, true);
+      return { ...value, ...merge(value, selector), fails: true,
+        source: `checkedReferenceValue(S, ${value.source}, ${descriptor}, ${key}, ${name})` };
+    }
+    let value = lower({ kind: "id", name: path.root }, scope, true);
+    const lines = [`let x = ${value.source}, t = ${descriptor}, k;`];
+    for (const step of path.steps) {
+      const key = typeof step.key === "object" ? lower(step.key, scope) : none("", valueSource(step.key));
+      lines.push(`k = ${key.source}; x = ${read(scope, `${step.member ? "readFailing" : "readIndex"}(x, k)`)}; t = referenceSchemaAt(t, k);`);
+      value = { ...value, ...merge(value, key), deep: true, boolean: false,
+        nested: value.nested || !value.item && value.bits !== 0 };
+    }
+    return { ...value, ...merge(value, selector), fails: true,
+      source: `(() => { ${lines.join(" ")} return checkedReferenceValue(S, x, t, ${key}, ${name}); })()` };
+  }
+
+  /** Lowers with actual-read checks; static dependency discovery remains a separate compiler pass. */
+  checked(plan: CompiledExpression, scope: Scope): Lowered {
+    return lower(plan.ast, { ...scope, reference: (node, path, active) => this.reference(plan.source, node, path, active) });
   }
 
   /**
@@ -1138,7 +1152,7 @@ class Planner {
     block.transitions = true;
   }
 
-  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] | 5 {
+  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean, ordered = false): unknown[] | 5 {
     if (EXCLUDED.has(node.name)) unreachable("a <template> without a flow renders as its content");
     // A component the graph compiles renders through its factory; any other custom element is an
     // element, as an unregistered one is to live lowering.
@@ -1159,7 +1173,18 @@ class Planner {
     let content: Lowered | undefined;
     let html: Lowered | undefined;
     const selectValue = (name: string): boolean => node.name === "select" && name === "value";
+    const forwards = ordered || orderedAttributeWrites(node.attributes);
+    const bindingStart = block.bindings.length;
     for (const attribute of node.attributes) {
+      if (attribute.kind === "forward") {
+        block.bindings.push({ site: this.site(block, path), kind: "forward", name: "", expression: none("attribute-inputs", "attributes"), initial: "undefined", ordered: true });
+        continue;
+      }
+      if (attribute.kind === "literal" && forwards) {
+        if (node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+        block.bindings.push({ site: this.site(block, path), kind: "attribute", name: attribute.name, expression: none(`literal:${attribute.name}:${attribute.value}`, JSON.stringify(attribute.value)), initial: "undefined", ordered: true });
+        continue;
+      }
       if (attribute.kind === "literal") continue;
       // A property (a bound control's value included) is written with each new result, as the element
       // may have changed it; every other binding writes only a result that differs from its last.
@@ -1193,7 +1218,8 @@ class Planner {
       }
       if (attribute.target === "class") {
         // The root's invocation may carry the class, so its first evaluation always writes.
-        const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
+        const initial = root || node.attributes.some(attribute => attribute.kind === "attribute" && attribute.name === "class" && attribute.target === undefined)
+          ? "undefined" : String((literal("class") ?? "").split(/[\t\n\f\r ]+/).includes(attribute.name));
         block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial });
         continue;
       }
@@ -1208,7 +1234,10 @@ class Planner {
         initial: root ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
       });
     }
-    const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
+    const spec: unknown[] = [node.name, literals.flatMap((attribute) => {
+      const namespace = attributeNamespace(attribute.name);
+      return [namespace === undefined ? attribute.name : [namespace, attribute.name], attribute.value];
+    })];
     if (html !== undefined) {
       // `$html` replaces the element's content with sanitized markup when that markup changes.
       block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html, initial: "undefined" });
@@ -1221,6 +1250,10 @@ class Planner {
       return spec;
     }
     spec.push(...this.children(block, node, node.children, path, 0, scope, svg && node.name !== "foreignObject"));
+    if (forwards) for (let index = bindingStart; index < block.bindings.length; index += 1) {
+      const binding = block.bindings[index]!;
+      if (binding.site === this.site(block, path)) block.bindings[index] = { ...binding, ordered: true, ...(!node.attributes.some(attribute => attribute.kind === "forward") || literal(binding.name) === undefined ? {} : { fallback: JSON.stringify(literal(binding.name)) }) };
+    }
     if (node.name === "select" && block.bindings.some((binding) => binding.site === this.site(block, path) && binding.select === true)) {
       block.selects.push(this.site(block, path));
     }
@@ -1228,25 +1261,30 @@ class Planner {
   }
 
   /**
-   * Plans an invocation as live lowering treats one: literal props are the component's HTML input,
-   * other literals and every non-prop binding go to its root, bound props apply as values, listeners
-   * and the ref follow its root, and the children are this template's content projected into it.
+   * Plans invocation inputs separately from the rendered root. Declared props use their receiving
+   * contract; remaining attributes reach authored forwarding destinations. Listeners and refs follow
+   * the rendered root, and children retain this template's projection scope.
    */
   invocation(block: Block, node: ElementNode, path: readonly number[], scope: Scope, invoked: Invoked, svg: boolean): 5 {
     const site = this.site(block, path);
     const contract = invoked.definition.contract;
-    const propOf = (name: string): string | undefined =>
-      Object.keys(contract.props).find((prop) => kebabCase(prop) === name.toLowerCase());
+    const forwards = orderedAttributeWrites(node.attributes, true);
+    const modified = new Set(node.attributes.flatMap(attribute => attribute.kind === "attribute" && attribute.target !== undefined ? [attribute.target] : []));
+    const propOf = (name: string): string | undefined => modified.has(name as "class" | "style") ? undefined
+      : Object.keys(contract.props).find((prop) => kebabCase(prop) === asciiLowerCase(name));
     const html: [string, string][] = [];
     const attributes: [string, string][] = [];
-    const props: { name: string; attribute: string; expression: Lowered; record: string; type: string; availability?: string; snapshot?: boolean }[] = [];
+    const props: { name: string; attribute: string; expression: Lowered; record: string; type: string; availability?: string; snapshot?: boolean; fallback?: string }[] = [];
     const controls: string[] = [];
     let content: Invocation["content"];
     const rest: ElementNode["attributes"][number][] = [];
     for (const attribute of node.attributes) {
       const prop = attribute.kind === "property" || attribute.kind === "directive" || attribute.kind === "attribute" && attribute.target !== undefined
         ? undefined : propOf(attribute.name);
-      if (attribute.kind === "literal") (prop === undefined ? attributes : html).push([prop ?? attribute.name, attribute.value]);
+      if (attribute.kind === "literal") {
+        (prop === undefined ? attributes : html).push([prop ?? attribute.name, attribute.value]);
+        if (forwards) rest.push(attribute);
+      }
       else if (attribute.kind === "directive") {
         // Live writes it into the invocation before lowering, so it is what the component is given.
         content = { kind: attribute.name === "html" ? "html" : "value", expression: this.checked(attribute.expressionPlan!, scope) };
@@ -1279,13 +1317,34 @@ class Planner {
           ...(availability === undefined ? {} : { availability }),
           ...(snapshot ? { snapshot: true } : {}),
           type: contract.select === undefined ? compactSource(compactType(normalizeType(contract.type))) : "0" });
+        if (forwards) rest.push(attribute);
       } else rest.push(attribute);
     }
     const order = new Map(propInputOrder(Object.entries(invoked.definition.contract.props).map(([name, contract]) => ({ name, contract })))
       .map((prop, index) => [prop.name, index]));
     props.sort((left, right) => order.get(left.name)! - order.get(right.name)!);
-    // Every other binding targets the component's root, which the site holds once it is created.
-    this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg);
+    if (forwards) for (const prop of props) {
+      const literal = html.find(([name]) => name === prop.name);
+      if (literal === undefined) continue;
+      const value = invocationValue(invoked.definition.contract.props[prop.name]!, literal[1], "html", true);
+      if (value !== undefined) prop.fallback = JSON.stringify(value);
+    }
+    // Attribute bindings use the child's logical invocation; properties and controls use its root.
+    const restStart = block.bindings.length;
+    this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg, forwards);
+    for (let index = restStart; index < block.bindings.length; index += 1) {
+      const binding = block.bindings[index]!;
+      if (binding.kind !== "property" && binding.kind !== "control") {
+        const receiver = block.invocations.length;
+        const propIndex = props.findIndex(prop => prop.attribute === binding.name && (binding.kind === "attribute" || binding.kind === "url"));
+        if (propIndex >= 0) {
+          const prop = props[propIndex]!;
+          const cache = `r.t${receiver}_${propIndex}`;
+          block.bindings[index] = { ...binding, receiver, kind: "prop", prop: { index: propIndex, name: prop.name, input: prop.snapshot === true || prop.availability !== undefined },
+            expression: { ...binding.expression, source: `${cache} === undefined ? NONCONFORMING : ${cache}.value`, key: `invocation-prop:${receiver}:${propIndex}`, fails: true } };
+        } else block.bindings[index] = { ...binding, receiver };
+      }
+    }
     let projection: Block | undefined;
     if (node.children.length > 0 && content === undefined) {
       const outer = this.projecting;
@@ -1296,7 +1355,7 @@ class Planner {
       this.projecting = outer;
     }
     block.invocations.push({
-      site, factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined, controls, content,
+      site, ordered: forwards, names: Object.keys(contract.props).flatMap(name => [[name, name], [kebabCase(name), name]] as const), factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined, controls, content,
       ...(block.projection === true ? path.length === 1 : block.listing === true && path.length <= 1) && this.accepts(node).length > 0 ? { accepted: true } : {},
       events: (node.events ?? []).map((event) => ({ site, name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers })),
       ref: node.ref === undefined ? undefined : { name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) },
@@ -1307,7 +1366,8 @@ class Planner {
   /** The tags the slot `node` is projected into accepts, in the component the content is projected into. */
   accepts(node: ElementNode): readonly string[] {
     const slot = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "slot");
-    return this.projecting?.definition.contract.slots?.[slot?.kind === "literal" ? slot.value : ""]?.accepts ?? [];
+    const declared = this.projecting?.definition.contract.slots?.[slot?.kind === "literal" ? slot.value : ""];
+    return declared?.as === undefined ? [] : declared.accepts ?? [];
   }
 
   /**
@@ -1387,7 +1447,7 @@ class Planner {
         // A static prop is given as its text; the child's slot declaration converts it (`outletProps`).
         const given = (node.props ?? []).map((prop) => prop.raw !== undefined ? none(`raw:${prop.raw}`, JSON.stringify(prop.raw)) : this.checked(prop.expressionPlan, scope));
         block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
-          of: this.checked(node.of.expressionPlan, scope), listRoot: this.roots.findIndex((root) => root.name === node.of!.list),
+          of: this.checked(node.of.expressionPlan, scope), listRoots: entryLists(node.of).map(name => this.roots.findIndex(root => root.name === name)),
           props: given, propNames: (node.props ?? []).map((prop) => prop.name), propRaws: (node.props ?? []).map((prop) => prop.raw) });
         return 4;
       }
@@ -1502,22 +1562,23 @@ class Planner {
     const list = this.checked(listPlan, scope);
     const listType = declaredExpressionType(listPlan, scope.types);
     const itemType = listType?.kind === "list" ? listType.item : undefined;
-    // A row holds its item, its index alias and its `loop` record.
-    // The index and `loop` are the rows' level in a key too, so a position mask tells them from an outer loop's.
-    const positions = (base: Scope, item?: string, index?: string, loop?: string): Scope => {
+    // Internal writable paths and authored index aliases read the same private row position.
+    const positions = (base: Scope, item?: string, index?: string): Scope => {
       const layered = this.layer(base, flow.item, itemType, "item", item);
+      const types: TypeScope = flow.index === undefined ? layered.types : { get: () => undefined };
+      if (flow.index !== undefined) declareLayerTypes(types, layered.types, { [flow.index]: { kind: "terminal", name: "number" } });
       return {
-        ...layered,
+        ...layered, types,
         aliases: [
           ...layered.aliases,
           ...flow.index === undefined ? [] : [{ name: flow.index, level: inner.level, kind: "index" as const, ...index === undefined ? {} : { source: index } }],
-          { name: "loop", level: inner.level, kind: "loop" as const, ...loop === undefined ? {} : { source: loop } },
+          { name: ITERATION_INDEX, level: inner.level, kind: "index" as const, ...index === undefined ? {} : { source: index } },
         ],
       };
     };
     const rowScope = positions(inner);
     // A key is a function of the item and its position, run beside the row's owner: `(o, j, l, r)`.
-    const keyScope: Scope = { ...positions(scope, "o", "j", "loopRecord({ j, l })"), closure: true };
+    const keyScope: Scope = { ...positions(scope, "o", "j"), closure: true };
     const key = flow.key === undefined ? undefined : lower(plan(flow.keyPlan, flow.key).ast, keyScope);
     const shaped = this.shape(flow, scope, list, itemType);
     this.listingContent = listed;
@@ -1528,7 +1589,7 @@ class Planner {
     const positional = reads.some((value) => ((value.positional ?? 0) & own) !== 0);
     rows.positional = positional;
     block.regions.push({ kind: "each", site, block: rows, list: shaped.list, key, alias: flow.item, positional,
-      counted: reads.some((value) => ((value.counted ?? 0) & own) !== 0), ...projected });
+      ...projected });
     return 2;
   }
 
@@ -1667,7 +1728,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       return [[tag, [own, declared.flatMap(([name, slot]) => Object.keys(slot.props).length > 0 ? [name] : []), known,
         listed(known.filter((name) => name !== ""))] as const]];
     }));
-    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
+    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, referenceSchemas: planner.referenceSchemas, handlers: [...planner.handlers.values()], lifecycle, head, scripts,
       ...children === undefined ? {} : { children, accepted },
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       seeds: roots.flatMap((item, index) => item.initializer === undefined ? [] : [{ index, source: convertible(planner.checked(item.initializer, { ...planner.scope, observesInputs: true })) }]),
@@ -1804,7 +1865,7 @@ function regionOuter(block: Block, level: number): number {
   for (const region of block.regions) {
     for (const value of [region.test, region.list, region.key, region.of, ...region.props ?? []]) if (value !== undefined) mask |= outerOf(value, level);
     // A `<slot of>` range carries its entry's index in the list.
-    if (region.listRoot !== undefined) mask |= region.listRoot < 29 ? rootBit(region.listRoot) : OVERFLOW;
+    for (const root of region.listRoots ?? []) mask |= root < 29 ? rootBit(root) : OVERFLOW;
     // Rows below follow the same outer changes: a sweep reaches them through each row between.
     for (const body of [region.block, ...region.arms ?? []]) mask |= blockOuter(body, level);
   }
@@ -1853,7 +1914,7 @@ export function emitBlocks(
   // A slot prop's value as live's `renderScopedTemplate` gives it: a typed one is checked in full, as a prop's
   // input is, and one its type does not accept warns once (HR007). It, and absent input, take the default, or null.
   const slotPropGiven = (value: string, slot: string | undefined, prop: string, type: TypeNode | undefined, fallback: string | undefined, check: () => string): string => {
-    if (type === undefined) return fallback === undefined ? value : `(${value} == null || ${value} === ABSENT ? ${fallback} : ${value})`;
+    if (type === undefined) return `(${value} == null || ${value} === ABSENT ? ${fallback ?? "null"} : ${value})`;
     const name = typeof slot === "string" && slot !== "" ? `Slot \`${slot}\`` : "The default slot";
     const message = `${name} prop \`${prop}\` does not satisfy its declared type \`${formatType(type)}\`.`;
     return `(${value} != null && ${value} !== ABSENT && (${check()}(${value}) || (warnOnce(S, ${JSON.stringify(`slot:${slot ?? ""}:${prop}`)}, ${JSON.stringify(message)}), false)) ? ${value} : ${fallback ?? "null"})`;
@@ -1865,7 +1926,7 @@ export function emitBlocks(
     const name = region.slot!;
     const names = region.propNames ?? [];
     const outlet = `<slot of name="${name}">`;
-    const shapes = (plan.roots[region.listRoot!]?.list?.accepts ?? []).flatMap((tag) => {
+    const shapes = ([...new Set((region.listRoots ?? []).flatMap(root => plan.roots[root]?.list?.accepts ?? []))]).flatMap((tag) => {
       const declared = plan.accepted?.[tag]?.contract.slots?.[name]?.props ?? {};
       if (plan.accepted?.[tag] === undefined || names.length + Object.keys(declared).length === 0) return [];
       const warn = (prop: string, message: string): string => `warnOnce(S, ${JSON.stringify(`of:${name}:${prop}`)}, ${JSON.stringify(message)}); `;
@@ -1923,6 +1984,7 @@ export function emitBlocks(
     block.bindings.forEach((binding, index) => {
       // An adopted block's first render writes every binding, as live hydration's effects run once each.
       entries.push(`v${index}: ${hydrate && binding.initial !== "undefined" ? `z ? undefined : ${binding.initial}` : binding.initial}`);
+      if (binding.ordered && binding.kind !== "prop" && binding.expression.fails) entries.push(`g${index}: ${binding.fallback ?? "NONCONFORMING"}`);
       // A nonconforming segment keeps the text it last accepted.
       binding.parts?.forEach((part, segment) => {
         if (typeof part !== "string" && part.fails) entries.push(`m${index}_${segment}: ""`);
@@ -1932,7 +1994,7 @@ export function emitBlocks(
     block.invocations.forEach((invocation, index) => {
       if (block.sites[invocation.site]!.length > 0 && !written.has(invocation.site)) entries.push(`a${invocation.site}: ${sites[invocation.site]}`);
       entries.push(`h${index}: undefined`, ...invocation.projection === undefined ? [] : [`j${index}: undefined`],
-        ...invocation.props.map((_, at) => `q${index}_${at}: undefined`));
+        ...invocation.props.flatMap((prop, at) => [`q${index}_${at}: undefined`, ...invocation.ordered ? [`t${index}_${at}: ${prop.fallback === undefined ? "undefined" : `{ value: ${prop.fallback}${prop.snapshot || prop.availability !== undefined ? ", status: READY_INPUT" : ""} }`}`] : []]));
     });
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
@@ -1958,7 +2020,34 @@ export function emitBlocks(
    * Creates the block's invocations when it first renders, as live lowering puts each component's
    * root in its invocation's place, then applies their bound props whenever those re-run.
    */
+  const acceptedBy = [...invocations?.values() ?? []].some(({ definition: parent }) => Object.values(parent.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(contract.tag)));
+  const repeated = repeatedSlotNames(definition);
+  const sharedPlain = acceptedBy || repeated.size > 0;
+  const projectionHelper = acceptedBy ? "projectAccepted" : "project";
+  const projectionTag = acceptedBy ? ", S.g" : "";
   const invoke = (block: Block): string[] => block.invocations.flatMap((invocation, index) => {
+    const cacheProp = (prop: Invocation["props"][number], at: number, value: string, status?: string): string[] => !invocation.ordered ? [] : [
+      `{ const accepted = propValue(${prop.type}, ${value}); if (${status === undefined ? "" : `!${status}.ready || `}accepted !== NONCONFORMING) r.t${index}_${at} = { value: accepted${status === undefined ? "" : `, status: ${status}`} }; }`,
+    ];
+    const initialExpressions = new Map<string, string>();
+    const initialDefaults = [...invocation.attributes, ...invocation.html].filter(([name]) => name === "class" || name === "style")
+      .map(([name, value]) => `[${JSON.stringify(name)}, ${JSON.stringify(value)}]`);
+    const initialWrites = !invocation.ordered ? [] : [...initialDefaults, ...block.bindings.flatMap((binding, at) => {
+      if (binding.receiver !== index) return [];
+      if (binding.kind === "forward") return ["attributes"];
+      if (!["prop", "attribute", "url", "class", "style"].includes(binding.kind)) return [];
+      let value = convertible(binding.expression);
+      if (binding.kind !== "prop" && !binding.expression.key.startsWith("literal:")) {
+        const cached = initialExpressions.get(binding.expression.key);
+        if (cached !== undefined) value = `${cached}.value`;
+        else {
+          const cache = `r.o${at}`;
+          initialExpressions.set(binding.expression.key, cache);
+          value = `(${cache} = { value: ${value} }).value`;
+        }
+      }
+      return [`[${JSON.stringify(binding.name)}, ${value}, ${binding.kind === "prop" ? '"value"' : binding.kind === "class" || binding.kind === "style" ? JSON.stringify(binding.kind) : "undefined"}${binding.fallback === undefined ? "" : `, ${binding.fallback}`}]`];
+    })];
     const site = field(block, invocation.site);
     const projection = invocation.projection;
     // A hydrating block adopts the server's root of the component, and the content it projected there.
@@ -1982,11 +2071,14 @@ export function emitBlocks(
     ];
     // In projected content a component waits until a slot places it, as live lowering does.
     const waits = inProjection(block) && invocation.accepted !== true;
+    const call = invocation.accepted === true ? "invokeAccepted" : "invoke";
+    const adoptCall = invocation.accepted === true ? "adoptAcceptedInvoke" : "adoptInvoke";
+    const acceptedTag = invocation.accepted !== true ? "" : `, ${JSON.stringify([...invocations!.values()].find(entry => `create${entry.definition.contract.name}` === invocation.factory)!.definition.contract.tag)}`;
     return [
       waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, -1, new Map()))) {` : `  if (r.h${index} === undefined) {`,
       ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.matches(':is([component]:not(template), [data-component]:not([component]))');`] : [],
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
-      `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
+      `    const H = { ${invocation.html.map(([name, value]) => `${objectKey(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
       ...hydrate && invocation.props.length > 0 ? ["    const V = {};"] : [],
       // Adoption reads typed current inputs before comparing prepared producer identities.
       ...invocation.props.flatMap((prop, at) => [
@@ -1994,15 +2086,17 @@ export function emitBlocks(
           : prop.availability === undefined ? `    const ${prop.record} = [], y${at} = ${convertible(prop.expression)};`
           : `    const ${prop.record} = [], s${at} = rec(${prop.record}, ${prop.availability}), y${at} = s${at}.ready ? ${convertible(prop.expression)} : undefined;`,
         `    r.q${index}_${at} = ${prop.record};`,
+        ...cacheProp(prop, at, `y${at}`, prop.snapshot || prop.availability !== undefined ? `s${at}` : undefined),
         hydrate ? `    { const t = propValue(${prop.type}, y${at}); if (${prop.snapshot || prop.availability !== undefined ? `s${at}.ready && ` : ""}t !== NONCONFORMING) V[${JSON.stringify(prop.name)}] = t; }`
           : `    { const t = propText(${prop.type}, y${at}, ${JSON.stringify(prop.attribute)}); if (t !== null) H[${JSON.stringify(prop.name)}] = t; }`,
       ]),
+      ...invocation.ordered ? [`    const W = initialInvocationInputs([${initialWrites.join(", ")}], ${JSON.stringify(invocation.names)});`] : [],
       ...invocation.content === undefined ? [] : [
         `    const k = document.createElement("div"), y = ${convertible(invocation.content.expression)};`,
         `    if (y !== NONCONFORMING) ${invocation.content.kind === "html" ? "writeHtml(k, toText(y))" : "k.textContent = toText(y)"};`,
       ],
-      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? adoptInvoke : invoke)` : "invoke"}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
-        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
+      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? ${adoptCall} : ${call})` : call}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.ordered ? "W.attributes" : `{ ${invocation.attributes.map(([name, value]) => `${objectKey(name)}: ${JSON.stringify(value)}`).join(", ")} }`}${
+        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${invocation.ordered ? ", ...W.props" : hydrate && invocation.props.length > 0 ? ", ...V" : ""} }, ${invocation.ordered ? "W.html" : "H"}, (root, previous) => { ${follow.join(" ")} }, r.z ??= []${acceptedTag});`,
       `    ${site} = r.h${index}.e;`,
       // The shared root carries both markers, and this component's lifecycle rides its owner's.
       ...invocation.root ? [
@@ -2012,7 +2106,7 @@ export function emitBlocks(
         hydrate ? `    { const t = I.e.getAttribute("component") ?? I.e.getAttribute("data-component") ?? ""; if (!t.split(/\\s+/).includes(${JSON.stringify(contract.tag)})) I.e.setAttribute("component", \`${contract.tag} \${t}\`); }`
           : `    I.e.setAttribute("component", \`${contract.tag} \${I.e.getAttribute("component") ?? I.e.getAttribute("data-component")}\`);`,
       ] : [],
-      ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (${prop.snapshot ? `!s${at}.ready || ` : ""}y${at} !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
+      ...invocation.ordered ? [] : invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (${prop.snapshot ? `!s${at}.ready || ` : ""}y${at} !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
         ? `bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at});`
         : `bindInput(r.h${index}, ${JSON.stringify(prop.name)}, { value: y${at}, status: s${at} });`}`),
       ...ref === undefined ? [] : [ref.iterated ? `    (I.r[${refKey}] ??= []).push(${site});` : `    I.r[${refKey}] = ${site};`],
@@ -2034,9 +2128,10 @@ export function emitBlocks(
         // A nested write anywhere in the value re-applies it, as live's parse at the destination reads it all.
         `      if (c === -1${rootsWritten(prop.expression)} || readsChanged(r.q${index}_${at}, ${prop.record}) || touches(x, d)) {`,
         `        r.q${index}_${at} = ${prop.record};`,
-        `        ${prop.expression.fails ? `if (${prop.snapshot ? "!s.ready || " : ""}x !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
+        ...cacheProp(prop, at, "x", prop.snapshot || prop.availability !== undefined ? "s" : undefined),
+        ...invocation.ordered ? [] : [`        ${prop.expression.fails ? `if (${prop.snapshot ? "!s.ready || " : ""}x !== NONCONFORMING) ` : ""}${prop.availability === undefined && !prop.snapshot
           ? `bindProp(r.h${index}, ${JSON.stringify(prop.name)}, x);`
-          : `bindInput(r.h${index}, ${JSON.stringify(prop.name)}, { value: x, status: s });`}`,
+          : `bindInput(r.h${index}, ${JSON.stringify(prop.name)}, { value: x, status: s });`}`],
         "      }",
         "    }",
       ]),
@@ -2048,11 +2143,13 @@ export function emitBlocks(
     const lines: string[] = [...invoke(block)];
     // One group per mask, except that writes to one element's attributes and classes keep their
     // authored order (it decides the order attributes and class tokens are created in).
-    const groups: Array<{ readonly mask: number; readonly bindings: Binding[] }> = [];
+    const groups: Array<{ mask: number; readonly bindings: Binding[] }> = [];
     const ordered = (binding: Binding): boolean =>
-      binding.kind === "attribute" || binding.kind === "url" || binding.kind === "class" || binding.kind === "style";
+      binding.kind === "forward" || binding.kind === "attribute" || binding.kind === "url" || binding.kind === "class" || binding.kind === "style";
     for (const binding of block.bindings) {
       const mask = maskOf(finalExpression(binding));
+      const orderedGroup = binding.ordered ? groups.find(group => group.bindings.some(other => other.site === binding.site && other.ordered)) : undefined;
+      if (orderedGroup !== undefined) { orderedGroup.mask |= mask; orderedGroup.bindings.push(binding); continue; }
       const at = groups.findLastIndex((group) => group.mask === mask);
       const later = ordered(binding) && groups.slice(at + 1).some((group) =>
         group.bindings.some((other) => other.site === binding.site && ordered(other)));
@@ -2067,10 +2164,20 @@ export function emitBlocks(
       lines.push(`  if (${guard(mask)}) {`);
       if (reset && mask === NESTED && group === groups[0]!.bindings) lines.push("    r.w = 0;");
       const shared = new Map<string, string>();
+      for (const binding of group) if (binding.kind === "forward") {
+        const index = block.bindings.indexOf(binding);
+        lines.push(binding.receiver === undefined ? `    resetForwardedAttributes(${field(block, binding.site)}, attributes, r.v${index});`
+          : `    resetForwardedInvocationAttributes(r.h${binding.receiver}, attributes, r.v${index});`);
+      }
       for (const binding of group) {
         const index = block.bindings.indexOf(binding);
         const last = `r.v${index}`;
         const site = field(block, binding.site);
+        if (binding.kind === "forward") {
+          const forward = binding.receiver === undefined ? `forwardAttributes(${site}` : `forwardInvocationAttributes(r.h${binding.receiver}`;
+          lines.push(`    ${last} = ${forward}, attributes);`);
+          continue;
+        }
         const output = `s${index}`;
         if (binding.kind === "mixed") {
           const pieces = binding.parts!.map((part, segment) => {
@@ -2101,25 +2208,41 @@ export function emitBlocks(
           continue;
         }
         let value = shared.get(binding.expression.key);
+        const initial = binding.receiver === undefined || !binding.ordered || binding.kind === "prop" || binding.expression.key.startsWith("literal:") ? -1
+          : block.bindings.findIndex(other => other.receiver === binding.receiver && other.expression.key === binding.expression.key);
         if (value === undefined) {
           value = `x${temporary++}`;
           shared.set(binding.expression.key, value);
           // Every binding sharing an expression converts it, so an item-reached container is flagged here.
-          lines.push(`    const ${value} = ${convertible(binding.expression)};`);
+          if (initial < 0) lines.push(`    const ${value} = ${convertible(binding.expression)};`);
+          else lines.push(`    const first${temporary} = r.o${initial}; r.o${initial} = undefined;`, `    const ${value} = first${temporary} === undefined ? ${convertible(binding.expression)} : first${temporary}.value;`);
+        }
+        else if (initial >= 0) lines.push(`    r.o${initial} = undefined;`);
+        if (binding.ordered && binding.kind !== "prop" && binding.expression.fails) {
+          const kept = `r.g${block.bindings.indexOf(binding)}`;
+          lines.push(`    if (${value} !== NONCONFORMING) ${kept} = ${value};`);
+          value = kept;
         }
         // A nonconforming result leaves what the binding last wrote, as the live runtime does.
         const fails = finalExpression(binding).fails;
         if (fails) lines.push(`    if (${value} !== NONCONFORMING) {`);
         const start = lines.length;
         switch (binding.kind) {
+          case "prop":
+            lines.push(binding.prop!.input
+              ? `    bindInput(r.h${binding.receiver}, ${JSON.stringify(binding.prop!.name)}, r.t${binding.receiver}_${binding.prop!.index});`
+              : `    bindProp(r.h${binding.receiver}, ${JSON.stringify(binding.prop!.name)}, ${value});`);
+            break;
           case "attribute":
           case "url": {
             // A bound style attribute would drop the transition's own properties, written once.
-            const write = binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
+            const namespace = attributeNamespace(binding.name);
+            const write = binding.receiver !== undefined ? `writeInvocationAttribute(r.h${binding.receiver}, ${JSON.stringify(binding.name)}, ` : namespace !== undefined ? `writeNamespaced${binding.kind === "url" ? "Url" : ""}Attribute(${site}, ${JSON.stringify(namespace)}, ${JSON.stringify(binding.name)}, ${JSON.stringify(binding.name.slice(binding.name.indexOf(":") + 1))}, `
+              : binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
               : binding.name === "style" && transitioned(block, binding.site) ? `writeTransitionStyle(${site}, `
               : `writeAttribute(${site}, ${JSON.stringify(binding.name)}, `;
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
-              `    if (${output} !== ${last}) ${write}${last} = ${output});`);
+              `    ${binding.ordered ? "" : `if (${output} !== ${last}) `}${write}${last} = ${output});`);
             break;
           }
           case "value":
@@ -2139,11 +2262,11 @@ export function emitBlocks(
             break;
           case "style":
             lines.push(`    const ${output} = toText(${value});`,
-              `    if (${output} !== ${last}) ${site}.style.setProperty(${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    ${binding.ordered ? "" : `if (${output} !== ${last}) `}${binding.receiver === undefined ? `${site}.style.setProperty(${JSON.stringify(binding.name)}, ${last} = ${output})` : `writeInvocationModifier(r.h${binding.receiver}, "style", ${JSON.stringify(binding.name)}, ${last} = ${output})`};`);
             break;
           case "class":
             lines.push(`    const ${output} = ${binding.expression.boolean ? value : `truthy(${value})`};`,
-              `    if (${output} !== ${last}) ${site}.classList.toggle(${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    ${binding.ordered ? "" : `if (${output} !== ${last}) `}${binding.receiver === undefined ? `${site}.classList.toggle(${JSON.stringify(binding.name)}, ${last} = ${output})` : `writeInvocationModifier(r.h${binding.receiver}, "class", ${JSON.stringify(binding.name)}, ${last} = ${output})`};`);
             break;
         }
         if (fails) {
@@ -2153,18 +2276,8 @@ export function emitBlocks(
       }
       lines.push("  }");
     }
-    // Slots fill last, in the order live assembles their parents (deepest first, then document
-    // order), so when two outlets share a name the one live's assembly appends last holds the nodes.
-    const order = (index: number): number[] => block.sites[block.regions[index]!.site]!;
-    const sequence = [...block.regions.keys()].sort((left, right) => {
-      const a = block.regions[left]!.kind === "slot", b = block.regions[right]!.kind === "slot";
-      if (a !== b) return a ? 1 : -1;
-      if (!a) return left - right;
-      const [x, y] = [order(left), order(right)];
-      const [px, py] = [x.slice(0, -1), y.slice(0, -1)];
-      for (let step = 0; step < Math.min(px.length, py.length); step += 1) if (px[step] !== py[step]) return px[step]! - py[step]!;
-      return py.length - px.length || x.at(-1)! - y.at(-1)!;
-    });
+    // Regions place their content in authored order, including the slots nested in each body.
+    const sequence = [...block.regions.keys()];
     sequence.map((index) => [block.regions[index]!, index] as const).forEach(([region, index]) => {
       const child = region.block.id;
       if (region.kind === "slot") {
@@ -2180,16 +2293,16 @@ export function emitBlocks(
           // `<slot of>` places an accepted child's slot, and renders again when `of` names another entry.
           lines.push(
             `  if (r.f${index} === undefined) r.f${index} = childOutlet(r, r.a${region.site}, r.e${index}, ${name}, OF, S, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}, ${(props?.length ?? 0) > 0}, ${outletPropsSource(region)}${hydrate ? `, ${body} === ADOPT` : ""});`,
-            `  r.f${index}(${convertible(region.of)}, v[${region.listRoot}], { ${(props ?? []).map((prop, at) => `${JSON.stringify(region.propNames![at])}: ${convertible(prop)}`).join(", ")} }, c, d);`,
+            `  r.f${index}(${convertible(region.of)}, ${region.listRoots?.length === 1 ? `v[${region.listRoots[0]}]` : `[${(region.listRoots ?? []).map(root => `v[${root}]`).join(", ")}]`}, { ${(props ?? []).map((prop, at) => `${JSON.stringify(region.propNames![at])}: ${convertible(prop)}`).join(", ")} }, c, d);`,
           );
           return;
         }
         if (props === undefined) {
           lines.push(
             // A consumer's <template slot> renders here afresh, and is let go when this outlet goes.
-            `  if (r.f${index} === undefined) { r.f${index} = 1; ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d);`,
-            `    if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; ${place} } }`,
-            `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
+            `  if (r.f${index} === undefined) { r.f${index} = 1; ${sharedPlain ? fill.replaceAll("adoptSlot", "adoptPlainSlot").replaceAll("fillSlot", "initializeSlot") : fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d${region.fallback === true ? ", r.z ??= []" : ""});`,
+            `    ${sharedPlain ? `if (typeof at === "function") r.f${index} = at(r, (d, at) => m${child}(d, undefined, r${hydrate ? ", at" : ""}), p${child}); else ` : ""}if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; ${place} } }`,
+            `  else ${sharedPlain ? `if (typeof r.f${index} === "function") r.f${index}(c, d); else ` : ""}if (${body} !== undefined) p${child}(${body}, c, d);`,
           );
           return;
         }
@@ -2204,9 +2317,8 @@ export function emitBlocks(
         lines.push(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
-          // A prop whose expression fails is not given, as live leaves it unset.
-          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = ${given("y", at)}; }`).join(" ")}`,
-          `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
+          `    const s = { ${props.map((_, at) => `${objectKey(region.propNames![at]!)}: ${region.propDefaults?.[at] ?? "null"}`).join(", ")} }; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = ${given("y", at)}; }`).join(" ")}`,
+          `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d${region.fallback === true ? ", r.z ??= []" : ""});`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
           `    else if (at !== undefined) { ${body} = ${make}; ${place} }`,
           `  } else if (${rendering} !== undefined) {`,
@@ -2362,7 +2474,6 @@ export function emitBlocks(
     }
     block.regions.forEach((region, index) => {
       if (region.kind === "each" && listOwned(region)) lines.push(`${indent}${record}.L${index}.u = ${record};`);
-      if (region.kind === "each" && region.counted === true) lines.push(`${indent}${record}.L${index}.q = true;`);
     });
     // A consumer's scoped-slot templates, which the component it projects into renders with its props.
     block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: ${hydrate
@@ -2411,7 +2522,7 @@ export function emitBlocks(
       : [`${position(block.sites[region.site]![0]!)}: ${JSON.stringify(region.projected)}`]);
     const slotted = regions.length === 0 ? "" : `${invoked === "" ? ", []" : ""}, { ${regions.join(", ")} }`;
     // An accepted child's plain content its parent's `<slot of>` outlet rendered is found in that outlet's range.
-    const borrowed = into.accepted !== true ? "" : `${invoked === "" ? ", []" : ""}${slotted === "" ? ", {}" : ""}, borrowedSlots`;
+    const borrowed = into.accepted !== true ? "" : `${invoked === "" && slotted === "" ? ", []" : ""}${slotted === "" ? ", {}" : ""}, borrowedSlots`;
     return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked}${slotted}${borrowed});`];
   };
   /** The block's node: the one it adopted, or its prototype's clone. Projected content leaves its nodes where the server put them. */
@@ -2486,6 +2597,8 @@ export function emitBlocks(
   // a declared slot (components#columns-as-markup).
   const lists = plan.roots.flatMap((item, index) => item.list === undefined ? [] : [{ index, ...item.list }]);
   const slotted = lists.length > 0 || Object.keys(contract.slots ?? {}).length > 0 || blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
+
+
   /** Whether the props' `data-<tag>-prop-<name>` the root's template binds itself, which is then its output. */
   const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
     node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === propAttribute(contract.tag, name)));
@@ -2553,10 +2666,7 @@ export function emitBlocks(
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { ${rootEntries.join(", ")} };`,
     ...root.selects.map((select) => `  R.c${select} = ${selection(root, select, (site) => root.sites[site]!.length === 0 ? "element" : `R.a${site}`, hydrate)};`),
-    ...root.regions.flatMap((region, index) => region.kind !== "each" ? [] : [
-      ...listOwned(region) ? [`  R.L${index}.u = R;`] : [],
-      ...region.counted === true ? [`  R.L${index}.q = true;`] : [],
-    ]),
+    ...root.regions.flatMap((region, index) => region.kind === "each" && listOwned(region) ? [`  R.L${index}.u = R;`] : []),
   );
   // Contexts and `as` lists are read-only: the host reads them as it reads a computed.
   const contextStart = plan.roots.findIndex(readOnlyRoot);
@@ -2579,7 +2689,9 @@ export function emitBlocks(
   // A component that declares requests gives its controller a host with `host.request`, which reads the instance.
   const scripted = (definition.scripts ?? []).some((script) => script.name !== undefined);
   const asks = (definition.module ?? definition.controller) !== undefined && (Object.keys(contract.requests ?? {}).length > 0 || scripted);
-  const instance = asks || hydrate || provides || contextStart >= 0 || lists.length > 0 || plan.seeds.length > 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const forwards = blocks.some(block => block.bindings.some(binding => binding.kind === "forward"));
+  const tracksAttributes = forwards || hot;
+  const instance = tracksAttributes || asks || hydrate || provides || contextStart >= 0 || lists.length > 0 || plan.seeds.length > 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
     transitionMask !== 0 || headed || plan.scripts.length > 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
@@ -2589,7 +2701,8 @@ export function emitBlocks(
     ...(instance && guardNestedDepth ? ["  I.nd = __htmlNextDepth + 1;"] : []),
     // An adopted root connects once the outermost adoption has finished.
     ...hydrate ? ["  if (h) I.L = adoptLifecycle;"] : [],
-    ...(slotted ? [hydrate ? "  const J = Y ? project(I, ...Y) : project(I, children, slots);" : "  const J = project(I, children, slots);"] : []),
+    ...(slotted ? [hydrate ? `  const J = Y ? ${projectionHelper}(I, ...Y${projectionTag}) : ${projectionHelper}(I, children, slots${projectionTag});` : `  const J = ${projectionHelper}(I, children, slots${projectionTag});`] : []),
+    ...repeated.size === 0 ? [] : [`  sharePlainSlots(I, J, ${JSON.stringify([...repeated])});`],
     // Each `as` list is read from the projection before the template first renders.
     ...lists.map((list) => {
       const named = `\`${contract.tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
@@ -2625,6 +2738,7 @@ export function emitBlocks(
     ],
     ...headed ? ["  const HK = [];", "  let HU;"] : [],
     // A context provider tells its readers after each render.
+    ...tracksAttributes ? [`  I.F = { values: attributes, draw: () => ${update}(-1) };`] : [],
     `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : asks ? "(host) => C(host, I)" : "C"}${
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...transitionMask === 0 ? [] : [`  holdTransitions(I, ${transitionMask});`],
@@ -2667,10 +2781,6 @@ export function emitBlocks(
       name === "svg"
         ? `${indent}${declare}element = document.createElementNS("http://www.w3.org/2000/svg", "svg");`
         : `${indent}${declare}element = document.createElement(${JSON.stringify(name)});`,
-      `${indent}for (const [name, value] of Object.entries(attributes)) {`,
-      `${indent}  if (value === null || value === undefined || value === false) continue;`,
-      `${indent}  element.setAttribute(name, value === true ? "" : String(value));`,
-      `${indent}}`,
       ...literals,
       `${indent}element.setAttribute("component", ${JSON.stringify(contract.tag)});`,
     ];
@@ -2681,9 +2791,7 @@ export function emitBlocks(
       if (attribute.kind !== "literal") return [];
       const name = JSON.stringify(attribute.name);
       const value = JSON.stringify(attribute.value);
-      return [attribute.name === "class" || attribute.name === "style"
-        ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${JSON.stringify(attribute.name === "class" ? " " : "; ")}));`
-        : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
+      return [`  element.setAttribute(${name}, ${value});`];
     });
   }
   /** The prop inputs: the factory's, or an adopted root's restored ones. */
@@ -2696,12 +2804,13 @@ export function emitBlocks(
   const factory = [
     // `html` is an invocation's literal props, which a compiled parent passes as HTML input.
     `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}${propNames.length > 0 || hydrate ? ", html" : ""}${hydrate ? ", h" : ""}) {`,
-    propNames.length === 0 && !slotted && !delegated ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
+    propNames.length === 0 && !slotted && !delegated ? `  const { attributes: ${tracksAttributes ? "authoredAttributes" : "attributes"} = {} } = options;` : `  const { attributes: ${tracksAttributes ? "authoredAttributes" : "attributes"} = {}, children = [], slots = {}, ...componentProps } = options;`,
     // An adopted root's props, prop inputs and state are the server instance's, and its controls keep what a reader typed.
     // Its projection is what the server rendered in its slot ranges and carried, read before its content is adopted,
     // except each slot its caller gives content.
     ...hydrate ? [`  const Z = h && renderedInstanceRecord(h, ${JSON.stringify(contract.tag)}), W = h && holdControls(h)${
       slotted ? `, Y = h && serverProjection(h, ${JSON.stringify(contract.tag)}, children, slots)` : ""};`] : [],
+    ...tracksAttributes ? [`  const attributes = Object.fromEntries([...${hydrate ? "Z?.attributes ?? []" : "[]"}, ...Object.entries(authoredAttributes)].filter(([name]) => !${JSON.stringify(propNames.map(kebabCase))}.includes(name)));`] : [],
     ...delegated ? [
       // The root is the invoked component's, created when the root block first renders.
       hydrate ? "  const element = h ?? document.createTextNode(\"\");" : "  const element = document.createTextNode(\"\");",
@@ -2752,7 +2861,7 @@ export function emitBlocks(
       "    return next;",
       "  };",
     ]),
-    ...(plan.seeds.length === 0 ? [] : [`  const E = stateInitializers(S, v, X, { ${plan.seeds.map(seed => `${seed.index}: () => ${seed.source}`).join(", ")} }${hydrate ? ", Z" : ""});`]),
+    ...(plan.seeds.length === 0 ? [] : [`  const E = stateInitializers(S, v, X, { ${plan.seeds.map(seed => `${seed.index}: () => (${seed.source})`).join(", ")} }${hydrate ? ", Z" : ""});`]),
     ...plan.handlers.map((handler) => [`  const ${handler.name} = (e) => {`, ...handler.lines, "  };"].join("\n")),
     ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
     ...plan.arms === undefined ? [] : [
@@ -2804,14 +2913,14 @@ export function emitBlocks(
       const data = JSON.stringify(rule).slice(1, -1);
       const typed = select === undefined ? propChecks(type)
         : `select: { from: ${JSON.stringify(select.from)}, options: [${select.options.map((option) => `{ value: ${JSON.stringify(option.value)}, ${propChecks(option.type)} }`).join(", ")}] }`;
-      return `${JSON.stringify(name)}: { ${data}${data === "" ? "" : ", "}${typed}${hasBounds(prop) ? ", k: boundFailures" : ""} }`;
+      return `${objectKey(name)}: { ${data}${data === "" ? "" : ", "}${typed}${hasBounds(prop) ? ", k: boundFailures" : ""} }`;
     }).join(", ")} } };`;
-  const helpers = ["attachGeneratedController", "stateInitializers", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
+  const helpers = ["attachGeneratedController", "checkedReferenceValue", "referenceSchemaAt", "equalValue", "stateInitializers", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
-    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "plainObject", "eventPasses", "listen", "refTargets", "rootValue", "setState",
-    "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
+    "writeUrlAttribute", "writeNamespacedAttribute", "writeNamespacedUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "plainObject", "eventPasses", "listen", "refTargets", "rootValue", "setState",
+    "dispose", "shapeItems", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "acceptHydratedProps", "manageProps", "generatedInputs", "awaitInput", "evaluateInput", "inputRead", "inputDefault", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT", "notifyPropertySet", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke", "propValue",
@@ -2821,9 +2930,9 @@ export function emitBlocks(
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
     "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "canWriteControl", "placeFallback", "recordInputs",
-    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots",
-    "transitionStyles", "writeTransitionStyle"]
-    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${outletProps.join("\n")}`));
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection", "slotRegion", "regionChanged", "warnOnce", "childList", "childOutlet", "listChanged", "borrowedSlots", "initializeSlot", "adoptPlainSlot", "invokeAccepted", "adoptAcceptedInvoke", "sharePlainSlots", "projectAccepted",
+    "transitionStyles", "writeTransitionStyle", "forwardAttributes", "resetForwardedAttributes", "writeInvocationAttribute", "forwardInvocationAttributes", "initialInvocationInputs", "writeInvocationModifier", "resetForwardedInvocationAttributes"]
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}\n${slotPropChecks.join("\n")}\n${plan.referenceSchemas.join("\n")}\n${outletProps.join("\n")}`));
   // The controller of a component that declares requests receives `requestHost`'s host, and of one that names scripts `scriptHost`'s.
   if (requests.length > 0) helpers.push("requestHost");
   if (scripted && (definition.module ?? definition.controller) !== undefined) helpers.push("scriptHost");
@@ -2840,7 +2949,7 @@ export function emitBlocks(
   const prototypes = blocks.filter(built).map((block) => `P${block.id}`);
   return [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
-    `import { ${helpers.map(name => guardNestedDepth && (name === "invoke" || name === "adoptInvoke") ? `${name === "invoke" ? "invokeNested" : "adoptNestedInvoke"} as ${name}` : name).join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
+    `import { ${helpers.map(name => guardNestedDepth && (name === "invoke" || name === "adoptInvoke" || name === "invokeAccepted" || name === "adoptAcceptedInvoke") ? `${({ invoke: "invokeNested", adoptInvoke: "adoptNestedInvoke", invokeAccepted: "invokeAcceptedNested", adoptAcceptedInvoke: "adoptAcceptedNestedInvoke" })[name]} as ${name}` : name).join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
     ...(modulePreparation === undefined ? [] : ['import { adoptNativeModule } from "@nextwebwg/html-next/bindings";']),
     // Each invoked component's factory, from its own module; a component that invokes itself has its own.
     ...[...new Set(blocks.flatMap((block) => block.invocations.map((invocation) => invocation.factory)))].filter((factory) => factory !== `create${contract.name}`).map((factory) => {
@@ -2854,6 +2963,7 @@ export function emitBlocks(
     ...registration === "" ? [] : [registration],
     ...specs,
     ...slotPropChecks.map((check, at) => `const K${at} = ${check};`),
+    ...plan.referenceSchemas.map((schema, at) => `const RC${at} = ${schema};`),
     ...outletProps.map((shapes, at) => `const OP${at} = ${shapes};`),
     ...plan.children === undefined ? [] : [`const OF = ${JSON.stringify(plan.children)};`],
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
@@ -2904,7 +3014,7 @@ function armRoot(node: ElementNode, definition: ComponentDefinition): ArmRoot {
     else if (attribute.kind === "attribute" && attribute.target === "style") styles.push(attribute.name);
     else if (attribute.kind === "attribute") written.push(attribute.name);
     // A reflecting property writes its attribute: `.disabled` writes `disabled`.
-    else if (attribute.kind === "property") written.push(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
+    else if (attribute.kind === "property") written.push(attribute.name === "htmlFor" ? "for" : asciiLowerCase(attribute.name));
   }
   return [node.name, literals, classes, style, styles, written];
 }

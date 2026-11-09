@@ -1,14 +1,23 @@
+import { entryTags } from "../entry-origin.js";
+import { literalValueSource } from "./shared.js";
+import { orderedAttributeWrites, repeatedSlotNames, templateForwardsAttributes } from "../template.js";
+import { invocationSchema } from "./invocation-attributes.js";
+import { isStyleWrite, styleWriteRules } from "./style-writes.js";
+import { ITERATION_INDEX } from "../expression.js";
+import { attributeNamespace } from "../dom-attributes.js";
+import { namespacedAttributeSource } from "./shared.js";
+import { referenceContext, referenceType, uncheckedReferences, withReferenceTypes } from "./reference-types.js";
 /**
  * Converts a definition to a Vue 3.5 single-file component that depends only on Vue and the
  * component's own modules. Props, state, computed values, bindings, structural directives, slots,
  * events map to Vue's own facilities; the controller receives a host generated here from
  * Vue refs, effects, and lifecycle; styles become `<style scoped>`, which the converter scopes itself.
  */
-import { isScriptIdentifier } from "./shared.js";
+import { isScriptIdentifier, propValueIsNullable } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
-import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
-import { componentName, kebabCase, propAttribute } from "../names.js";
+import { type CompiledExpression, type ExpressionNode } from "../expression.js";
+import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
 import type {
@@ -26,13 +35,13 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../te
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue, componentStateNames, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { declarationTypeNode, formatType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypedValue, parseTypeExpression, typeScriptType, type TypeNode } from "../type-system.js";
 import { invocationValue } from "../prop-values.js";
 import type { PropContract } from "../types.js";
 import { propInputOrder, targetComponent } from "./backend.js";
 import { declaresHead, headEntriesSource, headScriptsSource } from "./head-target.js";
-import { conformingScalarStates, controllerInitials, revertSource, withRevert } from "./state-roots.js";
-import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, svgAttributeName, typeSource } from "./shared.js";
+import { controllerInitials, revertSource, withRevert } from "./state-roots.js";
+import { condenseWhitespace, dependentPropTypeSource, escapeHtml, isKeptSpace, isVoidElement, objectKey, propKey, quote, selectorGenerics, SLOT_PROP_IMPORT, slotPropsType, slotPropValueSource, slotPropDefaultSource, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_EXPORTS, VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -58,14 +67,16 @@ import { category, inputScope, Lowering, mayProduceInvalidResult, present, prove
 import { destinationTypeCheck, handlerDestinationCheck, increment, provenWrite, refusing, typeCheck, WRITE_PREDICATES, writeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
-const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "shallowRef", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
+const VUE_APIS = ["normalizeStyle", "computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "shallowRef", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
+  "CSSProperties",
   "warnUnless", "formatValue", "isString", "isNumber", "isInteger", "isBoolean", "next", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
-  "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
-  "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "checkHydratedRoot",
-  "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
+  "model", "controllerModule", "event", "element", "classText", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
+  "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "rootMetadata", "htmlAttributeInputs", "invocationProps", "preservePropInput", "styleText", "forwardedAttributes", "checkHydratedRoot",
+  "vAttributeBindings", "attributeBindingsState", "writeAttributeBindings", "AttributeBinding", "attributeBindingProps", "AttributeWriteState", "applyOrderedAttributes", "vClassBindings", "classBindingsState", "classBindingText", "ClassBindingInput", "initializeClassBindings", "applyClassBindings", "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
+  "vComponentClasses", "applyComponentClasses",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
@@ -132,7 +143,7 @@ function bound(code: string): string {
  * boolean attribute is `true`, and `count="3"` is the number. A string value stays a plain attribute.
  */
 function literalPropBinding(name: string, value: string, props: Readonly<Record<string, PropContract>> | undefined): string | undefined {
-  const contract = Object.entries(props ?? {}).find(([prop]) => prop.toLowerCase() === name || kebabCase(prop) === name)?.[1];
+  const contract = Object.entries(props ?? {}).find(([prop]) => asciiLowerCase(prop) === name || kebabCase(prop) === name)?.[1];
   if (contract === undefined || contract.select !== undefined) return undefined;
   const parsed = parseTypedValue(value, contract.type, "$", "html");
   if (parsed.ok && typeof parsed.value === "string") return undefined;
@@ -150,6 +161,9 @@ function writableTarget(path: readonly WritablePathSegment[], scope: Scope, lowe
 }
 
 interface Context {
+  usesHtmlInputs?: boolean;
+  usesPreservedProps?: boolean;
+  usesStyle?: boolean;
   readonly modulePreparation: boolean;
   readonly availability: ReadonlyMap<string, string>;
   readonly observe: (scope: Scope) => Scope;
@@ -164,6 +178,7 @@ interface Context {
   readonly childNodes: ReadonlyMap<string, string>;
   /** The `as` lists' names. */
   readonly childLists: ReadonlySet<string>;
+  readonly plainSlots: { readonly state: string; readonly names: ReadonlySet<string> } | undefined;
   readonly lowering: Lowering;
   readonly imports: Set<string>;
   /** Template refs, by ref name, and the script variable holding each. */
@@ -205,94 +220,20 @@ interface Context {
   preformatted: boolean;
 }
 
-function referenceCheck(type: TypeNode, value: string): string {
-  switch (type.kind) {
-    case "list": return `Array.isArray(${value})`;
-    case "record":
-    case "object": return `(typeof ${value} === "object" && ${value} !== null && !Array.isArray(${value}))`;
-    case "union": return `(${type.members.map((member) => referenceCheck(member, value)).join(" || ")})`;
-    case "selected": return `(${type.options.map((option) => referenceCheck(option.type, value)).join(" || ")})`;
-    case "constrained": return referenceCheck(type.base, value);
-    case "keyword": return `${value} === ${quote(type.value)}`;
-    case "separated-list": return `Array.isArray(${value})`;
-    case "terminal":
-      if (type.name === "string") return `typeof ${value} === "string"`;
-      if (type.name === "boolean") return `typeof ${value} === "boolean"`;
-      if (type.name === "number") return `(typeof ${value} === "number" && Number.isFinite(${value}))`;
-      if (type.name === "integer") return `Number.isInteger(${value})`;
-      if (type.name === "null") return `${value} === null`;
-      if (type.name === "absent") return `${value} === undefined`;
-      if (type.name === "function") return `typeof ${value} === "function"`;
-      return "true";
-  }
-}
-
-/** The same declared path checks as the live evaluator, before a generated expression can update. */
-function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, locals?: ReadonlySet<string>, lowering?: Lowering): string | undefined {
-  const checks: string[] = [];
-  for (const dependency of typeCheckedDependencies(plan)) {
-    const [root, ...steps] = dependency.split(".");
-    // Loop/with/slot aliases carry inferred types for lowering, not declared read contracts.
-    // Like the live evaluator, do not apply a shadowed component declaration to a local alias.
-    if (locals?.has(root!)) continue;
-    const declaration = definition.declarations?.find((entry) => entry.name === root);
-    let type: TypeNode | undefined;
-    // Prop boundary handling is separate from these mutable declaration guards.
-    if (definition.contract.props[root!] !== undefined) continue;
-    if (declaration?.kind === "state" || declaration?.kind === "computed") {
-      // A conforming scalar state's own value is checked in full on every write, so reading it cannot fail.
-      if (steps.length === 0 && declaration.kind === "state" && conformingScalarStates(definition).has(root!)) continue;
-      type = declarationTypeNode(declaration.type, declaration.shape);
-    } else if (declaration?.kind === "data") {
-      const first = steps.shift();
-      if (first === "value") type = declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
-      else if (first === "pending" || first === "ok") type = { kind: "terminal", name: "boolean" };
-      else if (first === "error") type = UNKNOWN.type;
-      if (first !== undefined) steps.unshift(first);
-    }
-    if (type === undefined) continue;
-    let readAbsentField = false;
-    for (const step of declaration?.kind === "data" ? steps.slice(1) : steps) {
-      if (type.kind === "object" && !type.fields.some((field) => field.name === step)) readAbsentField = true;
-      type = typeAtKey(type, step);
-      if (type === undefined) break;
-    }
-    if (type === undefined) continue;
-    const base = scope.code.get(root!);
-    if (base === undefined) continue;
-    const read = `${readAbsentField ? `(${base} as any)` : base}${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
-    const accepted = `(${read} == null || ${referenceCheck(type, read)})`;
-    checks.push(lowering?.authoredCheck(accepted, `${plan.source}:${dependency}`,
-      `${definition.source.file}: HR007: Reference ${dependency} does not satisfy its declared type.`) ?? accepted);
-  }
-  return checks.length === 0 ? undefined : checks.join(" && ");
-}
-
-function guardedBinding(plan: CompiledExpression, names: Names, context: Context, emit: (scope: Scope) => string, structural = false): string | undefined {
-  if (plan.dependencies.some((dependency) => {
+/** Retain a refused result in Vue's existing computed owner. */
+function guardedBinding(plan: CompiledExpression, names: Names, context: Context, emit: (scope: Scope) => string, structural = false, initial = "null"): string | undefined {
+  if (plan.dependencies.some(dependency => {
     const root = dependency.split(".")[0]!;
     return !context.globals.has(root) || names.locals?.has(root);
-  })) return undefined;
-  const guard = expressionGuard(plan, names.script, context.definition, names.locals, context.lowering);
-  const retains = mayProduceInvalidResult(plan.ast, names.script);
-  if (guard === undefined && !retains) return undefined;
+  }) || !mayProduceInvalidResult(plan.ast, names.script)) return undefined;
   const name = context.identifiers.take("guarded", "Binding");
-  if (!retains) {
-    if (structural) {
-      context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; const value = ${emit(names.script)}; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
-      return name;
-    }
-    context.guarded.push(`let ${name}Previous: any;`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${emit(names.script)}; });`);
-    return name;
-  }
   const output = emit(names.script);
-  const raw = retains ? context.lowering.value(plan.ast, names.script) : undefined;
-  const next = raw === undefined ? output : raw === output ? "candidate" : output;
+  const accepts = context.lowering.use("acceptsBindingResult");
   if (structural) {
-    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}const value = ${next}; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
-    return name;
+    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { const value: any = ${output}; if (!${accepts}(value)) return ${name}Previous; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
+  } else {
+    context.guarded.push(`let ${name}Previous: any = ${initial};`, `const ${name} = computed(() => { const value: any = ${output}; return ${accepts}(value) ? (${name}Previous = value) : ${name}Previous; });`);
   }
-  context.guarded.push(`let ${name}Previous: any = null;`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = ${next}; });`);
   return name;
 }
 
@@ -322,7 +263,7 @@ function renderChildren(nodes: readonly TemplateNode[], names: Names, context: C
 }
 
 /** Names bound by `$each`, `$with`, and `$match`, read the same way in template and script. */
-function withLocal(names: Names, entries: readonly (readonly [string, Static, (string | undefined)?])[]): Names {
+function withLocal(names: Names, entries: readonly (readonly [string, Static, (string | undefined)?, (TypeNode | undefined)?])[]): Names {
   const scope = (base: Scope): Scope => {
     const code = new Map(base.code);
     const types = new Map(base.types);
@@ -330,7 +271,7 @@ function withLocal(names: Names, entries: readonly (readonly [string, Static, (s
       code.set(name, alias ?? name);
       types.set(name, type);
     }
-    return { code, types };
+    return withReferenceTypes({ ...base, code, types }, entries.map(([name, , , type]) => [name, type]));
   };
   return {
     template: scope(names.template),
@@ -357,12 +298,6 @@ function withSlotProps(names: Names, props: readonly string[], alias: string, de
   return { ...local, template: remap(local.template, names.template), script: remap(local.script, names.script) };
 }
 
-function readsLoop(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return false;
-  if (!Array.isArray(value) && "kind" in value && "name" in value && value.kind === "id" && value.name === "loop") return true;
-  return Object.values(value).some(readsLoop);
-}
-
 /** A consumer template's free names are the receiving slot's props, not setup-scope globals. */
 function projectedNames(children: readonly TemplateNode[], scope: Scope): readonly string[] {
   const exposed = new Set<string>();
@@ -383,7 +318,6 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
       dependencies(flow.listPlan, known);
       known.add(flow.item);
       if (flow.index !== undefined) known.add(flow.index);
-      known.add("loop");
       dependencies(flow.wherePlan, known);
       dependencies(flow.limitPlan, known);
       dependencies(flow.keyPlan, known);
@@ -397,7 +331,7 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
       for (const child of node.fallback ?? []) visit(child, known);
       return;
     }
-    for (const attribute of node.attributes) if (attribute.kind !== "literal") dependencies(attribute.expressionPlan, known);
+    for (const attribute of node.attributes) if (attribute.kind !== "literal" && attribute.kind !== "forward") dependencies(attribute.expressionPlan, known);
     for (const child of node.children) visit(child, known);
   };
   const known = new Set(scope.code.keys());
@@ -413,33 +347,29 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
   const item = localIdentifier(flow.item, context);
   const index = flow.index === undefined ? context.identifiers.take("index", "Loop")
     : localIdentifier(flow.index, context);
-  const local = withLocal(names, [
-    [flow.item, itemType, item],
-    [flow.index ?? index, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
-    ["loop", { type: { kind: "object", open: false, fields: [
-      { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
-      { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
-      { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
-      { name: "count", type: { kind: "terminal", name: "number" }, optional: false },
-    ] }, nullable: false }],
+  const itemLocal = withLocal(names, [
+    [flow.item, itemType, item, (() => { const type = referenceType(listNode, names.template); return type?.kind === "list" ? type.item : undefined; })()],
+  ]);
+  const local = withLocal(itemLocal, [
+    [flow.index ?? ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
+    [ITERATION_INDEX, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
   ]);
   const options = {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-    itemScope: local.template,
+    itemScope: itemLocal.template,
     sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
   };
   const list = (flow.listPlan === undefined || !mayProduceInvalidResult(listNode, names.script) ? undefined : guardedBinding(flow.listPlan, names, context, (scope) =>
-    lowering.list(listNode, scope, item, { ...options, itemScope: local.script })))
+    lowering.list(listNode, scope, item, { ...options, itemScope: itemLocal.script })))
     ?? lowering.list(listNode, names.template, item, options);
   const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, local.template);
   // An `as` list's entry is its own key: Vue keys vnodes by identity, though its types take only property keys.
   const entryKey = flow.keyPlan?.ast.kind === "id" && flow.keyPlan.ast.name === flow.item && listNode.kind === "id" && context.childLists.has(listNode.name);
   const { flow: _flow, ...body } = node;
-  const needsLoop = readsLoop(body) || readsLoop(flow.keyPlan?.ast);
-  const row = needsLoop ? `({ item: ${item}, index: ${index}, loop })` : flow.index === undefined && flow.keyPlan !== undefined ? item : `(${item}, ${index})`;
-  const checkedList = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
-  const rows = needsLoop ? lowering.eachRows(checkedList) : checkedList;
+  const row = `(${item}, ${index})`;
+  const checkedList = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}) => ${key}`);
+  const rows = checkedList;
   const directives = [`v-for=${bound(`${row} in ${rows}`)}`, `:key=${bound(entryKey ? `${key} as any` : key)}`];
   const markup = node.kind === "slot"
     ? `<template ${directives.join(" ")}>${renderNode(body as SlotNode, local, context)}</template>`
@@ -482,9 +412,9 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
     const carrier = children.find(isSlotTemplate);
     const contract = contractOf(slot);
     const props = carrier === undefined ? [] : contract?.props ?? projectedNames(carrier.children, names.template);
-    const alias = contract !== undefined && props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
+    const alias = props.length > 0 ? context.identifiers.take("slotProps", "") : undefined;
     const local = alias === undefined ? withLocal(names, props.map((name) => [name, UNKNOWN] as const))
-      : withSlotProps(names, props, alias, contract?.declared);
+      : withSlotProps(names, props, alias, contract?.declared ?? context.componentGraph?.get(tag)?.contract.slots?.[slot]?.props);
     // Without `slot`, the carrier renders as a plain `<template>`: its children, under its own flow.
     const content = carrier === undefined ? renderChildren(children, names, context)
       : renderNode({ ...carrier, attributes: carrier.attributes.filter((attribute) => !(attribute.kind === "literal" && attribute.name === "slot")) }, local, context);
@@ -496,9 +426,11 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
   // An accepted child's `<template slot>` renders at every `<slot of>` outlet, and its plain content at
   // the first only: an empty marker slot beside each `<template slot>` tells its outlets which it is.
   const accepted = [...context.componentGraph?.values() ?? []].some((definition) =>
-    Object.values(definition.contract.slots ?? {}).some((declared) => declared.accepts?.includes(tag) === true));
-  const markers = !accepted ? [] : [...groups].filter(([slot, children]) => /^[A-Za-z_][\w-]*$/.test(slot) && children.some(isSlotTemplate))
-    .map(([slot]) => `<template #html-next-template-${slot} />`);
+    Object.values(definition.contract.slots ?? {}).some((declared) => declared.as !== undefined && declared.accepts?.includes(tag) === true));
+  const target = context.componentGraph?.get(tag);
+  const shared = accepted || target !== undefined && repeatedSlotNames(target).size > 0;
+  const markers = !shared ? [] : [...groups].filter(([, children]) => children.some(isSlotTemplate))
+    .map(([slot]) => `<template #html-next-template-${slot || "default"} />`);
   const loose = renderChildren(nodes.filter((child) => !groups.has(assignedSlot(child))), names, context);
   return [loose, ...named, ...markers].filter((part) => part !== "").join("\n");
 }
@@ -508,7 +440,7 @@ function renderProjection(nodes: readonly TemplateNode[], names: Names, context:
  * accepted child `of` names, with the outlet's props as the child's slot declaration shapes them.
  */
 function renderChildSlot(node: SlotNode, of: NonNullable<SlotNode["of"]>, names: Names, context: Context): string {
-  const name = node.name!;
+  const name = node.name ?? "";
   // A static prop is given as its text; the child's slot declaration converts it (`outletPropsSource`).
   const given = (node.props ?? []).map((prop) =>
     `${propKey(prop.name)}: ${prop.raw === undefined ? context.lowering.value(prop.expressionPlan.ast, names.template) : quote(prop.raw)}`);
@@ -531,7 +463,7 @@ function outletPropsSource(node: SlotNode, context: Context): string | undefined
   const outlet = `<slot of name="${name}">`;
   const file = context.definition.source.file;
   const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
-  const accepts = Object.values(context.definition.contract.slots ?? {}).find((declared) => declared.as === node.of!.list)?.accepts ?? [];
+  const accepts = entryTags(context.definition.contract, node.of!);
   const shapes = accepts.flatMap((tag) => {
     const accepted = context.componentGraph?.get(tag);
     const declared = accepted?.contract.slots?.[name]?.props ?? {};
@@ -578,14 +510,14 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
     const segments = node.segments ?? [node];
     if (segments.some((segment) => segment.expressionPlan !== undefined &&
       segment.expressionPlan.dependencies.some((dependency) => names.locals?.has(dependency.split(".")[0]!)) &&
-      (mayProduceInvalidResult(segment.expressionPlan.ast, names.template) || expressionGuard(segment.expressionPlan, names.template, context.definition, names.locals) !== undefined))) {
+      mayProduceInvalidResult(segment.expressionPlan.ast, names.template))) {
       context.usesRetainedInlineText = true;
       const parts = segments.map((segment) => {
         const plan = segment.expressionPlan;
         if (plan === undefined) return `{ value: ${quote(segment.value)}, text: ${quote(segment.value)}, accepted: true }`;
         const candidate = context.identifiers.take("candidate", "Text");
         const local = withLocal(names, [[candidate, typeOf(plan.ast, names.template)]]);
-        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, ${expressionGuard(plan, names.template, context.definition, names.locals, lowering) ?? "true"}, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
+        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, true, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
       });
       return `<RetainedInlineText :segments=${bound(`[${parts.join(", ")}]`)} />`;
     }
@@ -615,23 +547,41 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
       return fallback === "" ? `<ChildNodes :nodes=${bound(childNodes)} />` : `<ChildNodes :nodes=${bound(childNodes)}>${fallback}</ChildNodes>`;
     }
     const scoped = (node.props?.length ?? 0) > 0;
+    if (!scoped && context.plainSlots?.names.has(node.name ?? "")) {
+      const fallback = renderChildren(node.fallback ?? [], names, context);
+      return `<PlainSlot :state=${bound(context.plainSlots.state)} name=${quote(node.name ?? "")}>${fallback}</PlainSlot>`;
+    }
     const slotName = quote(node.name ?? "");
     const name = scoped ? ` :name=${bound(`scopedSlotName(${slotName})`)}`
       : node.name === undefined ? "" : ` name=${quote(node.name)}`;
     // A null value, and one its declared type rejects, takes the prop's default, or null; a value whose
     // static type is the declared one needs no check.
+    const retained = (node.props ?? []).some(prop => mayProduceInvalidResult(prop.expressionPlan.ast, names.template));
+    const local = retained ? context.identifiers.take("slotValues", "") : "";
+    const values: string[] = [];
+    const defaults: string[] = [];
+    const objectProps = node.props?.some(prop => prop.name === "__proto__") === true;
     const props = (node.props ?? []).map((prop) => {
       const value = lowering.value(prop.expressionPlan.ast, names.template);
       const proven = prop.type !== undefined && provenSlotProp(prop.type, typeOf(prop.expressionPlan.ast, names.template));
-      const source = proven ? undefined : slotPropValueSource(context.definition, node.name, prop);
-      if (source === undefined) return ` :${prop.name}=${bound(value)}`;
-      if (prop.type !== undefined) context.usesSlotPropChecks = true;
-      const given = context.identifiers.take("slotProp", "");
-      context.guarded.push(`const ${given} = ${source};`);
-      return ` :${prop.name}=${bound(`${given}(${value})`)}`;
-    }).join("");
+      const source = proven ? undefined : slotPropValueSource(context.definition, node.name, prop, true);
+      if (source !== undefined && prop.type !== undefined) context.usesSlotPropChecks = true;
+      let given = value;
+      if (source !== undefined) {
+        const check = context.identifiers.take("slotProp", "");
+        context.guarded.push(`const ${check} = ${source};`);
+        given = `${check}(${value})`;
+      }
+      values.push(`${objectKey(prop.name)}: ${given}`);
+      defaults.push(`${objectKey(prop.name)}: ${slotPropDefaultSource(prop)}`);
+      const read = retained ? `${local}[${quote(prop.name)}]` : given;
+      return objectProps ? `${objectKey(prop.name)}: ${read}` : ` :${prop.name}=${bound(read)}`;
+    }).join(objectProps ? ", " : "");
     const fallback = renderChildren(node.fallback ?? [], names, context);
-    return fallback === "" ? `<slot${name}${props} />` : `<slot${name}${props}>${fallback}</slot>`;
+    const outlet = objectProps
+      ? `<ScopedSlotOutlet :content="$slots"${name} :values=${bound(`{ ${props} }`)}>${fallback}</ScopedSlotOutlet>`
+      : fallback === "" ? `<slot${name}${props} />` : `<slot${name}${props}>${fallback}</slot>`;
+    return retained ? `<RetainedSlotValues :values=${bound(`{ ${values.join(", ")} }`)} :defaults=${bound(`{ ${defaults.join(", ")} }`)} v-slot="${local}">${outlet}</RetainedSlotValues>` : outlet;
   }
   const flow = node.flow;
   if (flow?.kind === "each") return renderEachNode(node, flow, names, context);
@@ -649,13 +599,13 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
         : computedStatus !== undefined ? `requireInputStatus(${computedStatus}, ${flow.binding.handlesError})`
         : `requireInputStatus((${lowering.value(value, names.template)}) === undefined ? UNRESOLVED_INPUT : READY_INPUT, ${flow.binding.handlesError})`;
     const values = accepted === undefined ? `[${read}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
-    return `<template v-for=${bound(`${alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, flow.aliasType === undefined ? typeOf(value, names.template) : present(flow.aliasType), alias]]), context)}</template>`;
+    return `<template v-for=${bound(`${alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, flow.aliasType === undefined ? typeOf(value, names.template) : present(flow.aliasType), alias, flow.binding === undefined ? referenceType(value, names.template) : undefined]]), context)}</template>`;
   }
   if (flow?.kind === "match") {
     if (node.name !== "template") return renderElement(elementMatchRoot(node), names, context, false);
     const value = flow.expr === undefined ? undefined : ast(flow.expressionPlan, flow.expr);
     const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, context);
-    const local = flow.alias === undefined ? names : withLocal(names, [[flow.alias, value === undefined ? UNKNOWN : typeOf(value, names.template), alias]]);
+    const local = flow.alias === undefined ? names : withLocal(names, [[flow.alias, value === undefined ? UNKNOWN : typeOf(value, names.template), alias, value === undefined ? undefined : referenceType(value, names.template)]]);
     const arms = node.children
       .filter((child): child is ElementNode => child.kind === "element" && (child.flow?.kind === "when" || child.flow?.kind === "else"))
       .map((arm, index) => {
@@ -698,6 +648,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   if (component) context.imports.add(node.name);
   const literals: string[] = [];
   const attributes: string[] = [];
+  const namespacedAttributes: string[] = [];
+  const retainedAttributes: string[] = [];
   const nativeControl = !component && ["input", "textarea", "select"].includes(node.name);
   const authoredDefault = (bindingName: "value" | "checked"): string => {
     if (bindingName === "checked") {
@@ -725,8 +677,11 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     }
   }
   const classes: string[] = [];
+  const keyedClasses = node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || !component && attribute.target === undefined && attribute.name === "class" && !attribute.twoWay));
+  const literalClass = node.attributes.find(attribute => attribute.kind === "literal" && attribute.name === "class");
   const styles: string[] = [];
   const bindingInputs: string[] = [];
+  const attributeInputs: string[] = [];
   const inputSnapshots: { readonly name: string; readonly source: string }[] = [];
   const reflected = isRoot && !component
     ? Object.entries(context.definition.contract.props).map(([propName]) => {
@@ -737,13 +692,66 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     })
     : [];
   const reflectedNames = new Set(reflected.map(({ attributeName }) => attributeName));
+  const forwards = node.attributes.some(attribute => attribute.kind === "forward");
+  const componentStyle = component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  if (componentStyle) context.usesStyle = true;
+  const declaredStyle = component && Object.hasOwn(context.propContractsByTag?.get(node.name) ?? {}, "style");
+  const preservedStyle = component && (forwards || node.attributes.some(write => write.name === "style" || write.kind === "attribute" && write.target === "style"));
+  if (preservedStyle) context.usesPreservedProps = true;
+  const orderedStyles = forwards && !component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
+  let orderedStyleValue = "{}";
+  const htmlInputs = component && (forwards || componentStyle) && Object.keys(context.propContractsByTag?.get(node.name) ?? {}).length > 0
+    ? invocationSchema(context.propContractsByTag!.get(node.name)!) : undefined;
+  if (htmlInputs !== undefined) context.usesHtmlInputs = true;
+  const ordered: string[] = [];
   let content: string | undefined;
   for (const attribute of node.attributes) {
+    if (attribute.kind === "forward") {
+      if (keyedClasses) classes.push(`[null, $attrs.class == null ? Symbol.for('html-next.no-attribute') : $attrs.class]`);
+      const omitted = [...keyedClasses ? ["class"] : [], ...orderedStyles ? ["style"] : []];
+      const native = context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)";
+      if (orderedStyles) orderedStyleValue = `(Object.hasOwn(forwardedAttributes(${native}), "style") ? (normalizeStyle([${native}.style]) as CSSProperties) : ${orderedStyleValue})`;
+      const forwarded = `forwardedAttributes(${native}${omitted.length === 0 ? "" : `, ${JSON.stringify(omitted)}`})`;
+      ordered.push(`...${htmlInputs === undefined ? forwarded : `htmlAttributeInputs(${forwarded}, ${htmlInputs})`}`);
+      continue;
+    }
+    if (componentStyle && isStyleWrite(attribute)) continue;
+    if (forwards && attribute.kind === "literal" && node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+    if (preservedStyle && attribute.kind === "literal" && attribute.name === "style") {
+      const contract = context.propContractsByTag?.get(node.name)?.style;
+      const parsed = contract === undefined ? undefined : parseTypedValue(attribute.value, contract.type, "$", "html");
+      ordered.push(`style: ${parsed?.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}`);
+      continue;
+    }
+    if (orderedStyles && attribute.kind === "literal" && attribute.name === "style") {
+      orderedStyleValue = `(normalizeStyle([${quote(attribute.value)}]) as CSSProperties)`;
+      continue;
+    }
+    if (forwards && keyedClasses && attribute.kind === "literal" && attribute.name === "class") { classes.push(`[null, ${quote(attribute.value)}]`); continue; }
+    if (forwards && attribute.kind === "literal" && !(keyedClasses && attribute.name === "class")) {
+      const contracts = component ? context.propContractsByTag?.get(node.name) : undefined;
+      const prop = Object.keys(contracts ?? {}).find(name => asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name);
+      const parsed = prop === undefined ? undefined : parseTypedValue(attribute.value, contracts![prop]!.type, "$", "html");
+      ordered.push(`${objectKey(prop ?? (Object.hasOwn(Object.prototype, attribute.name) ? attribute.name === "__proto__" ? "__Proto__" : attribute.name[0]!.toUpperCase() + attribute.name.slice(1) : svgAttributeName(attribute.name)))}: ${parsed?.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}`);
+      continue;
+    }
+    if (!component && attribute.kind === "attribute" && !attribute.twoWay && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class")) {
+      const value = attribute.expressionPlan!.ast;
+      classes.push(`[${attribute.target === "class" ? quote(attribute.name) : "null"}, ${attribute.target === "class" ? lowering.condition(value, names.template) : lowering.attribute(value, names.template, "class")}]`);
+      continue;
+    }
     if (attribute.kind === "literal") {
+      if (keyedClasses && attribute.name === "class") continue;
+      if (!component && attributeNamespace(attribute.name) !== undefined) {
+        namespacedAttributes.push(namespacedAttributeSource(attribute.name, quote(attribute.value)));
+        continue;
+      }
       const propertyOwnsControl = nativeControl && ["value", "checked"].includes(attribute.name) &&
         node.attributes.some((candidate) => candidate.kind === "property" && candidate.name === attribute.name);
       const typed = component ? literalPropBinding(attribute.name, attribute.value, context.propContractsByTag?.get(node.name)) : undefined;
       if (typed !== undefined) literals.push(typed);
+      else if (nativeControl && ["value", "checked"].includes(attribute.name) && !propertyOwnsControl && !reflectedNames.has(attribute.name)) literals.push(`:${attribute.name}.attr=${bound(quote(attribute.value))}`);
+      else if (attribute.name === "__proto__") attributeInputs.push(`${objectKey(component ? "__Proto__" : attribute.name)}: ${quote(attribute.value)}`);
       else if (!reflectedNames.has(attribute.name) && !propertyOwnsControl) literals.push(`${attribute.name}=${attributeValue(attribute.value)}`);
     } else if (attribute.kind === "attribute" && reflectedNames.has(attribute.name) && attribute.twoWay !== true) {
       // The runtime's prop reflection is the final writer for this data-* attribute.
@@ -754,7 +762,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope));
         const value = guarded ?? lowering.text(ast(plan, attribute.expression), names.template);
         context.usesHtml = true;
-        content = `<SanitizedHtml :value=${bound(value)}${context.owner === undefined ? "" : ` owner=${attributeValue(context.owner)}`} />`;
+        content = `<SanitizedHtml :value=${bound(`(${value}) ?? ''`)}${context.owner === undefined ? "" : ` owner=${attributeValue(context.owner)}`} />`;
       } else {
         ast(plan, attribute.expression);
         content = renderNode({ kind: "text", value: "", expressionPlan: plan! }, names, context);
@@ -770,7 +778,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     } else if (attribute.target === "class") {
       const value = ast(attribute.expressionPlan, attribute.expression);
       const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.condition(value, scope));
-      classes.push(`${quote(attribute.name)}: ${guarded ?? lowering.condition(value, names.template)}`);
+      classes.push(`{ kind: "class", name: ${quote(attribute.name)}, read: () => ${guarded === undefined ? lowering.condition(value, names.template) : `${guarded} ?? Symbol.for("html-next.invalid-result")`} }`);
     } else if (attribute.target === "style") {
       const value = ast(attribute.expressionPlan, attribute.expression);
       const code = lowering.text(value, names.template);
@@ -778,7 +786,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       // Vue types a style value as never null. A number is the text the DOM stores, and TypeScript
       // reads `?? undefined` after arithmetic as dead code.
       const styleType = typeOf(value, names.template);
-      styles.push(`${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`);
+      const property = `${quote(attribute.name)}: ${guarded ?? (!styleType.nullable ? code : category(styleType.type) === "number" ? `(${code})?.toString()` : `(${code} ?? undefined)`)}`;
+      if (orderedStyles) orderedStyleValue = `{ ...(${orderedStyleValue}), ${property} }`;
+      else styles.push(property);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
       const available = attribute.writablePath.slice(0, -1).map((_, index) => `${writableTarget(attribute.writablePath!.slice(0, index + 1), names.template, lowering)} != null && `).join("");
@@ -815,7 +825,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
           ? `${lowering.condition(value, scope)} ? true : undefined`
           : lowering.attribute(value, scope, attribute.name);
       const propName = component ? Object.keys(context.propContractsByTag?.get(node.name) ?? {}).find(name =>
-        name.toLowerCase() === attribute.name || kebabCase(name) === attribute.name) : undefined;
+        asciiLowerCase(name) === attribute.name || kebabCase(name) === attribute.name) : undefined;
       const observed = context.observe(names.template);
       if (propName !== undefined && plan !== undefined && value.kind !== "id" && plan.dependencies.some(path => {
         const root = path.split(".")[0]!;
@@ -823,15 +833,17 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       })) {
         context.usesInputStatus = true; context.usesInputExpressions = true;
         const input = context.identifiers.take("boundInput", "Snapshot");
-        const guard = expressionGuard(plan, names.template, context.definition, names.locals, lowering);
         const read = lowering.value(value, observed);
-        inputSnapshots.push({ name: input, source: `evaluateInput(() => (${guard === undefined ? read : `((${guard}) ? ${read} : Symbol.for("html-next.invalid-result"))`}) as any, READY_INPUT)` });
+        inputSnapshots.push({ name: input, source: `evaluateInput(() => (${read}) as any, READY_INPUT)` });
         bindingInputs.push(`${quote(propName)}: () => ${input}`);
         attributes.push(`:${propName}=${bound(`${input}.value`)}`);
         continue;
       }
-      const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) =>
-        component ? lowering.value(value, scope) : attributeValueFor(scope));
+      const namespaced = !component && attributeNamespace(attribute.name) !== undefined;
+      const fallback = node.attributes.find(binding => binding.kind === "literal" && binding.name === attribute.name);
+      const initial = !forwards ? "null" : fallback?.kind === "literal" ? quote(fallback.value) : "Symbol.for('html-next.invalid-result')";
+      const guarded = plan === undefined || namespaced ? undefined : guardedBinding(plan, names, context, (scope) =>
+        component ? lowering.value(value, scope) : attributeValueFor(scope), false, initial);
       const adjusted = component ? attribute.name : svgAttributeName(attribute.name);
       if (propName !== undefined && value.kind === "id") {
         const read = names.template.code.get(value.name);
@@ -840,14 +852,43 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const availability = observed.code.get(value.name) !== read ? context.availability.get(value.name) : undefined;
         if (prop || availability !== undefined || computed && read?.endsWith(".get()")) bindingInputs.push(`${quote(propName)}: () => ({ value: ${guarded ?? lowering.value(value, names.template)}, status: ${availability ?? (prop ? `inputStatus(${quote(value.name)}, true)` : read!.replace(/\.get\(\)$/, ".status()"))} })`);
       }
-      attributes.push(`:${adjusted}${nativeAttribute || adjusted !== attribute.name ? ".attr" : ""}=${bound(guarded ?? (component ? lowering.value(value, names.template) : attributeValueFor(names.template)))}`);
+      const rendered = guarded ?? (component ? lowering.value(value, names.template) : attributeValueFor(names.template));
+      if (namespaced) namespacedAttributes.push(namespacedAttributeSource(adjusted, rendered));
+      else if (!component && !forwards && guarded === undefined && plan !== undefined && mayProduceInvalidResult(plan.ast, names.template)) {
+        retainedAttributes.push(`[${quote(adjusted)}, ${rendered}${fallback?.kind === "literal" ? `, ${quote(fallback.value)}` : ""}]`);
+      }
+      else if (component && propName === undefined && (adjusted === "class" || adjusted === "style" || adjusted === "__proto__")) attributeInputs.push(`...(${rendered} == null ? {} : { ${objectKey(adjusted === "__proto__" && component ? "__Proto__" : adjusted)}: ${rendered} })`);
+      else if (orderedStyles && attribute.name === "style") orderedStyleValue = `(${rendered} === Symbol.for('html-next.invalid-result') ? ${orderedStyleValue} : (normalizeStyle([${rendered}]) as CSSProperties))`;
+      else if (forwards || declaredStyle && attribute.name === "style") ordered.push(guarded === undefined ? `${objectKey(adjusted === "__proto__" && component ? "__Proto__" : adjusted)}: ${rendered}` : `...(${rendered} === Symbol.for('html-next.invalid-result') ? {} : { ${objectKey(adjusted === "__proto__" && component ? "__Proto__" : adjusted)}: ${rendered} })`);
+      else attributes.push(`:${adjusted}${nativeAttribute || adjusted !== attribute.name ? ".attr" : ""}=${bound(rendered)}`);
     }
   }
+  if (componentStyle) {
+    const rules = styleWriteRules(node.attributes, (attribute, fallback) => {
+      const plan = attribute.expressionPlan!;
+      const read = (scope: Scope) => attribute.target === "style" ? lowering.text(plan.ast, scope) : lowering.attribute(plan.ast, scope, "style");
+      return guardedBinding(plan, names, context, read, false, fallback === undefined ? "Symbol.for('html-next.invalid-result')" : quote(fallback)) ?? read(names.template);
+    }, context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)");
+    const value = `styleText("", ${rules})`;
+    ordered.push(htmlInputs === undefined ? `style: ${value}` : `...htmlAttributeInputs({ style: ${value} }, ${htmlInputs})`);
+  }
+  if (namespacedAttributes.length > 0) attributes.push(`v-namespaced-attributes=${bound(`[${namespacedAttributes.join(", ")}]`)}`);
+  if (retainedAttributes.length > 0) attributes.push(`v-attribute-bindings=${bound(`[${retainedAttributes.join(", ")}]`)}`);
   const inputs = bindingInputs.length === 0 ? undefined : `[BINDING_INPUTS_PROP]: { ${bindingInputs.join(", ")} }`;
   // A delegated root's inputs join its consumer's attributes: Vue rejects a second object `v-bind`.
-  if (inputs !== undefined && !isRoot) attributes.push(`v-bind=${bound(`{ ${inputs} }`)}`);
-  if (classes.length > 0) attributes.push(`:class=${bound(`{ ${classes.join(", ")} }`)}`);
-  if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
+  if (forwards || isRoot || ordered.length > 0 || attributeInputs.length > 0 || inputs !== undefined) {
+    const record = `{ ${[...isRoot ? [`...rootMetadata(${context.modulePreparation ? "moduleBindings.attributes($attrs)" : "$attrs"})`] : [], ...ordered, ...attributeInputs, ...inputs === undefined ? [] : [inputs]].join(", ")} }`;
+    const values = htmlInputs === undefined ? record : `invocationProps(${record}, ${htmlInputs})`;
+    attributes.push(`v-bind=${bound(preservedStyle ? `preservePropInput(${values}, "style")` : values)}`);
+  }
+  if (classes.length > 0) {
+    if (component) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
+    else {
+      attributes.push(`v-class-bindings=${bound(`{ ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}base: ${forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
+    }
+  }
+  if (orderedStyles) attributes.push(`:style=${bound(orderedStyleValue)}`);
+  else if (styles.length > 0) attributes.push(`:style=${bound(`{ ${styles.join(", ")} }`)}`);
   for (const event of node.events ?? []) {
     const handler = context.handlers.get(event.handler);
     if (handler === undefined) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
@@ -867,11 +908,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     attributes.push(`ref=${quote(context.refs.get(node.ref)!)}`);
   }
   if (isRoot) {
-    // The consumer's attributes win over the template's literals and lose to its bindings, as in
-    // the runtime; Vue combines class and style itself.
     const tag = context.definition.contract.tag;
-    const rootAttrs = context.modulePreparation ? "nativeAttrs(moduleBindings.attributes($attrs))" : "nativeAttrs($attrs)";
-    literals.push(inputs === undefined ? `v-bind=${bound(rootAttrs)}` : `v-bind=${bound(`{ ...${rootAttrs}, ${inputs} }`)}`);
     if (context.validityValues !== undefined) {
       attributes.push(`v-prop-validity=${bound(`{ contract: propValidityContract, values: ${context.validityValues} }`)}`);
     }
@@ -905,7 +942,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     ...(isRoot && context.hostClass ? [context.definition.contract.tag] : []),
     ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
   ];
-  if (styled.length > 0) {
+  if (styled.length > 0 && component) {
+    attributes.push(`v-component-classes=${bound(JSON.stringify(styled))}`);
+  } else if (styled.length > 0 && classes.length === 0) {
     const index = literals.findIndex((literal) => literal.startsWith("class="));
     if (index < 0) literals.unshift(`class=${attributeValue(styled.join(" "))}`);
     else literals[index] = `class="${styled.join(" ")} ${literals[index]!.slice('class="'.length)}`;
@@ -1046,7 +1085,7 @@ export interface VueConversionOptions {
   readonly guardNestedDepth?: boolean;
   /** Public graph output can relocate components into nested source-mirrored directories. */
   readonly importSpecifier?: (tag: string) => string;
-  readonly helperSpecifier?: (name: "host" | "html" | "control" | "props" | "requests" | "head" | "bindings") => string;
+  readonly helperSpecifier?: (name: "attributes" | "host" | "html" | "control" | "props" | "requests" | "head" | "bindings" | "style") => string;
   /**
    * The linked graph's definitions, by tag. A `:state()` condition on another component resolves
    * against them, and the component's root carries the states their styles test on it.
@@ -1095,8 +1134,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     : undefined;
   const identifiers = new Identifiers(target.props.map((prop) => prop.name));
   const lowering = new Lowering("warnUnless");
-  const templateScope = { code: new Map<string, string>(), types: new Map<string, Static>() };
-  const script = { code: new Map<string, string>(), types: new Map<string, Static>() };
+  const templateScope = { ...referenceContext(definition), code: new Map<string, string>(), types: new Map<string, Static>() };
+  const script = { ...referenceContext(definition), code: new Map<string, string>(), types: new Map<string, Static>() };
   const names: Names = { template: templateScope, script };
   const define = (name: string, templateCode: string, scriptCode: string, type: Static): void => {
     templateScope.code.set(name, templateCode);
@@ -1112,7 +1151,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const templateRead = prop === modelProp ? "(checkedProps.modelValue ?? checkedProps.value)"
       : identifier ? `checkedProps.${prop.name}` : `checkedProps[${quote(prop.name)}]`;
     const type = present(normalizeType(prop.contract.type));
-    define(prop.name, templateRead, read, { type: type.type, nullable: type.nullable || !prop.contract.required || prop === modelProp, null: !prop.contract.required || prop === modelProp });
+    const nullable = propValueIsNullable(prop.contract) || prop === modelProp;
+    define(prop.name, templateRead, read, { type: type.type, nullable, null: nullable });
   }
   const stateNames = new Map<ReactiveDeclaration, string>();
   for (const state of states) {
@@ -1167,6 +1207,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     type: childListType(declared.accepts, options.componentGraph),
   }]);
   for (const list of childLists) define(list.as, list.name, `${list.name}.value`, list.type);
+  const accepted = [...options.componentGraph?.values() ?? []].some(other => Object.values(other.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(contract.tag)));
+  const sharedSlots = new Set(repeatedSlotNames(definition));
+  if (accepted) for (const name of [...Object.keys(contract.slots ?? {}), ...(definition.slots ?? []).map(slot => slot.name ?? "")]) sharedSlots.add(name);
+  for (const list of childLists) sharedSlots.delete(list.slot);
+  for (const name of sharedSlots) if (Object.keys(contract.slots?.[name]?.props ?? {}).length > 0 ||
+    definition.slots?.some(slot => (slot.name ?? "") === name && (slot.props?.length ?? 0) > 0)) sharedSlots.delete(name);
+  const plainSlots = sharedSlots.size === 0 ? undefined : { state: identifiers.take("plainSlots", ""), names: sharedSlots };
   const handlerNames = new Map(handlers.map((handler) => [handler.name, identifiers.take(handler.name, "Handler")]));
 
   const selectorStateNames = new Set(target.props.flatMap((prop) => {
@@ -1192,7 +1239,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const controlled = (definition.module ?? definition.controller) !== undefined;
   const dispatches = events.length > 0 || controlled;
   const headed = declaresHead(definition);
-  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed;
+  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed || accepted;
   const availability = new Map([...seeded.map(state => [state.name, `declarationStatus(${quote(state.name)})`] as const),
     ...contexts.map(context => [context.as ?? context.name, `declarationStatus(${quote(context.as ?? context.name)})`] as const)]);
   const context: Context = {
@@ -1207,6 +1254,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(options.componentGraph === undefined ? {} : { componentGraph: options.componentGraph }),
     childNodes: new Map(childLists.map((list) => [list.slot, list.nodes])),
     childLists: new Set(childLists.map((list) => list.as)),
+    plainSlots,
     outletProps: [],
     lowering,
     imports: new Set(),
@@ -1236,7 +1284,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const rootWithName = rootWith === undefined ? undefined : identifiers.take("rootWith", "");
   if (rootWith?.binding !== undefined) context.usesInputStatus = true;
   const rootNames: Names = rootWith === undefined ? names : (() => {
-    const local = withLocal(names, [[rootWith.alias, rootWith.aliasType === undefined ? typeOf(rootWithValue!, names.template) : present(rootWith.aliasType)]]);
+    const local = withLocal(names, [[rootWith.alias, rootWith.aliasType === undefined ? typeOf(rootWithValue!, names.template) : present(rootWith.aliasType), undefined, rootWith.binding === undefined ? referenceType(rootWithValue!, names.template) : undefined]]);
     return {
       ...local,
       template: { ...local.template, code: new Map([...local.template.code, [rootWith.alias, rootWithName!] as const]) },
@@ -1256,13 +1304,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return renderElement(arm, names, context, true, [directive]);
     }).join("\n")
     : renderElement(elementMatchRoot(template), rootNames, context, true);
-  const hydrationExpectedTag = arms === undefined ? quote(elementMatchRoot(template).name)
+  // A delegated component checks its own selected native root during setup.
+  const hydrationRoot = (element: ElementNode): string => options.componentGraph?.has(element.name) === true ? "null" : quote(element.name);
+  const hydrationExpectedTag = arms === undefined ? hydrationRoot(elementMatchRoot(template))
     : arms.reduceRight((fallback, arm) => {
       const flow = arm.flow!;
-      if (flow.kind === "else") return quote(arm.name);
+      if (flow.kind === "else") return hydrationRoot(arm);
       if (flow.kind !== "when") fail("HT018", `A root $match child in <${contract.tag}> must be a $when or $else arm.`);
       const test = lowering.condition(ast(flow.testPlan, flow.test), names.script);
-      return `(${test}) ? ${quote(arm.name)} : (${fallback})`;
+      return `(${test}) ? ${hydrationRoot(arm)} : (${fallback})`;
     }, "undefined");
   const hydrationInstanceName = identifiers.take("hydrationInstance", "");
   const nestedDepthName = options.guardNestedDepth ? identifiers.take("nestedDepth", "") : undefined;
@@ -1292,8 +1342,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
-    const checked = `propInputs.value<${type}${prop.contract.required ? "" : " | null"}>(${quote(prop.name)}, props[${quote(prop.name)}], props[BINDING_INPUTS_PROP])`;
-    const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
+    const valueType = propValueIsNullable(prop.contract) ? optionalType(type, false) : `NonNullable<${type}>`;
+    const value = `propInputs.value<${valueType}>(${quote(prop.name)}, props[${quote(prop.name)}], props[BINDING_INPUTS_PROP])`;
     return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
       : `  ${propKey(prop.name)}: ${value},`;
   });
@@ -1349,7 +1399,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   ].join("\n");
   const stateSource = (declaration: ReactiveDeclaration): string => {
     const name = stateNames.get(declaration)!;
-    const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
+    const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, uncheckedReferences(script));
     if (declaration.kind === "computed" || declaration.initializer !== undefined) {
       const observed = inputScope(script, (name, read) => Object.hasOwn(contract.props, name) ? `propInputs.status(${quote(name)})`
         : availability.get(name) ?? (computedValues.some(value => value.name === name) ? read.replace(/\.get\(\)$/, ".status()")
@@ -1357,17 +1407,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
             ? `((${read}) === undefined ? UNRESOLVED_INPUT : READY_INPUT)` : undefined));
       if (declaration.initializer !== undefined) {
         const expression = lowering.value(declaration.initializer.ast, observed);
-        const guard = expressionGuard(declaration.initializer, script, definition, undefined, lowering);
         const node = declarationTypeNode(declaration.type, declaration.shape);
         const accepts = node === undefined ? "true" : destinationTypeCheck(node, "next");
-        return `const ${name} = initializedState<${node === undefined ? "unknown" : typeScript(present(node))}>(() => evaluateInput(() => { ${guard === undefined ? "" : `if (!(${guard})) return Symbol.for("html-next.invalid-result"); `}return ${expression}; }), (next: unknown) => ${accepts}, copyStateSeed, () => ${lowering.use("warnUnless")}(false, ${quote(`initializer:${declaration.name}`)}, ${quote(`State \`${declaration.name}\` does not satisfy its declared type.`)}));`;
+        return `const ${name} = initializedState<${node === undefined ? "unknown" : typeScript(present(node))}>(() => evaluateInput(() => { return ${expression}; }), (next: unknown) => ${accepts}, copyStateSeed, () => ${lowering.use("warnUnless")}(false, ${quote(`initializer:${declaration.name}`)}, ${quote(`State \`${declaration.name}\` does not satisfy its declared type.`)}));`;
       }
       const expression = declaration.expression === undefined ? "undefined" : lowering.value(declaration.expression.ast, observed);
-      const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition, undefined, lowering);
       const retains = declaration.expression !== undefined && mayProduceInvalidResult(declaration.expression.ast, script);
       const make = `(read) => { const value = cycleCheckedComputed(read); return { get: () => value.value }; }`;
       const type = typeScript(script.types.get(declaration.name)!);
-      if (retains || guard !== undefined) return `let ${name}Previous: ${type} = null;\nconst ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => { ${guard === undefined ? "" : `if (!(${guard})) return Symbol.for("html-next.invalid-result") as any; `}return ${expression} as any; }, ${make}, next => (next as unknown) === Symbol.for("html-next.invalid-result") ? ${name}Previous : (${name}Previous = next));`;
+      if (retains) return `let ${name}Previous: ${type} = null;\nconst ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => { return ${expression} as any; }, ${make}, next => ${lowering.use("acceptsBindingResult")}(next) ? (${name}Previous = next) : ${name}Previous);`;
       return `const ${name}: ReturnType<typeof inputComputed<${type}>> = inputComputed<${type}>(() => ${expression} as any, ${make});`;
     }
     const type = script.types.get(declaration.name)!;
@@ -1388,6 +1436,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     return lines;
   };
 
+  const childEntrySource = `useChildEntry({ ${states.filter(state => options.publishedStates?.has(state.name) ?? true)
+    .map(state => `${quote(`html-next:${contract.tag}:${state.name}`)}: ${stateNames.get(state)!}`).join(", ")} }, root)`;
   const body: string[] = [];
   body.push(
     ...(nestedDepthName === undefined ? [] : [
@@ -1400,7 +1450,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ]),
     ...(target.props.length > 0 || requestPropDefinitions.length === 0 ? [] : ["const props = defineProps({", ...requestPropDefinitions, "});"]),
     ...(target.props.length === 0 ? [] : [
-      `const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })} as const;`,
+      `const propValidityContract = ${literalValueSource({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })} as const;`,
       "const props = defineProps({",
       ...propDefinitions,
       ...requestPropDefinitions,
@@ -1449,7 +1499,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       return [`const ${name} = injectContext(${quote(contract.tag)}, ${quote(declaration.from)}, ${quote(declaration.name)});`];
     }),
     ...childLists.map((list) => `const [${list.name}, ${list.nodes}] = ${childListSource(list, contract.tag, context, options)};`),
-    ...([...options.componentGraph?.values() ?? []].some((other) => Object.values(other.contract.slots ?? {}).some((declared) => declared.accepts?.includes(contract.tag) === true)) ? ["useChildEntry();"] : []),
+    ...(plainSlots === undefined ? accepted ? [`${childEntrySource};`] : [] : [`const ${plainSlots.state} = usePlainSlots(${JSON.stringify([...plainSlots.names])}${accepted ? `, ${childEntrySource}` : ""});`]),
     ...context.outletProps.map((shapes, index) => `const outletProps${index} = ${shapes};`),
     ...(availability.size === 0 ? [] : [`const declarationStatuses = { ${[...seeded.map(state => `${quote(state.name)}: () => ${stateNames.get(state)}.status()`),
       ...contexts.map(context => { const variable = contextNames.get(context)!; return `${quote(context.as ?? context.name)}: () => ${variable}.status?.() ?? (${variable}.value === undefined ? UNRESOLVED_INPUT : READY_INPUT)`; })].join(", ")} } as Record<string, () => typeof READY_INPUT>;`, "const declarationStatus = (name: string) => declarationStatuses[name]!();"]),
@@ -1482,9 +1532,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(!headed ? [] : ["",
       ...[...scriptNames.values()].map((name) => `const ${name} = shallowRef<ScriptStatus>({ pending: false, ok: false, error: null });`),
       ...(definition.head === undefined ? [] : ["const headKept: unknown[] = [];", `useHead(root, () => ${headEntriesSource(definition, (expression) => {
-        const guard = expressionGuard(expression, script, definition, undefined, lowering);
         const value = lowering.value(expression.ast, script);
-        return guard === undefined ? value : `((${guard}) ? ${value} : Symbol.for("html-next.invalid-result"))`;
+        return value;
       })});`]),
       ...(definition.scripts === undefined ? [] : [`const headScripts = useScripts(root, ${headScriptsSource(definition, (name, event) => {
         const handler = handlers.findIndex((candidate) => candidate.name === name);
@@ -1516,15 +1565,16 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const index = body.findIndex((line) => line.startsWith("const props = "));
     if (index !== -1) body[index] = body[index]!.replace("const props = ", "");
   }
+  body.unshift(...lowering.referenceDeclarations());
   const code = `${body.join("\n")}\n${rootMarkup}`;
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   // The shared module holds what every component's host and dispatcher do the same way.
   const shared = [...["createDispatch", "useComponentHost", "useLifecycle", "useDataRead", "runFilteredEvent", "preserveRootFocus",
-    "nativeAttrs", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
-    "inlineTextSegment", "RetainedInlineText", "KeyedBoundary", "useChildList", "useChildEntry", "ChildNodes", "ChildSlot", ...Object.values(WRITE_PREDICATES)]
+    "nativeAttrs", "rootMetadata", "checkHydratedRoot", "injectContext", "cycleCheckedComputed", "initializedState", "useReflectedProp", "useScopedSlotName",
+    "inlineTextSegment", "RetainedInlineText", "RetainedSlotValues", "ScopedSlotOutlet", "KeyedBoundary", "useChildList", "useChildEntry", "usePlainSlots", "PlainSlot", "ChildNodes", "ChildSlot", ...Object.values(WRITE_PREDICATES)]
     .filter((name) => new RegExp(`\\b${name}\\b`).test(code)),
     ...new Set([...lowering.helpers(), ...context.usesSlotPropChecks || context.outletProps.length > 0 ? ["warnUnless"] : []])].sort();
-  const vueTypes = target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"];
+  const vueTypes = [...(target.props.length === 0 && target.requests.length === 0 ? [] : ["PropType"]), ...apis.includes("normalizeStyle") ? ["CSSProperties"] : []];
   const requestHelpers = (definition.module ?? definition.controller) === undefined ? [] : REQUEST_HELPERS.filter((name) => new RegExp(`\\b${name}\\(`).test(code));
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
@@ -1545,6 +1595,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ]),
       `import type { ${REQUEST_TYPES.join(", ")} } from ${quote(options.helperSpecifier?.("requests") ?? VUE_REQUESTS_SPECIFIER)};`,
     ]),
+    ...(!rootMarkup.includes("v-namespaced-attributes=") ? [] : [`import { applyNamespacedAttributes, namespacedAttributeProps, type NamespacedAttribute } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
+    ...(!rootMarkup.includes("v-attribute-bindings=") ? [] : [`import { applyOrderedAttributes, attributeBindingProps, type AttributeBinding, type AttributeWriteState } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
     ...(!headed ? [] : [
       `import { ${["headAttribute", "headAttributes", "headJson", "headText", "useHead", "useScripts"].filter((name) => new RegExp(`\\b${name}\\(`).test(code)).join(", ")} } from ${quote(options.helperSpecifier?.("head") ?? VUE_HEAD_SPECIFIER)};`,
@@ -1556,8 +1608,41 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ...(rootMarkup.includes("v-bind-control=") ? ["vBindControl"] : []),
       ...(rootMarkup.includes("<SelectedOptions ") ? ["SelectedOptions"] : []),
     ].join(", ")} } from ${quote(options.helperSpecifier?.("control") ?? VUE_CONTROL_SPECIFIER)};`] : []),
+    ...(!rootMarkup.includes("v-class-bindings=") ? [] : [`import { classBindingText, initializeClassBindings, applyClassBindings, type ClassBindingInput } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`]),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.vue`)};`),
     "",
+    ...(!rootMarkup.includes("v-attribute-bindings=") ? [] : [
+      'const attributeBindingsState = new WeakMap<Element, AttributeWriteState>();',
+      'const writeAttributeBindings = (element: Element, binding: { value: readonly AttributeBinding[] }): void => {',
+      '  let state = attributeBindingsState.get(element);',
+      '  if (state === undefined) { state = { values: [], forwarded: [] }; attributeBindingsState.set(element, state); }',
+      '  applyOrderedAttributes(element, binding.value.map(([name, value, fallback]) => [name, value, undefined, fallback] as const), state);',
+      '};',
+      'const vAttributeBindings = { getSSRProps: (binding: { value: readonly AttributeBinding[] }) => attributeBindingProps(binding.value), mounted: writeAttributeBindings, updated: writeAttributeBindings };',
+    ]),
+    ...(!rootMarkup.includes("v-namespaced-attributes=") ? [] : [
+      'const vNamespacedAttributes = {',
+      '  getSSRProps: (binding: { value: readonly NamespacedAttribute[] }) => namespacedAttributeProps(binding.value),',
+      '  mounted: (element: Element, binding: { value: readonly NamespacedAttribute[] }) => applyNamespacedAttributes(element, binding.value),',
+      '  updated: (element: Element, binding: { value: readonly NamespacedAttribute[]; oldValue: readonly NamespacedAttribute[] }) => applyNamespacedAttributes(element, binding.value, binding.oldValue),',
+      '};',
+    ]),
+    ...(!rootMarkup.includes("v-class-bindings=") ? [] : [
+      'const classBindingsState = new WeakMap<Element, unknown[]>();',
+      'const vClassBindings = {',
+      '  getSSRProps: (binding: { value: ClassBindingInput }) => ({ className: classBindingText(binding.value) }),',
+      '  mounted: (element: Element, binding: { value: ClassBindingInput }) => { const input = binding.value; const previous = initializeClassBindings(element, input); classBindingsState.set(element, previous); applyClassBindings(element, input, previous); },',
+      '  updated: (element: Element, binding: { value: ClassBindingInput }) => applyClassBindings(element, binding.value, classBindingsState.get(element)!),',
+      '};',
+    ]),
+    ...(!rootMarkup.includes("v-component-classes=") ? [] : [
+      'const applyComponentClasses = (element: Element, binding: { value: readonly string[] }): void => { element.classList.add(...binding.value); };',
+      'const vComponentClasses = { getSSRProps: (binding: { value: readonly string[] }) => ({ class: binding.value.join(" ") }), mounted: applyComponentClasses, updated: applyComponentClasses };',
+    ]),
+    ...(templateForwardsAttributes(definition.template) ? [`import { forwardedAttributes } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`] : []),
+    ...(!context.usesStyle ? [] : [`import { styleText } from ${quote(options.helperSpecifier?.("style") ?? "./style/style.js")};`]),
+    ...(!context.usesPreservedProps ? [] : [`import { preservePropInput } from ${quote(options.helperSpecifier?.("props") ?? "./props")};`]),
+    ...(!context.usesHtmlInputs ? [] : [`import { htmlAttributeInputs, invocationProps } from ${quote(options.helperSpecifier?.("props") ?? "./props")};`]),
     "defineOptions({ inheritAttrs: false });",
     "",
     ...body,
@@ -1686,7 +1771,7 @@ function childListSource(list: { readonly slot: string; readonly accepts: readon
     const outlets = (definition.slots ?? []).map((slot) => slot.name ?? "");
     const scoped = [...new Set([...Object.keys(declared).filter((name) => Object.keys(declared[name]!.props).length > 0),
       ...(definition.slots ?? []).filter((slot) => (slot.props?.length ?? 0) > 0).map((slot) => slot.name ?? "")])];
-    const known = [...new Set([...Object.keys(declared), ...outlets])].filter((name) => name !== "");
+    const known = [...new Set([...Object.keys(declared), ...outlets])];
     return `[${componentName(accepted)}, ${quote(accepted)}, (g: Record<string, unknown>) => ({ ${props.join(", ")} }), ${JSON.stringify([outlets, scoped, known, listed(known)])}]`;
   });
   // A preset, whose root is an accepted component, is not supported yet: the list leaves it out with a warning.
@@ -1699,5 +1784,5 @@ function childListSource(list: { readonly slot: string; readonly accepts: readon
   const named = `\`${tag}\`'s ${list.slot === "" ? "default slot" : `\`${list.slot}\` slot`}`;
   const file = context.definition.source.file;
   const prefix = file === "" ? "HR007: " : `${file}: HR007: `;
-  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))})`;
+  return `useChildList<${typeScript(list.type)}>(${quote(list.slot)}, [${kinds.join(", ")}], { ${presets.join(", ")} }, ${quote(prefix)}, ${quote(named)}, ${quote(listed(list.accepts))}${repeatedSlotNames(context.definition).has(list.slot) ? ", true" : ""})`;
 }

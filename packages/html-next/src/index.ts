@@ -36,6 +36,7 @@ export {
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
   svelteStyleArtifacts,
+  inlineStyleArtifacts,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -51,8 +52,10 @@ export { publishedStates } from "./targets/state-roots.js";
 export { addControllerGraph } from "./controller-files.js";
 export { writeHostDeclarations } from "./host-declarations.js";
 export { parseComponent } from "./source-parser.js";
+export { attributeHelperArtifact } from "./targets/attribute-helper.js";
 export { parseSourceComponent } from "./source.js";
 export { preparedModuleRevision } from "./module-preparation.js";
+export { analyzeClientPlan, type ClientPlan, type ClientPlanOptions } from "./client-plan.js";
 export { assembleComponentPackage } from "./package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
@@ -99,7 +102,7 @@ export {
   PROJECTED_ATTRIBUTE,
   stateAttribute,
 } from "./component-styles.js";
-export { normalizeConversionStyleIdentities, compileComponentStylesForConversion, compileComponentGraphStylesForConversion, compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
+export { normalizeConversionStyleIdentities, compileComponentStylesForConversion, compileComponentGraphStylesForConversion, compileComponentStylesForBuild, compileSharedComponentStylesForBuild, compileComponentGraphStylesForBuild, compileComponentGraphStyleAssetsForBuild, type CompiledGraphStyleAssets, compileComponentStylesForSvelte, compileComponentStylesForVue } from "./component-styles-build.js";
 export { collectSharedStylesheets, wrapStylesheetConditions } from "./stylesheet-resources.js";
 export {
   NATIVE_FLAG,

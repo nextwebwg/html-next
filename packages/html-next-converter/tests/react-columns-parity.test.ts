@@ -1,3 +1,4 @@
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -28,7 +29,7 @@ const run = promisify(execFile);
 const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 
 // A table-part root comes before its <defs>: a template whose first start tag is <defs> drops the <th>.
-const source = `<template component="x-column" status="early" summary="One column."><th scope="col"><slot name="header">{$header}</slot></th><defs>
+const source = `<template component="x-column" status="early" summary="One column."><th $attributes scope="col"><slot name="header">{$header}</slot></th><defs>
   <prop name="field" type="string">The row field a cell shows when no cell content is given.</prop>
   <prop name="header" type="string">The header text.</prop>
   <state name="tone" type="string" value="quiet"></state>
@@ -324,7 +325,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
       const consumer = hand === "wrapped" ? `${target} wrapped` : hand ? `${target} hand-written` : target;
       for (const mode of ["mount", "hydrate"] as const) {
         it(`${consumer} ${mode} matches live in ${engine}: entries, $if and keyed $each columns, cells, notes and contexts`, async () => {
-          const browser = await browserType.launch({ headless: true });
+          const browser = await launchParityBrowser(browserType);
           try {
             const live = await browser.newPage();
             const converted = await browser.newPage();
@@ -356,7 +357,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
       }
 
       if (hand !== "wrapped") it(`${consumer} warns like live for children a slot does not accept, presets and plain content for a slot with props in ${engine}`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const live = await browser.newPage();
           const converted = await browser.newPage();
@@ -374,7 +375,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
 
       for (const mode of ["mount", "hydrate"] as const) {
         it(`${consumer} ${mode} matches live in ${engine}: $match and <template> regions, templates at every outlet, static outlet props and defaults`, async () => {
-          const browser = await browserType.launch({ headless: true });
+          const browser = await launchParityBrowser(browserType);
           try {
             const live = await browser.newPage();
             const converted = await browser.newPage();
@@ -413,7 +414,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
       };
 
       it(`${target} ${mode} in ${engine}: a wrapper's own state adds, removes, reorders and renames its columns among direct ones`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const page = await browser.newPage();
           const errors: string[] = [];
@@ -450,7 +451,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
       });
 
       it(`${target} ${mode} in ${engine}: a read before the outlet holds the direct columns in server output, then every column and its latest slot content`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const page = await browser.newPage();
           const errors: string[] = [];
@@ -471,7 +472,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
 
       if (target === "react") {
         it(`react ${mode} in ${engine}: StrictMode keeps one entry per wrapped column`, async () => {
-          const browser = await browserType.launch({ headless: true });
+          const browser = await launchParityBrowser(browserType);
           try {
             const live = await browser.newPage();
             const page = await browser.newPage();
@@ -492,7 +493,7 @@ if (mount.hasChildNodes()) hydrate(<App />, mount); else render(<App />, mount);
         });
 
         if (mode === "hydrate") it(`react in ${engine}: a discarded concurrent render leaves no entry`, async () => {
-          const browser = await browserType.launch({ headless: true });
+          const browser = await launchParityBrowser(browserType);
           try {
             const page = await browser.newPage();
             await openTarget(page, target, mode, "Discarded");

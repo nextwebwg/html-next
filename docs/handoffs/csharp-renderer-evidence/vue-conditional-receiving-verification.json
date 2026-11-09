@@ -1,0 +1,245 @@
+{
+  "checkpoint": "Vue conditional and receiving slot lifetime fixes, based on 38fb4973",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "goalStatus": "active",
+  "shipReady": false,
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "ee83bc361313d3f2a30868bd890a606ac298091d",
+    "references": [
+      "html-next/components.md#content-that-renders-on-demand",
+      "html-next/components.md#slot-of",
+      "html-next/reactivity.md"
+    ]
+  },
+  "changes": [
+    "Shared immutable-definition slot analysis retains the existing repeated-slot inventory and adds removable destinations under conditions, matches and iteration. Vue uses those facts for ordinary source lifetime. Permanent single outlets and scoped slots keep native Vue rendering.",
+    "Accepting as-list projections opt into one existing PlainFrame only for repeated or removable receiving destinations. ChildNodes places that retained projection once; PlainPlacement is transparent to accepted-instance registration. Receiving projection and child slot frames dispose with their source.",
+    "Ordinary conditional outlets preserve native inputs while authored lazy templates instantiate fresh content after reopening. Lazy template markers include these selected destinations.",
+    "Public converted tests use actual fresh Vue and renderToString/createSSRApp hydration, including pre-hydration edits, counter state, caller prop changes, injected state context while the root is unplaced, reopening and disposal. SSR bundles load from temporary files for readable failure stacks."
+  ],
+  "regressions": [
+    {
+      "case": "single conditional ordinary outlet",
+      "source": "<template component=\"x-card\"><defs><state name=\"open\" type=\"boolean\" value=\"true\"></state><handler name=\"toggle\"><set name=\"open\" expr:value=\"not $open\"></set></handler></defs><section><button on:click=\"toggle\">Toggle</button><slot $if=\"$open\"></slot></section></template><template component=\"x-page\"><main><x-card><input value=\"Initial\"></x-card></main></template>",
+      "before": {
+        "compiledVanillaAdoptingNodeSSR": {
+          "closedInputs": 0,
+          "sameInputAfterReopen": true,
+          "value": "Edited"
+        },
+        "vueFresh": {
+          "closedInputs": 0,
+          "sameInputAfterReopen": false,
+          "value": "Initial"
+        }
+      },
+      "publicRed": "Chromium preserves plain inputs: direct source lifetime, false !== true",
+      "qualifiedCases": [
+        "direct slot condition",
+        "conditional ancestor",
+        "match branch",
+        "initially closed outlet",
+        "authored default lazy template fresh after reopen"
+      ]
+    },
+    {
+      "case": "repeated receiving accepting outlets",
+      "source": "<template component=\"x-item\"><b>Child</b></template><template component=\"x-list\"><defs><slot accepts=\"x-item\" as=\"items\"></slot></defs><section><p><slot>First</slot></p><div><slot>Second</slot></div></section></template><template component=\"x-page\"><main><x-list><x-item></x-item></x-list></main></template>",
+      "before": {
+        "nodeSSR": [
+          [
+            "p",
+            "Child"
+          ],
+          [
+            "div",
+            "Second"
+          ]
+        ],
+        "vueSSR": [
+          [
+            "p",
+            "Child"
+          ],
+          [
+            "div",
+            "Child"
+          ]
+        ]
+      },
+      "qualifiedCases": [
+        "one rendered accepted root and one as entry",
+        "later destination fallback",
+        "original server input and pre-hydration edit preserved",
+        "counter survives transfer and both outlets absent",
+        "borrowed content retains child state context while root is unplaced",
+        "caller prop update reflected on reopening",
+        "subsequent counter click and application disposal"
+      ]
+    }
+  ],
+  "verification": {
+    "repositoryGate": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "seconds": 413.4671319590125,
+      "javascriptPassed": 2086,
+      "javascriptGatedSkips": 4972,
+      "javascriptSeconds": 328.65,
+      "nativePassed": 844,
+      "nativeSkipped": 0,
+      "fluidCompleteOutputComparisons": 5,
+      "packedConsumersPassed": 8,
+      "packedConsumerSeconds": 59.86,
+      "checks": [
+        "lint",
+        "types",
+        "generated artifacts",
+        "runtime size budgets",
+        "native tests",
+        "build",
+        "packed consumers"
+      ]
+    },
+    "vueBrowser": {
+      "command": "corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts packages/html-next-converter/tests/vue-columns-parity.test.ts packages/html-next-converter/tests/vue-form-model-parity.test.ts packages/html-next-converter/tests/vue-columns-consumer-parity.test.ts --testNamePattern \"columns as markup|columns from| vue |keeps native edits\" --maxWorkers=1",
+      "exitCode": 0,
+      "passed": 40,
+      "filtered": 36,
+      "seconds": 123.31,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "firefoxHost": "Linux arm64 Docker",
+      "playwright": "1.64.0",
+      "firefoxImage": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "containersStoppedAndRemoved": true
+    },
+    "focused": {
+      "passed": 166,
+      "files": [
+        "targets.test.ts",
+        "vue-host.test.ts",
+        "converter.test.ts"
+      ],
+      "note": "Executed after final production edits. Later test-only receiving-context assertions passed in the 40-case browser run."
+    },
+    "review": "One bounded inline unit review, no delegated or repeated reviews. Whole-goal review remains required.",
+    "sourceQualification": "All production, generated, test and changelog edits preceded both final gates. Only this verification receipt and private status notes changed afterward. Source hashes were verified before staging.",
+    "nativeOutputValidation": [
+      {
+        "name": "card",
+        "rows": 0,
+        "bytes": 75,
+        "compileOnceNs": 113980700,
+        "liquidParseOnceNs": 45308000,
+        "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d",
+        "templateSha256": "d63428c5c873f732f089d7d262292c7784989ed531ef3766434fa368c76667fa",
+        "liquidSha256": "7c7ef7d35a1fc737293d91f3c4776ef9f1a10483bf62cd5e2cb16f4540a1c828",
+        "modelSha256": "645c51dbbe297f595345a0eab02a906e108c0b18609081ee200560d4f5ef1fcc",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "af5ab2c67edfbb6547d562f92d8a668fbcc6471580ce5dc93c1f0aa2c408accf"
+      },
+      {
+        "name": "list-10",
+        "rows": 10,
+        "bytes": 589,
+        "compileOnceNs": 4357800,
+        "liquidParseOnceNs": 2574300,
+        "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "97614a4243bfaebe2d05be8dab8df1f1a99251d249f22ae11aac821107a5a0b8",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "af5ab2c67edfbb6547d562f92d8a668fbcc6471580ce5dc93c1f0aa2c408accf"
+      },
+      {
+        "name": "list-100",
+        "rows": 100,
+        "bytes": 5989,
+        "compileOnceNs": 281300,
+        "liquidParseOnceNs": 712000,
+        "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "e39a426097cace6a6bf2190e8a73466b2718df29aafe2f9d4b586ea152ed1a4f",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "af5ab2c67edfbb6547d562f92d8a668fbcc6471580ce5dc93c1f0aa2c408accf"
+      },
+      {
+        "name": "list-1000",
+        "rows": 1000,
+        "bytes": 61789,
+        "compileOnceNs": 215000,
+        "liquidParseOnceNs": 636600,
+        "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "7ced73a5e2bb2cd17aa428c7641c5a8ab445be27518662fc54d66f52fdd5f575",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "af5ab2c67edfbb6547d562f92d8a668fbcc6471580ce5dc93c1f0aa2c408accf"
+      },
+      {
+        "name": "cart-100",
+        "rows": 100,
+        "bytes": 4227,
+        "compileOnceNs": 1394800,
+        "liquidParseOnceNs": 2012000,
+        "outputSha256": "6d004995ac4037a19b7b278d391c61e2ebcef79e46891f20dd0b039714be8a3a",
+        "templateSha256": "24b05b970398860feb5672962d5d0827a9137b014f8eb897358a92675213eefc",
+        "liquidSha256": "5df60c1649be6207fd19a022cb09b5ce6d997efef33c1bb01b80e4790a12d15c",
+        "modelSha256": "c9068fce323131357b750a78337bb83945f730c5df931afabecbe4b8f72c104d",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "af5ab2c67edfbb6547d562f92d8a668fbcc6471580ce5dc93c1f0aa2c408accf"
+      }
+    ]
+  },
+  "ordinaryBundleProbe": {
+    "component": "Unchanged generated XButton.vue, no as list or repeated slot",
+    "baseline": "38fb4973",
+    "current": "Vue conditional and receiving outlet fixes",
+    "mode": "minified browser bundle with identical component and Vue3.5.43",
+    "bundles": {
+      "before": {
+        "bytes": 88805,
+        "gzip": 33934,
+        "sha256": "da44b1502634c0d530981cb8f3de730912df57d246bce29b29dfd5cdd24e6184",
+        "plainPlacementRetained": false
+      },
+      "after": {
+        "bytes": 88805,
+        "gzip": 33934,
+        "sha256": "da44b1502634c0d530981cb8f3de730912df57d246bce29b29dfd5cdd24e6184",
+        "plainPlacementRetained": false
+      }
+    },
+    "runtimeTimingMeasured": false
+  },
+  "qualificationLimits": [
+    "This is a development checkpoint, not whole-goal ship-readiness or all-target catalog qualification.",
+    "New retained-slot facts are consumed by Vue in this unit. Other targets keep their previous repeated-slot selection; equivalent single-conditional and receiving-root lifetime combinations remain to audit there.",
+    "Known React/Preact actual hydration failures and Svelte ownership work remain open. Accepted presets and complete setup/context/filtering combinations remain unfinished.",
+    "Complete native C# client asset/server preparation/identity/rendered-form/hydration, native CSS/styles/formats/validation, refreshed real Looma all-target three-engine gates, and fair cached Fluid/Node latency/throughput/cold/warm plus allocated/retained/peak memory qualification remain.",
+    "No feature hot-path latency or memory measurement was performed in this unit. Identical ordinary bundle bytes do not establish feature performance. Native C# source is unchanged.",
+    "No package publication, public visibility change, branch rename, new support profile or inferred owner approval."
+  ],
+  "sourceHashes": {
+    "CHANGELOG.md": "796b671f49515867a069ac9da331dcb27038571320d64997c4dbb64c3d1b637a",
+    "packages/html-next/src/template.ts": "191cdf84d52951abf11c7cddad4ad4874b2a19d52b03f94e1e196b4814c848c0",
+    "packages/html-next/src/targets/vue.ts": "aa410846271c86899f7315ffb3312f70f15776eb0a431efde705c6ce9e976e18",
+    "packages/html-next/src/targets/vue-host.ts": "b2e763c7b08d98e77e1585784bfcab6799b3b240d79f0f788a3ef0a4d7718fad",
+    "packages/html-next/src/targets/vue-plain-source.ts": "e3ec6000de51f552efc01cc4f07461535e938170de20f82f3ae0469e9df68839",
+    "packages/html-next/examples/generated/vue/host.ts": "2bc975c0a4856592f3ca3b3dbe63d7a47e3333218ce35d902efd85c89bf50416",
+    "packages/html-next-converter/tests/vue-columns-parity.test.ts": "15148bd0bfdbff67641715a4bf5e9099113f55c507c8e243cbae93886a849182",
+    "packages/html-next/tests/targets.test.ts": "ef8b17eec3099d7a8df2b326c9cf75575513bf968277bbbf75d18fa2d4b03c7a"
+  }
+}

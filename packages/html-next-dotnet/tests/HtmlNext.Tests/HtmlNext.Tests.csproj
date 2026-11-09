@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../fixtures/selected-types.json" Link="fixtures/selected-types.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/accepted-child-lists.json" Link="fixtures/accepted-child-lists.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/accepted-children.json" Link="fixtures/accepted-children.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/attribute-forwarding.json" Link="fixtures/attribute-forwarding.json" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <None Include="../fixtures/scoped-slots.json" Link="fixtures/scoped-slots.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/element-references.json" Link="fixtures/element-references.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/deferred-components.json" Link="fixtures/deferred-components.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/invocation-props.json" Link="fixtures/invocation-props.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/invocation-attributes.json" Link="fixtures/invocation-attributes.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/class-bindings.json" Link="fixtures/class-bindings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/iterations.json" Link="fixtures/iterations.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../../src/HtmlNext/HtmlNext.csproj" />
+    <None Include="../fixtures/attribute-bindings.json" Link="fixtures/attribute-bindings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/interface-declarations.json" Link="fixtures/interface-declarations.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/slot-rendering.json" Link="fixtures/slot-rendering.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

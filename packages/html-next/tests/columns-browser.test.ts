@@ -7,7 +7,10 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 import { renderComponents } from "../src/server.js";
-import { parseComponent } from "../src/source-parser.js";
+import { parseComponent, parseComponentResource } from "../src/source-parser.js";
+import { plainSlotFiles, plainSlotInvocations, plainSlotExpected, dynamicPlainSource, repeatedPlainSource } from "./fixtures/plain-slot-ownership.js";
+import { ownedEntryFiles, ownedEntryInvocation, ownedEntryInitial, ownedEntryChanged } from "./fixtures/owned-entry-expressions.js";
+import { launchParityBrowser } from "./pixel-parity.js";
 import { compiledFixtures } from "./hydration-fixtures.js";
 
 // Columns as markup (components#columns-as-markup) in the live runtime. The column template starts
@@ -112,6 +115,179 @@ describe.skipIf(!enabled)("columns as markup (live runtime)", () => {
   const pageHost = `window.HtmlRuntime.getComponentHost(document.querySelector("main"))`;
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const delivery of ["live", "compiled"]) for (const hydrate of [false, true]) it(`${engine} shares plain content by actual placement (${delivery}, ${hydrate ? "hydrated" : "fresh"})`, async () => {
+      const source = Object.values(plainSlotFiles).join("") + dynamicPlainSource + repeatedPlainSource + `<template component="x-page"><main>${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page></main></template>`;
+      const definitions = parseComponentResource(source, "plain-ownership.html").definitions;
+      const html = hydrate ? (await renderComponents("<x-page></x-page>", { definitions })).html : "<x-page></x-page>";
+      const browser = await launchParityBrowser(browserType);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [], warnings: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(html);
+        const before = hydrate ? await page.locator("[data-moving-plain] input").elementHandle() : undefined;
+        if (hydrate) await page.locator("[data-moving-plain] input").fill("Before hydration");
+        if (delivery === "compiled") {
+          const path = join(temporaryDirectory, "plain-compiled.js");
+          await writeFile(path, await compiledFixtures("iife", "", definitions));
+          await page.addScriptTag({ path });
+          await page.evaluate(hydrate => {
+            const root = (window as any).HtmlCompiled.factories["x-page"]({}, {}, hydrate ? document.querySelector("main") : undefined);
+            if (!hydrate) document.body.replaceChildren(root);
+          }, hydrate);
+        } else {
+          await page.addScriptTag({ path: bundlePath });
+          await page.evaluate(definitions => {
+            const api = (window as any).HtmlRuntime;
+            api.registerComponentDefinitions(JSON.parse(definitions));
+            api.observeDocument(document);
+          }, JSON.stringify(definitions));
+        }
+        await page.waitForFunction(() => document.querySelectorAll("[data-plain-case]").length === 4);
+        assert.deepEqual(await page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent]))), plainSlotExpected);
+        assert.equal(await page.locator("[data-plain-case] i").count(), 4);
+        const input = await page.locator("[data-moving-plain] input").elementHandle();
+        if (before !== undefined) {
+          assert.ok(await before!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+          assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
+        }
+        await page.locator("[data-moving-plain] input").fill("Edited");
+        const read = () => page.locator("[data-moving-plain] > b, [data-moving-plain] > p").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
+        assert.deepEqual(await read(), [["p", "Plain"], ["b", "OwnFallback"]]);
+        const toggleContent = async (owner: "p" | "b"): Promise<void> => {
+          for (const text of ["", "Plain"]) {
+            await page.locator('[data-plain-action="content"]').click();
+            await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+            assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text);
+            assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
+          }
+        };
+        await toggleContent("p");
+        for (const [action, expected] of [
+          ["borrowed", [["b", "Plain"]]],
+          ["borrowed", [["p", "BorrowedFallback"], ["b", "Plain"]]],
+          ["root", [["p", "Plain"]]],
+          ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
+        ] as const) {
+          await page.locator(`[data-plain-action="${action}"]`).click();
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+          assert.deepEqual(await read(), expected);
+          await toggleContent(expected.some(([tag, text]) => tag === "b" && text === "Plain") ? "b" : "p");
+          assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
+          assert.ok(await input!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+        }
+        const repeated = await page.locator("[data-repeated-plain] input").elementHandle();
+        await page.locator("[data-repeated-plain] input").fill("Kept");
+        await page.locator('[data-plain-action="first"]').click();
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        assert.equal(await page.locator("[data-repeated-plain] footer").textContent(), "Tail");
+        assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+        assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+        assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
+        assert.equal(await page.locator("[data-repeated-lazy] input").count(), 2);
+        assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
+        await page.evaluate(async () => {
+          const root = document.querySelector("main")!;
+          root.remove();
+          await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          document.body.append(root);
+          await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        });
+        assert.deepEqual(await read(), [["p", "Plain"], ["b", "OwnFallback"]]);
+        await toggleContent("p");
+        assert.ok(await input!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+        assert.equal(await page.locator("[data-repeated-plain] footer").textContent(), "Tail");
+        assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+        assert.deepEqual(warnings, []);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
+    for (const hydrate of [false, true]) it(`${engine} preserves owned entry expressions and updates (${hydrate ? "hydrated" : "fresh"})`, async () => {
+      const source = Object.values(ownedEntryFiles).join("") + `<template component="x-page"><defs>
+        <state name="values" type="list(number)" from="[4, 5]"></state>
+        <handler name="change"><set name="values" expr:value="$values.length = 2 ? [5, 4, 3] : [4, 5]"></set></handler>
+        </defs><main><button data-owned-change on:click="change">Change</button>${ownedEntryInvocation}</main></template>`;
+      const definitions = parseComponentResource(source, "owned-entries.html").definitions;
+      const html = hydrate ? (await renderComponents("<x-page></x-page>", { definitions })).html : "<x-page></x-page>";
+      const browser = await launchParityBrowser(browserType);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [], warnings: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(html);
+        const before = hydrate ? await page.locator('[data-owned="indexed"]').elementHandle() : undefined;
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(definitions => {
+          const api = (window as any).HtmlRuntime;
+          api.registerComponentDefinitions(JSON.parse(definitions));
+          api.observeDocument(document);
+        }, JSON.stringify(definitions));
+        await page.waitForFunction(() => document.querySelectorAll("[data-owned]").length === 11);
+        assert.deepEqual(await page.locator("[data-owned]").allTextContents(), ownedEntryInitial);
+        if (before !== undefined) assert.ok(await before!.evaluate(node => node === document.querySelector('[data-owned="indexed"]')));
+        for (const expected of [ownedEntryChanged, ownedEntryInitial]) {
+          await page.locator("[data-owned-change]").click();
+          await page.waitForFunction(value => document.querySelector('[data-owned="indexed"]')?.textContent === value, expected[0]);
+          assert.deepEqual(await page.locator("[data-owned]").allTextContents(), expected);
+        }
+        assert.deepEqual(warnings, []);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
+    for (const hydrate of [false, true]) it(`${engine} filters accepted content without as through forwarded fallbacks (${hydrate ? "hydrated" : "fresh"})`, async () => {
+      const source = `<template component="x-accepted"><defs><prop name="label" type="string">Label.</prop></defs><b>{$label}</b></template>
+        <template component="x-rejected"><defs><prop name="required" type="string" required>Required.</prop></defs><i>Wrong</i></template>
+        <template component="x-filter"><defs><slot accepts="x-accepted"></slot></defs><section><slot>List empty</slot></section></template>
+        <template component="x-forward"><defs><state name="show" type="boolean" value="true"></state></defs><article><x-filter $if="$show"><slot><x-accepted label="Relay"></x-accepted></slot></x-filter></article></template>
+        <template component="x-acceptance-page"><defs><state name="rows" type="list(object({ id: number, good: boolean, label: string }))" from="[]"></state></defs><main><x-forward><template $each="row of $rows" $key="$row.id"><template $match><x-accepted $when="$row.good" from:label="$row.label"></x-accepted><x-rejected $else></x-rejected></template></template></x-forward></main></template>`;
+      const definitions = parseComponentResource(source, "accepted-without-list.html").definitions;
+      const server = hydrate ? (await renderComponents("<x-acceptance-page></x-acceptance-page>", { definitions })).html : undefined;
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [], warnings: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(server ?? source + "<x-acceptance-page></x-acceptance-page>");
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(definitions => {
+          const api = (window as any).HtmlRuntime;
+          if (definitions !== undefined) api.registerComponentDefinitions(JSON.parse(definitions));
+          api.observeDocument(document);
+        }, hydrate ? JSON.stringify(definitions) : undefined);
+        const text = () => page.locator("section").textContent();
+        const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await settle();
+        assert.equal(await text(), "Relay");
+        const rows = async (value: readonly { id: number; good: boolean; label: string }[]) => {
+          await page.evaluate(value => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("main")).state.rows = value; }, value);
+          await settle();
+        };
+        await rows([{ id: 1, good: true, label: "A" }, { id: 2, good: false, label: "Wrong" }]);
+        assert.equal(await text(), "A");
+        await rows([]);
+        assert.equal(await text(), "Relay");
+        for (let index = 0; index < 3; index++) {
+          await page.evaluate(() => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("article")).state.show = false; });
+          await settle();
+          assert.equal(await page.locator("section").count(), 0);
+          await page.evaluate(() => { (window as any).HtmlRuntime.getComponentHost(document.querySelector("article")).state.show = true; });
+          await settle();
+          assert.equal(await text(), "Relay");
+        }
+        await rows([{ id: 3, good: true, label: "B" }]);
+        assert.equal(await text(), "B");
+        assert.equal(await page.locator("section b").count(), 1);
+        assert.ok(warnings.length > 0);
+        assert.ok(warnings.every(message => /accepts .*left out/.test(message)), warnings.join("\n"));
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} renders the spec's data table, follows consumer $if and $each, and keeps cells by key`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

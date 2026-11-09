@@ -1,0 +1,33 @@
+[
+  {
+    "name": "card",
+    "rows": 0,
+    "html": "<template component=\"x-card\"><defs><prop name=\"title\" type=\"string\" required>Input value.</prop><prop name=\"visible\" type=\"boolean\" required>Input value.</prop></defs><article from:title=\"$title\"><h2 $if=\"$visible\">{$title}</h2></article></template>",
+    "liquid": "<article title=\"{{ title }}\">{% if visible %}<h2>{{ title }}</h2>{% endif %}</article>"
+  },
+  {
+    "name": "list-10",
+    "rows": 10,
+    "html": "<template component=\"x-products\"><defs><prop name=\"products\" type=\"list(object({label: string, price: number}))\" required>Input value.</prop></defs><ul><li $each=\"product of $products\"><span>{$product.label}</span><b>{$product.price}</b></li></ul></template>",
+    "liquid": "<ul>{% for product in products %}<li><span>{{ product.label }}</span><b>{{ product.price }}</b></li>{% endfor %}</ul>"
+  },
+  {
+    "name": "list-100",
+    "rows": 100,
+    "html": "<template component=\"x-products\"><defs><prop name=\"products\" type=\"list(object({label: string, price: number}))\" required>Input value.</prop></defs><ul><li $each=\"product of $products\"><span>{$product.label}</span><b>{$product.price}</b></li></ul></template>",
+    "liquid": "<ul>{% for product in products %}<li><span>{{ product.label }}</span><b>{{ product.price }}</b></li>{% endfor %}</ul>"
+  },
+  {
+    "name": "list-1000",
+    "rows": 1000,
+    "html": "<template component=\"x-products\"><defs><prop name=\"products\" type=\"list(object({label: string, price: number}))\" required>Input value.</prop></defs><ul><li $each=\"product of $products\"><span>{$product.label}</span><b>{$product.price}</b></li></ul></template>",
+    "liquid": "<ul>{% for product in products %}<li><span>{{ product.label }}</span><b>{{ product.price }}</b></li>{% endfor %}</ul>"
+  },
+  {
+    "name": "cart-100",
+    "rows": 100,
+    "computed": true,
+    "html": "<template component=\"x-cart\"><defs><prop name=\"products\" type=\"list(object({label: string, price: number, quantity: integer}))\" required>Cart items.</prop></defs><ul><li $each=\"product of $products\">{concat($product.label, \": \", $product.price * $product.quantity)}</li></ul></template>",
+    "liquid": "<ul>{% for product in products %}<li>{{ product.label }}: {{ product.price | times: product.quantity }}</li>{% endfor %}</ul>"
+  }
+]

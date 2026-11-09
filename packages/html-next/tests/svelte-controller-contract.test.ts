@@ -58,8 +58,8 @@ describe("Svelte controller event contract", () => {
     const subset = source.replace('name="activate" type="event"', 'name="activate" type="number"')
       .replace('expr:value="$$event"', () => 'expr:value="$$event.detail" $if="$$event.type = \'click\'"');
     const output = generateSvelteOutput(parseComponent(subset), "test");
-    assert.match(output.component, /event[^\n]*\.type/);
-    assert.match(output.component, /event[^\n]*\.detail/);
+    assert.match(output.component, /referenceMember\(event, 'type'\)/);
+    assert.match(output.component, /referenceMember\(event, 'detail'\)/);
     compile(output.component, { filename: "EventSubset.svelte", generate: "client" });
   });
 

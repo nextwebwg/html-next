@@ -180,6 +180,8 @@ export function definitionMayInvokeComponents(definition: ComponentDefinition): 
 }
 
 export interface ElementNode {
+  /** Inert source children of a consumer <template slot>, retained for serialized carriers. */
+  readonly slotContent?: string;
   readonly kind: "element";
   readonly name: string;
   readonly attributes: readonly TemplateAttribute[];
@@ -281,16 +283,30 @@ export interface SlotNode {
   readonly fallback?: readonly TemplateNode[];
   /**
    * `<slot of>`: the outlet places this slot of a child the component reads through `as`, rather than
-   * its own. `list` is the `as` list whose entry `expression` names.
+   * its own. `list` is the sole source or the first candidate. When present, `lists` contains all
+   * candidate own `as` lists; an empty array represents a null-only expression.
    */
-  readonly of?: { readonly expression: string; readonly expressionPlan: CompiledExpression; readonly list: string };
+  readonly of?: { readonly expression: string; readonly expressionPlan: CompiledExpression; readonly list: string; readonly lists?: readonly string[] };
 }
 
 export type TemplateAttribute =
   | LiteralAttribute
   | AttributeBinding
   | PropertyBinding
+  | ForwardAttributes
   | DirectiveAttribute;
+
+/** Whole presentation bindings and their keyed writes share one authored-order update. */
+export function orderedAttributeWrites(attributes: readonly TemplateAttribute[], invocation = false): boolean {
+  return attributes.some(attribute => attribute.kind === "forward"
+    || attribute.kind === "attribute" && attribute.target !== undefined && (invocation || attributes.some(binding =>
+      binding.kind === "attribute" && binding.target === undefined && !binding.twoWay && binding.name === attribute.target)));
+}
+
+export interface ForwardAttributes {
+  readonly kind: "forward";
+  readonly name: "attributes";
+}
 
 /** A `$`-directive that sets an element's content: `$value` (escaped text) or `$html` (sanitized). */
 export interface DirectiveAttribute {
@@ -366,4 +382,34 @@ export function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<s
   walk(definition.template, false);
   iteratedRefs.set(definition, names);
   return names;
+}
+
+/** Whether any authored destination forwards inputs, including destinations in future branches. */
+export function templateForwardsAttributes(node: TemplateNode): boolean {
+  return node.kind === "element"
+    ? node.attributes.some(attribute => attribute.kind === "forward") || node.children.some(templateForwardsAttributes)
+    : node.kind === "slot" && (node.fallback?.some(templateForwardsAttributes) ?? false);
+}
+
+const repeatedSlots = new WeakMap<ComponentDefinition, ReadonlySet<string>>();
+/** Slot names whose ordinary content can compete for more than one destination. */
+export function repeatedSlotNames(definition: ComponentDefinition): ReadonlySet<string> {
+  const cached = repeatedSlots.get(definition);
+  if (cached !== undefined) return cached;
+  const names = new Set<string>(), repeated = new Set<string>();
+  const visit = (node: TemplateNode, loop = false): void => {
+    if (node.kind === "text") return;
+    loop ||= node.flow?.kind === "each";
+    if (node.kind === "slot") {
+      if (node.of === undefined) {
+        const name = node.name ?? "";
+        if (loop || names.has(name)) repeated.add(name);
+        names.add(name);
+      }
+      for (const child of node.fallback ?? []) visit(child, loop);
+    } else for (const child of node.children) visit(child, loop);
+  };
+  visit(definition.template);
+  repeatedSlots.set(definition, repeated);
+  return repeated;
 }

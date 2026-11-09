@@ -353,6 +353,21 @@ interface Binding {
   ran: boolean;
 }
 
+// The shared script entry outlives instances; their owners keep callbacks alive.
+class WeakScriptBinding implements Binding {
+  readonly #binding: WeakRef<Binding>;
+  constructor(binding: Binding) { this.#binding = new WeakRef(binding); }
+  get connected(): boolean { return this.#binding.deref()?.connected ?? false; }
+  get ran(): boolean { return this.#binding.deref()?.ran ?? false; }
+  call(): void { this.#binding.deref()?.call(); }
+  queue(): void { this.#binding.deref()?.queue(); }
+  changed(): void { this.#binding.deref()?.changed(); }
+}
+type ScriptBindingCleanup = readonly [WeakRef<Set<Binding>>, WeakScriptBinding];
+// A module-owned finalizer cannot retain an instance through its binding scope.
+function cleanScriptBinding([bindings, subscriber]: ScriptBindingCleanup): void { bindings.deref()?.delete(subscriber); }
+let scriptBindingCleanup: FinalizationRegistry<ScriptBindingCleanup> | undefined;
+
 const BEFORE: ScriptStatus = /* @__PURE__ */ Object.freeze({ pending: false, ok: false, error: null });
 const URL_LIKE = /^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/;
 /** How near the viewport a lazy script's root comes before it loads, as Chromium fetches an `<img loading="lazy">`. */
@@ -514,7 +529,10 @@ export function declareScript(document: Document, declaration: DeclaredScript, r
       return;
     }
     entry = bound;
-    bound.bindings.add(binding);
+    const subscription = new WeakScriptBinding(binding);
+    bound.bindings.add(subscription);
+    (scriptBindingCleanup ??= new FinalizationRegistry(cleanScriptBinding))
+      .register(binding, [new WeakRef(bound.bindings), subscription]);
   };
   const binding: Binding = {
     connected: false,

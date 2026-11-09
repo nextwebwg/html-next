@@ -30,7 +30,7 @@ const counter = parseComponent(`<template component="x-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><button type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
+</defs><button $attributes type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
 
 const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],
@@ -55,6 +55,17 @@ retaining caller ownership; `undefined` releases the prop, including an invocati
 Omitted props keep their invocation values or implicit defaults. Inputs must name declared props;
 a selector that matches no invocation is an error. Values cross the worker boundary through
 Node's structured clone.
+
+Unconsumed invocation attributes apply first on the rendered root. A defining
+template with `noforward` forwards them only at explicit `$attributes` positions,
+following the proposal's [attribute forwarding rules](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
+The example forwards `id` through its authored `$attributes` directive.
+
+`rootAttributes` writes application-owned output attributes directly on lowered roots, keyed by
+selectors for the authored invocations. For example,
+`rootAttributes: { "x-counter": { "data-page-layer": "0" } }` identifies the rendered root for
+application code and `state` selectors. These writes follow replacement roots and remain separate
+from invocation inputs and their authored forwarding destinations.
 
 `state` addresses lowered component roots, so selectors should use stable authored IDs. Each value
 must name declared state. Node output matches the browser's declarative baseline before connection:

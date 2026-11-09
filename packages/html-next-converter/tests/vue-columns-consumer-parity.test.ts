@@ -10,6 +10,7 @@ import { build, type BuildOptions } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 /**
  * Columns as markup (https://nextwebwg.org/declarative-components/components#columns-as-markup) with
@@ -22,7 +23,7 @@ const nodeModules = new URL("../node_modules", import.meta.url).pathname;
 // The server renderer is a dependency of the html-next package's own tests.
 const serverModules = new URL("../../html-next/node_modules", import.meta.url).pathname;
 
-const source = `<template component="x-column" status="early" summary="Column."><th scope="col"><slot name="header">{$header}</slot></th>
+const source = `<template component="x-column" status="early" summary="Column."><th $attributes scope="col"><slot name="header">{$header}</slot></th>
   <defs><prop name="field" type="string">Field.</prop><prop name="header" type="string">Header.</prop>
     <prop name="span" type="number" default="1">Span.</prop>
     <state name="tone" type="string" value="quiet"></state>
@@ -415,7 +416,7 @@ export const render = (name: keyof typeof apps) => renderToString(createSSRApp({
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     it(`${engine} renders, updates and hydrates each consumer's tables alike`, async () => {
-      const browser = await browserType.launch({ headless: true });
+      const browser = await launchParityBrowser(browserType);
       try {
         const errors: string[] = [];
         const warnings: Record<string, string[]> = {};
@@ -487,7 +488,7 @@ export const render = (name: keyof typeof apps) => renderToString(createSSRApp({
 
     for (const mode of ["fresh", "hydrated"] as const) {
       it(`${engine} ${mode}: a read before the outlet holds the direct columns in server output, then every column and its latest slot content`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const page = await browser.newPage();
           const problems: string[] = [];
@@ -513,7 +514,7 @@ export const render = (name: keyof typeof apps) => renderToString(createSSRApp({
       });
 
       it(`${engine} ${mode}: a wrapper's own state adds, removes, reorders and renames its columns among direct ones`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         try {
           const page = await browser.newPage();
           const problems: string[] = [];

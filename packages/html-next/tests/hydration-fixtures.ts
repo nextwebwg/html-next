@@ -14,59 +14,59 @@ export const definitions = [
   `<template component="ssr-inline"><defs>
     <state name="count" type="number" value="0"></state>
     <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-    </defs><section><button type="button" on:click="increment">Next</button><p>Total: {$count} due today <b>Kept</b>!</p></section></template>`,
+    </defs><section $attributes><button type="button" on:click="increment">Next</button><p>Total: {$count} due today <b>Kept</b>!</p></section></template>`,
   `<template component="ssr-counter"><defs>
     <prop name="label" type="string" default="Visits">Label.</prop>
     <state name="count" type="number" value="0"></state>
     <state name="open" type="boolean" value="false"></state>
     <handler name="increment"><set name="count" expr:value="$count + 1"></set><set name="open" expr:value="true"></set></handler>
-    </defs><section from:data-label="$label"><button type="button" on:click="increment"><span $value="$count"></span></button>
+    </defs><section from:data-label="$label" $attributes><button type="button" on:click="increment"><span $value="$count"></span></button>
     <header><slot name="title">Untitled</slot></header><p>Hello <slot></slot>!</p>
     <aside $if="$open"><slot name="extra">Fallback</slot></aside></section></template>`,
   `<template component="ssr-list"><defs>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
-    </defs><section><button type="button" on:click="change">Change</button>
+    </defs><section $attributes><button type="button" on:click="change">Change</button>
     <ul><li $each="row of $rows" $key="$row"><b $value="$row"></b></li></ul></section></template>`,
   `<template component="ssr-reader"><defs><context name="current" from="ssr-provider"></context></defs>
     <output $value="$current"></output></template>`,
   `<template component="ssr-bound-button"><defs><prop name="count" type="number" default="0">Count</prop></defs>
-    <template $match><button $when="$count < 6" type="button"><slot></slot><span $value="$count"></span></button>
-    <a $else href="#kept"><slot></slot><span $value="$count"></span></a></template></template>`,
+    <template $match><button $when="$count < 6" type="button" $attributes><slot></slot><span $value="$count"></span></button>
+    <a $else href="#kept" $attributes><slot></slot><span $value="$count"></span></a></template></template>`,
   `<template component="ssr-bound-parent"><defs><state name="count" type="number" value="0"></state>
     <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
-    <section><ssr-bound-button $ref="action" from:count="$count" from:aria-expanded="$count > 4"
+    <section $attributes><ssr-bound-button $ref="action" from:count="$count" from:aria-expanded="$count > 4"
     class:active="$count > 4" style:opacity="$count > 4 ? '0.5' : '1'" on:click="increment"><strong>Next</strong></ssr-bound-button></section></template>`,
   `<template component="ssr-provider"><defs><state name="current" type="number" value="1"></state>
     <handler name="increment"><set name="current" expr:value="$current + 1"></set></handler></defs>
-    <section><button type="button" on:click="increment">Next</button><ssr-reader></ssr-reader><slot></slot></section></template>`,
+    <section $attributes><button type="button" on:click="increment">Next</button><ssr-reader></ssr-reader><slot></slot></section></template>`,
   `<template component="ssr-control"><defs><state name="text" type="string" value="'initial'"></state></defs>
-    <input bind:value="text" value="authored"></template>`,
-  `<template component="ssr-delegate"><ssr-counter><slot></slot></ssr-counter></template>`,
+    <input bind:value="text" value="authored" $attributes></template>`,
+  `<template component="ssr-delegate"><ssr-counter $attributes><slot></slot></ssr-counter></template>`,
   `<template component="ssr-props"><defs>
     <prop name="items" type="list(string)" default="[]">Items.</prop>
     <prop name="amount" type="number" default="2">Amount.</prop>
     <prop name="enabled" type="boolean" default="false">Enabled.</prop>
-    </defs><output from:data-items="$items" $value="$amount"></output></template>`,
+    </defs><output from:data-items="$items" $value="$amount" $attributes></output></template>`,
   `<template component="ssr-alias"><defs>
     <state name="first" type="unknown" value="{ count: 1 }"></state>
     <state name="second" type="unknown" value="first"></state>
     <handler name="increment"><set name="first.count" expr:value="$first.count + 1"></set></handler>
-    </defs><section><button type="button" on:click="increment">Next</button><output $value="$second.count"></output></section></template>`,
+    </defs><section $attributes><button type="button" on:click="increment">Next</button><output $value="$second.count"></output></section></template>`,
   `<template component="ssr-match"><defs><state name="open" type="boolean" value="false"></state>
     <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
-    <template $match><article $when="$open"><button type="button" on:click="toggle">Close</button><slot></slot></article>
-    <div $else><button type="button" on:click="toggle">Open</button><slot></slot></div></template></template>`,
-  `<template component="ssr-table"><table><tbody><tr><td>Cell <slot></slot> end</td></tr></tbody></table></template>`,
+    <template $match><article $when="$open" $attributes><button type="button" on:click="toggle">Close</button><slot></slot></article>
+    <div $else $attributes><button type="button" on:click="toggle">Open</button><slot></slot></div></template></template>`,
+  `<template component="ssr-table"><table $attributes><tbody><tr><td>Cell <slot></slot> end</td></tr></tbody></table></template>`,
   `<template component="ssr-classed"><defs><state name="count" type="number" value="0"></state></defs>
-    <section class="card own" style="color: red" title="own"><output $value="$count"></output></section></template>`,
+    <section class="card own" style="color: red" title="own" $attributes><output $value="$count"></output></section></template>`,
   `<template component="ssr-scoped"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
-    </defs><section><button type="button" on:click="change">Change</button><ul>
+    </defs><section $attributes><button type="button" on:click="change">Change</button><ul>
     <slot $each="row of $rows" $key="$row" name="row" from:item="$row"><li $value="$row"></li></slot>
     </ul></section></template>`,
-  `<template component="ssr-scoped-page"><article><ssr-scoped><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped></article></template>`,
+  `<template component="ssr-scoped-page"><article $attributes><ssr-scoped><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped></article></template>`,
   `<template component="ssr-assorted"><defs>
     <state name="markup" type="string" value="<em>first</em>"></state>
     <state name="choice" type="string" value="b"></state>
@@ -74,7 +74,7 @@ export const definitions = [
     <state name="detail" type="object({ label: string })" value="{ label: 'kept' }"></state>
     <handler name="change"><set name="markup" expr:value="'<em>second</em>'"></set><set name="choice" expr:value="'a'"></set>
     <set name="pairs" expr:value="['y', 'z', 'x']"></set><set name="detail.label" expr:value="'changed'"></set></handler>
-    </defs><section><button type="button" on:click="change">Change</button><div $html="$markup"></div><p><template $html="$markup"></template></p>
+    </defs><section $attributes><button type="button" on:click="change">Change</button><div $html="$markup"></div><p><template $html="$markup"></template></p>
     <select bind:value="choice"><option value="a">A</option><option value="b">B</option></select>
     <dl><template $each="pair of $pairs" $key="$pair"><dt $value="$pair"></dt><dd>{$pair}!</dd></template></dl>
     <p $with="$detail as shown"><span $value="$shown.label"></span></p></section></template>`,
@@ -82,26 +82,26 @@ export const definitions = [
     <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
     <section><button type="button" on:click="toggle">More</button><div $if="$open"><slot name="details"></slot></div></section></template>`,
   `<template component="ssr-lazy-page"><defs><state name="label" type="string" value="first"></state></defs>
-    <article><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="$label"></b></template></ssr-lazy-toggle></article></template>`,
+    <article $attributes><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="$label"></b></template></ssr-lazy-toggle></article></template>`,
   `<template component="ssr-forward-panel"><defs><prop name="open" type="boolean" default="false">Open.</prop></defs>
-    <div><section $if="$open"><slot name="details"></slot></section></div></template>`,
+    <div $attributes><section $if="$open"><slot name="details"></slot></section></div></template>`,
   `<template component="ssr-forward"><defs><state name="open" type="boolean" value="false"></state>
     <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
-    <article><button type="button" on:click="toggle">Toggle</button><ssr-forward-panel from:open="$open"><template slot="details"><slot name="details"></slot></template></ssr-forward-panel></article></template>`,
+    <article $attributes><button type="button" on:click="toggle">Toggle</button><ssr-forward-panel from:open="$open"><template slot="details"><slot name="details"></slot></template></ssr-forward-panel></article></template>`,
   `<template component="ssr-scoped-forward"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs>
     <div><ssr-scoped><template slot="row"><slot name="row" from:item="$item"></slot></template></ssr-scoped></div></template>`,
-  `<template component="ssr-scoped-forward-page"><article><ssr-scoped-forward><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-forward></article></template>`,
+  `<template component="ssr-scoped-forward-page"><article $attributes><ssr-scoped-forward><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-forward></article></template>`,
   `<template component="ssr-scoped-relay"><defs><slot name="row"><prop name="item" type="string" required>The item.</prop></slot></defs>
     <ssr-scoped><template slot="row"><slot name="row" from:item="$item"></slot></template></ssr-scoped></template>`,
-  `<template component="ssr-scoped-relay-page"><article><ssr-scoped-relay><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-relay></article></template>`,
+  `<template component="ssr-scoped-relay-page"><article $attributes><ssr-scoped-relay><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped-relay></article></template>`,
   `<template component="ssr-eager-forward"><defs><state name="open" type="boolean" value="false"></state>
     <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
-    <article><button type="button" on:click="toggle">Toggle</button><ssr-forward-panel from:open="$open"><div slot="details"><slot name="details"></slot></div></ssr-forward-panel></article></template>`,
-  `<template component="ssr-eager-relay"><ssr-forward-panel><div slot="details"><slot name="details"></slot></div></ssr-forward-panel></template>`,
+    <article $attributes><button type="button" on:click="toggle">Toggle</button><ssr-forward-panel from:open="$open"><div slot="details"><slot name="details"></slot></div></ssr-forward-panel></article></template>`,
+  `<template component="ssr-eager-relay"><ssr-forward-panel $attributes><div slot="details"><slot name="details"></slot></div></ssr-forward-panel></template>`,
   `<template component="ssr-row-flows"><defs>
     <state name="items" type="list(object({ label: string, href: string, tags: list(string) }))" value="[]"></state>
     <handler name="change"><set name="items" expr:value="[{ label: 'group', href: '', tags: [] }, { label: 'link', href: '/a/', tags: ['x'] }]"></set></handler>
-    </defs><section><button type="button" on:click="change">Change</button>
+    </defs><section $attributes><button type="button" on:click="change">Change</button>
     <ul><li $each="item of $items"><template $match><a $when="$item.href" from:href="$item.href">{$item.label}</a><span $else>{$item.label}</span></template></li></ul>
     <ol><li $each="item of $items"><template $match><a $when="$item.href != ''">{$item.label}</a><span $else>{$item.label}</span></template></li></ol>
     <dl><template $each="item of $items"><dt $if="$item.href">{$item.label}</dt><dd $if="not $item.href">{$item.label}</dd>
@@ -109,7 +109,7 @@ export const definitions = [
   `<template component="ssr-whitespace"><defs>
     <state name="rows" type="list(string)" value="['a', 'b']"></state>
     <handler name="change"><set name="rows" expr:value="['c', 'a', 'b']"></set></handler>
-    </defs><section><button type="button" on:click="change">Change</button>
+    </defs><section $attributes><button type="button" on:click="change">Change</button>
     <p><strong>Package:</strong> <code>x</code> <!-- note --> and <em>a</em>
       <em>b</em><template $if="true"> <i>c</i></template></p>
     <p style="white-space: pre"><b>1</b>  <b>2</b>
@@ -120,7 +120,7 @@ export const definitions = [
     <state name="rows" type="list(string)" value="['r']"></state>
     <handler name="toggle"><set name="open" expr:value="not $open"></set><set name="label" expr:value="'b'"></set>
     <set name="rows" expr:value="['s', 'r']"></set></handler>
-    </defs><section><button type="button" on:click="toggle">Toggle <template $if="$open"><i>open</i></template></button>
+    </defs><section $attributes><button type="button" on:click="toggle">Toggle <template $if="$open"><i>open</i></template></button>
     <p>If <template $if="$open"><i>if</i> <b>p</b></template> end</p>
     <span>Arm <template $match><template $when="$open"><i>match</i> <b>span</b></template><template $else><s>closed</s></template></template> end</span>
     <a href="#kept">With <template $with="$label as shown"><i>{$shown}</i> <b>a</b></template> end</a>
@@ -133,23 +133,23 @@ export const definitions = [
     <state name="open" type="boolean" value="false"></state>
     <state name="tags" type="list(string)" value="[]"></state>
     <handler name="toggle"><set name="open" expr:value="not $open"></set><set name="tags" expr:value="$open ? [] : ['docs', 'guide']"></set></handler>
-    </defs><section><button type="button" on:click="toggle">Toggle</button>
+    </defs><section $attributes><button type="button" on:click="toggle">Toggle</button>
     <ssr-slot-row><b slot="meta" $if="$open">Opened</b><i slot="leading" $each="tag of $tags">#{$tag}</i>Body</ssr-slot-row></section></template>`,
   `<template component="ssr-slot-text"><defs>
     <state name="label" type="string" value="Bold"></state>
     <state name="shortcut" type="string" value="Mod-b"></state>
     <handler name="toggle"><set name="shortcut" expr:value="$shortcut = '' ? 'Mod-b' : ''"></set></handler>
-    </defs><section><button type="button" on:click="toggle">Toggle</button>
+    </defs><section $attributes><button type="button" on:click="toggle">Toggle</button>
     <ssr-slot-row>{$label}<kbd slot="meta" $if="$shortcut">{$shortcut}</kbd></ssr-slot-row></section></template>`,
   // `<template $slot>` outlets in table parts, where the HTML parser would move a `<slot>` out of the table.
   `<template component="ssr-grid"><defs><slot name="row"><prop name="item" type="string" required>The row.</prop></slot>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
-    </defs><section><button type="button" on:click="change">Change</button><table>
+    </defs><section $attributes><button type="button" on:click="change">Change</button><table>
     <thead><tr><template $slot><th>Name</th></template></tr></thead>
     <tbody><template $slot="row" $each="row of $rows" $key="$row" from:item="$row"><tr><td><i $value="$row"></i></td></tr></template></tbody>
     <tfoot><tr><template $slot="total" $if="$rows.length > 1"><td><span>Many</span></td></template></tr></tfoot></table></section></template>`,
-  `<template component="ssr-grid-page"><article><ssr-grid><template slot=""><th>Who</th></template>
+  `<template component="ssr-grid-page"><article $attributes><ssr-grid><template slot=""><th>Who</th></template>
     <template slot="row"><tr><td><b $value="$item"></b></td></tr></template></ssr-grid></article></template>`,
   // Columns as markup (components#columns-as-markup): a table reads its accepted columns as a list,
   // and each cell places its column's slot. A table-part root comes before its <defs>.
@@ -177,7 +177,7 @@ export const definitions = [
     <handler name="change"><set name="showId" expr:value="not $showId"></set>
     <set name="extra" expr:value="[{ key: 'price', label: 'P' }, { key: 'name', label: 'N' }]"></set>
     <set name="products" expr:value="[{ id: 2, name: 'Notebook', price: 6.5 }, { id: 1, name: 'Lamp', price: 49 }]"></set></handler>
-    </defs><main><button type="button" on:click="change">Change</button><ssr-datatable from:rows="$products">
+    </defs><main $attributes><button type="button" on:click="change">Change</button><ssr-datatable from:rows="$products">
       <ssr-column $if="$showId" field="id" header="Id"></ssr-column>
       <ssr-column field="name" header="Name"><i slot="note">kept</i></ssr-column>
       <ssr-column class="numeric"><abbr slot="header" title="Price in US dollars">Price</abbr>
@@ -199,7 +199,7 @@ export const definitions = [
   `<template component="ssr-bare-products"><defs>
     <state name="products" type="list(object({ id: number, name: string, price: number }))" value="[{ id: 1, name: 'Lamp', price: 49 }]"></state>
     <handler name="change"><set name="products" expr:value="[{ id: 1, name: 'Lamp', price: 45 }, { id: 2, name: 'Pen', price: 2 }]"></set></handler>
-    </defs><main><button type="button" on:click="change">Change</button><ssr-bare-table from:rows="$products">
+    </defs><main $attributes><button type="button" on:click="change">Change</button><ssr-bare-table from:rows="$products">
       <ssr-bare-column field="name" header="Name"></ssr-bare-column>
       <ssr-bare-column header="Price"><template slot="cell"><span>{$row.price}</span></template><i slot="note">kept</i></ssr-bare-column>
     </ssr-bare-table></main></template>`,

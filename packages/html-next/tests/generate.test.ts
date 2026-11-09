@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 import { transform } from "esbuild";
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 
@@ -24,7 +25,7 @@ const expectedPaths = [
 // `demo-action` derives the component name `DemoAction`; targets are inferred from the
 // bindings the caller writes in `template`.
 function componentSource(template: string): string {
-  return `<template component="demo-action" status="experimental" summary="An action fixture.">
+  return `<template component="demo-action" noforward status="experimental" summary="An action fixture.">
     <props>
       <prop name="destination" type="string">Submission destination.</prop>
       <prop name="disabled" type="boolean" default="false">Whether the action is disabled.</prop>
@@ -35,7 +36,7 @@ function componentSource(template: string): string {
 }
 
 function audioSource(): string {
-  return `<template component="demo-player" status="experimental" summary="An audio fixture.">
+  return `<template component="demo-player" noforward status="experimental" summary="An audio fixture.">
     <audio controls><slot></slot></audio>
   </template>`;
 }
@@ -61,11 +62,11 @@ describe("generateComponent", () => {
     const vue = artifacts.get("vue/XFirstItem.vue")!;
     assert.match(vanilla, /items\.0\.name/);
     assert.match(vanilla, /byId\.42\.name/);
-    assert.match(vue, /\[0\]/);
-    assert.match(vue, /\[42\]/);
+    assert.match(vue, /referenceIndex\(items, 0\)/);
+    assert.match(vue, /referenceIndex\(byId, 42\)/);
   });
   it("writes whitespace between inline content in each framework's kept form", async () => {
-    const definition = parseComponent(`<template component="x-spaces"><div>
+    const definition = parseComponent(`<template component="x-spaces" noforward><div>
       <p><strong>Package:</strong> <code>x</code> and <em>a</em>
         <em>b</em><template $if="true"> <b>c</b></template></p>
       <ul>
@@ -81,7 +82,7 @@ describe("generateComponent", () => {
     // Vue drops whitespace with a newline between elements, where a formatter may break a line, and
     // at a block's edge, so a kept space is an interpolation.
     const vue = lines(generateVueComponent(definition));
-    assert.match(vue, /<strong>Package:<\/strong>\{\{ ' ' \}\}<code>x<\/code> and <em>a<\/em>\{\{ ' ' \}\}<em>b<\/em>\n<template v-if="true">\{\{ ' ' \}\}<b>c<\/b><\/template>/);
+    assert.match(vue, /<strong>Package:<\/strong>\{\{ ' ' \}\}<code\s*>x<\/code> and <em>a<\/em>\{\{ ' ' \}\}<em>b<\/em>\n<template v-if="true"\s*>\{\{ ' ' \}\}<b>c<\/b><\/template>/);
     assert.match(vue, /<li>a<\/li>\n<li>b<\/li>/);
     assert.match(vue, /<pre><b>1<\/b>\n<b>2<\/b><\/pre>/);
     // Check rendered whitespace so formatting changes cannot alter inline or preformatted content.
@@ -89,6 +90,7 @@ describe("generateComponent", () => {
     const helperCode = await transform(reactRenderArtifact("test").content, { loader: "tsx", format: "cjs" });
     const helpers = { exports: {} };
     new Function("require", "module", "exports", helperCode.code)((name: string) => {
+      if (name === "react-dom") return ReactDOM;
       assert.equal(name, "react");
       return React;
     }, helpers, helpers.exports);
@@ -152,7 +154,7 @@ describe("generateComponent", () => {
     const vue = byPath.get("vue/XButton.vue")!;
     assert.match(vue, /<script setup lang="ts">/);
     assert.match(vue, /defineOptions\(\{ inheritAttrs: false \}\)/);
-    assert.ok(vue.lastIndexOf('v-bind="nativeAttrs($attrs)"') < vue.lastIndexOf("data-x-button"));
+    assert.ok(vue.lastIndexOf('forwardedAttributes(nativeAttrs($attrs))') < vue.lastIndexOf("data-x-button"));
 
     assert.doesNotMatch(vanilla, /<x-button\b|createElement\("x-button"\)/);
     assert.doesNotMatch(vue.slice(vue.indexOf("<template>")), /<x-button\b/);
@@ -221,7 +223,9 @@ describe("generateComponent", () => {
     assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /injectContext\('x-step', 'x-steps', 'current'\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
-    assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === checkedProps\.index \? 'step' : null/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /__htmlNextLeft === undefined \|\| __htmlNextRight === undefined/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /\)\)\(activeStep, checkedProps\.index\)/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /\? 'step'\s*:\s*null/);
 
     const nestedProvider = parseComponent(`<template component="x-steps"><defs>` +
       `<state type="number" name="current" value="1"></state></defs><section><x-step></x-step></section></template>`);
@@ -243,7 +247,7 @@ describe("generateComponent", () => {
     assert.match(byPath.get("vanilla/DemoAction.js")!, /\["formAction"\] =/);
     const vue = byPath.get("vue/DemoAction.vue")!;
     assert.match(vue, /:formAction\.prop="checkedProps\.destination as any"/);
-    assert.match(vue, /:disabled="checkedProps\.disabled \?\? undefined"/);
+    assert.match(vue, /:disabled="checkedProps\.disabled"/);
     // An authored data-* binding is the template's own; the prop's record has its namespaced attribute.
     assert.match(vue, /:data-selected="checkedProps\.selected \? '' : undefined"/);
     assert.match(vue, /:data-demo-action-prop-selected="reflectedProp\('selected', 'selected', checkedProps\.selected, undefined, false\)"/);
@@ -258,6 +262,7 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
-    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio controls="" v-bind="nativeAttrs\(\$attrs\)"/);
+    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio\b[^>]*controls=""/);
+    assert.doesNotMatch(byPath.get("vue/DemoPlayer.vue")!, /forwardedAttributes\(/);
   });
 });

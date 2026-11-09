@@ -2,6 +2,7 @@ import { COMPONENT_ROOT_SELECTOR, componentIdentity } from "./component-identity
 import { fail } from "./diagnostics.js";
 import { decodeHydrationValue } from "./hydration-value.js";
 import type { InputStatus } from "./inputs.js";
+import type { ReactiveEffect } from "./reactivity.js";
 
 /**
  * The rendered form's marks (slot ranges, carried projection). The live runtime and compiled
@@ -31,10 +32,14 @@ export function renderedFormMark(document: Document, target: string, data: strin
 
 /** 1 for the start mark of an `$if`, `$each`, `$with` or `$match` region, -1 for its end, else 0. Both runtimes write these marks (see `buildTemplate`). */
 function regionMark(node: Node): number {
+  if (node.nodeType === 7) return node.nodeName === "start" ? 1 : node.nodeName === "end" ? -1 : 0;
   if (node.nodeType !== 8) return 0;
   const data = (node as Comment).data;
-  return data === "html-next:start" || data === "html-next:each-start" ? 1 : data === "html-next:end" || data === "html-next:each-end" ? -1 : 0;
+  return data === "html-next:start" || data === "html-next:each-start" || data.startsWith('?start slot="') ? 1
+    : data === "html-next:end" || data === "html-next:each-end" || data === "?end?" ? -1 : 0;
 }
+
+export function regionStart(node: Node): boolean { return regionMark(node) === 1; }
 
 /** Writes a rendered-form mark's data, as a processing instruction or the comment standing in for one. */
 export function writeMark(mark: Node, target: string, data: string): void {
@@ -56,10 +61,17 @@ export function slotRegions(nodes: readonly Node[]): (readonly [Node, Node])[] |
       if (depth++ === 0) open = node;
     } else if (mark === -1) {
       if (--depth === 0) regions.push([open!, node]);
-    } else if (depth === 0) return undefined;
+    } else if (depth === 0 && (node.nodeType === 1 || node.nodeType === 3)) return undefined;
   }
   return regions.length === 0 || depth !== 0 ? undefined : regions;
 }
+
+let rejectedProjection: WeakSet<Node> | undefined;
+export function rejectProjection(node: Node): void {
+  (rejectedProjection ??= new WeakSet<Node>()).add(node);
+  node.parentNode?.removeChild(node);
+}
+export function projectionRejected(node: Node): boolean { return rejectedProjection?.has(node) ?? false; }
 
 /**
  * Projected nodes with each region's content as the DOM holds it now, between its marks, and each
@@ -70,11 +82,12 @@ export function withRegionContent<T>(entries: readonly (readonly [Node, T])[]): 
   const current: [Node, T][] = [];
   let depth = 0;
   for (const [node, slot] of entries) {
+    if (projectionRejected(node)) continue;
     const mark = regionMark(node);
     if (depth === 0 && mark === 1) {
       let inner = 0;
       for (let next: Node | null = node; next !== null; next = next.nextSibling) {
-        current.push([next, slot]);
+        if (!projectionRejected(next)) current.push([next, slot]);
         const nested = regionMark(next);
         if (nested === 1) inner += 1;
         else if (nested === -1 && --inner === 0) break;
@@ -89,11 +102,25 @@ export function withRegionContent<T>(entries: readonly (readonly [Node, T])[]): 
 export const currentProjection = (nodes: readonly Node[]): Node[] => withRegionContent(nodes.map((node) => [node, 0] as const)).map(([node]) => node);
 
 /** Each consumer region's slot, told when the region renders, by the region's start mark. */
-const regionListeners = new WeakMap<Node, () => void>();
+const regionListeners = new WeakMap<Node, Map<object, () => void>>();
+
+export function observeRegion(start: Node, owner: object, update: () => void): () => void {
+  let listeners = regionListeners.get(start);
+  if (listeners === undefined) regionListeners.set(start, listeners = new Map());
+  listeners.set(owner, update);
+  return () => { listeners.delete(owner); };
+}
 
 /** A region for a named slot rendered: its slot shows its fallback or its content accordingly. */
 export function regionChanged(start: Node): void {
-  regionListeners.get(start)?.();
+  const listeners = regionListeners.get(start);
+  if (listeners !== undefined) for (const update of listeners.values()) update();
+}
+
+export function slotRegionsEmpty(regions: readonly (readonly [Node, Node])[]): boolean {
+  for (const [start, end] of regions) for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling)
+    if (node.nodeType === 1 || node.nodeType === 3) return false;
+  return true;
 }
 
 /**
@@ -102,15 +129,30 @@ export function regionChanged(start: Node): void {
  * Each region tells its slot when it renders (`regionChanged`); `open`, the slot's start mark, keeps
  * its `fallback` attribute in step. The fallback goes before the first region.
  */
-export function switchFallback(open: Node, regions: readonly (readonly [Node, Node])[], fallback: readonly Node[]): void {
+export function switchFallback(open: Node, regions: readonly (readonly [Node, Node])[], fallback: readonly Node[]): () => void {
   const mark = open as CharacterData;
   const content = mark.data.replace(' fallback=""', "");
   const shown = content.replace(/(slot="[^"]*")/, '$1 fallback=""');
   let showing = mark.data !== content;
   const first = regions[0]![0];
+  const stops = new Map<Node, { stop: () => void; revision: number }>();
+  let revision = 0;
+  const watch = (start: Node): void => {
+    const known = stops.get(start);
+    if (known === undefined) stops.set(start, { stop: observeRegion(start, open, sync), revision });
+    else known.revision = revision;
+  };
   const sync = (): void => {
+    revision += 1;
     let empty = true;
-    for (let index = 0; empty && index < regions.length; index += 1) empty = regions[index]![0].nextSibling === regions[index]![1];
+    for (const [start, end] of regions) {
+      watch(start);
+      for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) {
+        if (node.nodeType === 1 || node.nodeType === 3) empty = false;
+        else if (regionStart(node)) watch(node);
+      }
+    }
+    for (const [node, subscription] of stops) if (subscription.revision !== revision) { subscription.stop(); stops.delete(node); }
     if (empty === showing) return;
     showing = empty;
     mark.data = empty ? shown : content;
@@ -121,7 +163,8 @@ export function switchFallback(open: Node, regions: readonly (readonly [Node, No
       else node.parentNode?.removeChild(node);
     }
   };
-  for (const [start] of regions) regionListeners.set(start, sync);
+  sync();
+  return () => { for (const { stop } of stops.values()) stop(); stops.clear(); };
 }
 
 export interface HydrationRange {
@@ -222,6 +265,63 @@ export function releaseContent(content: readonly Node[]): void {
   });
 }
 
+/** Plain ownership belongs to one logical projection and slot, including its structural marks. */
+export class ProjectionClaims {
+  readonly #owners = new Map<string, { readonly owner: object; mark?: Node | undefined; lifetime?: ReactiveEffect; released?: boolean }>();
+  #tracked?: WeakSet<ReactiveEffect>;
+  #waiters: Map<string, Set<readonly [Node, () => void]>> | undefined;
+
+  take(name: string, owner: object): boolean {
+    const current = this.#owners.get(name);
+    if (current?.owner === owner) { current.released = false; return true; }
+    if (current !== undefined && (!current.released || current.mark?.isConnected && current.lifetime?.stopped !== true)) return false;
+    this.#owners.set(name, { owner });
+    return true;
+  }
+
+  /** Preserve placement across pause/resume; permanent stop uses the existing ownership registration. */
+  track(name: string, owner: object, mark: Node | undefined, lifetime: ReactiveEffect): void {
+    const current = this.#owners.get(name);
+    if (current?.owner !== owner) return;
+    current.mark = mark; current.lifetime = lifetime;
+    const tracked = this.#tracked ??= new WeakSet();
+    if (tracked.has(lifetime)) return;
+    tracked.add(lifetime);
+    const registration = lifetime.registration;
+    lifetime.registration = { release: effect => {
+      try { registration?.release(effect); }
+      finally { if (this.#owners.get(name)?.lifetime === effect) this.release(name, owner); }
+    } };
+  }
+
+  wait(name: string, mark: Node, place: () => void): () => void {
+    const waiters = this.#waiters ??= new Map();
+    let waiting = waiters.get(name);
+    if (waiting === undefined) waiters.set(name, waiting = new Set());
+    const waiter = [mark, place] as const;
+    waiting.add(waiter);
+    return () => { waiting.delete(waiter); };
+  }
+
+  release(name: string, owner: object): void {
+    const current = this.#owners.get(name);
+    if (current?.owner !== owner) return;
+    if (current.mark !== undefined && current.lifetime?.paused && !current.lifetime.stopped) current.released = true;
+    else this.#owners.delete(name);
+    const waiting = this.#waiters?.get(name);
+    if (waiting !== undefined) queueMicrotask(() => {
+      const current = this.#owners.get(name);
+      if (current !== undefined && (!current.released || current.mark?.isConnected && current.lifetime?.stopped !== true)) return;
+      let first: readonly [Node, () => void] | undefined;
+      for (const waiter of waiting) {
+        if (!waiter[0].isConnected) continue;
+        if (first === undefined || first[0].compareDocumentPosition(waiter[0]) & 2) first = waiter;
+      }
+      first?.[1]();
+    });
+  }
+}
+
 /** The nodes a server carrier held, which hydration puts in place only where their slots render them. */
 const carriedRoots = new WeakSet<Node>();
 
@@ -289,10 +389,30 @@ export function serverRanges(root: Element, consume = true, tag?: string): { ran
   return { ranges, carried };
 }
 
+/**
+ * The ranges in which its parent's `<slot of>` outlets rendered a server root's plain slot content
+ * (rendered-form#borrowed-slot-ranges): the root's entry index is its place among the component roots
+ * projected into its slot of the parent. Their content joins the root's projection (`borrowedRanges`).
+ */
+export function borrowedSlots(root: Element): HydrationRange[] {
+  const parent = root.parentElement?.closest("[component]");
+  const server = parent === null || parent === undefined ? undefined : serverRanges(parent, false);
+  if (server === undefined) return [];
+  const of = (range: HydrationRange): string | undefined => serverMark(range.markers[0]!)!.attributes.get("of");
+  const slot = server.ranges.find((range) => of(range) === undefined && range.content.includes(root))?.slot ?? root.getAttribute("slot") ?? "";
+  const siblings = [...server.ranges.flatMap((range) => of(range) === undefined && !range.fallback && !range.scoped && range.slot === slot ? range.content : []),
+    ...server.carried.filter((node) => node.nodeType === 1 && ((node as Element).getAttribute("slot") ?? "") === slot)];
+  const index = String(siblings.filter((node) => node.nodeType === 1 && (node as Element).hasAttribute("component")).indexOf(root));
+  const ranges = server.ranges.filter((range) => of(range) === index && !range.fallback && !range.scoped);
+  borrowedRanges.set(root, ranges.flatMap((range) => range.content));
+  return ranges;
+}
+
 export const FORM_DEFAULTS_ATTRIBUTE = "data-html-next-form-defaults";
 export const INSTANCE_ATTRIBUTE = "data-html-next-instance";
 
 export interface RenderedInstanceRecord {
+  readonly attributes?: readonly (readonly [string, string])[];
   readonly explicit: readonly string[];
   readonly inputs: Readonly<Record<string, {
     readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean;
@@ -348,6 +468,10 @@ export function renderedInstanceRecord(element: Element, tag: string): RenderedI
           input.provided !== undefined && typeof input.provided !== "boolean" ||
           input.producer !== undefined && typeof input.producer !== "boolean")) {
         fail("HR010", "Malformed rendered component instance record.");
+      }
+      if (record.attributes !== undefined && (!Array.isArray(record.attributes) || record.attributes.some(attribute =>
+        !Array.isArray(attribute) || attribute.length !== 2 || attribute.some(value => typeof value !== "string")))) {
+        fail("HR010", "Malformed rendered attribute inputs.");
       }
       if (record.availability !== undefined) {
         if (record.availability === null || typeof record.availability !== "object" || Array.isArray(record.availability) ||

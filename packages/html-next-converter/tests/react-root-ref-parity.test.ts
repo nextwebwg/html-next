@@ -8,6 +8,8 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit } from "playwright";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { parseComponent, compileComponentStylesForBuild } from "../../html-next/src/index.js";
+import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
+
 import { convertComponents } from "../src/index.js";
 
 describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native controls and refs", () => {
@@ -21,7 +23,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
     await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(directory, "node_modules"), "dir");
     await writeFile(join(directory, "field.html"), `<template component="x-field"><defs>
       <prop name="multiline" type="boolean" default="false">Render a textarea.</prop><prop name="select" type="boolean" default="false">Render a select.</prop><prop name="message" type="string" default="">Field value.</prop>
-      </defs><template $match><select $when="$select" from:data-value="$message" from:value="$message"><option value="a">A</option><option value="b">B</option></select><textarea $when="$multiline" from:data-value="$message" from:value="$message"></textarea><input $else from:data-value="$message" from:value="$message"></template><style>
+      </defs><template $match><select $attributes $when="$select" from:data-value="$message" from:value="$message"><option value="a">A</option><option value="b">B</option></select><textarea $attributes $when="$multiline" from:data-value="$message" from:value="$message"></textarea><input $attributes $else from:data-value="$message" from:value="$message"></template><style>
       :host { --declared-value: attr(value/**/); background: rgb(1 2 3); content: attr(/* attribute */value/**/); @media (min-width: 1px) { content: "overridden"; content: attr(/* attribute */value/**/); } }
       :host[/**/value/**/="initial"] { background: rgb(10 20 30); }
       :host { animation: value-label 1s step-end -1s paused both; }
@@ -66,7 +68,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
   for (const target of ["react", "preact"]) for (const [engine, type] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
     it(`${target} ${engine} serializes native value attributes`, async () => {
-      const browser = await type.launch({ headless: true });
+      const browser = await launchParityBrowser(type);
       try {
         const page = await browser.newPage();
         const markup = serverMarkup.get(target)!;
@@ -108,7 +110,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
       } finally { await browser.close(); }
     });
     it(`${target} ${engine} retains native value attribute behavior`, async () => {
-      const browser = await type.launch({ headless: true });
+      const browser = await launchParityBrowser(type);
       try {
         const page = await browser.newPage(); page.setDefaultTimeout(3000);
         const warnings: string[] = [];
@@ -148,7 +150,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Reactive native contr
       } finally { await browser.close(); }
     });
     it(`${target} ${engine} publishes only changed roots to a state ref`, async () => {
-      const browser = await type.launch({ headless: true });
+      const browser = await launchParityBrowser(type);
       try {
         const page = await browser.newPage(); page.setDefaultTimeout(3000); const errors: string[] = [];
         page.on("pageerror", error => errors.push(error.message));

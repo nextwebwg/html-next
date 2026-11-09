@@ -1,0 +1,423 @@
+{
+  "scope": "Explicit item/index iteration aliases in Node, native C# and compiled targets. Includes native stable sort, limit and duplicate-key support. A correctness checkpoint toward the active full renderer goal, not a ship-ready claim.",
+  "base": "7f3cb7b729059bac05f5af93376251c8ca8368ec",
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "30ae045c8336b3ffbefcdc29368057fb2b63eeeb",
+    "branch": "matthew-dean/html-next-null-contract",
+    "files": [
+      "html-next/templating.md",
+      "html-next/expressions.md",
+      "html-next/components.md"
+    ],
+    "checks": "verify:pr passed; all 298 chapters compile.",
+    "tests": {
+      "tools": 38,
+      "profiles": 36,
+      "email": 326,
+      "failed": 0,
+      "skipped": 0
+    },
+    "precedingIterationCommit": "5d2421557fb2b5743d8df007e1670b9444bc4ba4",
+    "url": "https://github.com/nextwebwg/specs/commit/30ae045c8336b3ffbefcdc29368057fb2b63eeeb"
+  },
+  "sourceHashes": {
+    "CHANGELOG.md": "3f6fc53cc8d19e28b4d4968495335990397bf9109147c52b899aaee69fa41abc",
+    "packages/html-next-converter/tests/converter.test.ts": "d8961e7a1ff1d44a1dd7ffa9193c6aa4366e855db762fa5604dabe427a6a8939",
+    "packages/html-next-converter/tests/fixtures/angular-controls.ts": "a41b51ba29b3b253e4f6684879acb7f6c8730660ab3d748e71c59ea275d80a6d",
+    "packages/html-next-converter/tests/react-dynamic-control-parity.test.ts": "99971a03a5fca7fc7467f91e5bea0a0dbc575e7773ca26dafafcd1c9bb4f7cf3",
+    "packages/html-next-converter/tests/react-scoped-slot-parity.test.ts": "4a1a891e3de02b41e50a14d43472a94c797b060f71a892a32867109b69101f53",
+    "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": "56fb48bfc8d8b5f76ca1573a0d6d28c2f79a18846a754214e5b4358b5151adc4",
+    "packages/html-next-converter/tests/svelte-basic-parity.test.ts": "9addf06d37f7e0556046dc6a36e6b0626966cacd203f4e4e1fc9e9c8908d2ab6",
+    "packages/html-next-converter/tests/svelte-converter.test.ts": "3a0ee7ab830664b896f8170d1ae274bed41e8ff29ac76265e2acd060ce16c330",
+    "packages/html-next-converter/tests/svelte-public-conformance-parity.test.ts": "5ee5a1aa43f386438e4cde1f4ed927e13429aceb5f539f68c23d2c412d2831e6",
+    "packages/html-next-converter/tests/vue-scoped-slot-parity.test.ts": "056d5911c1c67f66be0fdb930e2797a71e3e6dec709093c12ef161cc8080f357",
+    "packages/html-next-dotnet/README.md": "7a6ea97fc55ec45fade5db6bc79ca6a6745a424405826f85b2cc664961cb05bc",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "0dcd4ab5bb86a04b7ae13701c8403a11b9019cd8b1b1faa4a9b2e3eb78570e34",
+    "packages/html-next-dotnet/src/HtmlNext/Iteration.cs": "e0e7c55bd36b8014e43040e76dc91e4d1eb0107636833ccd4457de9ca698da5f",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "0468b85e47d9c8d4eb777e2c9d0669055984b7019e3c66c15482ec7450e1008f",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/IterationTests.cs": "07887a15ad1b19dd69cdd29fc8bbf2ff8fc3b5e1a811db9dcd5f39c703889497",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/StructuralRenderingTests.cs": "5d863df37fd8a98462dff2e39bbc47fdb0fb98cd145972857c89d5820bebcf3f",
+    "packages/html-next-dotnet/tests/fixtures/iterations.json": "96b2b7613ce4fd049b0af38ad1f83124bdd82fa9c94c26195c3c66c8c84f673c",
+    "packages/html-next/examples/generated/vue/host.ts": "04714bab8d5c3b89228b0c33ab5bd62f68b29716bc6f880a06424dffa99eab89",
+    "packages/html-next/scripts/measure-runtime-size.ts": "76a43081d8c1a741f185abedc533793b23f35701fd8c5ea9bde479e17f9d25ee",
+    "packages/html-next/src/declared-types.ts": "089e7b62f34597a1a4b4b84d2debe3298710ad29b29edbd101e0bdac6a73a63d",
+    "packages/html-next/src/expression.ts": "7ed8bdf134c78bb9acf679a0c020205eb7928d7f356a2005a32a9e0efd6f22fb",
+    "packages/html-next/src/generated-runtime.ts": "a4bc5057dc511e9ca293c99d25896f340b66c6988cbd866340e214a08b006176",
+    "packages/html-next/src/parser.ts": "b8117ea8cd6898d6bd03572e861cb43647ca862c13b9ddfae67980534d510067",
+    "packages/html-next/src/runtime.ts": "00679c86ca2115b35de293935487e8b917e61e98ed4d06567e007e8f04464c31",
+    "packages/html-next/src/targets/angular.ts": "77d551cec8d492eaa3619d53cb7476a61e0f9862901e6a9539c8692ec8904982",
+    "packages/html-next/src/targets/react.ts": "a769a868c0edc1a86b6ca2b3b5506447af5b853d360a2dde17bc8a157bc6342c",
+    "packages/html-next/src/targets/svelte.ts": "40d7b3d27c6f175c67efa5e75328257928666a906d100aa0e2cd3f209ebf5280",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "a073f401411cae0fda9ff15ceeefb80ed7b3fc77b978ba4d9f5104ff6b7958b9",
+    "packages/html-next/src/targets/vue-lowering.ts": "0559e972805dad5d81a120245bef2512675d02be12cce07400e29a9516c82530",
+    "packages/html-next/src/targets/vue.ts": "7f8a9cd59a92c00ae98d29becc780f2590748b47f33990acd83e009df09aa076",
+    "packages/html-next/tests/conformance/cases.ts": "1d47959bad4b1ceaa38e19c409f50a067e71efd8812dd9ab36cdae4617b56777",
+    "packages/html-next/tests/native-iterations.test.ts": "f32ee1baea133b7d3b66078728945173fc39ddb025f99caf6e41144238b782af",
+    "packages/html-next/tests/parser.test.ts": "f978c1ca95ec24d058f59a2cbe1a5e92d7def2c56c84664607d532d4f7e39ef4",
+    "packages/html-next/tests/runtime.test.ts": "4acb9805b0cc7f31985d853e452f7c0b3fd0cc8ca2364b00ddc148c24811c069",
+    "packages/html-next/tests/targets.test.ts": "3c7c354b23ae8f8ce852e362c78c4275199b2e74e88e190ae0dfc6ed6ff795ff",
+    "packages/html-next/tests/vanilla-blocks.test.ts": "420f8b73238ca1015d563b5e9b295e3f6fcbcf05e4d20d6a58693a645e750099",
+    "packages/html-next/tests/vue-parity.test.ts": "46cd8d1cc945a1a7e098bc06a83f790749c29190067b90af9dcf47cf52d5080b"
+  },
+  "focused": {
+    "nodeParserTargetsAndSize": {
+      "tests": 192,
+      "result": "pass"
+    },
+    "sharedFixtures": {
+      "total": 41,
+      "valid": 39,
+      "intentionalDuplicateKeyErrors": 2
+    },
+    "native": {
+      "tests": 602,
+      "result": "pass",
+      "skipped": 0
+    }
+  },
+  "browser": {
+    "allTargets": {
+      "cases": 42,
+      "targets": [
+        "live",
+        "vanilla",
+        "vue",
+        "react",
+        "preact",
+        "svelte",
+        "angular"
+      ],
+      "builds": [
+        "development",
+        "production"
+      ],
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "result": "pass",
+      "scope": "Named loop/index bindings in keys, lexical shadowing and outer restoration, candidate/outer/index shaping scopes, numeric alias math over dimensional outer values, unnamed-index item writes, CSS first/last matching, source-list length after limiting, and unchanged scoped prop conformance assertions.",
+      "command": "corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts --maxWorkers=1"
+    },
+    "nativeNodeOutput": {
+      "validFixtures": 39,
+      "comparisons": 234,
+      "result": "pass",
+      "scope": "Actual native Render and Write equivalence, and native/Node HTML parsed against independent expected visible/carrier output in three engines. Does not qualify native hydration."
+    }
+  },
+  "allocations": {
+    "scope": "Warmed current-thread allocations with complete output validation. Five existing core workloads remain unchanged from the prior checkpoint. No latency, throughput, RSS, retained or peak-memory claim.",
+    "repetitions": 200,
+    "rows": [
+      {
+        "name": "card",
+        "nativeTotalBytes": 240,
+        "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d"
+      },
+      {
+        "name": "list-10",
+        "nativeTotalBytes": 1984,
+        "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb"
+      },
+      {
+        "name": "list-100",
+        "nativeTotalBytes": 19264,
+        "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240"
+      },
+      {
+        "name": "list-1000",
+        "nativeTotalBytes": 195664,
+        "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce"
+      },
+      {
+        "name": "cart-100",
+        "nativeTotalBytes": 19072,
+        "outputSha256": "6d004995ac4037a19b7b278d391c61e2ebcef79e46891f20dd0b039714be8a3a"
+      }
+    ]
+  },
+  "looma": {
+    "revision": "915afd2e8fafdba86887ea4eefd3b3534c20de5a",
+    "sourceGraphs": 111,
+    "compiled": 57,
+    "scope": "Final native entry-graph compilation against the pinned real Looma sources and unchanged built style manifest. Same diagnostics as the preceding audit; no native behavior, preparation, hydration or all-target real-catalog qualification. Scratch checkout removed.",
+    "failures": [
+      {
+        "file": "packages/looma/src/components/ui-button/ui-button.html",
+        "detail": "'invocation attribute 'aria-hidden'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-calendar/ui-calendar.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-card-group/ui-card-group.html",
+        "detail": "'style:--_grid-column-cap' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-color-picker/ui-color-picker.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-column/ui-column.html",
+        "detail": "Expected one native root after <defs>."
+      },
+      {
+        "file": "packages/looma/src/components/ui-combobox/ui-combobox.html",
+        "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-compact-editor/ui-compact-editor.html",
+        "detail": "'default-true-reason' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-curve-editor/ui-curve-editor.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-cycle-button/ui-cycle-button.html",
+        "detail": "'invocation attribute 'from:title'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-data-table/ui-data-table.html",
+        "detail": "Expected one native root after <defs>."
+      },
+      {
+        "file": "packages/looma/src/components/ui-date-field/ui-date-field.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-date-picker/ui-date-picker.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-date-range-picker/ui-date-range-picker.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor/ui-editor.html",
+        "detail": "'default-true-reason' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-block-actions/ui-editor-block-actions.html",
+        "detail": "'invocation attribute 'aria-label'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-chip-editor/ui-editor-chip-editor.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-code-language/ui-editor-code-language.html",
+        "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-footnote-editor/ui-editor-footnote-editor.html",
+        "detail": "'invocation attribute 'data-footnote-note'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-formatting-tools/ui-editor-formatting-tools.html",
+        "detail": "'invocation attribute 'class'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-image-toolbar/ui-editor-image-toolbar.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-insert-table-grid/ui-editor-insert-table-grid.html",
+        "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-link-card/ui-editor-link-card.html",
+        "detail": "'invocation attribute 'from:title'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-link-form/ui-editor-link-form.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-mention-menu/ui-editor-mention-menu.html",
+        "detail": "'class:active' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-slash-menu/ui-editor-slash-menu.html",
+        "detail": "'class:active' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-table-context-menu/ui-editor-table-context-menu.html",
+        "detail": "'class:selected' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-table-overlay/ui-editor-table-overlay.html",
+        "detail": "'class:active' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-table-toolbar/ui-editor-table-toolbar.html",
+        "detail": "'class:active' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-file-input/ui-file-input.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-grid/ui-grid.html",
+        "detail": "'style:--_grid-column-cap' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-input/ui-input.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-light-editor/ui-light-editor.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-listbox/ui-listbox.html",
+        "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-meter/ui-meter.html",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression '{ true: null, false: { true: $valueText, false: format($percent / 100, 'percent', { maximumFractionDigits: 0 }) }[concat($valueText != '')] }[concat($variant = 'distribution')]' at 113."
+      },
+      {
+        "file": "packages/looma/src/components/ui-notice-stripe/ui-notice-stripe.html",
+        "detail": "'invocation attribute 'class'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-number-input/ui-number-input.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-pagination/ui-pagination.html",
+        "detail": "'invocation attribute 'from:aria-label'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-radio-group/ui-radio-group.html",
+        "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-segmented-control/ui-segmented-control.html",
+        "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-select/ui-select.html",
+        "detail": "'select' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-site-header/ui-site-header.html",
+        "detail": "'invocation attribute 'aria-haspopup'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-skeleton/ui-skeleton.html",
+        "detail": "'default-true-reason' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-slider/ui-slider.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-stack/ui-stack.html",
+        "detail": "'style:--_ui-stack-height' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-status-message/ui-status-message.html",
+        "detail": "'invocation attribute 'from:hidden'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-textarea/ui-textarea.html",
+        "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-time-field/ui-time-field.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-time-picker/ui-time-picker.html",
+        "detail": "'declaration' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-toast/ui-toast.html",
+        "detail": "'invocation attribute 'class'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-toast-region/ui-toast-region.html",
+        "detail": "'class:closing' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-top-bar/ui-top-bar.html",
+        "detail": "'class:scroll-title' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-tree/ui-tree.html",
+        "detail": "'invocation attribute 'data-tree-cancel-move'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-tree-item/ui-tree-item.html",
+        "detail": "'invocation attribute 'data-tree-cancel-move'' is not implemented in the measured rendering slice."
+      },
+      {
+        "file": "packages/looma/src/components/ui-wizard/ui-wizard.html",
+        "detail": "Unknown function or invalid argument count for 'format'. In expression 'format($index + 1, 'number')' at 28."
+      }
+    ]
+  },
+  "review": {
+    "method": "One bounded inline correctness and criteria review, with implicated scope/type fixes verified by focused tests. No delegated, independent or cross-model reviewers.",
+    "retainedScopedFindings": []
+  },
+  "verification": {
+    "verifyPr": "pass",
+    "developmentRuns": "Corrected a redundant array spread, a stale Svelte coverage-table case name, stale generated examples, and an exact 2-byte keyed gzip shift. The full native suite exposed an agent-carried Node root-name restriction that conflicted with the proposal\u2019s lexical-shadowing rule; removed it in both implementations. Kept original guard true/false assertions using a surrounding template. New shadowing probes exposed inherited index/dimension types and filter-scope errors, fixed in the owning type/runtime/target layers. All final gates pass.",
+    "command": "CHOKIDAR_USEPOLLING=1 PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+    "node": {
+      "passed": 1880,
+      "gatedSkips": 4637,
+      "filesPassed": 109,
+      "filesSkipped": 134,
+      "seconds": 329.83
+    },
+    "native": {
+      "passed": 602,
+      "skipped": 0
+    },
+    "packedConsumers": {
+      "passed": 8,
+      "seconds": 63.05
+    },
+    "other": "Lint, TypeScript, generated examples, runtime capability/size gates, all package builds and five complete Fluid/native output validations pass. No behavioral assertion or coverage list was reduced."
+  },
+  "remainingFullGoal": [
+    "Complete native catalog semantics and renderer-independent behavior qualification.",
+    "Shared smallest-client analysis and native hydration.",
+    "All-target real Looma compilation and shared browser behavior gates.",
+    "Matching Fluid/Node speed and allocated/retained/peak memory evidence.",
+    "Package/release readiness; no package publication or visibility change is authorized."
+  ],
+  "size": {
+    "node": "24.20.0",
+    "keyed": {
+      "beforeBytes": 20798,
+      "afterBytes": 20798,
+      "beforeGzip": 8326,
+      "afterGzip": 8328,
+      "ceiling": 8328
+    },
+    "live": {
+      "beforeBytes": 277500,
+      "afterBytes": 277255,
+      "beforeGzip": 93231,
+      "afterGzip": 93155
+    },
+    "scope": "All fifteen compiled fixture ceilings and complete-live capability inventory pass. The keyed fixture remains 20798 raw bytes; minifier allocation shifts gzip from 8326 to 8328 B under Node 24, recorded as an exact ceiling with no extra allowance. The final complete live bundle falls from 93231 to 93155 B gzip."
+  },
+  "completedAt": "2026-11-06T18:34:24.135683+00:00",
+  "verifiedBehavior": {
+    "bindings": "Only the named item and optional zero-based index alias. Aliases may shadow outer names; the item and index within one iteration must differ. Ordinary declared loop/index bindings remain valid. Item/index types belong to their lexical layer, including numeric aliases shadowing dimensional outer values.",
+    "listSize": "Existing .length on the referenced list; iteration shaping does not change that list.",
+    "presentation": "CSS structural selectors on rendered children.",
+    "functionsAdded": [],
+    "shaping": "Where reads the candidate item plus outer bindings; limit reads the enclosing scope; key and body read the shaped row index."
+  }
+}

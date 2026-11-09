@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { preactArtifact } from "./preact.js";
 
 import {
+  attributeHelperArtifact,
   addControllerGraph,
   normalizeConversionStyleIdentities,
   getDiagnosticLocation,
@@ -42,7 +43,7 @@ import {
   svelteHostArtifact,
   svelteConnectionArtifact,
   svelteDecorationsArtifact,
-  svelteStyleArtifacts,
+  inlineStyleArtifacts,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -317,40 +318,6 @@ function needsNestedDepthGuard(graph: ComponentGraph): boolean {
   return [...edges.keys()].some((tag) => visit(tag) > 33);
 }
 
-function decoratedRoots(graph: ComponentGraph): Map<string, { classes: boolean; styles: boolean }> {
-  const receivers = new Map<string, { classes: boolean; styles: boolean }>();
-  const pending: string[] = [];
-  const add = (tag: string, classes: boolean, styles: boolean): boolean => {
-    const previous = receivers.get(tag);
-    if ((!classes || previous?.classes) && (!styles || previous?.styles)) return false;
-    receivers.set(tag, { classes: classes || previous?.classes === true, styles: styles || previous?.styles === true });
-    pending.push(tag);
-    return true;
-  };
-  for (const node of graph.nodes.values()) {
-    const visit = (template: TemplateNode): void => {
-      if (template.kind === "slot") for (const child of template.fallback ?? []) visit(child);
-      else if (template.kind === "element") {
-        if (template.name.includes("-")) add(template.name,
-          template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class"),
-          template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "style"));
-        for (const child of template.children) visit(child);
-      }
-    };
-    visit(node.definition.template);
-  }
-  while (pending.length > 0) {
-    const tag = pending.pop()!;
-    const id = graph.tags.get(tag);
-    const root = id === undefined ? undefined : graph.nodes.get(id)?.definition.root;
-    if (root?.kind === "component") {
-      const receiver = receivers.get(tag)!;
-      add(root.tag, receiver.classes, receiver.styles);
-    }
-  }
-  return receivers;
-}
-
 function nativeBindingRoots(graph: ComponentGraph): Map<string, Set<string>> {
   const receivers = new Map<string, Set<string>>();
   const pending: string[] = [];
@@ -368,7 +335,8 @@ function nativeBindingRoots(graph: ComponentGraph): Map<string, Set<string>> {
         const id = graph.tags.get(template.name);
         const props = id === undefined ? undefined : graph.nodes.get(id)?.definition.contract.props;
         if (props !== undefined) for (const attribute of template.attributes) {
-          if (attribute.kind === "attribute" && attribute.twoWay === true && !Object.keys(props).some((name) => name.toLowerCase() === attribute.name || name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() === attribute.name)) add(template.name, attribute.name);
+          if (attribute.kind === "attribute" && attribute.twoWay === true && !Object.keys(props).some((name) =>
+            [name, name.replace(/([a-z0-9])([A-Z])/g, "$1-$2")].some(alias => alias.replace(/[A-Z]/g, letter => letter.toLowerCase()) === attribute.name))) add(template.name, attribute.name);
         }
         for (const child of template.children) visit(child);
       }
@@ -476,7 +444,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     node.definition.contract.props] as const));
   const guardNestedDepth = needsNestedDepthGuard(graph);
   const bindingReceivers = options.target === "svelte" ? nativeBindingRoots(graph) : undefined;
-  const decorationReceivers = options.target === "svelte" ? decoratedRoots(graph) : undefined;
   const manifestComponents: ConversionManifest["components"][number][] = [];
   const planned: Array<{ artifact: GeneratedArtifact; kind: ConversionOutput["kind"]; source?: string }> = [];
   const neededHelpers = new Set<string>();
@@ -587,7 +554,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           importSpecifier,
           helperSpecifier: (name) => {
             helpers.add(name);
-            return relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
+            return name === "style" ? relativeImport(componentPath, `${options.target}/style/style.js`) : relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
           },
           ...((node.definition.module ?? node.definition.controller) === undefined ? {} : { controllerSpecifier: node.definition.module ?? node.definition.controller }),
         }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
@@ -597,7 +564,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           slotsByTag,
           componentGraph,
           guardNestedDepth,
-          rootDecorations: decorationReceivers?.get(tag),
           ...(bindingReceivers?.has(tag) === true ? { rootBindings: [...bindingReceivers.get(tag)!] } : {}),
           decorationsSpecifier: relativeImport(componentPath, "svelte/decorations.ts").replace(/\.ts$/, ""),
           styleSpecifier: relativeImport(componentPath, "svelte/style/style.js"),
@@ -610,6 +576,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           importSpecifier,
           propContractsByTag,
           propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
+          attributesSpecifier: relativeImport(componentPath, "svelte/attributes.ts").replace(/\.ts$/, ""),
           htmlSpecifier: relativeImport(componentPath, "svelte/html.ts").replace(/\.ts$/, ""),
           eventsSpecifier: relativeImport(componentPath, "svelte/events.ts").replace(/\.ts$/, ""),
           controlSpecifier: relativeImport(componentPath, "svelte/control.ts").replace(/\.ts$/, ""),
@@ -628,6 +595,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           guardNestedDepth,
           importSpecifier,
           propsSpecifier: reactHelperSpecifier("props"),
+          attributesSpecifier: reactHelperSpecifier("attributes"),
+          styleSpecifier: relativeImport(componentPath, `${options.target}/style/style.js`),
           eventsSpecifier: reactHelperSpecifier("events"),
           controlSpecifier: reactHelperSpecifier("control"),
           dataSpecifier: reactHelperSpecifier("data"),
@@ -697,6 +666,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...unsupported, ...diagnostics]);
 
+  if (neededHelpers.has("attributes")) claim(attributeHelperArtifact(reactTarget ? "react" : options.target, GENERATOR_VERSION), "helper");
   if (options.target === "angular") for (const artifact of angularArtifacts(GENERATOR_VERSION, neededHelpers)) claim(artifact, "helper");
   if (reactTarget && neededHelpers.has("bindings")) claim(reactBindingsArtifact(GENERATOR_VERSION), "helper");
   if (options.target === "svelte" && neededHelpers.has("bindings")) claim(svelteBindingsArtifact(GENERATOR_VERSION), "helper");
@@ -728,8 +698,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "svelte" && neededHelpers.has("decorations")) {
     claim(svelteDecorationsArtifact(), "helper");
   }
-  if (options.target === "svelte" && neededHelpers.has("style")) {
-    for (const artifact of svelteStyleArtifacts()) claim(artifact, "helper");
+  if (neededHelpers.has("style")) {
+    for (const artifact of inlineStyleArtifacts(options.target)) claim(artifact, "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("connection")) {
     claim(svelteConnectionArtifact(), "helper");
@@ -815,9 +785,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     targetVersion,
     graph: options.mode,
     package: Object.freeze({
-      dependencies: Object.freeze({ ...(neededHelpers.has("bindings") ? { "@nextwebwg/html-next": `>=${GENERATOR_VERSION}` } : {}), ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
+      dependencies: Object.freeze({ ...(neededHelpers.has("bindings") ? { "@nextwebwg/html-next": `>=${GENERATOR_VERSION}` } : {}), ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target !== "angular" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
       // Vue 3.5.43 restores generic inference through runtime PropType declarations.
-      peerDependencies: Object.freeze(options.target === "angular" ? { "@angular/core": ">=21.2.24", ...(neededHelpers.has("slots") ? { "@angular/common": ">=21.2.24" } : {}) } : { [options.target]: options.target === "vue" ? "^3.5.43" : options.target === "preact" ? `^${targetVersion}` : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}`, ...((neededHelpers.has("bindings") || neededHelpers.has("host")) && options.target === "react" ? { "react-dom": `^${targetVersion}.0` } : {}), ...(neededHelpers.has("bindings") && options.target === "preact" ? { "preact-render-to-string": "^6.8.2" } : {}) }),
+      peerDependencies: Object.freeze(options.target === "angular" ? { "@angular/core": ">=21.2.24", ...((neededHelpers.has("slots") || neededHelpers.has("style")) ? { "@angular/common": ">=21.2.24" } : {}) } : { [options.target]: options.target === "vue" ? "^3.5.43" : options.target === "preact" ? `^${targetVersion}` : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}`, ...((neededHelpers.has("bindings") || neededHelpers.has("host")) && options.target === "react" ? { "react-dom": `^${targetVersion}.0` } : {}), ...(neededHelpers.has("bindings") && options.target === "preact" ? { "preact-render-to-string": "^6.8.2" } : {}) }),
     }),
     entries: Object.freeze(conversionEntries),
     sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),

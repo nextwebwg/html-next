@@ -2,8 +2,9 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
+import { ITERATION_INDEX, checkExpressionSemantics, compileExpression, compilePath, evaluateCompiled, NONCONFORMING, getWritablePath, writablePathOf, type CompiledExpression, type ExpressionNode, type WritablePath } from "./expression.js";
 import { parseDuration } from "./duration.js";
+import { componentEntryOrigins, entryOrigin, type EntryOrigin } from "./entry-origin.js";
 import { deepFreeze } from "./freeze.js";
 import {
   isReservedElement,
@@ -12,7 +13,7 @@ import {
   validateLiteralAttributeName,
   validateMvpDomProperty,
 } from "./language.js";
-import { componentName, requestPropName } from "./names.js";
+import { asciiLowerCase, componentName, requestPropName } from "./names.js";
 import { IDENTIFIER, isIdentifier } from "./identifiers.js";
 import { HEAD_ATTRIBUTES, HEAD_LINK_RELS, SCRIPT_STANDARD_ATTRIBUTES } from "./head-rules.js";
 import { hasExecutableUrl } from "./sanitize.js";
@@ -50,6 +51,7 @@ const recoveredElements = new WeakSet<ElementNode>();
 export type ComponentSourceNode = ChildNode;
 
 export interface ComponentParserPlatform {
+  readonly slotContent?: (element: ComponentSourceNode) => string;
   readonly isNativeElement: (name: string) => boolean;
   readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
   readonly onDiagnostic?: (diagnostic: HtmlDiagnostic) => void;
@@ -119,7 +121,10 @@ function sourceTag(element: Element): string {
 }
 
 function sourceAttributes(element: Element): Iterable<SourceAttribute> {
-  return "attrs" in element ? element.attrs : element.attributes;
+  if (!("attrs" in element)) return element.attributes;
+  return element.attrs.some(attribute => attribute.prefix)
+    ? element.attrs.map(attribute => attribute.prefix ? { name: `${attribute.prefix}:${attribute.name}`, value: attribute.value } : attribute)
+    : element.attrs;
 }
 
 function sourceChildren(element: Element): Iterable<ChildNode> {
@@ -281,38 +286,40 @@ interface ParseScope {
   readonly at?: DiagnosticLocation | undefined;
   /** What each `$each`, `$with`, and `$match` name stands for when a path field writes through it. */
   readonly aliases?: ReadonlyMap<string, Writable>;
-  /** How many `$each` layers enclose this point, so a `loop.index` segment names the right loop. */
+  /** How many `$each` layers enclose this point, so a private row index segment names the right loop. */
   readonly loops?: number;
   /** Among table-structure or SVG-container children, where whitespace-only text never renders. */
   readonly discardsWhitespace?: boolean;
-  /** `$each` items that stand for an entry of one of the component's `as` lists: item name to list name. */
-  readonly entries?: ReadonlyMap<string, string>;
+  /** Bindings whose values preserve the identity of this component's accepted entries. */
+  readonly entries?: ReadonlyMap<string, EntryOrigin | undefined>;
 }
 
-/** The names a structural directive binds for its subtree, recording which stand for an `as` list's entries. */
-function withEntries(scope: ParseScope, flow: Flow | undefined, contract: ComponentContract): ParseScope {
+/** Propagate identity through structural aliases, removing names they shadow. */
+function withEntries(scope: ParseScope, flow: Flow | undefined): ParseScope {
   if (flow === undefined) return scope;
-  const bound = flow.kind === "each" ? [flow.item, flow.index, "loop"] : flow.kind === "with" || flow.kind === "match" ? [flow.alias] : [];
-  const source = flow.kind === "each" ? flow.listPlan?.ast : undefined;
-  const list = source?.kind === "id" && Object.values(contract.slots ?? {}).some((slot) => slot.as === source.name) ? source.name : undefined;
-  if (list === undefined && !bound.some((name) => name !== undefined && scope.entries?.has(name) === true)) return scope;
+  const bound = flow.kind === "each" ? [flow.item, flow.index] : flow.kind === "with" || flow.kind === "match" ? [flow.alias] : [];
+  if (bound.every(name => name === undefined)) return scope;
+  const expression = flow.kind === "each" ? flow.listPlan?.ast : flow.kind === "with" || flow.kind === "match" ? flow.expressionPlan?.ast : undefined;
+  const origin = expression === undefined ? undefined : entryOrigin(expression, scope.entries ?? new Map());
+  if (origin === undefined && !bound.some(name => name !== undefined && scope.entries?.get(name) !== undefined)) return scope;
   const entries = new Map(scope.entries);
   for (const name of bound) if (name !== undefined) entries.delete(name);
-  if (list !== undefined) entries.set((flow as Extract<Flow, { kind: "each" }>).item, list);
+  if (flow.kind === "each" && origin?.kind === "list") entries.set(flow.item, { kind: "entry", lists: origin.lists });
+  else if ((flow.kind === "with" || flow.kind === "match") && flow.alias !== undefined && origin !== undefined) entries.set(flow.alias, origin);
   return { ...scope, entries };
 }
 
 /**
- * A path's state destination, valid only at `loops` depth when it reads a `loop.index`, or why it
+ * A path's state destination, valid only at `loops` depth when it reads a private row index, or why it
  * cannot be written. An alias of a writable path is writable (Declarative Components, Bindings).
  */
 type Writable = { readonly path: WritablePath; readonly loops?: number } | { readonly reason?: string };
 
-function readsLoop(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some(readsLoop);
+function readsPrivateIndex(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(readsPrivateIndex);
   if (node === null || typeof node !== "object") return false;
   const id = node as ExpressionNode;
-  return id.kind === "id" && id.name === "loop" || Object.values(node).some(readsLoop);
+  return id.kind === "id" && id.name === ITERATION_INDEX || Object.values(node).some(readsPrivateIndex);
 }
 
 function writableAt(node: ExpressionNode, scope: ParseScope): Writable {
@@ -320,7 +327,7 @@ function writableAt(node: ExpressionNode, scope: ParseScope): Writable {
   if (segments === undefined || segments[0] === "$$event") return {};
   const [root, ...rest] = segments as [string, ...typeof segments];
   const loops = scope.loops ?? 0;
-  const local = rest.some((segment) => typeof segment === "object" && readsLoop(segment.expression)) ? loops : undefined;
+  const local = rest.some((segment) => typeof segment === "object" && readsPrivateIndex(segment.expression)) ? loops : undefined;
   const alias = scope.aliases?.get(root);
   if (alias === undefined) return scope.writableRoots.has(root) ? { path: segments, ...local === undefined ? {} : { loops: local } } : {};
   if (!("path" in alias)) return alias;
@@ -347,13 +354,12 @@ function withAliases(scope: ParseScope, flow: Flow | undefined): ParseScope {
         : list.loops !== undefined ? { reason: `\`${flow.item}\` iterates an outer loop's item; name that loop's index to write through it` }
           : {
               path: [...list.path, { kind: "index", item: flow.item, expression: flow.index === undefined
-                ? { kind: "member", object: { kind: "id", name: "loop" }, key: "index" }
+                ? { kind: "id", name: ITERATION_INDEX }
                 : { kind: "id", name: flow.index } }],
               ...flow.index === undefined ? { loops } : {},
             };
     const aliases = new Map(scope.aliases);
     aliases.set(flow.item, item);
-    aliases.set("loop", { reason: "`loop` is the loop record" });
     if (flow.index !== undefined) aliases.set(flow.index, { reason: `\`${flow.index}\` is a loop index` });
     return { ...scope, aliases, loops };
   }
@@ -489,11 +495,11 @@ function collectTargetsAtSource(
       const name = attribute.value.slice(1);
       if (!attribute.value.startsWith("$") || !isIdentifier(name)) continue;
       if (attribute.name.startsWith("from:")) {
-        record(name, { attribute: attribute.name.slice("from:".length).toLowerCase() });
+        record(name, { attribute: asciiLowerCase(attribute.name.slice("from:".length)) });
       } else if (attribute.name.startsWith(".")) {
-        const key = attribute.name.slice(1).toLowerCase();
+        const key = asciiLowerCase(attribute.name.slice(1));
         const property = platform.resolveDomProperty(sourceTag(element), key) ??
-          (name.toLowerCase() === key ? name : key);
+          (asciiLowerCase(name) === key ? name : key);
         record(name, { property });
       }
     }
@@ -515,12 +521,7 @@ function readDeclaredTypeAtSource(
   nested = false,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
 ): PropContract["type"] {
-  // Null means not present, so no declaration opts into it (types#null-and-missing-values).
-  if (attr(element, "nullable") !== undefined) {
-    const message = "`nullable` is not a declaration attribute; remove it. A value without a default or `value` reads null, and null clears one with a default back to it.";
-    if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
-    warnInvalidDeclaration(message, source);
-  }
+  checkNullableAttribute(element, source, warnInvalidDeclaration);
   const written = attr(element, "type");
   if (written === undefined || written === "") fail("HC013", "A typed declaration requires a `type` attribute.", source);
   if (attr(element, "open") !== undefined && written !== "object") {
@@ -572,6 +573,19 @@ function readDeclaredTypeAtSource(
     type = { kind: "constrained", base: normalizeType(type), ...(values === undefined ? {} : { values }), ...bounds };
   }
   return type;
+}
+
+function checkNullableAttribute(element: Element, source: string, warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"]): void {
+  if (attr(element, "nullable") !== undefined) {
+    const message = "`nullable` is not a declaration attribute; remove it. A value without a default or `value` reads null, and null clears one with a default back to it.";
+    if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+    warnInvalidDeclaration(message, source);
+  }
+}
+
+function needsInterfaceShape(element: Element): boolean {
+  return directElements(element, "prop").length > 0 ||
+    ["open", "values", "min", "max", "minlength", "maxlength", "pattern"].some(name => attr(element, name) !== undefined);
 }
 
 function readProps(
@@ -660,7 +674,7 @@ function readProps(
       if ((typeAttribute === undefined || typeAttribute === "") && inline.length === 0) {
         fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
       }
-      const normalizedName = name.toLowerCase();
+      const normalizedName = asciiLowerCase(name);
       const priorName = normalizedNames[normalizedName];
       if (priorName !== undefined) {
         fail("HC011", `Props \`${priorName}\` and \`${name}\` collide after lowercase normalization.`, source);
@@ -670,7 +684,7 @@ function readProps(
       if (target === undefined && requireBinding) {
         fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
       }
-      target ??= { attribute: name.toLowerCase() };
+      target ??= { attribute: asciiLowerCase(name) };
       const selected = inline[0] ?? namedTypes.get(typeAttribute ?? "");
       if (inline[0] !== undefined && attr(inline[0], "name") !== undefined) {
         fail("HC013", "An inline <type> has no name; put named types directly under <defs>.", source);
@@ -1058,19 +1072,23 @@ function readDeclarations(
       if (kind === "request") {
         if (!EVENT_PART_RE.test(name)) fail("HC010", `Request name \`${name}\` must be lowercase kebab case.`, source);
         if (requestElements.has(name)) fail("HC020", `Request \`${name}\` is declared more than once.`, source);
+        if (!needsInterfaceShape(element)) checkNullableAttribute(element, source, warnInvalidDeclaration);
         requestElements.set(name, element);
         continue;
       }
       if (kind === "event") {
+        if (!EVENT_PART_RE.test(name)) fail("HC010", `Event name \`${name}\` must be lowercase kebab case.`, source);
         if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
         eventNames.add(name);
+        if (!needsInterfaceShape(element)) checkNullableAttribute(element, source, warnInvalidDeclaration);
         const eventType = attr(element, "type") ?? "object";
-        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined
+        const shape = needsInterfaceShape(element)
           ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
           : normalizeType(parseTypeAttribute(eventType));
         eventTypes.set(name, shape);
         continue;
       }
+      if (kind === "computed" || kind === "state" && attr(element, "type") === undefined) checkNullableAttribute(element, source, warnInvalidDeclaration);
       const localName = kind === "context" ? attr(element, "as") ?? name : name;
       if (kind === "context" && !isIdentifier(localName)) {
         fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
@@ -1138,7 +1156,7 @@ function readDeclarations(
         }
         const description = textContent(element).trim();
         requests[name] = {
-          type: requestType(element, attr(element, "type"), directElements(element, "prop").length > 0, NULL_TYPE, source, warnInvalidDeclaration),
+          type: requestType(element, attr(element, "type"), needsInterfaceShape(element), NULL_TYPE, source, warnInvalidDeclaration),
           returns: returns[0] === undefined ? requestType(element, written, false, UNKNOWN_TYPE, source, warnInvalidDeclaration)
             : requestType(returns[0], undefined, true, UNKNOWN_TYPE, source, warnInvalidDeclaration),
           ...(description === "" ? {} : { description }),
@@ -1273,9 +1291,7 @@ function readDeclarations(
       }
       if (kind === "event") {
         const eventType = attr(element, "type") ?? "object";
-        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
-          ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration)) : undefined;
-        if (shape === undefined) parseTypeAttribute(eventType);
+        const shape = needsInterfaceShape(element) ? eventTypes.get(name) : undefined;
         declarations.push({
           kind,
           name,
@@ -1466,9 +1482,16 @@ function parseAttributes(
 ): TemplateAttribute[] {
   const parsed: TemplateAttribute[] = [];
   for (const attribute of sourceAttributes) {
+    if (attribute.name === "$attributes") {
+      if (attribute.value !== "" || tagName === "template" || tagName === "slot") {
+        fail("HT012", "`$attributes` is a valueless directive on a rendered element or component invocation.", source);
+      }
+      parsed.push({ kind: "forward", name: "attributes" });
+      continue;
+    }
     if (attribute.name.startsWith("bind:")) {
-      const name = attribute.name.slice("bind:".length).toLowerCase();
-      if (name === "" || RAW_SINK_RE.test(name)) {
+      const name = asciiLowerCase(attribute.name.slice("bind:".length));
+      if (name === "" || !tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
         fail("HT007", `Two-way binding cannot target \`${name || attribute.name}\`.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source, true);
@@ -1495,7 +1518,7 @@ function parseAttributes(
       const name = attribute.name.slice(target.length + 1);
       const valid =
         target === "class"
-          ? name !== "" && !/\s/.test(name)
+          ? name !== "" && !/[\t\n\f\r ]/.test(name)
           : /^(?:--[a-z0-9_-]+|[a-z][a-z0-9-]*)$/.test(name);
       if (!valid) {
         fail("HT020", `\`${attribute.name}\` does not name a valid ${target} binding target.`, source);
@@ -1511,7 +1534,7 @@ function parseAttributes(
     }
 
     if (attribute.name.startsWith("$")) {
-      const name = attribute.name.slice(1).toLowerCase();
+      const name = asciiLowerCase(attribute.name.slice(1));
       if (name !== "value" && name !== "html") {
         fail("HT012", `\`$${name}\` is not a known content directive.`, source);
       }
@@ -1525,9 +1548,9 @@ function parseAttributes(
     }
 
     if (attribute.name.startsWith("from:")) {
-      const name = attribute.name.slice("from:".length).toLowerCase();
-      if (RAW_SINK_RE.test(name)) {
-        fail("HT007", `\`from:${name}\` cannot bind a raw content sink.`, source);
+      const name = asciiLowerCase(attribute.name.slice("from:".length));
+      if (!tagName.includes("-") && name.startsWith("on") || RAW_SINK_RE.test(name)) {
+        fail("HT007", `\`from:${name}\` cannot bind executable or raw content.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
       parsed.push({ kind: "attribute", name, expression: attribute.value, expressionPlan });
@@ -1535,7 +1558,7 @@ function parseAttributes(
     }
 
     if (attribute.name.startsWith(".")) {
-      const key = attribute.name.slice(1).toLowerCase();
+      const key = asciiLowerCase(attribute.name.slice(1));
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
       // Property bindings reach native DOM properties only; component inputs are attributes.
       const name = platform.resolveDomProperty(tagName, key);
@@ -1655,10 +1678,10 @@ function extractFlow(
     }
     const item = match[1]!;
     const index = match[2];
-    if (scope.roots.has(item) || (index !== undefined && scope.roots.has(index))) {
-      fail("HC020", "Loop locals may not collide with an existing scope name.", source);
+    if (index === item) {
+      fail("HC020", "The item and index aliases must have distinct names.", source);
     }
-    const localScope = withRoots(scope, item, index, "loop");
+    const localScope = withRoots(scope, item, index);
     const result: {
       kind: "each";
       item: string;
@@ -1683,7 +1706,7 @@ function extractFlow(
     const where = values.$where;
     if (where !== undefined) {
       result.where = where;
-      result.wherePlan = compileScopedExpression(where, localScope, source);
+      result.wherePlan = compileScopedExpression(where, withRoots(scope, item), source);
     }
     // A path list rooted at the loop item, so `p.price` cannot be confused with a field named `p`:
     // `-p.name` sorts descending, `p` alone sorts by the item itself, and a leading `$` is accepted.
@@ -1705,7 +1728,7 @@ function extractFlow(
     const limit = values.$limit;
     if (limit !== undefined) {
       result.limit = limit;
-      result.limitPlan = compileScopedExpression(limit, localScope, source);
+      result.limitPlan = compileScopedExpression(limit, scope, source);
     }
     const key = values.$key;
     if (key !== undefined) {
@@ -1886,12 +1909,12 @@ function parseElementAtSource(
   const flow = extractFlow(flowValues, scope, source);
   const nodeScope = withEntries(withAliases(
     flow?.kind === "each"
-      ? withRoots(scope, flow.item, flow.index, "loop")
+      ? withRoots(scope, flow.item, flow.index)
       : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
         ? withRoots(scope, flow.alias)
         : scope,
     flow,
-  ), flow, contract);
+  ), flow);
   // The receiving component declares these names, so a standalone consumer definition cannot
   // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
   // A <template> renders its children among its parent's; a projected one, wherever its slot is.
@@ -1929,6 +1952,7 @@ function parseElementAtSource(
       continue;
     }
     if (isSlotOutlet(child)) {
+      if (attr(child, "$attributes") !== undefined) fail("HT012", "`$attributes` is a valueless directive on a rendered element or component invocation.", source);
       // `<template $slot="name">` is the same outlet as `<slot name="name">`; an empty `$slot` is the default slot.
       const templateForm = sourceTag(child) === "template";
       const name = templateForm ? attr(child, "$slot") || undefined : attr(child, "name");
@@ -1980,10 +2004,10 @@ function parseElementAtSource(
       const place = (node: TemplateNode): void => {
         children.push(condition === undefined ? node : { kind: "element", name: "template", attributes: [], children: [node], flow: condition });
       };
-      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index, "loop"), flow), flow, contract);
+      const slotScope = flow === undefined ? childScope : withEntries(withAliases(withRoots(childScope, flow.item, flow.index), flow), flow);
       const ofPlan = ofSource === undefined ? undefined : compileScopedExpression(ofSource, slotScope, source);
-      const ofList = ofPlan?.ast.kind === "id" ? slotScope.entries?.get(ofPlan.ast.name) : undefined;
-      if (ofPlan !== undefined && ofList === undefined) {
+      const origin = ofPlan === undefined ? undefined : entryOrigin(ofPlan.ast, slotScope.entries ?? new Map());
+      if (ofPlan !== undefined && (origin === undefined || origin.kind === "list")) {
         const list = Object.values(contract.slots ?? {}).find((slot) => slot.as !== undefined)?.as ?? "columns";
         fail("HT008", `\`of\` takes an entry of this component's \`as\` list, such as \`$item\` from \`$each="item of $${list}"\`; \`${ofSource}\` is not one.`, source);
       }
@@ -1996,7 +2020,7 @@ function parseElementAtSource(
         if (prop.type === undefined || prop.expressionPlan.dependencies.length > 0) continue;
         let value: unknown;
         try { value = evaluateCompiled(prop.expressionPlan, { get: () => undefined }); } catch { continue; }
-        if (value != null && !parseTypedValue(value, prop.type, "$", "value").ok) {
+        if (value !== NONCONFORMING && value != null && !parseTypedValue(value, prop.type, "$", "value").ok) {
           fail("HT008", `${name === undefined ? "<slot>" : `<slot name="${name}">`} gives prop \`${prop.name}\` a value that does not satisfy its declared type \`${formatType(prop.type)}\`.`, source);
         }
       }
@@ -2006,11 +2030,8 @@ function parseElementAtSource(
         if (!isIdentifier(name!)) fail("HT008", slotNameMessage(name!), source);
       } else if (name === undefined) {
         slotState.defaults += 1;
-        if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
       } else {
-        if (name === "" || slotState.names.has(name)) {
-          fail("HT008", `Slot name \`${name}\` is empty or duplicated.`, source);
-        }
+        if (name === "") fail("HT008", "A slot name is not empty.", source);
         if (!isIdentifier(name)) fail("HT008", slotNameMessage(name), source);
         slotState.names.add(name);
       }
@@ -2057,7 +2078,7 @@ function parseElementAtSource(
           flow?: Extract<Flow, { kind: "each" }>;
           props?: readonly { name: string; expression: string; expressionPlan: CompiledExpression }[];
           fallback: TemplateNode[];
-          of?: { expression: string; expressionPlan: CompiledExpression; list: string };
+          of?: { expression: string; expressionPlan: CompiledExpression; list: string; lists?: readonly string[] };
         } = {
           kind: "slot",
           fallback,
@@ -2065,7 +2086,7 @@ function parseElementAtSource(
         if (name !== undefined) slot.name = name;
         if (flow !== undefined) slot.flow = flow;
         if (props.length > 0) slot.props = props;
-        if (ofPlan !== undefined) slot.of = { expression: ofSource!, expressionPlan: ofPlan, list: ofList! };
+        if (ofPlan !== undefined) slot.of = { expression: ofSource!, expressionPlan: ofPlan, list: origin!.lists[0] ?? "", ...(origin!.lists.length === 1 ? {} : { lists: origin!.lists }) };
         place(slot);
       }
       continue;
@@ -2156,12 +2177,14 @@ function parseElementAtSource(
     events?: EventBinding[];
     ref?: string;
     transition?: ElementTransition;
+    slotContent?: string;
   } = {
     kind: "element",
     name: tagName,
     attributes,
     children,
   };
+  if (tagName === "template" && attributes.some(attribute => attribute.kind === "literal" && attribute.name === "slot") && platform.slotContent !== undefined) parsed.slotContent = platform.slotContent(element);
   if (flow !== undefined) parsed.flow = flow;
   if (events !== undefined) parsed.events = events;
   if (ref !== undefined) parsed.ref = ref;
@@ -2189,7 +2212,7 @@ function slotOutletProps(name: string | undefined, declaration: SlotDeclaration 
     fail("HT008", `${outlet} gives props to ${slot}, which declares none; declare them in <defs>: ${suggest(given)}.`, source);
   }
   // Attribute names reach the parser lowercased, as an invocation's do; each matches its declared spelling.
-  const declaredName = (prop: string): string | undefined => Object.keys(declaration.props).find((candidate) => candidate.toLowerCase() === prop.toLowerCase());
+  const declaredName = (prop: string): string | undefined => Object.keys(declaration.props).find((candidate) => asciiLowerCase(candidate) === asciiLowerCase(prop));
   const resolve = (prop: string): string => {
     const declared = declaredName(prop);
     if (declared === undefined) fail("HT008", `${outlet} gives prop \`${prop}\`, which ${slot} does not declare; add ${suggest([prop])} to <defs>.`, source);
@@ -2380,7 +2403,7 @@ function parseComponentNodesAtSource(
     ...(requests === undefined ? {} : { requests }),
     ...(scripts === undefined ? {} : { scripts: scripts.map(({ load: _load, error: _error, ...script }) => script) }),
   });
-  let scope: ParseScope = { ...declarationScope, bindings: new Set([
+  let scope: ParseScope = { ...declarationScope, entries: componentEntryOrigins(contract, declarations), bindings: new Set([
     ...Object.keys(contract.props),
     ...declarations.flatMap(declaration => declaration.kind === "context" ? [declaration.as ?? declaration.name]
       : declaration.kind === "state" || declaration.kind === "computed" || declaration.kind === "data" ? [declaration.name] : []),
@@ -2403,6 +2426,15 @@ function parseComponentNodesAtSource(
   const lifecycle: Parameters<typeof parseEvents>[3] = {};
   const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined,
     rootArms === undefined && !delegatedRoot ? lifecycle : undefined);
+  if (attr(wrapper, "noforward") === undefined) {
+    const forward = (node: ElementNode): ElementNode => node.attributes[0]?.kind === "forward" ? node : Object.assign(node, {
+      attributes: [{ kind: "forward", name: "attributes" }, ...node.attributes],
+    });
+    // Normalize the default to the same ordered operation as an authored $attributes. Every
+    // interpreter and generated target then shares prop consumption and precedence semantics.
+    if (rootArms === undefined) forward(template);
+    else for (const arm of template.children) forward(arm as ElementNode);
+  }
   if (template.flow !== undefined && template.flow.kind !== "with" && template.flow.kind !== "match") {
     fail("HT021", "A component root must always select exactly one native or delegated element.", source);
   }

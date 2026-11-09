@@ -46,6 +46,18 @@ async function fixture(): Promise<string> {
   return root;
 }
 
+for (const target of ["react", "preact"] as const) it(`${target} prunes retained projection owners from ordinary named and default slots`, async () => {
+  const root = await fixture();
+  await writeFile(join(root, "ordinary.html"), '<template component="x-label"><button><slot name="icon"></slot><slot></slot></button></template>' +
+    '<template component="x-page"><main><x-label><i slot="icon">Icon</i>Label</x-label></main></template>');
+  const out = join(root, "out");
+  const manifest = await convertComponents({ target, mode: "application", root, outDirectory: out, entries: ["ordinary.html"] });
+  const entry = manifest.components.find(component => component.tag === "x-page")!.artifact;
+  const bundle = await build({ entryPoints: [join(out, entry)], bundle: true, write: false, platform: "browser", format: "esm", jsx: "automatic",
+    ...(target === "preact" ? { jsxImportSource: "preact" } : {}), nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))], loader: { ".css": "empty" } });
+  assert.doesNotMatch(bundle.outputFiles[0]!.text, /\b(?:PlainFrame|PlainBoundary|plainNativeOwner|plainAdoptSource)\b|html-next:plain-start/);
+});
+
 /** Compiles a converted SFC with Vue's own compiler, failing on any error. */
 function compileVue(source: string, filename: string): void {
   const parsed = parseVue(source, { filename });
@@ -129,7 +141,7 @@ describe("framework converter", () => {
     temporary.push(root);
     await mkdir(join(root, "components", "nested"), { recursive: true });
     await writeFile(join(root, "components", "app.html"), `<link rel="component" href="./nested/card.html">
-      <template component="x-app" status="early" summary="App."><main><x-card label="Hello"></x-card></main></template>`);
+      <template component="x-app" status="early" summary="App."><main $attributes><x-card label="Hello"></x-card></main></template>`);
     await writeFile(join(root, "components", "nested", "card.html"), `<template component="x-card" status="early" summary="Card.">
       <props><prop name="label" type="string">Label.</prop></props>
       <article class="card" style="border-radius: 2px" class:ready="true" style:color="'red'" from:aria-label="$label"><slot></slot></article>
@@ -140,7 +152,7 @@ describe("framework converter", () => {
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
     assert.deepEqual(manifest.package, {
-      dependencies: {},
+      dependencies: { cssstyle: "^6.2.0", "css-tree": "^3.2.1" },
       peerDependencies: { react: "^19.3.0" },
     });
     assert.deepEqual(manifest.components.map(({ artifact }) => artifact), [
@@ -188,7 +200,7 @@ describe("framework converter", () => {
   it("does not infer React helpers from authored text", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-helper-text-"));
     temporary.push(root);
-    await writeFile(join(root, "card.html"), '<template component="x-card" status="early" summary="Text."><article>attachNativeEvents( attachBoundControl( &lt;SanitizedHtml </article></template>');
+    await writeFile(join(root, "card.html"), '<template component="x-card" noforward status="early" summary="Text."><article>attachNativeEvents( attachBoundControl( &lt;SanitizedHtml </article></template>');
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["card.html"] });
     assert.deepEqual(manifest.output.artifacts.filter((artifact) => artifact.kind === "helper"), [{ kind: "helper", path: "react/render.tsx" }]);
@@ -236,7 +248,7 @@ describe("framework converter", () => {
 
   for (const target of ["vue", "react", "preact", "svelte", "angular"] as const) it(`converts every successful shared conformance definition to ${target} in both graph modes`, async () => {
     const successful = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successful.length, 47, "review new successful conformance cases for converter coverage");
+    assert.equal(successful.length, 50, "review new successful conformance cases for converter coverage");
     const root = await mkdtemp(join(tmpdir(), `html-next-${target}-conformance-`));
     temporary.push(root);
     for (const [index, testCase] of successful.entries()) {
@@ -617,9 +629,9 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       assert.match(slots.get("#prefix")!, /^<i slot="prefix" class="icon">&gt;<\/i>$/);
       assert.match(slots.get("#meta")!, /^<span v-if="open" slot="meta">Opened<\/span>$/);
       // A slot's elements share one Vue slot, in authored order; its `<template slot>` replaces them.
-      assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in tags"[\s\S]*slot="leading"/);
+      assert.match(slots.get("#leading")!, /^<span slot="leading">Link<\/span>\s*<span\s+v-for="\(tag, index\) in guarded"[\s\S]*slot="leading"/);
       assert.equal(slots.get("#trailing"), "<b>!</b>");
-      assert.match(invocation, /<template #action="(\w+)"><button type="button" class="act">\s*\{\{ Object\.hasOwn\(\1, 'value'\)/);
+      assert.match(invocation, /<template #action="(\w+)"\s*>\s*<button\s+type="button"\s+class="act"\s*>\s*\{\{\s*Object\.hasOwn\(\1, 'value'\)/);
       // Only default content stays outside a named slot.
       assert.match(invocation, /^<p>Body text<\/p>\n\s*<template #prefix>/);
     }
@@ -679,7 +691,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
   it("server-renders React structural templates and sorted loops without wrapper elements", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
-      <ul><template $if="true"><li $each="n, i of [3, 1, 2]" $sort="n" from:data-i="$i" from:data-last="$loop.last" $value="$n"></li></template></ul>
+      <ul><template $if="true"><li $each="n, i of [3, 1, 2]" $sort="n" from:data-i="$i" $value="$n"></li></template></ul>
     </template>`);
     const outDirectory = join(root, "out-react-structure");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -691,7 +703,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})),
-      "<ul data-html-next-renderer=\"react\" component=\"x-card\"><li data-i=\"0\">1</li><li data-i=\"1\">2</li><li data-i=\"2\" data-last=\"\">3</li></ul>");
+      "<ul data-html-next-renderer=\"react\" component=\"x-card\"><li data-i=\"0\">1</li><li data-i=\"1\">2</li><li data-i=\"2\">3</li></ul>");
   });
 
   it("server-renders a React $match branch inside a table", async () => {
@@ -892,12 +904,12 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("converts a delegated React root into the child's native root", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-base-button.html"), `<template component="x-base-button" status="early" summary="Base button.">
-      <button type="button" class="base"><slot></slot></button>
+      <button type="button" class="base" $attributes><slot></slot></button>
       <style>:host { border: 1px solid blue; }</style>
     </template>`);
     await writeFile(join(root, "x-primary.html"), `<link rel="component" href="./x-base-button.html">
       <template component="x-primary" status="early" summary="Primary button.">
-        <x-base-button class="primary"><slot></slot></x-base-button>
+        <x-base-button $attributes class="primary"><slot></slot></x-base-button>
         <style>:host { color: red; }</style>
       </template>`);
     const outDirectory = join(root, "out-react-delegated");
@@ -911,7 +923,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     const markup = renderToStaticMarkup(createElement(module.exports.XPrimary!, { id: "case", children: "Projected" }));
     assert.match(markup, /^<button\b/);
-    assert.match(markup, /class="base primary"/);
+    assert.match(markup, /class="primary"/);
     assert.match(markup, /component="x-primary x-base-button"/);
     assert.match(markup, />Projected<\/button>$/);
   });
@@ -921,8 +933,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await writeFile(join(root, "x-switch.html"), `<template component="x-switch" status="early" summary="Polymorphic root."><defs>
       <state type="boolean" name="linked" value="false"></state>
       <handler name="switch"><set name="linked" expr:value="$linked = false"></set></handler>
-    </defs><template $match><a $when="$linked" href="#next" on:click="switch">Link</a>
-      <button $else type="button" on:click="switch">Button</button></template>
+    </defs><template $match><a $when="$linked" $attributes href="#next" on:click="switch">Link</a>
+      <button $else $attributes type="button" on:click="switch">Button</button></template>
     <style>:host { color: blue; }</style></template>`);
     const outDirectory = join(root, "out-react-polymorphic");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-switch.html"] });
@@ -1092,7 +1104,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("uses HTML parser recovery for duplicate attributes, as the browser does", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"),
-      '<template component="x-card" status="early" summary="Card."><article class="first" class="second">Ready</article></template>');
+      '<template component="x-card" noforward status="early" summary="Card."><article class="first" class="second">Ready</article></template>');
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(root, `recovered-${mode}`);
       await convertComponents({ mode, entries: ["x-card.html"], target: "vue", root, outDirectory });
@@ -1239,6 +1251,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
 
   it("emits a Vue component with only its authored-feature helper", async () => {
     const root = await fixture();
+    const file = join(root, "x-card.html");
+    await writeFile(file, (await readFile(file, "utf8")).replace('<template component="x-card"', '<template component="x-card" noforward'));
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["x-card.html"], target: "vue", root, outDirectory });
     const path = join(outDirectory, "vue", "XCard.vue");
@@ -1272,7 +1286,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("maps state, computed values, handlers, and typed events to Vue", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-converter-reactive-"));
     temporary.push(root);
-    await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
+    await writeFile(join(root, "counter.html"), `<template component="x-counter" noforward status="early" summary="Counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
         <computed name="double" from="$count * 2"></computed>
@@ -1547,7 +1561,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.doesNotMatch(helper, /\.setHTML\(/);
     assert.ok(manifest.output.artifacts.some(({ path, kind }) => path === "react/html.ts" && kind === "helper"));
     assert.deepEqual(manifest.package, {
-      dependencies: { parse5: "^8.0.1" },
+      dependencies: { parse5: "^8.0.1", cssstyle: "^6.2.0", "css-tree": "^3.2.1" },
       peerDependencies: { react: "^19.3.0" },
     });
     assert.deepEqual(JSON.parse(await readFile(join(outDirectory, manifest.output.inventory), "utf8")).package,
@@ -1592,11 +1606,13 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await writeFile(consumer, `import React from "react";
 import XPanel from "./react/components/XPanel.tsx";
 const named = <XPanel slots={{ title: <b>Title</b> }}>Body</XPanel>;
-// @ts-expect-error A declared plain slot cannot receive a render function.
+const templateSlot = <XPanel slots={{ title: () => <b>Template</b> }} />;
+const defaultTemplate = <XPanel>{() => <b>Default template</b>}</XPanel>;
+// @ts-expect-error A template for a slot without props takes no required arguments.
 const functionSlot = <XPanel slots={{ title: (_props: Record<string, unknown>) => <b>Title</b> }} />;
 // @ts-expect-error A static slot contract does not accept an undeclared name.
 const undeclared = <XPanel slots={{ other: <b>Other</b> }} />;
-void [named, functionSlot, undeclared];`);
+void [named, templateSlot, defaultTemplate, functionSlot, undeclared];`);
     await typecheckReact(root, [...files, consumer]);
     const bundle = await build({
       entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
@@ -1614,7 +1630,7 @@ void [named, functionSlot, undeclared];`);
     await mkdir(join(root, "components"), { recursive: true });
     await writeFile(join(root, "components/rows.html"), `<template component="x-rows" status="early" summary="Rows."><defs><slot name="row"><prop name="item" type="object({ id: string, name: string })" required>The item.</prop><prop name="index" type="number" required>The index.</prop></slot>
       <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></state>
-    </defs><ul><slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot></ul></template>`);
+    </defs><ul><slot name="row" $each="row, index of $rows" $key="$row.id" from:item="$row" from:index="$index"><li>Missing</li></slot></ul></template>`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./rows.html">
       <template component="x-app" status="early" summary="App."><defs><state type="object" name="item" value="{ name: 'Parent' }"></state>
       <state name="heading" value="Team"></state></defs><main><output $value="$item.name"></output>
@@ -1628,10 +1644,12 @@ void [named, functionSlot, undeclared];`);
     const consumer = join(outDirectory, "scoped-slot-consumer.tsx");
     await writeFile(consumer, `import React from "react";
 import XRows from "./react/components/XRows.tsx";
-const scoped = <XRows slots={{ row: ({ item, index }) => <li>{item.name}{index}</li> }} />;
+const scoped = <XRows slots={{ row: ({ item, index }) => <li>{item?.name}{index}</li> }} />;
 // @ts-expect-error A declared scoped slot requires a render function.
 const staticNode = <XRows slots={{ row: <li>Invalid</li> }} />;
-void [scoped, staticNode];`);
+// @ts-expect-error A required slot input without a default can still read as null.
+const unsafe = <XRows slots={{ row: ({ item }) => <li>{item.name}</li> }} />;
+void [scoped, staticNode, unsafe];`);
     await typecheckReact(root, [...files, consumer]);
     const bundle = await build({
       entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,

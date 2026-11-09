@@ -1,6 +1,6 @@
 import { SAFE_DEFAULT_ELEMENTS, SAFE_GLOBAL_ATTRIBUTES } from "./sanitizer-default.js";
 
-const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "data", "xlink:href"]);
+export const URL_ATTRIBUTES: ReadonlySet<string> = new Set(["href", "src", "action", "formaction", "poster", "data", "xlink:href"]);
 const NAMESPACES: Readonly<Record<string, string>> = {
   "http://www.w3.org/1999/xhtml": "html",
   "http://www.w3.org/2000/svg": "svg",

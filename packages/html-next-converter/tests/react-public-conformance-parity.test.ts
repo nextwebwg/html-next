@@ -49,7 +49,7 @@ function consumer(invocation: string, tag: string, componentName: string, props:
     const component = node.tagName === tag;
     const attributes: Record<string, unknown> = {};
     for (const attribute of node.attrs ?? []) {
-      const propName = component ? Object.keys(props).find((name) => name.toLowerCase() === attribute.name) : undefined;
+      const propName = component ? Object.keys(props).find((name) => name.replace(/[A-Z]/g, letter => letter.toLowerCase()) === attribute.name) : undefined;
       const name = propName ?? (attribute.name === "class" ? "className" : attribute.name === "for" ? "htmlFor" : attribute.name);
       const type = propName === undefined ? undefined : props[propName]?.type;
       attributes[name] = name === "style" ? Object.fromEntries(attribute.value.split(";").filter(Boolean).map((declaration) => {
@@ -95,29 +95,24 @@ for (const target of ["react", "preact"] as const) describe.skipIf(!enabled)(`pu
   let liveBundle = "";
   const artifacts = new Map<string, { readonly bundle: string; readonly css: string; readonly server: string }>();
 
-  beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), "html-next-react-public-conformance-"));
-    liveBundle = join(directory, "live.js");
-    await build({ entryPoints: [livePath], outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
-
-    for (const [index, testCase] of successful.entries()) {
-      const { definition, invocation } = scene(testCase.source);
-      const parsedDefinition = parseComponent(definition, testCase.name);
-      for (const mode of ["application", "library"] as const) {
-        const caseDirectory = join(directory, String(index), mode);
-        await mkdir(caseDirectory, { recursive: true });
-        await writeFile(join(caseDirectory, "component.html"), definition);
-        const outDirectory = join(caseDirectory, "out");
-        const manifest = await convertComponents({ mode, target, entries: ["component.html"], root: caseDirectory, outDirectory });
-        assert.deepEqual(manifest.components.map((component) => component.tag), [parsedDefinition.contract.tag]);
-        assert.equal(manifest.output.entry, `${target}/${mode === "application" ? "application" : "index"}.ts`);
-        const component = manifest.components[0]!;
-        const expression = consumer(invocation, parsedDefinition.contract.tag, component.name, parsedDefinition.contract.props);
-        const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
-        const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
-        const browserEntry = join(outDirectory, "browser.tsx");
-        const bundle = join(outDirectory, "react.js");
-        await writeFile(browserEntry, `import { createElement, Fragment } from "${target === "preact" ? "preact/compat" : "react"}";
+  const prepare = async (index: number, testCase: (typeof successful)[number], mode: "application" | "library") => {
+    if (artifacts.has(`${index}:${mode}`)) return;
+    const { definition, invocation } = scene(testCase.source);
+    const parsedDefinition = parseComponent(definition, testCase.name);
+    const caseDirectory = join(directory, String(index), mode);
+    await mkdir(caseDirectory, { recursive: true });
+    await writeFile(join(caseDirectory, "component.html"), definition);
+    const outDirectory = join(caseDirectory, "out");
+    const manifest = await convertComponents({ mode, target, entries: ["component.html"], root: caseDirectory, outDirectory });
+    assert.deepEqual(manifest.components.map((component) => component.tag), [parsedDefinition.contract.tag]);
+    assert.equal(manifest.output.entry, `${target}/${mode === "application" ? "application" : "index"}.ts`);
+    const component = manifest.components[0]!;
+    const expression = consumer(invocation, parsedDefinition.contract.tag, component.name, parsedDefinition.contract.props);
+    const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
+    const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
+    const browserEntry = join(outDirectory, "browser.tsx");
+    const bundle = join(outDirectory, "react.js");
+    await writeFile(browserEntry, `import { createElement, Fragment } from "${target === "preact" ? "preact/compat" : "react"}";
 import { createRoot, hydrateRoot } from "${target === "preact" ? "preact/compat/client" : "react-dom/client"}";
 import { ${component.name} } from "./${manifest.output.entry.replace(/\.ts$/, "")}";
 const root = document.querySelector("main")!;
@@ -125,21 +120,26 @@ const tree = ${expression};
 if (root.hasChildNodes()) hydrateRoot(root, tree);
 else createRoot(root).render(tree);
 `);
-        await build({ entryPoints: [browserEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
-          target: ["es2022"], jsx: "automatic", loader: { ".css": "empty" }, nodePaths: [nodeModulesPath] });
-        const serverEntry = join(outDirectory, "server.tsx");
-        await writeFile(serverEntry, `import { createElement, Fragment } from "${target === "preact" ? "preact/compat" : "react"}";
+    await build({ entryPoints: [browserEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
+      target: ["es2022"], jsx: "automatic", loader: { ".css": "empty" }, nodePaths: [nodeModulesPath] });
+    const serverEntry = join(outDirectory, "server.tsx");
+    await writeFile(serverEntry, `import { createElement, Fragment } from "${target === "preact" ? "preact/compat" : "react"}";
 import { renderToString } from "${target === "preact" ? "preact-render-to-string" : "react-dom/server"}";
 import { ${component.name} } from "./${manifest.output.entry.replace(/\.ts$/, "")}";
 export const render = () => renderToString(${expression});
 `);
-        const serverBuild = await build({ entryPoints: [serverEntry], bundle: true, format: "cjs", platform: "node",
-          write: false, packages: "external", jsx: "automatic", loader: { ".css": "empty" } });
-        const module = { exports: {} as { render(): string } };
-        new Function("require", "module", "exports", serverBuild.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-        artifacts.set(`${index}:${mode}`, { bundle, css, server: module.exports.render() });
-      }
-    }
+    const serverBuild = await build({ entryPoints: [serverEntry], bundle: true, format: "cjs", platform: "node",
+      write: false, packages: "external", jsx: "automatic", loader: { ".css": "empty" } });
+    const module = { exports: {} as { render(): string } };
+    new Function("require", "module", "exports", serverBuild.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    artifacts.set(`${index}:${mode}`, { bundle, css, server: module.exports.render() });
+  };
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-react-public-conformance-"));
+    liveBundle = join(directory, "live.js");
+    await build({ entryPoints: [livePath], outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
+
   }, 120_000);
 
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
@@ -153,6 +153,7 @@ export const render = () => renderToString(${expression});
 
         for (const [index, testCase] of successful.entries()) {
           it(testCase.name, async () => {
+            await prepare(index, testCase, mode);
             const [live, react, hydrated] = await Promise.all([browser.newPage({ viewport: { width: 800, height: 600 } }),
               browser.newPage({ viewport: { width: 800, height: 600 } }), browser.newPage({ viewport: { width: 800, height: 600 } })]);
             const errors: string[] = [];

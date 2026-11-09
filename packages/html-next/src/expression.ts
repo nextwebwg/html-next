@@ -37,9 +37,9 @@ export interface Scope {
   read?(name: string): Value | undefined;
   readKey?(object: object, key: string | number): Value | undefined;
   reveal?(value: Value): Value;
-  typeOfDeclaredPath?: ((path: string) => TypeNode | undefined) | undefined;
+  typeOfDeclaredPath?: ((path: string, values?: Scope) => TypeNode | undefined) | undefined;
   /** Declared type of a reference, when the host has one. */
-  typeOfPath?: ((path: string) => "length" | "percentage" | "duration" | undefined) | undefined;
+  typeOfPath?: ((path: string, currentValues?: boolean) => "length" | "percentage" | "duration" | undefined) | undefined;
 }
 
 export class UndeclaredName extends Error {
@@ -66,6 +66,24 @@ export interface CompiledExpression {
   readonly ast: ExpressionNode;
   readonly dependencies: readonly string[];
 }
+
+/** A rooted read plan. Computed keys are evaluated only when this reference executes. */
+export interface ReferencePath {
+  readonly root: string;
+  readonly steps: readonly { readonly key: string | number | ExpressionNode; readonly member: boolean }[];
+  readonly staticKeys?: readonly (string | number)[];
+  readonly name: string;
+}
+
+/** The host supplies declared types and refusal; the evaluator owns actual reads and laziness. */
+export interface ReferenceChecks {
+  typeOf(reference: ReferencePath, scope: Scope): TypeNode | undefined;
+  atKey(type: TypeNode, key: string | number): TypeNode | undefined;
+  accepts(reference: ReferencePath, value: Value, type: TypeNode | undefined): boolean;
+}
+
+/** Compiler-only row position for writable item paths; `#` is outside the expression identifier grammar. */
+export const ITERATION_INDEX = "#index";
 
 export type WritablePathSegment =
   | string
@@ -114,52 +132,97 @@ function reveal(value: Value, scope: Scope): Value {
   return scope.reveal === undefined || value === null || typeof value !== "object" ? value : scope.reveal(value);
 }
 
-function evalNode(node: ExpressionNode, scope: Scope): Value {
+const referencePaths = /* @__PURE__ */ new WeakMap<ExpressionNode, ReferencePath | null>();
+
+export function referencePath(node: ExpressionNode): ReferencePath | undefined {
+  const known = referencePaths.get(node);
+  if (known !== undefined) return known ?? undefined;
+  const steps: { key: string | number | ExpressionNode; member: boolean }[] = [];
+  let root = node;
+  while (root.kind === "member" || root.kind === "index") {
+    if (root.kind === "member") steps.unshift({ key: root.key, member: true });
+    else {
+      const index = root.index;
+      steps.unshift({ key: index.kind === "literal" && (typeof index.value === "string" || typeof index.value === "number")
+        ? index.value : index, member: false });
+    }
+    root = root.object;
+  }
+  if (root.kind !== "id") {
+    referencePaths.set(node, null);
+    return undefined;
+  }
+  const keys = steps.map(step => step.key);
+  const name = root.name + keys.map(key => typeof key === "object" ? "[computed]"
+    : /^\w+$/.test(String(key)) ? `.${key}` : `[${JSON.stringify(key)}]`).join("");
+  const reference: ReferencePath = { root: root.name, steps, name,
+    ...(keys.every(key => typeof key !== "object") ? { staticKeys: keys as (string | number)[] } : {}) };
+  referencePaths.set(node, reference);
+  return reference;
+}
+
+function access(object: Value, key: Value, scope: Scope, member: boolean): Value {
+  if (object === NONCONFORMING || key === NONCONFORMING) return NONCONFORMING;
+  if (isAbsent(object) || isAbsent(key)) return ABSENT;
+  if (member) {
+    if (key === "length" && typeof object === "string") return object.length;
+    if (key === "length" && Array.isArray(object)) return readKey(scope, object, "length");
+    return typeof object === "object" && !Array.isArray(object) && typeof key === "string" ? readKey(scope, object as object, key) : ABSENT;
+  }
+  if (Array.isArray(object) && typeof key === "number") return readKey(scope, object, key);
+  return typeof object === "object" && (typeof key === "string" || typeof key === "number")
+    ? readKey(scope, object as object, String(key)) : ABSENT;
+}
+
+function evalReference(reference: ReferencePath, scope: Scope, checks: ReferenceChecks): Value {
+  let value = scope.read === undefined ? scope.get(reference.root) : scope.read(reference.root);
+  if (value === undefined) throw new UndeclaredName(reference.root);
+  let type = checks.typeOf(reference, scope);
+  for (const step of reference.steps) {
+    const key = typeof step.key === "object" ? evalNode(step.key, scope, checks) : step.key;
+    value = access(value, key, scope, step.member);
+    if (reference.staticKeys === undefined && type !== undefined) {
+      type = typeof key === "string" || typeof key === "number" ? checks.atKey(type, key) : undefined;
+    }
+  }
+  return checks.accepts(reference, value, type) ? value : NONCONFORMING;
+}
+
+function evalNode(node: ExpressionNode, scope: Scope, checks?: ReferenceChecks): Value {
   switch (node.kind) {
     case "literal": return node.value;
     case "id": {
+      if (checks !== undefined) return evalReference(referencePath(node)!, scope, checks);
       const value = scope.read === undefined ? scope.get(node.name) : scope.read(node.name);
       if (value === undefined) throw new UndeclaredName(node.name);
       return value;
     }
     case "member": {
-      const object = evalNode(node.object, scope);
-      if (object === NONCONFORMING) return NONCONFORMING;
-      // A list's or string's `length` is its count, as `cart.items.length` reads in the proposal.
-      if (node.key === "length" && typeof object === "string") return object.length;
-      if (node.key === "length" && Array.isArray(object)) return readKey(scope, object, "length");
-      if (isAbsent(object) || typeof object !== "object" || Array.isArray(object)) {
-        return ABSENT;
-      }
-      return readKey(scope, object as object, node.key);
+      const reference = checks === undefined ? undefined : referencePath(node);
+      if (reference !== undefined) return evalReference(reference, scope, checks!);
+      return access(evalNode(node.object, scope, checks), node.key, scope, true);
     }
     case "index": {
-      const object = evalNode(node.object, scope);
-      const index = evalNode(node.index, scope);
-      if (object === NONCONFORMING || index === NONCONFORMING) return NONCONFORMING;
-      if (isAbsent(object) || isAbsent(index)) return ABSENT;
-      if (Array.isArray(object) && typeof index === "number") return readKey(scope, object, index);
-      if (typeof object === "object" && (typeof index === "string" || typeof index === "number")) {
-        return readKey(scope, object as object, String(index));
-      }
-      return ABSENT;
+      const reference = checks === undefined ? undefined : referencePath(node);
+      if (reference !== undefined) return evalReference(reference, scope, checks!);
+      return access(evalNode(node.object, scope, checks), evalNode(node.index, scope, checks), scope, false);
     }
     case "unary": {
-      const operand = evalNode(node.operand, scope);
+      const operand = evalNode(node.operand, scope, checks);
       if (operand === NONCONFORMING) return NONCONFORMING;
       if (node.op === "not") return !truthyIn(operand, scope);
-      return negate(operand, dimensionType(node.operand, scope));
+      return negate(operand, dimensionType(node.operand, scope, true));
     }
-    case "binary": return evalBinary(node, scope);
+    case "binary": return evalBinary(node, scope, checks);
     case "conditional": {
-      const test = evalNode(node.test, scope);
-      return test === NONCONFORMING ? NONCONFORMING : evalNode(truthyIn(test, scope) ? node.consequent : node.alternate, scope);
+      const test = evalNode(node.test, scope, checks);
+      return test === NONCONFORMING ? NONCONFORMING : evalNode(truthyIn(test, scope) ? node.consequent : node.alternate, scope, checks);
     }
-    case "call": return evalCall(node, scope);
+    case "call": return evalCall(node, scope, checks);
     case "object": {
       const value: Record<string, Value> = {};
       for (const pair of node.pairs) {
-        const item = evalNode(pair.value, scope);
+        const item = evalNode(pair.value, scope, checks);
         if (item === NONCONFORMING) return NONCONFORMING;
         value[pair.key] = item;
       }
@@ -168,7 +231,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
     case "array": {
       const value: Value[] = [];
       for (const item of node.items) {
-        const result = evalNode(item, scope);
+        const result = evalNode(item, scope, checks);
         if (result === NONCONFORMING) return NONCONFORMING;
         value.push(result);
       }
@@ -177,23 +240,24 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
   }
 }
 
-function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope): Value {
+function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope, checks?: ReferenceChecks): Value {
   const { op } = node;
   if (op === "and" || op === "or") {
-    const left = evalNode(node.left, scope);
+    const left = evalNode(node.left, scope, checks);
     if (left === NONCONFORMING) return NONCONFORMING;
     if (op === "and" && !truthyIn(left, scope)) return false;
     if (op === "or" && truthyIn(left, scope)) return true;
-    const right = evalNode(node.right, scope);
+    const right = evalNode(node.right, scope, checks);
     return right === NONCONFORMING ? NONCONFORMING : truthyIn(right, scope);
   }
-  const left = evalNode(node.left, scope);
-  const right = evalNode(node.right, scope);
-  // Dimensions are looked up only where `binaryValue` reads them: arithmetic on a non-number.
-  const dimensional = (op === "+" || op === "-" || op === "*" || op === "/") &&
+  const left = evalNode(node.left, scope, checks);
+  const right = evalNode(node.right, scope, checks);
+  // Preserve quantity identity in arithmetic and exclude it from text ordering.
+  const dimensional = (op === "+" || op === "-" || op === "*" || op === "/" ||
+    op === "<" || op === "<=" || op === ">" || op === ">=") &&
     (typeof left !== "number" || typeof right !== "number");
   return binaryValue(op, left, right,
-    dimensional ? dimensionType(node.left, scope) : undefined, dimensional ? dimensionType(node.right, scope) : undefined,
+    dimensional ? dimensionType(node.left, scope, true) : undefined, dimensional ? dimensionType(node.right, scope, true) : undefined,
     ARITHMETIC[op]);
 }
 
@@ -217,7 +281,7 @@ export function negate(operand: Value, dimension: Dimension | undefined): Value 
 
 /**
  * A binary operator other than `and`/`or` over evaluated operands. The dimensions are the operands'
- * declared dimension types; they matter only for arithmetic on an operand that is not a number.
+ * declared dimension types; arithmetic uses them and ordered comparison excludes them.
  * `operate` is the arithmetic operator's number operation (`add` for `+`, from `./decimal.js`); a
  * compiled component passes only the ones it uses, and none where both operands are integers, which
  * JavaScript's own operators already calculate exactly.
@@ -225,8 +289,7 @@ export function negate(operand: Value, dimension: Dimension | undefined): Value 
 export function binaryValue(op: string, left: Value, right: Value, leftDimension?: Dimension, rightDimension?: Dimension,
   operate?: (a: number, b: number) => number): Value {
   if (left === NONCONFORMING || right === NONCONFORMING) return NONCONFORMING;
-  if (op === "=") return left === right;
-  if (op === "!=") return left !== right;
+  if (op === "=" || op === "!=") return left === ABSENT || right === ABSENT ? ABSENT : (left === right) !== (op === "!=");
   if (op === "^=" || op === "$=" || op === "*=") {
     if (typeof left !== "string" || typeof right !== "string") return ABSENT;
     if (op === "^=") return left.startsWith(right);
@@ -265,15 +328,21 @@ export function binaryValue(op: string, left: Value, right: Value, leftDimension
     }
   }
 
+  if (op === "<" || op === "<=" || op === ">" || op === ">=") {
+    if (leftDimension !== undefined || rightDimension !== undefined) return ABSENT;
+    if (!(typeof left === "string" && typeof right === "string" ||
+      typeof left === "number" && Number.isFinite(left) && typeof right === "number" && Number.isFinite(right))) return ABSENT;
+    return op === "<" ? left < right : op === "<=" ? left <= right : op === ">" ? left > right : left >= right;
+  }
+
   const a = asNumber(left);
   const b = asNumber(right);
   if (a === ABSENT || b === ABSENT) return ABSENT;
   switch (op) {
-    case "<": return a < b;
-    case "<=": return a <= b;
-    case ">": return a > b;
-    case ">=": return a >= b;
-    case "+": case "-": case "*": case "/": case "%": return calculate(op, a, b, operate);
+    case "+": case "-": case "*": case "/": case "%": {
+      const result = calculate(op, a, b, operate);
+      return Number.isFinite(result) ? result : NONCONFORMING;
+    }
     default: return ABSENT;
   }
 }
@@ -284,25 +353,25 @@ function calculate(op: string, a: number, b: number, operate: ((a: number, b: nu
   return op === "+" ? a + b : op === "-" ? a - b : op === "*" ? a * b : op === "/" ? a / b : a % b;
 }
 
-function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): Value {
+function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope, checks?: ReferenceChecks): Value {
   const { args, fn } = node;
   if (fn === "format" || fn === "formatRange" || fn === "formatParts") {
-    const values = args.map((argument) => reveal(evalNode(argument, scope), scope));
+    const values = args.map((argument) => reveal(evalNode(argument, scope, checks), scope));
     return formatCall(fn, values, args.length === 0 ? undefined : expressionFormattingType(args[0]!, scope));
   }
   if (fn === "default") {
     if (args.length !== 2) return NONCONFORMING;
-    return inputDefault(() => evalNode(args[0]!, scope), () => evalNode(args[1]!, scope), ABSENT);
+    return inputDefault(() => evalNode(args[0]!, scope, checks), () => evalNode(args[1]!, scope, checks), ABSENT);
   }
   if (fn === "concat" || fn === "join") {
     const values: Value[] = [];
-    for (const argument of args) values.push(reveal(evalNode(argument, scope), scope));
+    for (const argument of args) values.push(reveal(evalNode(argument, scope, checks), scope));
     return textCall(fn, values);
   }
   if (!mathArity(fn, args.length)) return NONCONFORMING;
-  const dimension = dimensionType(args[0]!, scope);
-  return mathCall(fn, args.map((argument) => evalNode(argument, scope)), dimension,
-    dimension === undefined ? [] : args.map((argument) => dimensionType(argument, scope)));
+  const dimension = dimensionType(args[0]!, scope, true);
+  return mathCall(fn, args.map((argument) => evalNode(argument, scope, checks)), dimension,
+    dimension === undefined ? [] : args.map((argument) => dimensionType(argument, scope, true)));
 }
 
 /** `format`, `formatRange` and `formatParts` over evaluated arguments and the first one's formatting type. */
@@ -391,33 +460,33 @@ function parseQuantity(value: string): { value: number; unit: string; dimension:
 }
 
 /** The dimensional type an expression carries into a later math call. */
-export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "length" | "percentage" | "duration" | undefined {
+export function dimensionType(node: ExpressionNode | undefined, scope: Scope, currentValues = false): "length" | "percentage" | "duration" | undefined {
   if (node === undefined) return undefined;
   if (node.kind === "literal") return node.dimension;
-  if (node.kind === "unary" && node.op === "-") return dimensionType(node.operand, scope);
+  if (node.kind === "unary" && node.op === "-") return dimensionType(node.operand, scope, currentValues);
   if (node.kind === "binary") {
-    const left = dimensionType(node.left, scope);
-    const right = dimensionType(node.right, scope);
+    const left = dimensionType(node.left, scope, currentValues);
+    const right = dimensionType(node.right, scope, currentValues);
     if (node.op === "+" || node.op === "-") return left !== undefined && left === right ? left : undefined;
     if (node.op === "*") return left === undefined ? right : right === undefined ? left : undefined;
     if (node.op === "/") return right === undefined ? left : undefined;
   }
   if (node.kind === "conditional") {
-    const consequent = dimensionType(node.consequent, scope);
-    const alternate = dimensionType(node.alternate, scope);
+    const consequent = dimensionType(node.consequent, scope, currentValues);
+    const alternate = dimensionType(node.alternate, scope, currentValues);
     if (node.consequent.kind === "literal" && node.consequent.value === null) return alternate;
     if (node.alternate.kind === "literal" && node.alternate.value === null) return consequent;
     return consequent !== undefined && consequent === alternate ? consequent : undefined;
   }
   if (node.kind === "call" && (node.fn === "round" || node.fn === "min" || node.fn === "max" ||
     node.fn === "clamp" || node.fn === "abs")) {
-    return dimensionType(node.args[node.fn === "clamp" ? 1 : 0]!, scope);
+    return dimensionType(node.args[node.fn === "clamp" ? 1 : 0]!, scope, currentValues);
   }
   if (node.kind === "call" && node.fn === "default") {
-    return dimensionType(node.args[0]!, scope) ?? dimensionType(node.args[1]!, scope);
+    return dimensionType(node.args[0]!, scope, currentValues) ?? dimensionType(node.args[1]!, scope, currentValues);
   }
   const name = path(node);
-  return name === undefined ? undefined : scope.typeOfPath?.(name);
+  return name === undefined ? undefined : scope.typeOfPath?.(name, currentValues);
 }
 
 /**
@@ -435,6 +504,14 @@ export function wholeNumber(node: ExpressionNode, typeOf: (node: ExpressionNode)
   let type = typeOf(node);
   if (type?.kind === "constrained") type = type.base;
   return type?.kind === "terminal" && type.name === "integer";
+}
+
+/** A finite number plus/minus a literal no larger than a safe integer cannot overflow: large doubles round the step away. */
+export function finiteStep(node: ExpressionNode, isNumber: (operand: ExpressionNode) => boolean): boolean {
+  if (node.kind !== "binary" || node.op !== "+" && node.op !== "-") return false;
+  const step = (operand: ExpressionNode): boolean => operand.kind === "literal" && operand.dimension === undefined &&
+    typeof operand.value === "number" && Math.abs(operand.value) <= Number.MAX_SAFE_INTEGER;
+  return step(node.right) && isNumber(node.left) || step(node.left) && isNumber(node.right);
 }
 
 const cache = new Map<string, CompiledExpression>();
@@ -749,8 +826,8 @@ export function evaluate(source: string, scope: Scope): Value {
 }
 
 /** Evaluate a previously compiled expression without reparsing its source. */
-export function evaluateCompiled(expression: CompiledExpression | ExpressionNode, scope: Scope): Value {
-  return reveal(evalNode("ast" in expression ? expression.ast : expression, scope), scope);
+export function evaluateCompiled(expression: CompiledExpression | ExpressionNode, scope: Scope, checks?: ReferenceChecks): Value {
+  return reveal(evalNode("ast" in expression ? expression.ast : expression, scope, checks), scope);
 }
 
 /** Escaped-text form: absence and null render as empty text. */
@@ -760,6 +837,9 @@ export function toText(value: Value): string {
   if (typeof value === "object") return "";
   return String(value);
 }
+
+export const ENUMERATED_BOOLEAN_ATTRIBUTE_NAMES = ["contenteditable", "draggable", "spellcheck"] as const;
+export const ENUMERATED_BOOLEAN_ATTRIBUTE_PREFIX = "aria-";
 
 /** Enumerated attributes whose true and false are the strings "true" and "false", not presence. */
 export function isEnumeratedBoolean(name: string): boolean {

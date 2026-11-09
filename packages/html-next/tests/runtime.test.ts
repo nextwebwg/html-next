@@ -8,6 +8,9 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 import { renderComponents } from "../src/server.js";
 import { parseComponent } from "../src/source-parser.js";
+import { checkedReferenceInitial, checkedReferenceSource } from "./checked-reference-fixture.js";
+import { compiledFixtures } from "./hydration-fixtures.js";
+import { namespaceInitial, namespaceSnapshot, namespaceSource } from "./namespace-fixture.js";
 
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
@@ -59,6 +62,93 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const mode of ["live", "compiled"] as const) it(`${engine} preserves namespaced attributes during fresh creation and updates (${mode})`, async () => {
+      const definition = parseComponent(namespaceSource, "namespaces.html");
+      const compiled = mode === "compiled" ? await compiledFixtures("iife", "", [definition]) : undefined;
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<!doctype html><body></body>");
+        if (mode === "compiled") {
+          await page.addScriptTag({ content: compiled! });
+          await page.evaluate(() => document.body.append((window as any).HtmlCompiled.factories["x-namespaces"]({})));
+        } else {
+          await page.addScriptTag({ path: bundlePath });
+          await page.evaluate(definitionJSON => {
+            const definition = JSON.parse(definitionJSON);
+            const api = (window as any).HtmlRuntime;
+            api.registerComponentDefinitions([definition]);
+            document.body.innerHTML = "<x-namespaces></x-namespaces>";
+            api.lowerDocument();
+          }, JSON.stringify(definition));
+        }
+        const read = () => page.evaluate(namespaceSnapshot);
+        assert.deepEqual(await read(), namespaceInitial);
+        for (const [button, bound] of [["change", { href: "#second", value: "#second", language: "fr" }],
+          ["unsafe", { href: "", value: null, language: "fr" }], ["change", { href: "#second", value: "#second", language: "fr" }]] as const) {
+          await page.locator(`#${button}`).click();
+          await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+          assert.deepEqual(await read(), { ...namespaceInitial, bound });
+        }
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} compiled output checks executed references and reads computed keys once`, async () => {
+      const definition = parseComponent(checkedReferenceSource.replace('component="x-checked-reads"', 'component="x-checked-reads" controller="./reference-controller.js"'));
+      const once = parseComponent(`<template component="x-read-once" controller="./reference-controller.js"><defs>
+        <state name="record" type="object({ name: string, count: number })" value="{ name: 'Initial', count: 0 }"></state>
+        <state name="selector" type="object({ key: string })" value="{ key: 'name' }"></state>
+        </defs><output>{$record[$selector.key]}</output></template>`);
+      const compiled = await compiledFixtures("iife", "", [definition, once], {
+        "./reference-controller.js": "export default function(host) { globalThis['draft' in host.state ? 'checkedHost' : 'onceHost'] = host; }",
+      });
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent('<!doctype html><body></body>');
+        await page.addScriptTag({ content: compiled });
+        await page.evaluate(() => {
+          const factories = (window as any).HtmlCompiled.factories;
+          document.body.append(factories["x-checked-reads"]({}), factories["x-read-once"]({}));
+        });
+        await page.waitForFunction(() => (window as any).checkedHost && (window as any).onceHost);
+        const read = () => page.evaluate(ids => Object.fromEntries(ids.map(id => [id, document.getElementById(id)?.textContent])), Object.keys(checkedReferenceInitial));
+        assert.deepEqual(await read(), checkedReferenceInitial);
+        await page.evaluate(() => {
+          const { state } = (window as any).checkedHost;
+          state.choose = true; state.draft.name = "A"; state.draft["odd.key"] = "Quoted"; state.rows[0].name = "Row";
+        });
+        await page.waitForFunction(() => document.getElementById("computed-key")?.textContent === "A");
+        const accepted = { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row", "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" };
+        assert.deepEqual(await read(), accepted);
+        await page.evaluate(() => {
+          const { state } = (window as any).checkedHost;
+          state.draft.name = 17; state.rows[0].name = 17;
+        });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.deepEqual(await read(), accepted);
+        const reads = await page.evaluate(async () => {
+          const { state } = (window as any).onceHost;
+          let names = 0, keys = 0;
+          state.record = { get name() { names += 1; return "Once"; }, count: 2 };
+          state.selector = { get key() { keys += 1; return "name"; } };
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          return { names, keys, text: document.querySelector("body > output")?.textContent };
+        });
+        assert.deepEqual(reads, { names: 1, keys: 1, text: "Once" });
+        await page.evaluate(() => { (window as any).onceHost.state.selector = { key: "count" }; });
+        await page.waitForFunction(() => document.querySelector("body > output")?.textContent === "2");
+        await page.evaluate(() => { (window as any).onceHost.state.record = { name: "Another", count: "wrong" }; });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.equal(await page.locator("body > output").textContent(), "2");
+        await page.evaluate(() => { (window as any).onceHost.state.record = { name: "Another", count: 3 }; });
+        await page.waitForFunction(() => document.querySelector("body > output")?.textContent === "3");
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} releases removed row owners and stops descendants created by later branches`, async () => {
       const definition = parseComponent(`<template component="row-owner-release"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }]"></state>
@@ -502,11 +592,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
-    it(`${engine} keeps each row's loop record through list runs that leave its fields as they were`, async () => {
+    it(`${engine} keeps each row's explicit index through list runs that leave its position unchanged`, async () => {
       const definition = parseComponent(`<template component="loop-record-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
-        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-index="$loop.index" from:data-edge="$loop.first ? 'first' : $loop.last ? 'last' : ''">
-        <span $value="$loop.count"></span></li></ul></section></template>`);
+        </defs><section><ul><li $each="row, index of $rows" $key="$row.id" from:data-index="$index">
+        <span $value="$rows.length"></span></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -519,10 +609,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const host = runtime.getComponentHost(root);
           const list = root.querySelector("ul")!;
           const read = () => Array.from(list.querySelectorAll("li"), row =>
-            [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
+            [row.getAttribute("data-index"), row.querySelector("span")!.textContent].join(" "));
           const initial = read();
-          // An equal-keyed replacement reruns the list without changing any row's loop fields. A row
-          // keeps its loop record and writes only fields that changed, so no loop reader writes.
+          // Replacing an item at the same position leaves its index binding unchanged.
           const observer = new MutationObserver(() => undefined);
           observer.observe(list, { attributes: true, subtree: true });
           host.state.rows[1] = { id: 2 };
@@ -534,9 +623,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return { initial, indexWrites, reordered: read() };
         }, JSON.stringify(definition));
         assert.deepEqual(actual, {
-          initial: ["0 first 3", "1  3", "2 last 3"],
+          initial: ["0 3", "1 3", "2 3"],
           indexWrites: 0,
-          reordered: ["0 first 2", "1 last 2"],
+          reordered: ["0 2", "1 2"],
         });
       } finally { await browser.close(); }
     });
@@ -1610,7 +1699,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button type="button" on:click="add">Add</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index">
           <li class="fallback" $value="$row.name"></li></slot></ul></section></template>
           <x-scoped-list id="filled"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-list>
           <x-scoped-list id="empty"></x-scoped-list>`);
@@ -1639,7 +1728,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           <handler name="rename"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><button class="rename" type="button" on:click="rename">Rename</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"></slot>
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row" from:index="$index"></slot>
           </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-hydrate></main>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -1653,7 +1742,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const originalRow = hydrated.querySelector('li');
           document.body.append(server);
           R.lowerDocument();
-          const initial = { rootKept: document.querySelector('#hydrated') === hydrated,
+          const initial = { rootKept: server.querySelector('[component~="x-scoped-hydrate"]') === hydrated,
             rowKept: hydrated.querySelector('li') === originalRow,
             source: [...source.querySelectorAll('li')].map(row => row.textContent),
             hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
@@ -1688,7 +1777,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
           <template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
           <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
           <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
@@ -1716,7 +1805,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="renameRow"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>
-          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
+          <slot $each="row, index of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
           <template component="x-hydrated-consumer"><defs><state name="heading" value="People"></state>
           <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
           <main><button class="rename" type="button" on:click="rename">Rename</button><x-hydrated-rows>
@@ -3830,9 +3919,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
             ` value="[{ name: 'Apple', 'odd key': 'x' }]"></state>` +
             `<state name="byId" type="object({ '42': object({ name: string }) })" value="{ '42': { name: 'Ann' } }"></state>` +
             `<handler name="swap"><set name="items" expr:value="[{ name: 7, 'odd key': 'y' }]"></set>` +
-            `<set name="byId" expr:value="{ '42': { name: 7 } }"></set></handler></defs>` +
+            `<set name="byId" expr:value="{ '42': { name: 7 } }"></set></handler>` +
+            `<handler name="restore"><set name="items" expr:value="[{ name: 'Pear', 'odd key': 'z' }]"></set></handler></defs>` +
             `<main><output $value="$items.0.name"></output><b $value="$items.0['odd key']"></b><i $value="$byId.42.name"></i>` +
-            `<button type="button" on:click="swap"></button></main>` +
+            `<p $each="item of $items"><span>{$item.name}</span><em>{$item['odd key']}</em></p>` +
+            `<button type="button" on:click="swap"></button><button class="restore" type="button" on:click="restore"></button></main>` +
             `</template><x-first id="first"></x-first>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3840,6 +3931,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           document.querySelector("#first output")?.textContent,
           document.querySelector("#first b")?.textContent,
           document.querySelector("#first i")?.textContent,
+          document.querySelector("#first p span")?.textContent,
+          document.querySelector("#first p em")?.textContent,
         ]);
         await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
@@ -3850,12 +3943,83 @@ describe.skipIf(!enabled)("browser runtime", () => {
         // A dependency path names a list index and an object key alike (items.0.name, byId.42.name);
         // reading it must not fail, and a value that breaks its declared type leaves only that
         // reference inert, whether a list or an object holds it.
-        assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann"], swapped: ["Apple", "y", "Ann"] });
+        assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann", "Apple", "x"], swapped: ["Apple", "y", "Ann", "Apple", "y"] });
+        await page.click("#first button.restore");
+        await page.waitForFunction(() => document.querySelector("#first p span")?.textContent === "Pear");
+        assert.deepEqual(await read(), ["Pear", "z", "Ann", "Pear", "z"]);
         assert.deepEqual(messages.filter((text) => /SyntaxError/.test(text)), []);
         assert.deepEqual(messages.filter((text) => text.includes("declared type")), []);
       } finally {
         await browser.close();
       }
+    });
+
+    it(`${name} checks only evaluated typed references and recovers computed field reads`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent(checkedReferenceSource + '<x-checked-reads id="subject"></x-checked-reads>' +
+          `<template component="x-read-once"><defs>
+          <state name="record" type="object({ name: string, count: number })" value="{ name: 'Initial', count: 0 }"></state>
+          <state name="selector" type="object({ key: string })" value="{ key: 'name' }"></state>
+          </defs><output>{$record[$selector.key]}</output></template><x-read-once id="once"></x-read-once>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as any).HtmlRuntime.lowerDocument());
+        const read = () => page.evaluate(ids => Object.fromEntries(ids.map(id =>
+          [id, document.getElementById(id)?.textContent])), Object.keys(checkedReferenceInitial));
+        assert.deepEqual(await read(), checkedReferenceInitial);
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("subject"));
+          host.state.choose = true;
+          host.state.draft.name = "A";
+          host.state.draft["odd.key"] = "Quoted";
+          host.state.rows[0].name = "Row";
+        });
+        await page.waitForFunction(() => document.getElementById("computed-key")?.textContent === "A");
+        assert.deepEqual(await read(), { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row",
+          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" });
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("subject"));
+          host.state.draft.name = 17;
+          host.state.rows[0].name = 17;
+        });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.deepEqual(await read(), { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row",
+          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" });
+        const getters = await page.evaluate(async () => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          let names = 0; let keys = 0;
+          host.state.record = { get name() { names += 1; return "Once"; }, count: 2 };
+          host.state.selector = { get key() { keys += 1; return "name"; } };
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          return { names, keys, text: document.getElementById("once")?.textContent };
+        });
+        assert.deepEqual(getters, { names: 1, keys: 1, text: "Once" });
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.selector = { key: "count" };
+        });
+        await page.waitForFunction(() => document.getElementById("once")?.textContent === "2");
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.record = { name: "Another", count: "wrong" };
+        });
+        await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
+        assert.equal(await page.locator("#once").textContent(), "2");
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.record = { name: "Another", count: 3 };
+        });
+        await page.waitForFunction(() => document.getElementById("once")?.textContent === "3");
+        await page.evaluate(() => {
+          const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
+          host.state.selector.key = "name";
+        });
+        await page.waitForFunction(() => document.getElementById("once")?.textContent === "Another");
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
     });
 
     it(`${name} leaves a reference inert when its value breaks its declared type`, async () => {
@@ -4113,7 +4277,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
         })()`);
         assert.deepEqual(result, {
-          authored: ["figure", "wide"],
+          authored: ["figure", "figure"],
           recorded: ["end", "start"],
           rendered: ["end", "start"],
           caption: "rgb(0, 0, 0)",
@@ -4324,12 +4488,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return { before, linked, back: final, nativeClicks };
         })()`);
 
-        const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
+        const common = { id: "action", className: "action", component: "x-action", dataHref: "#next", label: true, host: true };
         assert.deepEqual(result, {
-          before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["", "pointer", "1px", "button"] },
           // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
           linked: { ...common, tag: "a", href: "#next", type: null, title: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
-          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "3", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "3", style: ["", "pointer", "1px", "button"] },
           nativeClicks: 3,
         });
         assert.deepEqual(pageErrors, []);
@@ -4413,12 +4577,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           }
           return states;
         })()`);
-        // The parent's on:click follows the root, its :as binding reaches the current root's
-        // record, and the consumer's type="submit" outlasts the button arm's own type="button".
+        // The parent's on:click and :as follow the root. Authored button attributes follow
+        // default forwarding; the link arm retains the caller type because it authors none.
         assert.deepEqual(result, [
-          ["button", "submit", "button", "0"],
+          ["button", "button", "button", "0"],
           ["a", "submit", "a", "1"],
-          ["button", "submit", "button", "2"],
+          ["button", "button", "button", "2"],
           ["a", "submit", "a", "3"],
         ]);
         assert.deepEqual(pageErrors, []);
@@ -4546,8 +4710,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           await settle();
           return { title, prevented: document.querySelector('#out output').textContent };
         })()`);
-        // The outer invocation's value wins, and the inner listener runs before the outer one.
-        assert.deepEqual(result, { title: "outer", prevented: "true" });
+        // The delegate's authored title follows forwarding. Its listener precedes the outer one.
+        assert.deepEqual(result, { title: "inner", prevented: "true" });
         assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();
@@ -4860,8 +5024,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["data-x-button", ""],
               ["data-x-button-prop-size", "lg"],
               ["id", "primary"],
-              // The author's attribute wins over the template's literal.
-              ["type", "submit"],
+              // The authored root literal follows default invocation forwarding.
+              ["type", "button"],
             ],
             // The template's indentation around its slot stays, as authored.
             children: [

@@ -41,7 +41,7 @@ describe("component package assembler", () => {
   for (const kind of ["module", "controller"]) it(`activates nested ${kind}s after their importing ancestor`, async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-package-order-")); temporary.push(root);
     for (const name of ["parent", "child"]) {
-      await writeFile(join(root, `${name}.html`), `<template component="x-${name}" ${kind}="./${name}.js"><section><slot></slot></section></template>`);
+      await writeFile(join(root, `${name}.html`), `<template component="x-${name}" ${kind}="./${name}.js"><section $attributes><slot></slot></section></template>`);
       await writeFile(join(root, `${name}.js`), `${name === "parent" ? 'await new Promise(resolve => window.releaseParent = resolve);' : 'window.childImported = true;'}
         export ${kind === "module" ? "function connect" : "default function"}(host) { window.connections.push(host.root.id); ${kind === "controller" ? name === "parent" ? "return new Promise(resolve => window.parentCleanup = resolve);" : "window.parentCleanup?.(() => {});" : ""} }`);
     }

@@ -1,0 +1,211 @@
+{
+  "checkpoint": "Vue child-slot lifetime and native edits, based on 3a347b4e",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "goalStatus": "active",
+  "shipReady": false,
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "ee83bc361313d3f2a30868bd890a606ac298091d",
+    "path": "html-next/components.md"
+  },
+  "implementation": [
+    "Own and borrowed outlets share logical child-slot frames. Repeated ordinary outlets use the same lifetime owner. Vue owns the retained child VNodes, component scopes, patching and final disposal.",
+    "The adapter extends Vue Teleport renderer hooks to retain children across destination removal and delegate normal SSR hydration and marker creation. It uses native fragments/live sibling ranges and the existing shared document mutation hub.",
+    "Only explicit as lists enroll accepted children. Scoped-only repeated slots retain native Vue outlets without plain-projection helpers.",
+    "Literal native control values use attribute writes, preserving dirty pre-hydration state. Same-destination reactive updates avoid native moves and preserve typing focus.",
+    "Source slot function replacements notify retained views. Empty text remains assigned content. Fragment filtering normalizes nested render-function text once, and disposed accepted roots get fresh mount VNodes when their outlet reopens.",
+    "A pure ChildSlot factory allows bundlers to remove unused projection machinery from unrelated components."
+  ],
+  "verification": {
+    "repositoryGate": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascriptPassed": 2085,
+      "javascriptGatedSkips": 4966,
+      "javascriptSeconds": 329.36,
+      "nativePassed": 844,
+      "nativeSkipped": 0,
+      "fluidCompleteOutputComparisons": 5,
+      "packedConsumersPassed": 8,
+      "packedConsumerSeconds": 60.19,
+      "checks": [
+        "lint",
+        "types",
+        "generated artifacts",
+        "runtime size budgets",
+        "native tests",
+        "build",
+        "packed consumers"
+      ]
+    },
+    "vueBrowser": {
+      "command": "corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts packages/html-next-converter/tests/vue-columns-parity.test.ts packages/html-next-converter/tests/vue-form-model-parity.test.ts packages/html-next-converter/tests/vue-columns-consumer-parity.test.ts --testNamePattern \"columns as markup|columns from| vue |keeps native edits\" --maxWorkers=1",
+      "passed": 34,
+      "filtered": 36,
+      "seconds": 96.77,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "coverage": [
+        "compiled and handwritten consumers",
+        "native dirty input identity through SSR hydration, transfers, caller conditions and reconnect",
+        "named/default lazy templates and ordinary repeated outlets",
+        "caller values read outside slot functions",
+        "empty text assignment",
+        "native focus during typing updates",
+        "keyed cell identity and context",
+        "wrapper state add/remove/reorder/rename",
+        "application/library native form behavior and pixels"
+      ]
+    },
+    "strengthenedVueHydration": {
+      "command": "corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/vue-columns-parity.test.ts --maxWorkers=1",
+      "passed": 6,
+      "seconds": 21.36,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "coverage": [
+        "original server button identity in a stateful external Vue component through own-outlet removal",
+        "counter state survives transfer and subsequent click",
+        "arbitrary provide/inject and useId preserved",
+        "onUnmounted fires exactly once on application disposal",
+        "all preceding dirty input, source closure, focus, transfer and reconnect assertions retained"
+      ]
+    },
+    "focused": {
+      "targetsConverterAndHostPassedBeforeFinalPruning": 164,
+      "finalHostIncludingTreeShakingPassed": 12,
+      "scopedOnlySpecializationPassed": 1
+    },
+    "firefox": {
+      "host": "Linux arm64 Docker",
+      "playwright": "1.64.0",
+      "image": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "containersStoppedAndRemoved": true
+    },
+    "sourceQualification": "All final production edits and canonical generated example preceded the final repository gate and 34-case browser gate. During the repository gate the browser-only fixture gained additional stateful-child/context/useId/disposal assertions; all six affected cases subsequently passed in all three engines. Final lint passed after those test edits. Changelog wording and this verification receipt were written afterward."
+  },
+  "bundleProbe": {
+    "component": "Unchanged generated XButton.vue, no as list or repeated slot",
+    "baseline": "3a347b4e",
+    "current": "uncommitted Vue plain source",
+    "mode": "minified browser bundle with identical component and Vue3.5.43",
+    "bundles": {
+      "before": {
+        "bytes": 90413,
+        "gzip": 34620,
+        "sha256": "a28ee848c4ce053953130285fef81468d9de6b720bdc5a8798471dafce2e1dbb",
+        "plainPlacementRetained": false
+      },
+      "after": {
+        "bytes": 88805,
+        "gzip": 33934,
+        "sha256": "da44b1502634c0d530981cb8f3de730912df57d246bce29b29dfd5cdd24e6184",
+        "plainPlacementRetained": false
+      }
+    },
+    "runtimeTimingMeasured": false
+  },
+  "review": {
+    "mode": "one bounded inline source review of the Vue delta; no reviewer agents or cross-model pass",
+    "resolved": [
+      "Avoid moving unchanged native slot ranges during reactive updates.",
+      "Normalize projected fragment text once so rejected nested text cannot evade filtering.",
+      "Make ChildSlot initialization removable to keep unused projection code out of ordinary bundles.",
+      "Retire replaced records by identity and avoid quadratic removed-record scans."
+    ],
+    "wholeGoalReviewComplete": false
+  },
+  "observedRemainingVueCases": [
+    {
+      "name": "Repeated receiving as outlets duplicate a child root",
+      "source": "<template component=\"x-item\"><b>Child</b></template><template component=\"x-list\"><defs><slot accepts=\"x-item\" as=\"items\"></slot></defs><section><p><slot>First</slot></p><div><slot>Second</slot></div></section></template><template component=\"x-page\"><main><x-list><x-item></x-item></x-list></main></template>",
+      "mode": "Actual Node and Vue SSR, independent visible fields",
+      "expected": [
+        [
+          "p",
+          "Child"
+        ],
+        [
+          "div",
+          "Second"
+        ]
+      ],
+      "node": [
+        [
+          "p",
+          "Child"
+        ],
+        [
+          "div",
+          "Second"
+        ]
+      ],
+      "vue": [
+        [
+          "p",
+          "Child"
+        ],
+        [
+          "div",
+          "Child"
+        ]
+      ],
+      "nextAction": "Share the receiving projection lifetime as well as the entry child-slot lifetime. ChildNodes currently bypasses the plain frame path."
+    },
+    {
+      "name": "A single conditional ordinary outlet recreates its input",
+      "source": "<template component=\"x-card\"><defs><state name=\"open\" type=\"boolean\" value=\"true\"></state><handler name=\"toggle\"><set name=\"open\" expr:value=\"not $open\"></set></handler></defs><section><button on:click=\"toggle\">Toggle</button><slot $if=\"$open\"></slot></section></template><template component=\"x-page\"><main><x-card><input value=\"Initial\"></x-card></main></template>",
+      "mode": "Chromium; Vue fresh and compiled Vanilla hydrating actual Node SSR, edit native input then close/reopen the outlet",
+      "expected": {
+        "closedInputCount": 0,
+        "sameInput": true,
+        "value": "Edited"
+      },
+      "vanilla": {
+        "closedInputCount": 0,
+        "sameInput": true,
+        "value": "Edited",
+        "pageErrors": []
+      },
+      "vue": {
+        "closedInputCount": 0,
+        "sameInput": false,
+        "value": "Initial",
+        "pageErrors": []
+      },
+      "nextAction": "Select persistent plain-content ownership for structurally removable outlets, including a single conditional outlet; counting repeated names alone is insufficient."
+    }
+  ],
+  "remainingWholeGoal": [
+    "Resolve both observed Vue cases and turn the portable observations into checked-in regressions. Do not treat the passing subset as a complete Vue language qualification.",
+    "Resolve React and Preact actual framework hydration without replacing original controls or suppressing recoveries; both dedicated tests remain enabled and failing. Align Svelte projection ownership.",
+    "Complete accepted presets, filtering and setup/context paths across all targets, shared compiler-owned smallest-client selection, native asset ingestion, server preparation, identities, rendered-form records and native hydration.",
+    "Complete native CSS/styles/formats/validation, refreshed full real Looma qualification for every target and all three engines, fair cached Fluid/Node speed plus allocated/retained/peak memory, final bounded whole-goal review and protected release readiness."
+  ],
+  "limits": [
+    "No package publication, visibility change, PR or branch rename.",
+    "Vue renderer hooks are internal and were qualified at the existing peer minimum Vue3.5.43; no dependency restriction was added.",
+    "Bundle size/pruning is measured; feature latency, throughput and memory are not. Focus preservation is qualified during reactive updates, not every possible transfer.",
+    "Native C# source is unchanged. No current native allocation/speed, retained/peak memory or full catalog claim.",
+    "The two new remaining Vue observations are not part of the passing dedicated suites yet. Inputs and observations are retained here for reproducible follow-up."
+  ],
+  "sourceHashes": {
+    "CHANGELOG.md": "b42ac2fea3b7e891500cd67e2d610de83bcc45f2532ad22512d8bc73e1378546",
+    "packages/html-next-converter/tests/vue-columns-consumer-parity.test.ts": "11573daf47c14ac9261de858e2cfc5da4d059a7278469fbe6921fac0690ef8e5",
+    "packages/html-next-converter/tests/vue-columns-parity.test.ts": "1d852cc74c45e718041f80bb3eb70358326bb9a85fbb1108b10713cbe3223cdb",
+    "packages/html-next-converter/tests/vue-form-model-parity.test.ts": "92252bd16d91a39ddba045f4b2ae7a893089a4e689e213d6c1b8bd4d132b2ea1",
+    "packages/html-next/examples/generated/vue/host.ts": "8b1ea95559185668418238ac1cc2282da86d10a2a2bc34b36703b3940dbdd48b",
+    "packages/html-next/src/targets/vue-host.ts": "f770f4657e6870e37fe6bcb531c61305ae8e83c0f8418233e0eacbbe3189218d",
+    "packages/html-next/src/targets/vue-plain-source.ts": "e3ec6000de51f552efc01cc4f07461535e938170de20f82f3ae0469e9df68839",
+    "packages/html-next/src/targets/vue.ts": "3ddad008b25c47ed09da4c4e1276ae2cf7c20590b5373b9e7c1bf2a3f5b103e0",
+    "packages/html-next/tests/targets.test.ts": "e30581cc9b6e1c52839e6e652fc49a0a51b88bde5874d75b95737e556596d017",
+    "packages/html-next/tests/vue-host.test.ts": "48839209fb432e75f6254621b4856bcd9479a186ea914e47e15f5344eed80045"
+  }
+}

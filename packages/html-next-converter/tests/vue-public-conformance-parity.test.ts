@@ -48,7 +48,7 @@ function consumer(invocation: string, tag: string, componentName: string, props:
     const component = node.tagName === tag;
     const attributes: Record<string, unknown> = {};
     for (const attribute of node.attrs ?? []) {
-      const propName = component ? Object.keys(props).find((name) => name.toLowerCase() === attribute.name) : undefined;
+      const propName = component ? Object.keys(props).find((name) => name.replace(/[A-Z]/g, letter => letter.toLowerCase()) === attribute.name) : undefined;
       const name = propName ?? attribute.name;
       const type = propName === undefined ? undefined : props[propName]?.type;
       attributes[name] = type === "number" && attribute.value.trim() !== "" && Number.isFinite(Number(attribute.value)) ? Number(attribute.value)

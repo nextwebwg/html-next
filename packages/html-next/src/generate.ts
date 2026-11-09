@@ -15,6 +15,7 @@ import { reactContextArtifact as makeReactContextArtifact } from "./targets/reac
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
 import { reactRenderArtifact as makeReactRenderArtifact } from "./targets/react-render.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
+import { inlineStyleArtifacts as makeInlineStyleArtifacts } from "./targets/inline-style.js";
 import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
@@ -39,7 +40,7 @@ import type { ComponentDefinition, SlotContract } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.91";
+export const GENERATOR_VERSION = "1.0.0-alpha.92";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -191,6 +192,10 @@ export function reactPropsArtifact(): GeneratedArtifact {
 
 export function svelteDecorationsArtifact(): GeneratedArtifact {
   return makeSvelteDecorationsArtifact(GENERATOR_VERSION);
+}
+
+export function inlineStyleArtifacts(target: "react" | "preact" | "svelte" | "vue" | "angular"): readonly GeneratedArtifact[] {
+  return makeInlineStyleArtifacts(target, GENERATOR_VERSION);
 }
 
 export function svelteStyleArtifacts(): readonly GeneratedArtifact[] {

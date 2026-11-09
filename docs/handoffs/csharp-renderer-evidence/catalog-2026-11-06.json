@@ -1,0 +1,797 @@
+{
+  "revision": "915afd2e8fafdba86887ea4eefd3b3534c20de5a",
+  "sourceGraphs": 111,
+  "compiled": 56,
+  "scope": "Captured first native compilation diagnostic per complete entry graph with supplied built style assets. No native render, behavior or hydration qualification.",
+  "results": [
+    {
+      "file": "packages/looma/src/components/ui-action-bar/ui-action-bar.html",
+      "pass": true,
+      "components": [
+        "ui-action-bar"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-affordance-scope/ui-affordance-scope.html",
+      "pass": true,
+      "components": [
+        "ui-affordance-scope"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-avatar/ui-avatar.html",
+      "pass": true,
+      "components": [
+        "ui-avatar",
+        "ui-icon"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-avatar-group/ui-avatar-group.html",
+      "pass": true,
+      "components": [
+        "ui-avatar-group"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-badge/ui-badge.html",
+      "pass": true,
+      "components": [
+        "ui-badge"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-breadcrumb-item/ui-breadcrumb-item.html",
+      "pass": true,
+      "components": [
+        "ui-breadcrumb-item",
+        "ui-icon"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-breadcrumbs/ui-breadcrumbs.html",
+      "pass": true,
+      "components": [
+        "ui-breadcrumbs"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-button/ui-button.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-button/ui-button.html",
+      "detail": "'invocation attribute 'aria-hidden'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-calendar/ui-calendar.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-callout/ui-callout.html",
+      "pass": true,
+      "components": [
+        "ui-callout"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-card/ui-card.html",
+      "pass": true,
+      "components": [
+        "ui-card"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-card-group/ui-card-group.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-grid/ui-grid.html",
+      "detail": "'style:--_grid-column-cap' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-checkbox/ui-checkbox.html",
+      "pass": true,
+      "components": [
+        "ui-checkbox"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-cluster/ui-cluster.html",
+      "pass": true,
+      "components": [
+        "ui-cluster"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-color-picker/ui-color-picker.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-column/ui-column.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-column/ui-column.html",
+      "detail": "Expected one native root after <defs>."
+    },
+    {
+      "file": "packages/looma/src/components/ui-combobox/ui-combobox.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-combobox/ui-combobox.html",
+      "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-compact-content/ui-compact-content.html",
+      "pass": true,
+      "components": [
+        "ui-compact-content",
+        "ui-compact-mark",
+        "ui-compact-node"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-compact-editor/ui-compact-editor.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-compact-editor/ui-compact-editor.html",
+      "detail": "'default-true-reason' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-compact-mark/ui-compact-mark.html",
+      "pass": true,
+      "components": [
+        "ui-compact-mark"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-compact-node/ui-compact-node.html",
+      "pass": true,
+      "components": [
+        "ui-compact-mark",
+        "ui-compact-node"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-container/ui-container.html",
+      "pass": true,
+      "components": [
+        "ui-container"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-context-menu/ui-context-menu.html",
+      "pass": true,
+      "components": [
+        "ui-context-menu"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-cover/ui-cover.html",
+      "pass": true,
+      "components": [
+        "ui-cover"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-curve-editor/ui-curve-editor.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-cycle-button/ui-cycle-button.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-cycle-button/ui-cycle-button.html",
+      "detail": "'invocation attribute 'from:title'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-data-table/ui-data-table.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-data-table/ui-data-table.html",
+      "detail": "Expected one native root after <defs>."
+    },
+    {
+      "file": "packages/looma/src/components/ui-date-field/ui-date-field.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-date-picker/ui-date-picker.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-date-range-picker/ui-date-range-picker.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-description-item/ui-description-item.html",
+      "pass": true,
+      "components": [
+        "ui-description-item"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-description-list/ui-description-list.html",
+      "pass": true,
+      "components": [
+        "ui-description-list"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-dialog/ui-dialog.html",
+      "pass": true,
+      "components": [
+        "ui-dialog",
+        "ui-icon",
+        "ui-icon-button",
+        "ui-scroll-area",
+        "ui-spinner"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-disclosure/ui-disclosure.html",
+      "pass": true,
+      "components": [
+        "ui-disclosure"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-editable/ui-editable.html",
+      "pass": true,
+      "components": [
+        "ui-editable"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor/ui-editor.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor/ui-editor.html",
+      "detail": "'default-true-reason' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-block-actions/ui-editor-block-actions.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-block-actions/ui-editor-block-actions.html",
+      "detail": "'invocation attribute 'aria-label'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-chip-editor/ui-editor-chip-editor.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-code-language/ui-editor-code-language.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-code-language/ui-editor-code-language.html",
+      "detail": "'$key' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-footnote-editor/ui-editor-footnote-editor.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-footnote-editor/ui-editor-footnote-editor.html",
+      "detail": "'invocation attribute 'data-footnote-note'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-formatting-tools/ui-editor-formatting-tools.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-formatting-tools/ui-editor-formatting-tools.html",
+      "detail": "'attribute '$key' on a wrapper-free template' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-image-toolbar/ui-editor-image-toolbar.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-insert-table-grid/ui-editor-insert-table-grid.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-insert-table-grid/ui-editor-insert-table-grid.html",
+      "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-link-card/ui-editor-link-card.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-link-card/ui-editor-link-card.html",
+      "detail": "'invocation attribute 'from:title'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-link-form/ui-editor-link-form.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-mention-menu/ui-editor-mention-menu.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-mention-menu/ui-editor-mention-menu.html",
+      "detail": "Expected '$each=\"item of $list\"'."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-mention-menu-item/ui-editor-mention-menu-item.html",
+      "pass": true,
+      "components": [
+        "ui-editor-mention-menu-item"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-slash-menu/ui-editor-slash-menu.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-slash-menu/ui-editor-slash-menu.html",
+      "detail": "Expected '$each=\"item of $list\"'."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-slash-menu-group/ui-editor-slash-menu-group.html",
+      "pass": true,
+      "components": [
+        "ui-editor-slash-menu-group"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-slash-menu-item/ui-editor-slash-menu-item.html",
+      "pass": true,
+      "components": [
+        "ui-editor-slash-menu-item",
+        "ui-icon"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-surface/ui-editor-surface.html",
+      "pass": true,
+      "components": [
+        "ui-editor-surface"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-table-context-menu/ui-editor-table-context-menu.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-table-context-menu/ui-editor-table-context-menu.html",
+      "detail": "'$key' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-table-overlay/ui-editor-table-overlay.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-table-overlay/ui-editor-table-overlay.html",
+      "detail": "'$key' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-table-toolbar/ui-editor-table-toolbar.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-editor-table-toolbar/ui-editor-table-toolbar.html",
+      "detail": "'$key' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-editor-toolbar/ui-editor-toolbar.html",
+      "pass": true,
+      "components": [
+        "ui-editor-toolbar"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-file-input/ui-file-input.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-floating-action-button/ui-floating-action-button.html",
+      "pass": true,
+      "components": [
+        "ui-floating-action-button"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-form-field/ui-form-field.html",
+      "pass": true,
+      "components": [
+        "ui-form-field"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-grid/ui-grid.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-grid/ui-grid.html",
+      "detail": "'style:--_grid-column-cap' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-icon/ui-icon.html",
+      "pass": true,
+      "components": [
+        "ui-icon"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-icon-button/ui-icon-button.html",
+      "pass": true,
+      "components": [
+        "ui-icon-button",
+        "ui-spinner"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-image/ui-image.html",
+      "pass": true,
+      "components": [
+        "ui-image"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-input/ui-input.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-input-group/ui-input-group.html",
+      "pass": true,
+      "components": [
+        "ui-input-group"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-light-editor/ui-light-editor.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-list/ui-list.html",
+      "pass": true,
+      "components": [
+        "ui-list"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-list-item/ui-list-item.html",
+      "pass": true,
+      "components": [
+        "ui-list-item"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-listbox/ui-listbox.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-listbox/ui-listbox.html",
+      "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-menu/ui-menu.html",
+      "pass": true,
+      "components": [
+        "ui-menu"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-menu-group/ui-menu-group.html",
+      "pass": true,
+      "components": [
+        "ui-menu-group"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-menu-item/ui-menu-item.html",
+      "pass": true,
+      "components": [
+        "ui-icon",
+        "ui-menu-item"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-meter/ui-meter.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-meter/ui-meter.html",
+      "detail": "Unknown function or invalid argument count for 'format'. In expression '{ true: null, false: { true: $valueText, false: format($percent / 100, 'percent', { maximumFractionDigits: 0 }) }[concat($valueText != '')] }[concat($variant = 'distribution')]' at 113."
+    },
+    {
+      "file": "packages/looma/src/components/ui-nav-item/ui-nav-item.html",
+      "pass": true,
+      "components": [
+        "ui-nav-item"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-notice-stripe/ui-notice-stripe.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-notice-stripe/ui-notice-stripe.html",
+      "detail": "'invocation attribute 'class'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-number-input/ui-number-input.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-page-header/ui-page-header.html",
+      "pass": true,
+      "components": [
+        "ui-page-header"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-pagination/ui-pagination.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-pagination/ui-pagination.html",
+      "detail": "'invocation attribute 'from:aria-label'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-popover/ui-popover.html",
+      "pass": true,
+      "components": [
+        "ui-popover"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-radio/ui-radio.html",
+      "pass": true,
+      "components": [
+        "ui-radio"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-radio-group/ui-radio-group.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-radio-group/ui-radio-group.html",
+      "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-reel/ui-reel.html",
+      "pass": true,
+      "components": [
+        "ui-reel"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-scroll-area/ui-scroll-area.html",
+      "pass": true,
+      "components": [
+        "ui-scroll-area"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-search-result-row/ui-search-result-row.html",
+      "pass": true,
+      "components": [
+        "ui-search-result-row"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-search-shell/ui-search-shell.html",
+      "pass": true,
+      "components": [
+        "ui-search-shell"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-section/ui-section.html",
+      "pass": true,
+      "components": [
+        "ui-section"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-segmented-control/ui-segmented-control.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-segmented-control/ui-segmented-control.html",
+      "detail": "'class:sr-only' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-select/ui-select.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-select/ui-select.html",
+      "detail": "'select' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-separator/ui-separator.html",
+      "pass": true,
+      "components": [
+        "ui-separator"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-sidebar/ui-sidebar.html",
+      "pass": true,
+      "components": [
+        "ui-sidebar"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-site-header/ui-site-header.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-site-header/ui-site-header.html",
+      "detail": "'invocation attribute 'aria-haspopup'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-skeleton/ui-skeleton.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-skeleton/ui-skeleton.html",
+      "detail": "'default-true-reason' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-slider/ui-slider.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-spinner/ui-spinner.html",
+      "pass": true,
+      "components": [
+        "ui-spinner"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-stack/ui-stack.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-stack/ui-stack.html",
+      "detail": "'style:--_ui-stack-height' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-status-message/ui-status-message.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-status-message/ui-status-message.html",
+      "detail": "'invocation attribute 'from:hidden'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-swatch/ui-swatch.html",
+      "pass": true,
+      "components": [
+        "ui-swatch"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-switch/ui-switch.html",
+      "pass": true,
+      "components": [
+        "ui-switch"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-switcher/ui-switcher.html",
+      "pass": true,
+      "components": [
+        "ui-switcher"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-table/ui-table.html",
+      "pass": true,
+      "components": [
+        "ui-table"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-tabs/ui-tabs.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-tabs/ui-tabs.html",
+      "detail": "'$key' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-text/ui-text.html",
+      "pass": true,
+      "components": [
+        "ui-text"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-textarea/ui-textarea.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-textarea/ui-textarea.html",
+      "detail": "'style:--_rows' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-time-field/ui-time-field.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-time-picker/ui-time-picker.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-input/ui-input.html",
+      "detail": "'declaration' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-toast/ui-toast.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-toast/ui-toast.html",
+      "detail": "'invocation attribute 'class'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-toast-region/ui-toast-region.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-toast-region/ui-toast-region.html",
+      "detail": "'$key' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-tooltip/ui-tooltip.html",
+      "pass": true,
+      "components": [
+        "ui-tooltip"
+      ]
+    },
+    {
+      "file": "packages/looma/src/components/ui-top-bar/ui-top-bar.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-top-bar/ui-top-bar.html",
+      "detail": "'class:scroll-title' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-tree/ui-tree.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-tree-item/ui-tree-item.html",
+      "detail": "'invocation attribute 'data-tree-cancel-move'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-tree-item/ui-tree-item.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-tree-item/ui-tree-item.html",
+      "detail": "'invocation attribute 'data-tree-cancel-move'' is not implemented in the measured rendering slice."
+    },
+    {
+      "file": "packages/looma/src/components/ui-wizard/ui-wizard.html",
+      "pass": false,
+      "code": "HNCS001",
+      "source": "packages/looma/src/components/ui-wizard/ui-wizard.html",
+      "detail": "Expected '$each=\"item of $list\"'."
+    }
+  ]
+}

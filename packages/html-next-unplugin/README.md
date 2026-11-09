@@ -436,6 +436,54 @@ import { createXCounter } from "virtual:html-next/components";
 createXCounter({}, undefined, document.querySelector('[component~="x-counter"]')!);
 ```
 
+For a server-rendered application, the shared compiler can select the factories its initial markup
+needs. Import the hydration entry and call it after the markup exists:
+
+```ts
+import { hydrate } from "virtual:html-next/hydrate";
+
+hydrate(); // document, or pass an Element or DocumentFragment
+```
+
+This entry also requires `hydrate: true`. Pure interpolation, static state seeds, conditions, and
+loops do not by themselves require a browser factory. Events, two-way bindings, reads, lifecycle
+work, context, scripts, and modules retain the relevant factories. Selection considers every
+authored branch, including branches absent from the server output. The entry keeps the ownership
+region around an interactive component so invocation, slot, and root-alias adoption continue through
+the existing generated runtime. Every component's stylesheet remains available, including static
+components whose factories are omitted. A fully static graph imports CSS and exports a no-op
+`hydrate` function, with no component runtime.
+
+Tell the compiler about browser access that template markup cannot express. For example:
+
+```ts
+htmlNext({
+  entries: ["src/components/counter.html", "src/components/profile.html"],
+  hydrate: true,
+  client: {
+    publicRoots: ["x-profile"], // application code updates or looks up an existing host
+    creationRoots: ["x-profile"], // application code creates later instances
+  },
+});
+```
+
+Either list accepts `"all"` when the target is unknown. Library builds always preserve their public
+entry hosts. Explicit `creationRoots` also export their factories from `virtual:html-next/hydrate`;
+import those factory names when application code creates the instances. Opaque modules and
+controllers conservatively retain the whole graph, since their
+public API targets cannot be proven from template markup. This selection currently prunes complete
+static ownership regions; it does not claim the smallest possible program for arbitrary JavaScript.
+The bundler continues to select the runtime helpers used by retained factories. The ordinary
+`virtual:html-next/components` exports keep their existing creation API.
+
+`html-next.manifest.json` records the shared compiler's versioned `client` plan: `adoption` and
+`creation` tag lists, per-component dependencies and retention reasons, and the hydration entry's
+virtual module name. `supportImports` remains an inventory of the complete generated graph. The
+virtual module name is a build input; resolve the emitted asset through the application's bundler
+manifest before serving it. The native .NET renderer's consumption of this artifact remains under
+development. Application hosts can use the same analysis to preserve the layer factories their client navigation
+can create or update.
+
 For components with producer modules exporting `prepare` and `adopt`, build a server entry with
 the same native Vite configuration:
 
@@ -450,3 +498,11 @@ factories adopt those records before connecting browser modules. Server preparat
 factories use the same graph revisions. Current caller props take precedence over restored server
 props, and controls retain edits made before hydration. Ordinary components import no binding
 preparation helper.
+
+### Server style assets
+
+The native build manifest includes a `server` block for server renderers. Version 1 records component and stylesheet source SHA-256 fingerprints, the shared CSS compiler's root-value names, and emitted stylesheet filenames. `hasStyles` distinguishes a graph that requires compiled CSS. The final stylesheet filenames are collected after CSS emission, so they include the bundler's asset names and URL processing.
+
+`server.preparedModules` lists the `tag` and compiler-owned `source` revision of each module with preparation and adoption exports. These are the same revisions used by the generated server preparation and browser adoption code. Server hosts can use them to match native preparation adapters to their deployed client modules.
+
+A server loads the manifest during startup, verifies matching component sources, and includes the listed stylesheets relative to its deployment's asset base. The .NET consumer is documented in [HTML Next for .NET](../html-next-dotnet/README.md#use-built-style-assets). These are build artifacts; language behavior remains defined by the [public proposal](https://nextwebwg.org/declarative-components/).

@@ -60,7 +60,16 @@ async function render(request: ServerRenderRequest): Promise<RenderedComponents>
         props.set(element, { ...props.get(element), ...values });
       }
     }
-    lowerDocument(document, { connect: false, props });
+    const rootAttributes = request.rootAttributes === undefined ? undefined : new Map<Element, Readonly<Record<string, string>>>();
+    for (const [selector, attributes] of Object.entries(request.rootAttributes ?? {})) {
+      const elements = document.querySelectorAll(selector);
+      if (elements.length === 0) fail("HR010", `Root attributes selector \`${selector}\` matches no component invocation.`);
+      for (const element of elements) {
+        if (!request.definitions.some(definition => definition.contract.tag === element.localName)) fail("HR010", `Root attributes selector \`${selector}\` does not identify a component invocation.`);
+        rootAttributes!.set(element, { ...rootAttributes!.get(element), ...attributes });
+      }
+    }
+    lowerDocument(document, { connect: false, props, ...(rootAttributes === undefined ? {} : { rootAttributes }) });
     for (const [selector, state] of Object.entries(request.state ?? {})) {
       const elements = document.querySelectorAll(selector);
       if (elements.length === 0) fail("HR010", `Initial state selector \`${selector}\` matches no component.`);
