@@ -9,6 +9,8 @@
 
 ### Changes
 
+- Preserve native and controller-owned control attributes across unrelated framework updates while retaining ordered forwarding precedence.
+
 - Preserve authored empty `class` attributes in Svelte roots and compile guarded iteration filters with strict framework type checking. Restore visible document order when Angular slot destinations reconnect. Keep the photo morph guide's grid visible when no photo is selected.
 
 - Connect React and Preact controller listeners when a previously detached subtree enters the document, before its first painted interaction.
@@ -67,7 +69,6 @@
 - Share generated binding acceptance, declared-reference metadata, and native scalar format predicates. React, Preact, Vue, Svelte and Angular check executed fields once, preserve lazy branches and safe missing paths, and clear absent bindings while retaining invalid results. Avoid duplicate Preact host commits and repeated text evaluation; parenthesize object-valued framework state seeds. Preserve scalar and event checks when the compiler is bundled and minified.
 - Keep missing and null fields absent through generated operators, preserve invalid results through text and attribute serialization, and read generic operands once during initialization and binding. Generate expression locals without shadowing authored names.
 - Propagate missing operands through equality in Node and generated renderers while keeping explicit null distinct. Preserve ordinary binary operand order when a result is invalid. Prepare Svelte state seeds before template derived reads and preserve Angular seed fields for checks at their read locations.
-- Keep HTMLKit navigation group labels when the preceding item has no group, using an explicit null fallback for that comparison.
 - Preserve enumerated HTML attribute tokens such as `draggable="false"` in Preact output, with the same invalid-result retention as other bindings.
 - Check live and Node references when their expression branch actually executes. Computed and quoted keys use the selected field's type, intermediate missing paths remain absent, and getters run once per read. Reuse cached reference plans without retaining request values.
 - Apply actual-read checks in generated Vanilla DOM expressions, preserving lazy branches, computed field types, safe missing paths and single getter evaluation. Emit reusable schema metadata and retain the last accepted binding until recovery.
@@ -76,7 +77,7 @@
 - Align generated prop inputs, accepted-value types, and required-prop clearing with the public null/default contract. Required props report validity while their content renders; Angular no longer suppresses missing-input content. Exercise null writes across live, compiled native, and all five converter targets.
 - Release native compiler/parser data after expression planning, and preserve valid sibling reads and shared identities in structured state seeds.
 - Add request-local native state `from` initialization, structured seed copies, available fallbacks, and lazy derived declarations with actual-read cycle checks. Preparation and hydration ownership remain implementation work.
-- Add shared compiler analysis for browser adoption and later component creation, with a native hydration entry and manifest retention reasons. Static component trees omit factory code while preserving CSS; retained factories keep future branches, projection, context, and native control edits. HTMLKit uses the same graph selection while preserving navigation layers. Opaque modules retain possible public API targets conservatively.
+- Add shared compiler analysis for browser adoption and later component creation, with a native hydration entry and manifest retention reasons. Static component trees omit factory code while preserving CSS; retained factories keep future branches, projection, context, and native control edits. Opaque modules retain possible public API targets conservatively.
 - Add an experimental native .NET rendering package with reusable inert template plans, typed C# data binding, conditions, loops, escaped HTML output, and concurrent rendering tests. Bind without per-row diagnostic strings or intermediate array buffers, and render to one exact-size string with stack-based numeric formatting. Include validated Fluid and Node template/data-binding benchmarks, allocation attribution, and native CI selection. Hydration and complete component-language support remain planned work.
 - Extend the experimental native renderer with pure expressions, dimensional arithmetic, compact structured defaults, lexical aliases, wrapper-free templates, `$match` arms, and per-row `$where` filters. Whole-iteration `$if` guards read the enclosing scope, and authored text supports escaped braces and backslashes.
 - Add native resource graph compilation through an application source resolver, with canonical-source deduplication, fingerprints, cancellation, inert metadata handling, and duplicate-definition checks. Basic nested and recursive component calls bind typed props once per buffered render and isolate request-local child snapshots.
