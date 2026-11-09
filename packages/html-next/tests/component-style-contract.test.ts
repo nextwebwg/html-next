@@ -10,6 +10,10 @@ import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
+const scopeIdentityCss = (tag: string, global = false): string => {
+  const selector = (value: string) => global ? `:global(${value})` : value;
+  return `@supports (-moz-appearance: none) { ${selector(":where([data-hn], [data-slotted])")} { --html-next-scope-owner: boundary; } ${selector(":where([data-slotted]:not([data-hn]))")} { --html-next-scope-owner: projected !important; } ${selector("." + tag)} { --html-next-scope-owner: "${tag}" !important; } }`;
+};
 
 it("preserves non-ASCII names when resolving CSSOM attribute casing", () => {
   const definition = parseComponent('<template component="x-case"><defs><prop name="é" type="string">Lower.</prop><prop name="É" type="string">Upper.</prop><state name="à" type="boolean" value="true"></state><state name="À" type="boolean" value="false"></state></defs><p></p></template>');
@@ -51,7 +55,7 @@ it("scopes Svelte selectors by the hash Svelte gives the component's own markup"
       :global(.item *)${own}::before, :global(p)${own}:after { color: blue; }
       :global(:is(.projected) a):not(:scope, * *, [data-html-next-owner~="x-svelte-scope"])::marker { color: green; }
       :global(:is(x-child, :where(.x-child)))${own} { color: navy; }
-    }`));
+    }` + scopeIdentityCss("x-svelte-scope", true)));
   assert.equal(compiled.hashed, true);
   // Without slots nothing is projected, so the native scope alone bounds the rules and Svelte hashes nothing.
   const unslotted = compileComponentStylesForSvelte("span { color: red; }", parseComponent('<template component="x-plain"><p><span></span></p></template>'));
@@ -265,7 +269,7 @@ it("gives Vue host subjects the live runtime's selectors, with the owner test in
     + '.wide :scope:where([data-hn-ui-x])::after { content: "x"; }'
     + ".wide > :scope.a:where([data-hn-ui-x]) { color: blue; }"
     + ".wide :scope:not(.c):where([data-hn-ui-x]) { color: green; }"
-    + ".wide :scope .in:where([data-hn-ui-x]) { color: navy; } }");
+    + ".wide :scope .in:where([data-hn-ui-x]) { color: navy; } }" + scopeIdentityCss("ui-x"));
 });
 
 it("selects a component by tag with the live runtime's selectors in Vue and Svelte, without slots", () => {
@@ -276,9 +280,9 @@ it("selects a component by tag with the live runtime's selectors in Vue and Svel
   // Live: `:is(x-kid, :where([component~="x-kid"]))`, the type selector's (0,0,1).
   // Without slots nothing is projected, so a subject needs no owner test.
   assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
-    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
+    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }" + scopeIdentityCss("ui-x"));
   assert.equal(svelte.replace(/\s+/g, " "), "@scope (.ui-x) to ([data-hn]) {:scope:is(:is(ui-x, :where(.ui-x))) { color: red; }"
-    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }");
+    + ":is(x-kid, :where(.x-kid)) > b { color: blue; } }" + scopeIdentityCss("ui-x"));
 });
 
 it("keeps a nested Vue rule's own declarations in place, at its specificity", () => {
@@ -287,7 +291,7 @@ it("keeps a nested Vue rule's own declarations in place, at its specificity", ()
   // Vue's own wrapper would be a first `&[data-v-1] { … }`, one class heavier than the rule.
   assert.equal(vueScoped(css, button), "@scope (.ui-x) to ([data-hn]) {:scope:where([data-hn-ui-x]) { &:where([data-hn-ui-x]) { color: red; }"
     + " & b:where([data-hn-ui-x]) { color: blue; } @media (min-width: 0px) { &:where([data-hn-ui-x]) { margin: 0; } }"
-    + " &:where([data-hn-ui-x]) { padding: 0; } } }");
+    + " &:where([data-hn-ui-x]) { padding: 0; } } }" + scopeIdentityCss("ui-x"));
 });
 
 it("selects projected content in Vue as what lacks the owner's attribute, inside grouping rules", () => {
@@ -295,7 +299,7 @@ it("selects projected content in Vue as what lacks the owner's attribute, inside
   const css = ":slotted(p) { color: red; } @media (min-width: 0px) { @supports (display: grid) { @layer base { :slotted(.a), .own { color: blue; } } } }";
   // Live: `:where([data-slotted], [data-slotted] *):is(p)`, in a scope bounded by component roots.
   assert.equal(vueScoped(css, card), "@scope (.ui-x) to ([data-hn]) {:where(:not([data-hn-ui-x])):is(p) { color: red; }"
-    + "@media (min-width: 0px) { @supports (display: grid) { @layer base { :where(:not([data-hn-ui-x])):is(.a),.own:where([data-hn-ui-x]) { color: blue; } } } } }");
+    + "@media (min-width: 0px) { @supports (display: grid) { @layer base { :where(:not([data-hn-ui-x])):is(.a),.own:where([data-hn-ui-x]) { color: blue; } } } } }" + scopeIdentityCss("ui-x"));
 });
 
 it("keeps a component type selector's namespace in Vue's class form", () => {

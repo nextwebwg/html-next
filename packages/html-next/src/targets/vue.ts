@@ -1,6 +1,6 @@
 import { entryTags } from "../entry-origin.js";
 import { literalValueSource } from "./shared.js";
-import { repeatedSlotNames, templateForwardsAttributes } from "../template.js";
+import { orderedAttributeWrites, repeatedSlotNames, templateForwardsAttributes } from "../template.js";
 import { invocationSchema } from "./invocation-attributes.js";
 import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { ITERATION_INDEX } from "../expression.js";
@@ -76,6 +76,7 @@ const RESERVED = new Set([
   "model", "controllerModule", "event", "element", "classText", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "usePreparedModule", "moduleBindings", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs", "rootMetadata", "htmlAttributeInputs", "invocationProps", "preservePropInput", "styleText", "forwardedAttributes", "checkHydratedRoot",
   "vAttributeBindings", "attributeBindingsState", "writeAttributeBindings", "AttributeBinding", "attributeBindingProps", "AttributeWriteState", "applyOrderedAttributes", "vClassBindings", "classBindingsState", "classBindingText", "ClassBindingInput", "initializeClassBindings", "applyClassBindings", "vNamespacedAttributes", "applyNamespacedAttributes", "namespacedAttributeProps", "NamespacedAttribute", "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl", "revertBoundControl",
+  "vComponentClasses", "applyComponentClasses",
   "propInputs", "inputTracking", "inputStatus", "checkPropInput", "vuePropInputs", "BINDING_INPUTS_PROP", "requireInputStatus", "READY_INPUT", "UNRESOLVED_INPUT",
   "inputComputed", "inputRead", "inputDefault", "evaluateInput", "copyStateSeed", "declarationStatus", "declarationStatuses",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed", "injectContext", "useReflectedProp", "useScopedSlotName",
@@ -883,7 +884,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   if (classes.length > 0) {
     if (component) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
     else {
-      attributes.push(`v-class-bindings=${bound(`{ ${forwards ? "ordered: true, " : ""}base: ${forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
+      attributes.push(`v-class-bindings=${bound(`{ ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}base: ${forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
     }
   }
   if (orderedStyles) attributes.push(`:style=${bound(orderedStyleValue)}`);
@@ -941,7 +942,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     ...(isRoot && context.hostClass ? [context.definition.contract.tag] : []),
     ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
   ];
-  if (styled.length > 0 && !(classes.length > 0 && !component)) {
+  if (styled.length > 0 && component) {
+    attributes.push(`v-component-classes=${bound(JSON.stringify(styled))}`);
+  } else if (styled.length > 0 && classes.length === 0) {
     const index = literals.findIndex((literal) => literal.startsWith("class="));
     if (index < 0) literals.unshift(`class=${attributeValue(styled.join(" "))}`);
     else literals[index] = `class="${styled.join(" ")} ${literals[index]!.slice('class="'.length)}`;
@@ -1236,7 +1239,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const controlled = (definition.module ?? definition.controller) !== undefined;
   const dispatches = events.length > 0 || controlled;
   const headed = declaresHead(definition);
-  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed;
+  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed || accepted;
   const availability = new Map([...seeded.map(state => [state.name, `declarationStatus(${quote(state.name)})`] as const),
     ...contexts.map(context => [context.as ?? context.name, `declarationStatus(${quote(context.as ?? context.name)})`] as const)]);
   const context: Context = {
@@ -1434,7 +1437,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   };
 
   const childEntrySource = `useChildEntry({ ${states.filter(state => options.publishedStates?.has(state.name) ?? true)
-    .map(state => `${quote(`html-next:${contract.tag}:${state.name}`)}: ${stateNames.get(state)!}`).join(", ")} })`;
+    .map(state => `${quote(`html-next:${contract.tag}:${state.name}`)}: ${stateNames.get(state)!}`).join(", ")} }, root)`;
   const body: string[] = [];
   body.push(
     ...(nestedDepthName === undefined ? [] : [
@@ -1631,6 +1634,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       '  mounted: (element: Element, binding: { value: ClassBindingInput }) => { const input = binding.value; const previous = initializeClassBindings(element, input); classBindingsState.set(element, previous); applyClassBindings(element, input, previous); },',
       '  updated: (element: Element, binding: { value: ClassBindingInput }) => applyClassBindings(element, binding.value, classBindingsState.get(element)!),',
       '};',
+    ]),
+    ...(!rootMarkup.includes("v-component-classes=") ? [] : [
+      'const applyComponentClasses = (element: Element, binding: { value: readonly string[] }): void => { element.classList.add(...binding.value); };',
+      'const vComponentClasses = { getSSRProps: (binding: { value: readonly string[] }) => ({ class: binding.value.join(" ") }), mounted: applyComponentClasses, updated: applyComponentClasses };',
     ]),
     ...(templateForwardsAttributes(definition.template) ? [`import { forwardedAttributes } from ${quote(options.helperSpecifier?.("attributes") ?? "./attributes")};`] : []),
     ...(!context.usesStyle ? [] : [`import { styleText } from ${quote(options.helperSpecifier?.("style") ?? "./style/style.js")};`]),

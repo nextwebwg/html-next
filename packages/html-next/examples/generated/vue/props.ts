@@ -1058,7 +1058,7 @@ export class PropInputs {
   }
   #fallback(name: string): unknown { return Object.hasOwn(this.#options.defaults, name) ? this.#options.defaults[name] : null; }
   #accept(name: string, input: unknown, source: boolean): InputAcceptance {
-    const value = input == null ? this.#fallback(name) : input;
+    const value = input === null || !source && input === undefined ? this.#fallback(name) : input;
     return value === null ? NULL_ACCEPTANCE : this.#options.check(name, value, source, this.#options.values);
   }
   #status(record: PropInputRecord, status: InputStatus): void {

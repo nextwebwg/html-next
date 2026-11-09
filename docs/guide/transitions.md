@@ -59,7 +59,7 @@ Put `$transition` on keyed rows. Rows that arrive or leave play their keyframes,
 `$transition-name` gives an element an identity across a change, as CSS's `view-transition-name` does. When one element leaves and another with the same name arrives in the same update, the browser moves and resizes the first into the second. Here the selected photo leaves the grid as the hero takes its name, and returns when the hero closes:
 
 ```html
-<img $each="photo of $photos" $key="$photo.id" $where="$photo.id != $selected.id" $transition-name="$photo.id">
+<img $each="photo of $photos" $key="$photo.id" $where="not $selected or $photo.id != $selected.id" $transition-name="$photo.id">
 <img $if="$selected" class="hero" $transition-name="$selected.id">
 ```
 

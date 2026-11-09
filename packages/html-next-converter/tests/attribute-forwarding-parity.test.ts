@@ -21,6 +21,7 @@ import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const nativeStyleInput = { "--caller": "9px", width: 12, lineHeight: 1.5, aspectRatio: 2, fontSizeAdjust: 0.5 };
 const dynamicSource = `<template component="x-auto"><button title="Template">Auto</button></template>
+<template component="x-native-state"><defs><prop name="label" type="string">Label.</prop></defs><button from:disabled="false" from:aria-invalid="false">{$label}</button></template>
 <template noforward component="x-native-style-leaf"><button $attributes>Native style</button></template>
 <template noforward component="x-native-style-wrapper"><x-native-style-leaf $attributes style:--local="'2px'"></x-native-style-leaf></template>
 <template noforward component="x-style-prop"><defs><prop name="style" type="string" default="color: green">Style text.</prop></defs><output>{$style}</output></template>
@@ -42,6 +43,7 @@ const dynamicSource = `<template component="x-auto"><button title="Template">Aut
 <template noforward component="x-page"><defs><state name="caller" type="string" from="'Caller'"></state><state name="callerStyle" type="string" from="'--caller: 9px; --local: 9px'"></state><state name="styleDivisor" type="number" value="1"></state><handler name="rejectStyle"><set name="styleDivisor" value="0"></set></handler><handler name="validStyle"><set name="styleDivisor" value="2"></set></handler><handler name="next"><set name="caller" value="Updated"></set><set name="callerStyle" value="--caller: 8px; --local: 8px"></set></handler><handler name="remove"><set name="caller" expr:value="null"></set><set name="callerStyle" expr:value="null"></set></handler></defs><main>
 <div data-case="modified-style-prop"><x-style-prop from:style="$callerStyle" style:--local="concat(2 / $styleDivisor, 'px')"></x-style-prop></div><div data-case="declared-style"><x-style-prop from:style="$callerStyle"></x-style-prop></div><div data-case="style-before"><x-style-before from:style="$callerStyle"></x-style-before></div><div data-case="style-after"><x-style-after from:style="$callerStyle"></x-style-after></div>
 <div data-case="auto"><x-auto id="auto-control" from:title="$caller" from:aria-label="$caller" from:class="$caller" from:style="$callerStyle"></x-auto></div>
+<div data-case="native-state"><x-native-state id="native-state" from:label="$caller"></x-native-state></div>
 <div data-case="before"><x-before from:title="$caller"></x-before></div>
 <div data-case="after"><x-after from:title="$caller"></x-after></div>
 <div data-case="inner"><x-inner from:title="$caller"></x-inner></div>
@@ -331,7 +333,14 @@ const target = document.querySelector("#mount")!; const props = { [createAttachm
           assert.deepEqual(await bound(), ["Caller", "Local"]);
           for (const name of ["bound-before", "bound-after"]) await page.click(`[data-case="${name}"] button`);
           await settle(); assert.deepEqual(await bound(), ["Caller", "Changed"]);
+          await page.locator('#native-state').evaluate((element: HTMLButtonElement) => {
+            element.disabled = true;
+            element.removeAttribute('aria-invalid');
+          });
           await page.click("#next"); await settle(); assert.deepEqual(await snapshot(), expected("Updated"));
+          assert.equal(await page.locator('#native-state').textContent(), 'Updated');
+          assert.equal(await page.locator('#native-state').isDisabled(), true, "an unrelated prop update preserves native control state when its binding is unchanged");
+          assert.equal(await page.locator('#native-state').getAttribute('aria-invalid'), null, "unchanged bindings preserve controller-owned attribute removal");
           assert.deepEqual(await modifiedStyle(), ["8px", "2px"]);
           assert.equal(await declaredStyle(), "--caller: 8px; --local: 8px");
           assert.deepEqual(await styles(), [["8px", "8px", "3px"], ["", "4px", "3px"]]);

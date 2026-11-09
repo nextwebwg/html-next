@@ -611,10 +611,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     runtime.current!.checkValues();
     return () => { active = false; for (const stop of stops) stop(); };
   }, [...Object.values(options.state).map(state => state.subscribe), ...(options.contexts ?? []).map(context => context.subscribe)]);
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const root = latest.current.root.current;
     if (root === null) return;
     const stopObserving = observeConnection(root, runtime.current!.synchronize);
+    runtime.current!.synchronize();
     return () => { stopObserving(); runtime.current!.disconnect(); };
   }, []);
 }
@@ -623,7 +624,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
 export function useLifecycle(root: { readonly current: Element | null }, connect?: () => void, disconnect?: () => void): void {
   const latest = React.useRef({ connect, disconnect });
   React.useLayoutEffect(() => { latest.current = { connect, disconnect }; });
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const element = root.current;
     if (element === null) return;
     let connected = false;

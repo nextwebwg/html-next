@@ -11,7 +11,7 @@ import { compileComponentStylesForSvelte, componentStateNames, VUE_ROOT_ATTRIBUT
 import { asciiLowerCase, kebabCase, componentName, propAttribute } from "../names.js";
 import { invocationValue } from "../prop-values.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, repeatedSlotNames } from "../template.js";
+import { orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, repeatedSlotNames } from "../template.js";
 import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
 import { templateForwardsAttributes } from "../template.js";
@@ -884,7 +884,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const htmlInputs = component && (forwards || componentStyle) && Object.keys(childProps ?? {}).length > 0 ? invocationSchema(childProps!) : undefined;
   if (htmlInputs !== undefined) context.usesHtmlInputs = true;
   const authoredDecorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style" || !component && entry.target === undefined && (entry.name === "class" || entry.name === "style" && (forwards || node.attributes.some(write => write.kind === "attribute" && write.target === "style"))) && !entry.twoWay));
-  const ownsClasses = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined && entry.name === "class"));
+  const ownsClasses = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined && entry.name === "class")) || !component && forwards && node.attributes.some(entry => entry.kind === "literal" && entry.name === "class" && entry.value === "");
   const ownsStyles = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "style" || entry.target === undefined && entry.name === "style"));
   const decoratesClasses = ownsClasses;
   const decoratesStyles = ownsStyles && !componentStyle;
@@ -968,10 +968,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${literal})}`);
     }
     const inheritsBinding = root && context.rootBindings?.includes(attribute.name);
+    const authoredDefault = literalValue?.kind === "literal" && node.attributes.indexOf(literalValue) > node.attributes.findLastIndex(entry => entry.kind === "forward");
     const defaultValue = quote(literalValue?.kind === "literal" ? literalValue.value : node.name === "textarea" ? node.children.filter((child) => child.kind === "text").map((child) => child.value).join("") : "");
     const defaultChecked = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "checked");
     const defaults = attribute.name === "checked" ? `{ checked: ${inheritsBinding ? `${context.rootBindingAttributeName}("checked") !== undefined || ` : ""}${defaultChecked} }`
-      : `{ value: ${inheritsBinding && node.name === "input" ? `String(${context.rootBindingAttributeName}("value") ?? ${defaultValue})` : defaultValue} }`;
+      : `{ value: ${inheritsBinding && node.name === "input" && !authoredDefault ? `String(${context.rootBindingAttributeName}("value") ?? ${defaultValue})` : defaultValue} }`;
     const candidate = context.freshIdentifier("htmlNextControlValue");
     const serialized = read.invalid ? `(() => { const ${candidate}: unknown = ${value}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).${attribute.name === "checked" ? "checked" : "value"} : ${serialize(candidate)}; })()` : serialize(value);
     if (node.name === "select" && attribute.name === "value") {
@@ -1030,8 +1031,17 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const literalStart = literals.length, bindingStart = bindings.length;
     try {
     if (attribute.kind === "forward") {
-      const forwarded = "forwardedAttributes(rest)";
+      const ordinarySelect = root && node.name === "select" && !context.rootBindings?.includes("value");
+      const omitted = root && !component ? [...new Set([...(context.rootBindings ?? []), ...node.name === "select" ? ["value"] : []])] : [];
+      const forwarded = `forwardedAttributes(rest${omitted.length > 0 ? `, ${JSON.stringify(omitted)}` : ""})`;
       literals.push(`{...${htmlInputs === undefined ? forwarded : `htmlAttributeInputs(${forwarded}, ${htmlInputs})`}}`);
+      if (ordinarySelect) {
+        context.usesAttributeBinding = true;
+        const candidate = context.freshIdentifier("htmlNextSelectAttribute");
+        const value = `(() => { const ${candidate}: unknown = rest.value; return ${lowering.attribute({ kind: "id", name: candidate }, unknownValueScope(candidate), "value")}; })()`;
+        literals.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
+        bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${value})}`);
+      }
       continue;
     }
     if (componentStyle && isStyleWrite(attribute)) continue;
@@ -1257,16 +1267,19 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     for (const name of context.rootBindings ?? []) {
       const read = `${context.nativeBindingReadName}(${quote(name)})`;
       const source = `(${read} === undefined ? Symbol.for('html-next.invalid-result') : ${read}!())`;
+      const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
+      const authoredLast = literal?.kind === "literal" && node.attributes.indexOf(literal) > node.attributes.findLastIndex(entry => entry.kind === "forward");
+      const caller = `(Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"})`;
+      const unboundInput = authoredLast ? quote(literal.value) : caller;
       if (nativeControlBinding(node.name, name)) {
         context.usesControls = true;
-        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
         const defaults = name === "checked" ? `{ checked: ${context.rootBindingAttributeName}(${quote(name)}) !== undefined || ${literal !== undefined} }`
           : node.name === "textarea" ? `{ value: ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))} }`
-          : `{ value: String(${context.rootBindingAttributeName}(${quote(name)}) ?? ${quote(literal?.kind === "literal" ? literal.value : "")}) }`;
+          : `{ value: String(${authoredLast ? quote(literal.value) : `${context.rootBindingAttributeName}(${quote(name)}) ?? ${quote(literal?.kind === "literal" ? literal.value : "")}`}) }`;
         context.usesAttributeBinding = true;
         const unbound = context.freshIdentifier("htmlNextAttributeValue");
         const unboundScope = unknownValueScope(unbound);
-        const unboundSource = `(() => { const ${unbound}: unknown = Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${lowering.attribute({ kind: "id", name: unbound }, unboundScope, name)}; })()`;
+        const unboundSource = `(() => { const ${unbound}: unknown = ${authoredLast ? quote(literal.value) : caller}; return ${lowering.attribute({ kind: "id", name: unbound }, unboundScope, name)}; })()`;
         const unboundDefault = name === "checked" ? `(${unboundSource}) !== undefined` : `String((${unboundSource}) ?? "")`;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
         const multiple = node.name === "select" ? selectMultiple(node, root, scope, lowering, context) : "false";
@@ -1290,10 +1303,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         context.usesAttributeBinding = true;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
         const local = unknownValueScope(candidate);
-        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
-        const unbound = `(Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"})`;
         const serialized = lowering.attribute({ kind: "id", name: candidate }, local, name);
-        bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => { const ${candidate}: unknown = ${read} === undefined ? ${unbound} : ${read}!(); return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })}`);
+        if (authoredLast) bindings.push(`{...(typeof document === 'undefined' ? { ${objectKey(name)}: ${quote(literal.value)} } : {})}`);
+        bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => { const ${candidate}: unknown = ${read} === undefined ? ${unboundInput} : ${read}!(); if (${candidate} === Symbol.for('html-next.invalid-result')) return ${candidate}; const value = ${serialized}; if (${read} !== undefined) ${context.rootBindingAttributeName}(${quote(name)}, value); return ${authoredLast ? quote(literal.value) : "value"}; })}`);
       }
     }
   }
@@ -1400,7 +1412,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.style == null || rest.style === false ? undefined : ${quote("")})` : "undefined";
         attributes.push(`style={(typeof document === 'undefined' ? styleText(${forwards ? quote("") : base}, ${rules}) : ${base}) || ${empty}}`);
       }
-      attributes.push(`{@attach decorate(${rules}, { ${forwards ? "ordered: true, " : ""}scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
+      attributes.push(`{@attach decorate(${rules}, { ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
     }
   }
   attributes.push(...(forwards ? bindings.slice(capturedBindings) : bindings));
@@ -1937,8 +1949,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `  return ${initialBindingMap}.get(name);`,
       "}",
       `let ${context.initialBindingsName} = $derived.by(() => ({ ${initialBindingSources.join(", ")} }));`,
-      `function ${context.rootBindingAttributeName}(name: string): unknown {`,
-      `  return untrack(() => rootElement === undefined ? (${context.initialBindingsName} as Record<string, unknown>)[name] : rootElement.getAttribute(name) ?? undefined);`,
+      `untrack(() => ${context.initialBindingsName});`,
+      `function ${context.rootBindingAttributeName}(name: string, value?: unknown): unknown {`,
+      `  if (arguments.length > 1) ${initialBindingMap}.set(name, value);`,
+      `  return untrack(() => ${initialBindingMap}.has(name) ? ${initialBindingMap}.get(name) : (${context.initialBindingsName} as Record<string, unknown>)[name]);`,
       "}",
     ]),
     `const rootAttrs = rootAttributes(() => rest${rootAttributeOptions(context.rootScope, nativeRoot, [...context.rootAttributeBindings], nativeRoot ? context.rootBindings ?? [] : [], initialBindingSources.length === 0 ? undefined : context.initialBindingsName)});`,

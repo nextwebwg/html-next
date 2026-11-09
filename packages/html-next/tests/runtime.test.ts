@@ -1742,7 +1742,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const originalRow = hydrated.querySelector('li');
           document.body.append(server);
           R.lowerDocument();
-          const initial = { rootKept: document.querySelector('#hydrated') === hydrated,
+          const initial = { rootKept: server.querySelector('[component~="x-scoped-hydrate"]') === hydrated,
             rowKept: hydrated.querySelector('li') === originalRow,
             source: [...source.querySelectorAll('li')].map(row => row.textContent),
             hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
@@ -4277,7 +4277,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
         })()`);
         assert.deepEqual(result, {
-          authored: ["figure", "wide"],
+          authored: ["figure", "figure"],
           recorded: ["end", "start"],
           rendered: ["end", "start"],
           caption: "rgb(0, 0, 0)",
@@ -4488,12 +4488,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return { before, linked, back: final, nativeClicks };
         })()`);
 
-        const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
+        const common = { id: "action", className: "action", component: "x-action", dataHref: "#next", label: true, host: true };
         assert.deepEqual(result, {
-          before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["", "pointer", "1px", "button"] },
           // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
           linked: { ...common, tag: "a", href: "#next", type: null, title: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
-          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "3", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "3", style: ["", "pointer", "1px", "button"] },
           nativeClicks: 3,
         });
         assert.deepEqual(pageErrors, []);
@@ -4577,12 +4577,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           }
           return states;
         })()`);
-        // The parent's on:click follows the root, its :as binding reaches the current root's
-        // record, and the consumer's type="submit" outlasts the button arm's own type="button".
+        // The parent's on:click and :as follow the root. Authored button attributes follow
+        // default forwarding; the link arm retains the caller type because it authors none.
         assert.deepEqual(result, [
-          ["button", "submit", "button", "0"],
+          ["button", "button", "button", "0"],
           ["a", "submit", "a", "1"],
-          ["button", "submit", "button", "2"],
+          ["button", "button", "button", "2"],
           ["a", "submit", "a", "3"],
         ]);
         assert.deepEqual(pageErrors, []);
@@ -4710,8 +4710,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           await settle();
           return { title, prevented: document.querySelector('#out output').textContent };
         })()`);
-        // The outer invocation's value wins, and the inner listener runs before the outer one.
-        assert.deepEqual(result, { title: "outer", prevented: "true" });
+        // The delegate's authored title follows forwarding. Its listener precedes the outer one.
+        assert.deepEqual(result, { title: "inner", prevented: "true" });
         assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();
@@ -5024,8 +5024,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["data-x-button", ""],
               ["data-x-button-prop-size", "lg"],
               ["id", "primary"],
-              // The author's attribute wins over the template's literal.
-              ["type", "submit"],
+              // The authored root literal follows default invocation forwarding.
+              ["type", "button"],
             ],
             // The template's indentation around its slot stays, as authored.
             children: [

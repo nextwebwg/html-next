@@ -353,19 +353,41 @@ function KeyedRows(props: { readonly renderRows: KeyedRowsRender }): ReactNode {
 
 export ${HOST_STATE_TOKENS_SOURCE.trim()}
 
-/** Each render places ordinary content once; React owns the rendered nodes and their lifetime. */
+type SlotClaim = { readonly owner: object; committed: boolean };
+
+function discardUncommittedClaims(link: ChildLink): void {
+  for (const [name, claim] of link.claims) if (!claim.committed) link.claims.delete(name);
+}
+
+function releaseSlotClaims(link: ChildLink | undefined, owner: object, keep?: ReadonlyMap<string, string>): void {
+  if (link === undefined) return;
+  let changed = false;
+  for (const [name, claim] of link.claims) if (claim.owner === owner && !keep?.has(name)) { link.claims.delete(name); changed = true; }
+  if (changed) { link.stamp = link.claimStamp = {}; for (const listener of link.listeners) listener(); }
+}
+
+/** Mounted outlets retain their claims; React owns the rendered nodes and their lifetime. */
 export function useSlotClaims(link?: ChildLink): (name: string, slot: ReactNode | (() => ReactNode) | undefined, fallback: ReactNode, outlet: string) => ReactNode {
   const site = React.useRef({}).current;
+  React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.claimStamp, () => link?.claimStamp);
   const claims = link?.claims;
-  if (claims !== undefined) for (const [name, owner] of claims) if (owner === site) claims.delete(name);
   const placed = new Map<string, string>();
+  React.useLayoutEffect(() => {
+    releaseSlotClaims(link, site, placed);
+    for (const name of placed.keys()) {
+      const claim = claims?.get(name);
+      if (claim === undefined) claims?.set(name, { owner: site, committed: true });
+      else if (claim.owner === site) claim.committed = true;
+    }
+  });
+  React.useLayoutEffect(() => () => releaseSlotClaims(link, site), [link, site]);
   return (name, slot, fallback, outlet) => {
     if (typeof slot === "function") return renderPlainSlot(slot, fallback);
     if (!hasSlotContent(slot) || placed.has(name) && placed.get(name) !== outlet) return fallback;
     placed.set(name, outlet);
-    const owner = claims?.get(name);
-    if (owner !== undefined && owner !== site) return fallback;
-    claims?.set(name, site);
+    const claim = claims?.get(name);
+    if (claim !== undefined && claim.owner !== site) return fallback;
+    if (claim === undefined) claims?.set(name, { owner: site, committed: false });
     return renderPlainSlot(slot, fallback);
   };
 }
@@ -422,7 +444,9 @@ type ChildLink = {
   wrap?: (content: ReactNode) => ReactNode;
   /** Replaced when the child gives new contexts or slots, which an outlet rendered before it reads again. */
   stamp?: object;
-  claims: Map<string, object>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
+  /** Changes only when a mounted outlet releases content, independently of context publication. */
+  claimStamp?: object;
+  readonly claims: Map<string, SlotClaim>; readonly subscribe: (listener: () => void) => () => void; readonly listeners: Set<() => void>;
 };
 const childLinks = new WeakMap<object, ChildLink>();
 /** A new stable entry for one accepted child: its props' names are fixed, and reads go through its link. */
@@ -501,14 +525,14 @@ export function useChildLists(given: unknown, lists: ChildListSlots, tag: string
       let entry = kept.get(descriptor.key);
       if (entry === undefined || childLinks.get(entry)!.tag !== descriptor.tag) entry = childEntry(descriptor.tag, descriptor.props);
       const link = childLinks.get(entry)!;
-      // Plain content is claimed afresh each render by the first outlet that places it.
-      link.props = descriptor.props; link.slots = descriptor.slots; link.claims = new Map();
+      discardUncommittedClaims(link);
+      link.props = descriptor.props; link.slots = descriptor.slots;
       current.set(descriptor.key, entry);
       return entry;
     });
     result[name] = given === undefined && mounted.size > 0 ? withMounted(direct, committed.current[name], mounted) : direct;
   }
-  for (const entry of mounted) childLinks.get(entry)!.claims = new Map();
+  for (const entry of mounted) discardUncommittedClaims(childLinks.get(entry)!);
   kept.clear();
   for (const [key, entry] of current) kept.set(key, entry);
   if (given !== undefined) for (const name of Object.keys(result)) Object.freeze(result[name]);
@@ -669,14 +693,23 @@ export function ChildSlot(props: {
   const link = entry !== null && typeof entry === "object" ? childLinks.get(entry) : undefined;
   React.useSyncExternalStore(link?.subscribe ?? noSubscribe, () => link?.stamp, () => link?.stamp);
   const claim = React.useRef({}).current;
+  const known = link === undefined ? undefined : slots[link.tag];
+  const slot = link?.slots?.[name];
+  const plain = (known === undefined || known[2].includes(name)) && typeof slot !== "function" && hasSlotContent(slot as ReactNode)
+    && values === undefined && known?.[1].includes(name) !== true;
+  React.useLayoutEffect(() => {
+    if (link === undefined || !plain) return;
+    const current = link.claims.get(name);
+    if (current === undefined) link.claims.set(name, { owner: claim, committed: true });
+    else if (current.owner === claim) current.committed = true;
+    return () => releaseSlotClaims(link, claim);
+  }, [link, name, plain, claim]);
   if (link === undefined) return fallback;
-  const known = slots[link.tag];
   const location = file + "#of:" + link.tag + ":" + name;
   if (known !== undefined && !known[2].includes(name)) {
     warnUnless(false, location, prefix + "\`" + link.tag + "\` declares the slots " + known[3] + "; \`" + name + "\` is unknown.");
     return fallback;
   }
-  const slot = link.slots?.[name];
   let content: ReactNode;
   // A \`<template slot>\` renders afresh at every outlet; plain content renders at one.
   if (typeof slot === "function") content = (slot as (values: Record<string, unknown>) => ReactNode)(shapes?.[link.tag]?.(values ?? {}) ?? values ?? {});
@@ -685,8 +718,8 @@ export function ChildSlot(props: {
     warnUnless(false, location + ":plain", prefix + "\`" + name + "\` has props, so its content is a \`<template slot=\\"" + name + "\\">\`.");
     return fallback;
   } else {
-    if (!link.claims.has(name)) link.claims.set(name, claim);
-    if (link.claims.get(name) !== claim) return fallback;
+    if (!link.claims.has(name)) link.claims.set(name, { owner: claim, committed: false });
+    if (link.claims.get(name)!.owner !== claim) return fallback;
     content = slot as ReactNode;
   }
   const placed = markProjected(content);

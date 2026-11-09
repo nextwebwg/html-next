@@ -16,7 +16,7 @@ import type { CompiledExpression } from "../expression.js";
 import { componentStateNames, compileComponentGraphStylesForConversion, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import type { ComponentDefinition, ElementNode, HandlerDeclaration, LiteralAttribute, TemplateNode } from "../template.js";
-import { repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames } from "../template.js";
+import { orderedAttributeWrites, repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames } from "../template.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, typeScriptType, type TypeNode } from "../type-system.js";
 import { headEntriesSource, headScriptsSource, headHelperArtifact } from "./head-target.js";
 import { targetComponent, type TargetRequest } from "./backend.js";
@@ -333,7 +333,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     if (classRules.length > 0) {
       helper("attributes");
       const initial = forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined";
-      const input = `{ ${forwards ? "ordered: true, " : ""}base: ${initial}, bindings: [${classRules.map(rule => `[${rule.name}, ${rule.read}]`).join(", ")}] }`;
+      const input = `{ ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}base: ${initial}, bindings: [${classRules.map(rule => `[${rule.name}, ${rule.read}]`).join(", ")}] }`;
       if (child !== undefined) {
         helper("class-input");
         const classInput = `classBindingText(${input})`;
@@ -1274,7 +1274,11 @@ export class HtmlNextChildSlot {
   private disposed = false;
   private stop: (() => void) | undefined;
   private initializing = true;
-  constructor() { queueMicrotask(() => { this.initializing = false; }); }
+  constructor() { this.beginPlacement(); }
+  private beginPlacement(): void {
+    this.initializing = true;
+    queueMicrotask(() => { this.initializing = false; });
+  }
   ngOnChanges(): void { this.render(); }
   ngDoCheck(): void { this.render(); }
   private render(): void {
@@ -1286,7 +1290,7 @@ export class HtmlNextChildSlot {
       let connected = this.anchor.isConnected;
       this.stop = observeConnection(this.anchor.parentElement ?? this.anchor.ownerDocument!.documentElement, () => {
         const next = this.anchor.isConnected;
-        if (connected !== next) { connected = next; this.render(); this.changes.markForCheck(); }
+        if (connected !== next) { connected = next; if (next) this.beginPlacement(); this.render(); this.changes.markForCheck(); }
       });
     }
     if (this.claimed !== key) this.release();

@@ -1631,6 +1631,7 @@ interface ChildRecord {
   readonly released: Ref<number>
   contexts?: Readonly<Record<string, unknown>>
   readonly contextKey: Ref<symbol>
+  root?: Readable<Element | null>
   node: VNode
   props: Record<string, unknown>
   entry: object
@@ -1753,7 +1754,10 @@ const givenProps = (node: VNode): Record<string, unknown> => {
   for (const key in node.props) given[camelize(key)] = node.props[key]
   return given
 }
-const nodeRoot = (entry: object): Node | null => childRecords.get(entry)!.node.el as Node | null
+const nodeRoot = (entry: object): Node | null => {
+  const record = childRecords.get(entry)!
+  return record.root?.value ?? record.node.el as Node | null
+}
 
 /**
  * An accepted child's place in its parent's list, which every accepted component takes as it sets up.
@@ -1762,6 +1766,7 @@ const nodeRoot = (entry: object): Node | null => childRecords.get(entry)!.node.e
  */
 export function useChildEntry(
   contexts: Readonly<Record<string, unknown>> = {},
+  root?: Readable<Element | null>,
 ): ChildRecord | undefined {
   const instance = getCurrentInstance()!
   const nearest = inject<ChildOwner | undefined>(ACCEPTING, undefined)
@@ -1769,6 +1774,7 @@ export function useChildEntry(
   while (owner !== undefined && !owner.kinds.has(instance.type)) owner = owner.parent
   const record = owner?.add(instance, owner === nearest)
   if (record !== undefined) {
+    if (root !== undefined) record.root = rootElement(root)
     const replaced = record.contexts !== undefined && Object.keys(contexts).length > 0
     record.contexts = contexts
     if (replaced) record.contextKey.value = Symbol()

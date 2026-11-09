@@ -24,7 +24,7 @@ This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
 `@nextwebwg/html-next` supplies component tooling; the converter and unplugin adapt it to other
 build workflows. [MarkupKit](https://github.com/threadlabs-studio/markupkit), published as
 `@threadlabs/markupkit`, provides application routing, layouts, and server rendering.
-The four HTML Next packages share one version and publish together. Shared policy and verification
+The three HTML Next packages share one version and publish together. Shared policy and verification
 live at the repository root.
 
 Use [`html-next-check`](./packages/html-next-unplugin/README.md#check-components-in-ci) for
@@ -39,7 +39,7 @@ The command supports native, Vue, React, Preact, Svelte, and Angular targets and
 
 Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
 
-An experimental [native .NET renderer](./packages/html-next-dotnet) compiles and reuses inert template plans with C# data. It has its own .NET tests and validated Fluid/Node benchmarks; full component support and shared client-runtime selection are planned separately.
+An experimental [native .NET renderer](./packages/html-next-dotnet) compiles reusable template plans with C# data and uses shared client assets for browser adoption. Full component support and performance qualification remain unfinished.
 
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and

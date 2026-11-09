@@ -183,7 +183,7 @@ describe("framework converter", () => {
     const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XApp!, { id: "case", className: "outer" })),
-      "<main id=\"case\" class=\"outer\" data-html-next-renderer=\"react\" component=\"x-app\"><article aria-label=\"Hello\" class=\"card ready\" data-html-next-renderer=\"react\" data-x-card-prop-label=\"Hello\" data-x-card-state=\"label label=Hello\" component=\"x-card\" style=\"border-radius:2px;color:red\"></article></main>");
+      "<main id=\"case\" class=\"outer\" data-html-next-renderer=\"react\" component=\"x-app\"><article aria-label=\"Hello\" class=\"card ready\" style=\"border-radius:2px;color:red\" data-html-next-renderer=\"react\" data-x-card-prop-label=\"Hello\" data-x-card-state=\"label label=Hello\" component=\"x-card\"></article></main>");
   });
 
   it("writes each controller's typed host beside its definition when asked, as the CLI does", async () => {

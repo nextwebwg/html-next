@@ -526,6 +526,13 @@ function compileClassScopedStyles(css: string, definition: ComponentDefinition, 
     return withImportedStateNames({ css: normalizeConversionStyleIdentities(root.toString().trim(), "class"), stateNames: Array.from(names), ...testedStatesField(tested) }, definition, graph);
   }
   root.append(scope);
+  // Firefox's style sharing can reuse a scoped rule across an empty-class boundary. Distinct
+  // inherited owner values keep each native scope separate, as in assembleComponentStyles.
+  if (typeof limit === "string") root.append(postcss.parse(`@supports (-moz-appearance: none) {
+:global(:where([${VUE_ROOT_ATTRIBUTE}], [data-slotted])) { --html-next-scope-owner: boundary; }
+:global(:where([data-slotted]:not([${VUE_ROOT_ATTRIBUTE}]))) { --html-next-scope-owner: projected !important; }
+:global(${tagClassSelector(tag)}) { --html-next-scope-owner: "${tag}" !important; }
+}`));
   if (projecting?.nodes !== undefined && projecting.nodes.length > 0) root.append(projecting);
   return withImportedStateNames({ css: normalizeConversionStyleIdentities(root.toString().trim(), "class"), stateNames: Array.from(names), components: limits, ...testedStatesField(tested) }, definition, graph);
 }

@@ -210,7 +210,7 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "lets invocation attributes win over template literals and combines class and style",
+    name: "applies authored root attributes after default invocation forwarding",
     source: scene({
       tag: "x-pre",
       defs: `<prop name="label" type="string" default="Bound">Label.</prop>`,
@@ -219,7 +219,7 @@ const successes: ConformanceCase[] = [
     }),
     expect: {
       probe: `const b = q('#p'); return [b.type, b.getAttribute('role'), b.className, b.style.color, b.style.margin, b.getAttribute('aria-label')];`,
-      result: ["submit", "button", "base cta", "red", "0px", "Bound"],
+      result: ["button", "button", "base", "red", "", "Bound"],
     },
   },
   {
@@ -922,11 +922,11 @@ const successes: ConformanceCase[] = [
       probe: `const root = q('#class-scopes'); return [getComputedStyle(root).color, getComputedStyle(root.querySelector('p')).backgroundColor, root.classList.contains('lit'), root.classList.contains('manual'), q('#class-raw').getAttribute('class')];`,
       result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "],
       after: [
-        { action: `document.querySelector('#class-scopes').classList.add('manual'); document.querySelector('#class-next').click();`, result: ["rgb(1, 2, 3)", "rgb(4, 5, 6)", false, false, " raw  raw "] },
-        { action: `document.querySelector('#class-scopes').classList.add('manual'); document.querySelector('#class-off').click();`, result: ["rgb(1, 2, 3)", "rgb(4, 5, 6)", false, true, " raw  raw "] },
-        { action: `document.querySelector('#class-on').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, true, " raw  raw "] },
-        { action: `document.querySelector('#class-invalid').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, true, " raw  raw "] },
-        { action: `document.querySelector('#class-recover').click();`, result: ["rgb(1, 2, 3)", "rgb(4, 5, 6)", false, false, " raw  raw "] },
+        { action: `document.querySelector('#class-scopes').classList.add('manual'); document.querySelector('#class-next').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+        { action: `document.querySelector('#class-scopes').classList.add('manual'); document.querySelector('#class-off').click();`, result: ["rgb(1, 2, 3)", "rgb(4, 5, 6)", false, false, " raw  raw "] },
+        { action: `document.querySelector('#class-on').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+        { action: `document.querySelector('#class-invalid').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+        { action: `document.querySelector('#class-recover').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
       ],
     },
   },

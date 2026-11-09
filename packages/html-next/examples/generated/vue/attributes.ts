@@ -86,8 +86,9 @@ export function attributeBindingProps(bindings: readonly AttributeBinding[]): Re
   return props;
 }
 
-/** Replay authored writes at one destination while retaining each binding's accepted result. */
+/** Replay changed attributes in authored order while retaining each binding's accepted result. */
 export function applyOrderedAttributes(element: Element, writes: readonly OrderedAttributeWrite[], state: AttributeWriteState): void {
+  const changed = new Set<string>();
   const put = (name: string, value: unknown): void => {
     const text = attributeText(name, value);
     const namespace = attributeNamespace(name);
@@ -96,18 +97,34 @@ export function applyOrderedAttributes(element: Element, writes: readonly Ordere
   };
   for (let index = 0; index < writes.length; index += 1) {
     const write = writes[index]!;
-    if (Array.isArray(write)) continue;
-    const names = Object.keys(forwardedAttributes(write as Readonly<Record<string, unknown>>));
-    for (const name of state.forwarded[index] ?? []) if (!names.includes(name)) put(name, null);
+    if (Array.isArray(write)) {
+      const [name, candidate, target, fallback] = write as Extract<OrderedAttributeWrite, readonly unknown[]>;
+      const present = index in state.values;
+      if (candidate === Symbol.for("html-next.invalid-result") && !present && fallback === undefined) continue;
+      const value = candidate === Symbol.for("html-next.invalid-result") ? present ? state.values[index] : fallback : candidate;
+      if (!present || !Object.is(value, state.values[index])) changed.add(target ?? name);
+      state.values[index] = value;
+      continue;
+    }
+    const accepted = forwardedAttributes(write as Readonly<Record<string, unknown>>);
+    const names = Object.keys(accepted);
+    const previous = state.values[index] as Record<string, unknown> | undefined;
+    for (const name of state.forwarded[index] ?? []) if (!Object.hasOwn(accepted, name)) { changed.add(name); put(name, null); }
+    for (const name of names) {
+      const value = attributeText(name, accepted[name]);
+      if (previous === undefined || !Object.hasOwn(previous, name) || previous[name] !== value) changed.add(name);
+      accepted[name] = value;
+    }
+    state.values[index] = accepted;
     state.forwarded[index] = names;
   }
+  if (changed.size === 0) return;
   for (let index = 0; index < writes.length; index += 1) {
     const write = writes[index]!;
-    if (!Array.isArray(write)) { for (const name of state.forwarded[index]!) put(name, (write as Readonly<Record<string, unknown>>)[name]); continue; }
-    const [name, candidate, target, fallback] = write as Extract<OrderedAttributeWrite, readonly unknown[]>;
-    const value = candidate === Symbol.for("html-next.invalid-result") ? index in state.values ? state.values[index] : fallback : candidate;
-    if (candidate === Symbol.for("html-next.invalid-result") && !(index in state.values) && fallback === undefined) continue;
-    if (candidate !== Symbol.for("html-next.invalid-result")) state.values[index] = candidate;
+    if (!Array.isArray(write)) { for (const name of state.forwarded[index]!) if (changed.has(name)) put(name, (state.values[index] as Readonly<Record<string, unknown>>)[name]); continue; }
+    const [name, , target] = write as Extract<OrderedAttributeWrite, readonly unknown[]>;
+    if (!(index in state.values) || !changed.has(target ?? name)) continue;
+    const value = state.values[index];
     if (target === "class") element.classList.toggle(name, Boolean(value));
     else if (target === "style") (element as HTMLElement).style.setProperty(name, value == null ? "" : String(value));
     else put(name, value);
@@ -155,6 +172,9 @@ export function initializeClassBindings(element: Element, input: ClassBindingInp
 }
 
 export function applyClassBindings(element: Element, input: ClassBindingInput, previous: unknown[]): void {
+  if (input.ordered && input.bindings.every(([, value], index) =>
+    value !== Symbol.for('html-next.invalid-result') && (value === Symbol.for('html-next.no-attribute')
+      ? !(index in previous) : index in previous && Object.is(value, previous[index])))) return;
   if (input.ordered) for (const [index, [token, value]] of input.bindings.entries()) {
     if (token === null && value === Symbol.for('html-next.no-attribute') && index in previous) { element.removeAttribute('class'); delete previous[index]; }
   }
