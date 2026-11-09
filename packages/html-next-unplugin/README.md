@@ -481,7 +481,7 @@ The bundler continues to select the runtime helpers used by retained factories. 
 virtual module name. `supportImports` remains an inventory of the complete generated graph. The
 virtual module name is a build input; resolve the emitted asset through the application's bundler
 manifest before serving it. The native .NET renderer's consumption of this artifact remains under
-development. HTMLKit uses the same analysis and preserves the layer factories its client navigation
+development. Application hosts can use the same analysis to preserve the layer factories their client navigation
 can create or update.
 
 For components with producer modules exporting `prepare` and `adopt`, build a server entry with

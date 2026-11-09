@@ -219,4 +219,4 @@ The [low-memory measurements](benchmarks/results/2026-11-05-low-memory.md) inclu
 
 ## Ownership
 
-Native source, tests, fixture host and benchmark dependencies live in this directory. The unplugin owns the JavaScript integration tests that build the shared manifest and exercise native output with generated clients. `test:dotnet` includes their Node-side checks; the native CI job also runs their three-engine browser checks. Root CI never packs this project as an npm package. The JavaScript compiler owns `analyzeClientPlan`; HTMLKit and the .NET renderer consume its selection and use the existing browser runtime.
+Native source, tests, fixture host and benchmark dependencies live in this directory. The unplugin owns the JavaScript integration tests that build the shared manifest and exercise native output with generated clients. `test:dotnet` includes their Node-side checks; the native CI job also runs their three-engine browser checks. Root CI never packs this project as an npm package. The JavaScript compiler owns `analyzeClientPlan`; The unplugin and the .NET renderer consume its selection and use the existing browser runtime.
