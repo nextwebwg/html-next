@@ -26,7 +26,7 @@ internal sealed class NumberFormatting(ExpressionValue options)
         if (!double.IsFinite(number) || number < minimum || number > maximum) { valid = false; return fallback; }
         return (int)Math.Floor(number);
     }
-    private static double Number(ExpressionValue value)
+    internal static double Number(ExpressionValue value)
     {
         if (value.IsNumeric || value.Type.Kind == "boolean") return value.Number;
         if (value.IsNull) return 0;
@@ -40,7 +40,7 @@ internal sealed class NumberFormatting(ExpressionValue options)
         }
         return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : double.NaN;
     }
-    private static string String(ExpressionValue value)
+    internal static string String(ExpressionValue value)
     {
         if (value.IsNull) return "null";
         if (value.IsAbsent) return "undefined";
@@ -53,10 +53,10 @@ internal sealed class NumberFormatting(ExpressionValue options)
         return value.ScalarText();
     }
 
-    internal static bool TrySkeleton(IcuNumbers icu, string format, ExpressionValue options, out string skeleton)
+    internal static bool TrySkeleton(IcuFormatters icu, string format, ExpressionValue options, out string skeleton)
         => new NumberFormatting(options).Build(icu, format, out skeleton);
 
-    private bool Build(IcuNumbers icu, string format, out string skeleton)
+    private bool Build(IcuFormatters icu, string format, out string skeleton)
     {
         skeleton = "";
         var tokens = new List<string>();

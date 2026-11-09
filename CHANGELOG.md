@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Bind native date and time prop types and format civil values and instants through ICU. Preserve locale-specific fields, styles, calendars, hour cycles, time zones, parts and historical ranges, and carry typed strings through browser adoption.
+
 - Render native numeric `format`, `formatParts` and `formatRange` expressions through ICU, including currency, percentages, units, precision, signs and notation. Use the current request culture when the locale is omitted, and require selected types to agree before inferring a formatter.
 
 - Read native declaration groups before or after the markup root, and compare string and keyword values in ordinal UTF-16 order without numeric coercion.

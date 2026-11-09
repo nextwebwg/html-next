@@ -29,14 +29,14 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
     public bool IsNull => Type.Kind == "null";
     public bool IsDimension => Type.Kind is "length" or "percentage" or "duration";
     public bool IsNumeric => Type.Kind is "number" or "integer";
-    public bool IsText => Type.Kind is "string" or "keyword";
+    public bool IsText => Type.Textual;
     public bool IsScalar => IsNumeric || IsText || IsDimension || Type.Kind is "boolean" or "null";
     public int Count => Data switch { object?[] values => values.Length, ExpressionValue[] values => values.Length, AcceptedChildEntry => Type.Fields!.Length, string text => text.Length, _ => 0 };
     public bool Truthy => Type.Kind switch
     {
         "null" or "absent" or "invalid" => false,
         "boolean" or "number" or "integer" => Number != 0,
-        "list" or "object" or "string" or "keyword" => Count > 0,
+        "list" or "object" or "string" or "keyword" or "date" or "time" or "datetime" or "datetime-local" => Count > 0,
         _ => IsDimension,
     };
 
@@ -59,7 +59,7 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
         if (type.Kind is "length" or "percentage" or "duration" && !type.Unconstrained && data is string text)
             return type.Kind == "length" && text == "0" ? Text("0")
                 : Dimensions.TryParse(text, out var quantity) && quantity.Type.Kind == type.Kind ? quantity : Invalid;
-        if (data is string scalarText) return new(type.Kind == "keyword" ? type : StringType, scalarText);
+        if (data is string scalarText) return new(type.Textual ? type : StringType, scalarText);
         return new(type, data);
     }
 
@@ -67,7 +67,7 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
     {
         "null" => null, "absent" => AbsentStorage, "invalid" => InvalidStorage,
         "number" or "integer" => Number, "boolean" => Number != 0,
-        "string" or "keyword" => Data,
+        "string" or "keyword" or "date" or "time" or "datetime" or "datetime-local" => Data,
         _ => this,
     };
 

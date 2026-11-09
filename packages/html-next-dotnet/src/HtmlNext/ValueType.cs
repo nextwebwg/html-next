@@ -10,6 +10,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
     private readonly ConcurrentDictionary<Type, ModelAccess.RecordReader>? readers = Kind == "object" ? new() : null;
     internal sealed record Field(string Name, ValueType Type, bool Optional = false);
     public bool NeedsSnapshot { get; } = Kind == "unknown" || Open || Item?.NeedsSnapshot == true || Fields?.Any(field => field.Type.NeedsSnapshot) == true;
+    internal bool Textual => Kind is "string" or "keyword" || DateValues.IsType(Kind);
     public bool HasAttributeForm => Kind is not ("unknown" or "event" or "null") && Item?.HasAttributeForm != false && Fields?.Any(member => !member.Type.HasAttributeForm) != true;
 
     public ValueType AsReference() => this with
@@ -31,6 +32,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
             return Dimensions.TryParse(text, out var dimension) && dimension.Type.Kind == Kind ? dimension : ExpressionValue.Invalid;
         }
         if (Kind is "string" or "keyword" && value.IsDimension) value = ExpressionValue.Text(value.ScalarText());
+        if (DateValues.IsType(Kind)) return value.IsText && DateValues.Valid(Kind, value.ScalarText()) ? new(this, value.Data) : ExpressionValue.Invalid;
         var valid = Kind switch
         {
             "string" => value.IsText,
@@ -137,6 +139,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
         if (value is System.Text.Json.JsonElement json) value = ModelAccess.Unwrap(json);
         if (Kind == "string" && value is string || Kind == "boolean" && value is bool) return value;
         if (Kind == "keyword" && value is string keyword && IsKeyword(keyword)) return keyword;
+        if (DateValues.IsType(Kind) && value is string civil && DateValues.Valid(Kind, civil)) return civil;
         if (Kind is "length" or "percentage" or "duration" && value is string dimension
             && (Kind == "length" && dimension == "0" || Dimensions.TryParse(dimension, out var quantity) && quantity.Type.Kind == Kind)) return dimension;
         if (Kind is "number" or "integer" && value is double scalar && double.IsFinite(scalar) && (Kind != "integer" || Math.Truncate(scalar) == scalar)) return value;
@@ -319,6 +322,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
         {
             var kind = Name();
             if (javaScriptValues && kind is "event" or "null") return new(kind);
+            if (DateValues.IsType(kind)) return new(kind);
             if (kind is "string" or "number" or "integer" or "boolean" or "keyword" or "length" or "percentage" or "duration" or "unknown") return new(kind, Unconstrained: kind == "unknown");
             if (kind == "list")
             {

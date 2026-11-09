@@ -984,7 +984,7 @@ public static partial class HtmlNextCompiler
     internal static object? AttributeInput(string text, ValueType type, string source, CancellationToken cancellation = default)
     {
         object? value;
-        if (type.Kind is "string" or "keyword" or "length" or "percentage" or "duration") value = text;
+        if (type.Textual || type.Kind is "length" or "percentage" or "duration") value = text;
         else if (type.Kind == "boolean" && text is "true" or "false" or "") value = text != "false";
         else if (type.Kind is "number" or "integer" && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) value = number;
         else

@@ -6,10 +6,10 @@ namespace HtmlNext;
 
 // ICU's public C formatters own locale data and number layout. Each call owns its result and
 // formatter handles. The ICU library stays loaded for the process lifetime.
-internal sealed class IcuNumbers
+internal sealed partial class IcuFormatters
 {
-    private static readonly Lazy<IcuNumbers?> Current = new(Load);
-    internal static IcuNumbers? Available => Current.Value;
+    private static readonly Lazy<IcuFormatters?> Current = new(Load);
+    internal static IcuFormatters? Available => Current.Value;
     internal static readonly ValueType PartType = new("object", Fields:
         [new("type", ExpressionValue.StringType), new("value", ExpressionValue.StringType)]);
     internal static readonly ValueType PartsType = new("list", PartType);
@@ -31,7 +31,7 @@ internal sealed class IcuNumbers
     private readonly LanguageTag languageTag;
     private readonly CurrencyDigits currencyDigits;
 
-    private IcuNumbers(nint library, string suffix)
+    private IcuFormatters(nint library, string suffix)
     {
         this.library = library; this.suffix = suffix;
         open = Function<OpenFormatter>("unumf_openForSkeletonAndLocale");
@@ -54,7 +54,7 @@ internal sealed class IcuNumbers
     private T Function<T>(string name) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(library, name + suffix));
 
-    private static IcuNumbers? Load()
+    private static IcuFormatters? Load()
     {
         foreach (var (file, suffix) in Libraries())
         {
@@ -189,6 +189,17 @@ internal sealed class IcuNumbers
         }
         finally { closePosition(position); }
         if (status > 0) return ExpressionValue.Invalid;
+        return StructuredParts(written, regions, field => field switch
+        {
+            0 => "integer", 1 => "fraction", 2 => "decimal", 3 => "exponentSeparator", 4 => "exponentMinusSign",
+            5 => "exponentInteger", 6 => "group", 7 => "currency", 8 => unit ? "unit" : "percentSign",
+            10 => double.IsNegative(number) ? "minusSign" : "plusSign", 11 => "unit", 12 => "compact", 13 => "approximatelySign", _ => "literal"
+        });
+    }
+
+    private static ExpressionValue StructuredParts(string written, IEnumerable<(int Field, int Start, int End)> fields, Func<int, string> fieldType)
+    {
+        var regions = fields.ToArray();
         var boundaries = regions.SelectMany(region => new[] { region.Start, region.End }).Append(0).Append(written.Length).Distinct().Order().ToArray();
         var parts = new List<(string Type, string Text)>();
         for (var index = 0; index + 1 < boundaries.Length; index++)
@@ -196,12 +207,7 @@ internal sealed class IcuNumbers
             var start = boundaries[index]; var end = boundaries[index + 1];
             var covering = regions.Where(region => region.Start <= start && region.End >= end)
                 .OrderBy(region => region.End - region.Start).ThenByDescending(region => region.Field).ToArray();
-            var type = covering.Length == 0 ? "literal" : covering[0].Field switch
-            {
-                0 => "integer", 1 => "fraction", 2 => "decimal", 3 => "exponentSeparator", 4 => "exponentMinusSign",
-                5 => "exponentInteger", 6 => "group", 7 => "currency", 8 => unit ? "unit" : "percentSign",
-                10 => double.IsNegative(number) ? "minusSign" : "plusSign", 11 => "unit", 12 => "compact", 13 => "approximatelySign", _ => "literal"
-            };
+            var type = covering.Length == 0 ? "literal" : fieldType(covering[0].Field);
             var part = written[start..end];
             if (parts.Count > 0 && parts[^1].Type == type) parts[^1] = (type, parts[^1].Text + part);
             else parts.Add((type, part));

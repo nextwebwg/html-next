@@ -3,7 +3,7 @@ using System.Globalization;
 namespace HtmlNext;
 
 internal sealed record FormattingExpression(string Operation, ValueExpression[] Arguments)
-    : ValueExpression(Operation == "formatParts" ? IcuNumbers.PartsType : ExpressionValue.StringType)
+    : ValueExpression(Operation == "formatParts" ? IcuFormatters.PartsType : ExpressionValue.StringType)
 {
     internal static string? InputKind(ValueType type) => type.Selection is { } selected ? selected.FormattingKind : type.Kind;
 
@@ -27,7 +27,7 @@ internal sealed record FormattingExpression(string Operation, ValueExpression[] 
         var kind = InputKind(Arguments[0].Type);
         var offset = required;
         var format = offset < arguments.Length && arguments[offset].IsText ? arguments[offset++].ScalarText()
-            : kind switch { "number" or "integer" => "number", "percentage" => "percent", _ => null };
+            : kind switch { "number" or "integer" => "number", "percentage" => "percent", "date" => "date", "time" => "time", "datetime" or "datetime-local" => "dateTime", _ => null };
         var options = offset < arguments.Length ? arguments[offset++] : new ExpressionValue(new("object", Fields: []), Array.Empty<ExpressionValue>());
         string? locale = null;
         if (offset < arguments.Length)
@@ -36,10 +36,12 @@ internal sealed record FormattingExpression(string Operation, ValueExpression[] 
             if (!language.IsText) return ExpressionValue.Invalid;
             locale = language.ScalarText();
         }
-        if (offset < arguments.Length || format is not ("number" or "currency" or "percent" or "unit") || options.Type.Kind != "object") return ExpressionValue.Invalid;
-        var icu = IcuNumbers.Available;
+        if (offset < arguments.Length || format is not ("number" or "currency" or "percent" or "unit" or "date" or "time" or "dateTime") || options.Type.Kind != "object") return ExpressionValue.Invalid;
+        var icu = IcuFormatters.Available;
         locale ??= CultureInfo.CurrentCulture.Name is { Length: > 0 } culture ? culture : null;
         if (icu is null || locale is not null && !icu.Locale(locale, out locale, !options.Member("numberingSystem").IsAbsent)) return ExpressionValue.Invalid;
+        if (format is "date" or "time" or "dateTime")
+            return DateFormatting.Evaluate(icu, Operation, arguments[0], range ? arguments[1] : null, kind, format, options, locale);
         if (!Number(arguments[0], kind, out var first) || range && !Number(arguments[1], kind, out _)) return ExpressionValue.Invalid;
         double? last = null;
         if (range) { Number(arguments[1], kind, out var end); last = end; }
