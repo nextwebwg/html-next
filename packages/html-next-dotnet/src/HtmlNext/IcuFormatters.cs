@@ -137,7 +137,7 @@ internal sealed partial class IcuFormatters
         var open = Function<OpenNumbering>("unumsys_openByName");
         var close = Function<Close>("unumsys_close");
         var system = open(name, ref status);
-        try { return status <= 0 && system != 0; }
+        try { return status <= 0 && system != 0 && Function<IsAlgorithmic>("unumsys_isAlgorithmic")(system) == 0; }
         finally { if (system != 0) close(system); }
     }
 
@@ -150,8 +150,16 @@ internal sealed partial class IcuFormatters
 
     internal bool Format(string skeleton, string? locale, double number, double? end, bool parts, out ExpressionValue output)
     {
-        output = ExpressionValue.Invalid;
         if (end is not null) return Range(skeleton, locale, number, end.Value, out output);
+        return FormatNumber(skeleton, locale, number, null, parts, out output);
+    }
+
+    internal bool FormatDecimal(string skeleton, string? locale, string number, out ExpressionValue output)
+        => FormatNumber(skeleton, locale, number.StartsWith('-') ? -0.0 : 0, number, true, out output);
+
+    private bool FormatNumber(string skeleton, string? locale, double number, string? exact, bool parts, out ExpressionValue output)
+    {
+        output = ExpressionValue.Invalid;
         var status = 0;
         var formatter = open(skeleton, skeleton.Length, locale, ref status);
         nint result = 0;
@@ -160,7 +168,8 @@ internal sealed partial class IcuFormatters
             if (status > 0 || formatter == 0) return false;
             result = openResult(ref status);
             if (status > 0 || result == 0) return false;
-            format(formatter, number, result, ref status);
+            if (exact is null) format(formatter, number, result, ref status);
+            else Function<FormatDecimalNumber>("unumf_formatDecimal")(formatter, exact, exact.Length, result, ref status);
             if (status > 0) return false;
             var value = asValue(result, ref status);
             if (status > 0 || value == 0) return false;
@@ -249,9 +258,11 @@ internal sealed partial class IcuFormatters
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int KeywordValue([MarshalAs(UnmanagedType.LPUTF8Str)] string locale, [MarshalAs(UnmanagedType.LPUTF8Str)] string keyword, nint buffer, int capacity, ref int status);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int SetKeyword([MarshalAs(UnmanagedType.LPUTF8Str)] string keyword, [MarshalAs(UnmanagedType.LPUTF8Str)] string? value, nint buffer, int capacity, ref int status);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nint OpenNumbering([MarshalAs(UnmanagedType.LPUTF8Str)] string name, ref int status);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate byte IsAlgorithmic(nint system);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nint OpenFormatter([MarshalAs(UnmanagedType.LPWStr)] string skeleton, int length, [MarshalAs(UnmanagedType.LPUTF8Str)] string? locale, ref int status);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nint OpenResult(ref int status);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FormatDouble(nint formatter, double value, nint result, ref int status);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FormatDecimalNumber(nint formatter, [MarshalAs(UnmanagedType.LPUTF8Str)] string value, int length, nint result, ref int status);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nint AsValue(nint result, ref int status);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void Close(nint value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nint ValueText(nint value, out int length, ref int status);
