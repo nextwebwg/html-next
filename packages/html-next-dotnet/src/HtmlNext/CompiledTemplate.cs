@@ -275,7 +275,7 @@ public sealed partial class CompiledTemplate
                 }
                 raw = input;
                 present = !input.IsAbsent;
-                if (inputReady is not null) inputReady[index] = present && available;
+                if (inputReady is not null) inputReady[index] = available && (present || prop.HasDefault);
                 inputSource = "value";
                 try
                 {

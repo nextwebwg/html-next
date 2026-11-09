@@ -38,6 +38,9 @@ const acceptedSource = '<template component="x-column"><defs><prop name="header"
  + '<template component="x-page"><defs><prop name="headers" type="list(string)" default="[\'One\', \'Two\']">Headers.</prop></defs><main><x-list><x-column $each="header of $headers" $key="$header" from:header="$header"><input slot="cell" value="Original"></x-column></x-list></main></template>';
 const preparedSource = '<template component="x-prepared" module="./producer.js"><defs><prop name="count" type="integer" default="2">Count.</prop><prop name="filters" type="list(string)" default="[]">Filters.</prop><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><section><ul><li $each="row of $rows" $key="$row"><input value="Original"><b>{$row}</b></li></ul><output>{$draft.length}</output></section></template>';
 const applicationSource = '<template component="x-application"><defs><prop name="title" type="string">Title.</prop></defs><main id="application"><x-card from:title="$title"></x-card></main></template>';
+const memberApplicationSource = '<template component="x-application"><defs><prop name="data" type="object" open>Data.</prop></defs><main id="application"><x-card from:title="$data.title"></x-card></main></template>';
+const applicationInputs = [{ name: "provided input", missing: false, initial: "Application title" },
+  { name: "missing object member", missing: true, initial: "Default" }];
 
 describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance adoption", () => {
   let directory: string;
@@ -92,8 +95,9 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     return (await execute("dotnet", [join(host, "bin/Release/net10.0/HtmlNext.FixtureHost.dll"), request])).stdout;
   }
 
-  async function application(): Promise<string> {
-    return nativeRender({ source: source + acceptedSource + waitingSource, manifest, application: applicationSource, inputs: { title: "Application title" } });
+  async function application(missing = false): Promise<string> {
+    return nativeRender({ source: source + acceptedSource + waitingSource, manifest,
+      application: missing ? memberApplicationSource : applicationSource, inputs: missing ? { data: {} } : { title: "Application title" } });
   }
 
   async function prepared(): Promise<string> {
@@ -101,21 +105,22 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
   }
 
-  it("adopts library components rendered by a server-owned application carrier", async () => {
-    const { window } = new JSDOM(await application(), { runScripts: "dangerously" });
+  it.each(applicationInputs)("adopts library components rendered by a server-owned application carrier ($name)", async ({ missing, initial }) => {
+    const { window } = new JSDOM(await application(missing), { runScripts: "dangerously" });
     try {
       const root = window.document.querySelector("article")!;
       const input = root.querySelector("input")!;
+      assert.equal(root.querySelector("output")?.textContent, initial);
       input.value = "Early application edit";
       window.eval(bundle);
       const client = Reflect.get(window, "NativeClient");
       client.hydrate();
       assert.equal(window.document.querySelector("article"), root);
-      assert.equal(root.querySelector("b")?.textContent, "Application title");
+      assert.equal(root.querySelector("b")?.textContent, initial);
       client.componentRegistry.update(root, { title: "Updated title" });
       await new Promise(resolve => window.setTimeout(resolve, 0));
       assert.equal(root.querySelector("b")?.textContent, "Updated title");
-      assert.equal(root.querySelector("output")?.textContent, "Application title");
+      assert.equal(root.querySelector("output")?.textContent, initial);
       assert.equal(root.querySelector("input"), input);
       assert.equal(input.value, "Early application edit");
     } finally { window.close(); }
@@ -461,21 +466,22 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
-    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts components from a retained application library`, async () => {
-      const html = await application();
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1").each(applicationInputs)(`${name} adopts components from a retained application library ($name)`, async ({ missing, initial }) => {
+      const html = await application(missing);
       const browser = await launchParityBrowser(engine);
       try {
         const page = await browser.newPage();
         const errors: string[] = [];
         page.on("pageerror", error => errors.push(error.message));
         await page.setContent(html);
+        assert.equal(await page.locator("output").textContent(), initial);
         await page.evaluate(() => { Object.assign(window, { applicationRoot: document.querySelector("article"), applicationInput: document.querySelector("input") }); });
         await page.locator("input").fill("Early application edit");
         await page.addScriptTag({ content: bundle });
         await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
         await page.evaluate(() => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("article"), { title: "Updated title" }));
         await page.waitForFunction(() => document.querySelector("b")?.textContent === "Updated title");
-        assert.equal(await page.locator("output").textContent(), "Application title");
+        assert.equal(await page.locator("output").textContent(), initial);
         assert.equal(await page.locator("input").inputValue(), "Early application edit");
         assert.equal(await page.evaluate(() => document.querySelector("article") === Reflect.get(window, "applicationRoot") && document.querySelector("input") === Reflect.get(window, "applicationInput")), true);
         assert.deepEqual(errors, []);

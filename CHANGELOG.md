@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Keep a receiving native prop's default available when a binding reads a missing member of an available object. Preserve waiting upstream inputs and seed dependent state before rendering and browser adoption.
+
 - Compile server-owned application carriers against a retained native component graph. Reuse typed component and slot contracts, compiled plans, matching assets and client selection across independent application compilations.
 
 - Render keyed native styles in authored order with whole-style writes, invocation forwarding and consumed style props. Preserve shorthand priorities, empty custom properties and invalid-write retention; update Node's DOM implementation to preserve those values during server rendering and adoption.

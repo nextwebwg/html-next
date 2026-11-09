@@ -332,6 +332,33 @@ describe("Node component rendering", () => {
     await assert.rejects(renderComponents('<div id="plain"></div>', { definitions: [definition], props: { "#plain": { label: "No" } } }), /does not identify a component/);
     await assert.rejects(renderComponents('<x-initial-props id="wrong"></x-initial-props>', { definitions: [definition], props: { "#wrong": { unknown: true } } }), /declares no prop/);
   });
+  it("keeps receiving defaults ready when an available object has no bound member", async () => {
+    const definitions = [parseComponent(`<template component="x-default-child"><defs>
+      <prop name="title" type="string" default="Fallback">Title.</prop>
+      <state name="draft" type="string" from="$title"></state>
+      <computed name="blank" from="$title = ''"></computed>
+      </defs><article from:aria-hidden="$blank"><output>{$draft}</output></article></template>`),
+    parseComponent(`<template component="x-default-parent"><defs><prop name="data" type="object" open>Data.</prop></defs>
+      <main><x-default-child from:title="$data.title"></x-default-child></main></template>`)];
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [data, expected] of [[{}, "Fallback"], [{ title: null }, "Fallback"],
+        [{ title: "" }, ""], [{ title: "Provided" }, "Provided"]] as const) {
+        const { html } = await renderer.render('<x-default-parent></x-default-parent>', {
+          definitions, props: { "x-default-parent": { data } },
+        });
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("article")!;
+          assert.equal(root.querySelector("output")!.textContent, expected);
+          assert.equal(root.getAttribute("aria-hidden"), String(expected.length === 0));
+          const record = renderedInstanceRecord(root, "x-default-child")!;
+          assert.deepEqual(record.initialized, ["draft"]);
+          assert.equal(record.availability?.title?.ready ?? true, true);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
   it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: '&lt;b&gt;Ada&lt;/b&gt;' }]"></state>

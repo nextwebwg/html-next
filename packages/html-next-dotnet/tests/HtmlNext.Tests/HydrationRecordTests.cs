@@ -77,6 +77,41 @@ public sealed class HydrationRecordTests
         }
     }
 
+    [Theory]
+    [InlineData("missing", "Fallback")]
+    [InlineData("null", "Fallback")]
+    [InlineData("empty", "")]
+    [InlineData("value", "Provided")]
+    public void AnAvailableMemberBindingKeepsTheReceivingDefaultReady(string input, string expected)
+    {
+        var source = """
+            <template component="x-card"><defs>
+            <prop name="title" type="string" default="Fallback">Title.</prop>
+            <state name="draft" type="string" from="$title"></state>
+            <computed name="blank" from="$title = ''"></computed>
+            </defs><article from:aria-hidden="$blank"><output>{$draft}</output></article></template>
+            <template component="x-static"><defs><prop name="data" type="object" open>Data.</prop></defs>
+            <main><x-card from:title="$data.title"></x-card></main></template>
+            """;
+        var data = new Dictionary<string, object?>();
+        if (input != "missing") data.Add("title", input switch { "null" => null, "empty" => "", _ => "Provided" });
+        var template = Graph(source).Template("x-static");
+        var inputs = new { data };
+        var inertRoot = new HtmlParser().ParseDocument(template.Render(inputs)).QuerySelector("article")!;
+        Assert.Equal(expected, inertRoot.QuerySelector("output")!.TextContent);
+        Assert.Equal(expected.Length == 0 ? "true" : "false", inertRoot.GetAttribute("aria-hidden"));
+        var html = template.Render(inputs, options: new() { Interactive = true });
+        using var writer = new StringWriter();
+        template.Write(writer, inputs, options: new() { Interactive = true });
+        Assert.Equal(html, writer.ToString());
+        var root = new HtmlParser().ParseDocument(html).QuerySelector("article")!;
+        var record = Records(root.OuterHtml).GetProperty("x-card");
+        Assert.Equal(expected, root.QuerySelector("output")!.TextContent);
+        Assert.Equal(new[] { "draft" }, record.GetProperty("initialized").EnumerateArray().Select(item => item.GetString()));
+        Assert.False(record.TryGetProperty("availability", out _));
+        Assert.Equal(expected, record.GetProperty("props").GetProperty("title").GetString());
+    }
+
     [Fact]
     public void ARefusedBindingKeepsItsValidLiteralFallbackAvailable()
     {
