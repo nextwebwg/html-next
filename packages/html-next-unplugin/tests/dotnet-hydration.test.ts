@@ -25,7 +25,8 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + '<template component="x-selected"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop><prop name="mode" type="keyword" values="text, number" required>Mode.</prop></defs><output>{$value}:{$value = 3}</output></template>'
   + '<template component="x-selected-default"><defs><type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value" default="3">Value.</prop><prop name="mode" type="keyword" values="text, number" default="number">Mode.</prop></defs><output>{$value}:{$value = 3}</output><style>:host([value]){color:red}</style></template>'
   + '<template component="x-native-select"><defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs><select from:disabled="$disabled"><option value="a">A</option><option value="b" selected>B</option></select></template>'
-  + "<template component=\"x-formatted-date\"><defs><prop name=\"date\" type=\"date\">Date.</prop><prop name=\"clock\" type=\"time\">Clock.</prop><prop name=\"instant\" type=\"datetime\">Instant.</prop></defs><article><output class=\"date\">{format($date, 'date', { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-US')}</output><output class=\"clock\">{format($clock, 'time', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}</output><output class=\"instant\">{format($instant, 'dateTime', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-US')}</output></article></template>";
+  + "<template component=\"x-formatted-date\"><defs><prop name=\"date\" type=\"date\">Date.</prop><prop name=\"clock\" type=\"time\">Clock.</prop><prop name=\"instant\" type=\"datetime\">Instant.</prop></defs><article><output class=\"date\">{format($date, 'date', { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-US')}</output><output class=\"clock\">{format($clock, 'time', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}</output><output class=\"instant\">{format($instant, 'dateTime', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-US')}</output></article></template>"
+  + "<template component=\"x-formatted-message\"><defs><prop name=\"names\" type=\"list(string)\">Names.</prop><prop name=\"offset\" type=\"number\">Offset.</prop></defs><article><output class=\"names\">{format($names, {}, 'en-US')}</output><output class=\"relative\">{format($offset, 'relativeTime', { unit: 'day', numeric: 'auto' }, 'en-US')}</output></article></template>";
 const waitingSource = '<template component="x-wait"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><input value="Original"><b>{$rows.length}</b><output>{$draft.length}</output></article></template>'
   + '<template component="x-wait-shell"><defs><prop name="rows" type="list(string)">Rows.</prop></defs><main><x-wait from:rows="$rows"></x-wait></main></template>'
   + '<template component="x-wait-literal"><defs><state name="raw" value="wrong"></state></defs><main><x-wait rows="[&quot;Literal&quot;]" from:rows="$raw"></x-wait></main></template>';
@@ -62,7 +63,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -87,6 +88,24 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     const source = (preparedManifest as { server: { preparedModules: { tag: string; source: string }[] } }).server.preparedModules.find(item => item.tag === "x-prepared")!.source;
     return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
   }
+
+  it("adopts formatted lists and relative offsets without replacing their output nodes", async () => {
+    const { window } = new JSDOM(await render("x-formatted-message", { names: ["Alice", "Bob"], offset: -1 }), { runScripts: "dangerously" });
+    try {
+      const root = window.document.querySelector("article")!;
+      const outputs = [...root.querySelectorAll("output")];
+      assert.deepEqual(outputs.map(output => output.textContent), ["Alice and Bob", "yesterday"]);
+      window.eval(bundle);
+      const client = Reflect.get(window, "NativeClient");
+      client.hydrate();
+      assert.equal(window.document.querySelector("article"), root);
+      assert.ok(outputs.every((output, index) => root.querySelectorAll("output")[index] === output));
+      assert.deepEqual(outputs.map(output => output.textContent), ["Alice and Bob", "yesterday"]);
+      client.componentRegistry.update(root, { names: ["Alice", "Bob", "Carol"], offset: 3 });
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.deepEqual(outputs.map(output => output.textContent), ["Alice, Bob, and Carol", "in 3 days"]);
+    } finally { window.close(); }
+  });
 
   it("carries typed date strings into browser adoption and subsequent formatting", async () => {
     const { window } = new JSDOM(await render("x-formatted-date", { date: "2024-02-29", clock: "12:34", instant: "2024-02-29T12:34:56Z" }), { runScripts: "dangerously" });
@@ -468,7 +487,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     });
 
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native records, ranges, shared roots and carried slots`, async () => {
-      const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main><main id="selected-default">${await render("x-selected-default", { mode: "text" })}</main><main id="formatted-date">${await render("x-formatted-date", { date: "2024-02-29", clock: "12:34", instant: "2024-02-29T12:34:56Z" })}</main>`;
+      const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main><main id="selected-default">${await render("x-selected-default", { mode: "text" })}</main><main id="formatted-date">${await render("x-formatted-date", { date: "2024-02-29", clock: "12:34", instant: "2024-02-29T12:34:56Z" })}</main><main id="formatted-message">${await render("x-formatted-message", { names: ["Alice", "Bob"], offset: -1 })}</main>`;
       const browser = await launchParityBrowser(engine);
       try {
         const page = await browser.newPage();
@@ -490,6 +509,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
           && Reflect.get(window, "nativeInputs").every((input: HTMLInputElement, index: number) => document.querySelectorAll("input")[index] === input && input.value === `Early ${index}`)), true);
         assert.equal(await page.locator("#card b").textContent(), "Default");
         assert.deepEqual(await page.locator("#formatted-date output").allTextContents(), ["02/29/2024", "12:34", "02/29/2024"]);
+        assert.deepEqual(await page.locator("#formatted-message output").allTextContents(), ["Alice and Bob", "yesterday"]);
         assert.equal(await page.locator("#selected output").textContent(), "3:true");
         assert.equal(await page.locator("#unselected output").textContent(), ":false");
         assert.equal(await page.locator("#selected-default output").textContent(), ":");
@@ -504,10 +524,12 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
           registry.update(document.querySelector("#unselected output"), { mode: "number", value: 3 });
           registry.update(document.querySelector("#selected-default output"), { mode: "number" });
           registry.update(document.querySelector("#formatted-date article"), { date: "2025-01-02", clock: "09:07", instant: "2025-01-02T03:04:05Z" });
+          registry.update(document.querySelector("#formatted-message article"), { names: ["Alice", "Bob", "Carol"], offset: 3 });
         });
         await page.waitForFunction(() => document.querySelector("#flow aside output")?.textContent === "2" && document.querySelector("#project section input") !== null);
         assert.equal(await page.locator("#card b").textContent(), "Client");
         assert.deepEqual(await page.locator("#formatted-date output").allTextContents(), ["01/02/2025", "09:07", "01/02/2025"]);
+        assert.deepEqual(await page.locator("#formatted-message output").allTextContents(), ["Alice, Bob, and Carol", "in 3 days"]);
         assert.equal(await page.locator("#card output").textContent(), "Default");
         assert.deepEqual(await page.locator("#flow li input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value)), ["Early 3", "Early 2", "Row"]);
         assert.equal(await page.locator("#shell b").textContent(), "Changed");

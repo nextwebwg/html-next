@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Format native string lists and relative offsets through ICU, including locale list styles, named relative phrases and structured parts with normalized units. Keep adjacent list elements separate when the locale uses no separator.
+
 - Bind native date and time prop types and format civil values and instants through ICU. Preserve locale-specific fields, styles, calendars, hour cycles, time zones, parts and historical ranges, and carry typed strings through browser adoption.
 
 - Render native numeric `format`, `formatParts` and `formatRange` expressions through ICU, including currency, percentages, units, precision, signs and notation. Use the current request culture when the locale is omitted, and require selected types to agree before inferring a formatter.

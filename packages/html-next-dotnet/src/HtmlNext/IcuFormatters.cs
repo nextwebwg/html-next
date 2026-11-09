@@ -11,7 +11,7 @@ internal sealed partial class IcuFormatters
     private static readonly Lazy<IcuFormatters?> Current = new(Load);
     internal static IcuFormatters? Available => Current.Value;
     internal static readonly ValueType PartType = new("object", Fields:
-        [new("type", ExpressionValue.StringType), new("value", ExpressionValue.StringType)]);
+        [new("type", ExpressionValue.StringType), new("value", ExpressionValue.StringType), new("unit", ExpressionValue.StringType, Optional: true)]);
     internal static readonly ValueType PartsType = new("list", PartType);
     private readonly nint library;
     private readonly string suffix;
@@ -175,9 +175,9 @@ internal sealed partial class IcuFormatters
 
     private ExpressionValue Parts(nint value, double number, string written, bool unit, ref int status)
     {
+        var regions = new List<(int Field, int Start, int End)>();
         var position = openPosition(ref status);
         if (status > 0 || position == 0) { if (position != 0) closePosition(position); return ExpressionValue.Invalid; }
-        var regions = new List<(int Field, int Start, int End)>();
         try
         {
             while (nextPosition(value, position, ref status) != 0)
