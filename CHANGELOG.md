@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Render keyed native styles in authored order with whole-style writes, invocation forwarding and consumed style props. Preserve shorthand priorities, empty custom properties and invalid-write retention; update Node's DOM implementation to preserve those values during server rendering and adoption.
+
 - Format native duration records and CSS durations with ICU unit labels, digital groups and structured parts. Preserve fractional precision, single-sign output and native bidirectional isolation during browser adoption.
 
 - Render native display names and precision-aware plural messages through ICU. Respect missing-name fallbacks, normalize language identifiers, substitute every message marker as text and preserve output nodes during browser adoption.

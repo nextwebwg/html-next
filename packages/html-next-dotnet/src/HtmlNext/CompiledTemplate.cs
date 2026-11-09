@@ -231,10 +231,12 @@ public sealed partial class CompiledTemplate
         var inputReady = PrepareInputReadiness(values, cancellation, onDiagnostic);
         var marker = -1;
         var classModifiers = false;
+        var styleModifiers = false;
         if (attributes is not null) for (var index = 0; index < attributes.Length; index++)
         {
             if (attributes[index] is null) marker = index;
             else if (attributes[index]!.Target == "class") classModifiers = true;
+            else if (attributes[index]!.Target == "style") styleModifiers = true;
         }
         for (var position = 0; position < props.Length; position++)
         {
@@ -250,6 +252,8 @@ public sealed partial class CompiledTemplate
                 (inherited.Read(prop.AttributeName, out inheritedText) || inherited.Read(prop.Name, out inheritedText));
             if (classModifiers && InvocationAttributeFrame.Matches("class", prop))
                 forwarded = InvocationAttributeFrame.Read(attributes!, parent, inherited, "class", out inheritedText);
+            if (styleModifiers && InvocationAttributeFrame.Matches("style", prop))
+                forwarded = InvocationAttributeFrame.Read(attributes!, parent, inherited, "style", out inheritedText);
             if (forwarded) argument = null;
             if (caller is not null) caller[index] = forwarded || argument is not null;
             if (inputReady is not null) inputReady[index] = forwarded || argument is not null || prop.HasDefault;

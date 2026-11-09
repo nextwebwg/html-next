@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
+import { JSDOM } from "jsdom";
 import { parseComponentResource } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
 import { visibleComponentHtml } from "./server-visible-html.js";
@@ -10,6 +11,19 @@ const fixtures = JSON.parse(await readFile(new URL("../../html-next-dotnet/tests
 }[];
 
 describe("explicit attribute forwarding in native and Node rendering", () => {
+  it("preserves empty custom properties and rejects declaration injection during keyed style writes", async () => {
+    const source = `<template component="x-page"><main style="--empty: ; --count: 1; color: red" style:--count="3" style:--unsafe="'1; color: blue'">Styled</main></template>`;
+    const { html } = await renderComponents("<x-page></x-page>", { definitions: parseComponentResource(source, "keyed-styles.html").definitions });
+    const { window } = new JSDOM(html);
+    try {
+      const style = window.document.querySelector("main")!.style;
+      assert.ok(Array.from(style).includes("--empty"));
+      assert.equal(style.getPropertyValue("--count"), "3");
+      assert.equal(style.getPropertyValue("--unsafe"), "");
+      assert.equal(style.color, "red");
+    } finally { window.close(); }
+  });
+
   it.each(fixtures)("renders $name", async ({ name, source, expected }) => {
     const definitions = parseComponentResource(source, name + ".html").definitions;
     const { html } = await renderComponents("<x-page></x-page>", { definitions });

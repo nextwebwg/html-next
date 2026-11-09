@@ -521,7 +521,7 @@ public static partial class HtmlNextCompiler
             if (!fragment) Add(operations, "<" + element.LocalName);
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
-            if (element.HasAttribute("$attributes") || !fragment && ImplicitForwarding(element))
+            if (element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
             {
                 if (element.HasAttribute("$attributes") && (fragment || element.GetAttribute("$attributes") != "")) throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
                 operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes));
@@ -785,6 +785,14 @@ public static partial class HtmlNextCompiler
 
         private static bool IsStateAttribute(string name) => name.StartsWith("data-", StringComparison.Ordinal) && name.EndsWith("-state", StringComparison.Ordinal);
 
+        private string StyleProperty(string name)
+        {
+            var property = name[6..];
+            if (!Regex.IsMatch(property, @"\A(?:--[a-z0-9_-]+|[a-z][a-z0-9-]*)\z", RegexOptions.CultureInvariant))
+                throw ValueType.Error(source, "A style binding requires one CSS property name.");
+            return property;
+        }
+
         private string AttributeName(IElement element, string name)
         {
             try { System.Xml.XmlConvert.VerifyName(name); }
@@ -832,6 +840,11 @@ public static partial class HtmlNextCompiler
                     if (token.Length == 0 || token.Any(character => character is ' ' or '\t' or '\n' or '\r' or '\f')) throw ValueType.Error(source, "A class binding requires one nonempty class token.");
                     result.Add(new(token, null, Expression(attribute.Value, scope), source, "class")); continue;
                 }
+                if (name.StartsWith("style:", StringComparison.Ordinal))
+                {
+                    var property = StyleProperty(name);
+                    result.Add(new(property, null, Expression(attribute.Value, scope), source, "style")); continue;
+                }
                 var dynamic = name.StartsWith("from:", StringComparison.Ordinal);
                 if (!dynamic && (name == "srcdoc" || BoundAttributeRules.IsUrl(name) && BoundAttribute.ExecutableUrl(attribute.Value)))
                     throw ValueType.Error(source, $"Literal attribute '{name}' contains executable content.");
@@ -868,6 +881,12 @@ public static partial class HtmlNextCompiler
                     var token = attribute.Name[6..];
                     if (token.Length == 0 || token.Any(character => character is ' ' or '\t' or '\n' or '\r' or '\f')) throw ValueType.Error(source, "A class binding requires one nonempty class token.");
                     forwarded.Add(attribute.Name, new(token, null, Expression(attribute.Value, scope), source, "class"));
+                    continue;
+                }
+                if (attribute.Name.StartsWith("style:", StringComparison.Ordinal))
+                {
+                    var property = StyleProperty(attribute.Name);
+                    forwarded.Add(attribute.Name, new(property, null, Expression(attribute.Value, scope), source, "style"));
                     continue;
                 }
                 var dynamic = attribute.Name.StartsWith("from:", StringComparison.Ordinal);
@@ -908,7 +927,7 @@ public static partial class HtmlNextCompiler
                 else propAttributes.Add(index, new Literal(fallbacks[index]));
             var deferred = new List<RenderOperation>();
             var implicitForwarding = ImplicitForwarding(element);
-            var deferredOrdered = implicitForwarding || element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target == "class") ? new List<InvocationAttribute?>() : null;
+            var deferredOrdered = implicitForwarding || element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target is not null) ? new List<InvocationAttribute?>() : null;
             var attributes = new List<InvocationAttribute?>();
             if (implicitForwarding) { attributes.Add(null); deferredOrdered!.Add(null); }
             var writtenProps = new HashSet<int>();
@@ -918,7 +937,7 @@ public static partial class HtmlNextCompiler
                 if (attribute.Name == "$attributes") { attributes.Add(null); deferredOrdered?.Add(null); continue; }
                 var name = attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
-                if (!attribute.Name.StartsWith("from:", StringComparison.Ordinal) && !attribute.Name.StartsWith("class:", StringComparison.Ordinal) && (index >= 0 ? bound.Contains(index) : forwarded.GetValueOrDefault(name)?.Expression is not null)) continue;
+                if (!attribute.Name.StartsWith("from:", StringComparison.Ordinal) && !attribute.Name.StartsWith("class:", StringComparison.Ordinal) && !attribute.Name.StartsWith("style:", StringComparison.Ordinal) && (index >= 0 ? bound.Contains(index) : forwarded.GetValueOrDefault(name)?.Expression is not null)) continue;
                 if (index >= 0 && writtenProps.Add(index))
                 {
                     deferred.Add(propAttributes[index]);

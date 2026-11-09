@@ -31,8 +31,16 @@
       },
       "AngleSharp": {
         "type": "Transitive",
-        "resolved": "1.9.1",
-        "contentHash": "QgOLaoPvDofo66KBOHlI9WLH+L/3xGDDd1joM4CrsFsxm0knRu/6ZoiWU0DUOhBZzSCa13zYKAeVPS/CxnF12Q=="
+        "resolved": "1.10.0",
+        "contentHash": "jibGB16fKOT+p0T7/eMzsiHj/V43QXg/wGQot4VWHF3zEdH+RGco8rHFNeAbf526CrSOkA8WwILz3DDus+cUUA=="
+      },
+      "AngleSharp.Css": {
+        "type": "Transitive",
+        "resolved": "1.4.1",
+        "contentHash": "ZQ8g7jNFeTMSucR7GcqtXH2bzYAI4E2r6TM8kqnb61Yv3ROfbDc1lQG2+p5oCVBe2gQQxSHuJl499R1mmko0wA==",
+        "dependencies": {
+          "AngleSharp": "[1.10.0, 2.0.0)"
+        }
       },
       "Microsoft.CodeCoverage": {
         "type": "Transitive",
@@ -95,7 +103,8 @@
       "htmlnext": {
         "type": "Project",
         "dependencies": {
-          "AngleSharp": "[1.9.1, )"
+          "AngleSharp": "[1.10.0, )",
+          "AngleSharp.Css": "[1.4.1, )"
         }
       }
     }

@@ -17,6 +17,17 @@ internal sealed record InvocationAttribute(string Name, string? Literal, ValueEx
         if (Expression is null && Prop is null) return true;
         var value = Prop?.Read(values) ?? Expression!.Evaluate(values);
         if (Target == "class") { if (value.IsInvalid) return false; text = value.Truthy ? "true" : "false"; return true; }
+        if (Target == "style")
+        {
+            if (value.IsInvalid) return false;
+            if (value.IsNull || value.IsAbsent || value.Type.Kind == "object") { text = ""; return true; }
+            var styleCounter = HtmlWriter.Counter(); BoundAttribute.RawText(ref styleCounter, value, Source);
+            text = string.Create(styleCounter.Length, (Value: value, Source), static (span, state) =>
+            {
+                var writer = new HtmlWriter(span); BoundAttribute.RawText(ref writer, state.Value, state.Source);
+            });
+            return true;
+        }
         if (!BoundAttribute.ValidText(value, Source)) return Literal is not null;
         if (!BoundAttribute.Present(value, kind, Source) || kind == BoundAttributeKind.Url && BoundAttribute.ExecutableUrl(value, Source)) { text = null; return true; }
         if (value.Type.Kind == "boolean" && kind != BoundAttributeKind.EnumeratedBoolean) { text = ""; return true; }
@@ -66,6 +77,12 @@ internal sealed class InvocationAttributeFrame(InvocationAttribute?[] attributes
             var next = Toggle(previous, attribute.Name, text == "true");
             if (!ReferenceEquals(previous, next)) output["class"] = next;
         }
+        else if (attribute.Target == "style")
+        {
+            var previous = output.GetValueOrDefault("style");
+            var next = InlineStyle.Write(previous, attribute.Name, text ?? "");
+            if (!ReferenceEquals(previous, next)) output["style"] = next;
+        }
         else output[attribute.Name] = text;
     }
 
@@ -96,6 +113,11 @@ internal sealed class InvocationAttributeFrame(InvocationAttribute?[] attributes
             else if (attribute.Target == "class" && HtmlNextCompiler.AsciiEquals(name, "class") && attribute.TryRead(caller, out var enabled))
             {
                 var next = Toggle(text, attribute.Name, enabled == "true");
+                if (!ReferenceEquals(text, next)) { text = next; found = true; }
+            }
+            else if (attribute.Target == "style" && HtmlNextCompiler.AsciiEquals(name, "style") && attribute.TryRead(caller, out var value))
+            {
+                var next = InlineStyle.Write(text, attribute.Name, value ?? "");
                 if (!ReferenceEquals(text, next)) { text = next; found = true; }
             }
             else if (attribute.Target is null && HtmlNextCompiler.AsciiEquals(attribute.Name, name) && attribute.TryRead(caller, out var own)) { text = own; found = true; }

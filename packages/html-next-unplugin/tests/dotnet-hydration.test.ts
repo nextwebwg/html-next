@@ -28,7 +28,8 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + "<template component=\"x-formatted-date\"><defs><prop name=\"date\" type=\"date\">Date.</prop><prop name=\"clock\" type=\"time\">Clock.</prop><prop name=\"instant\" type=\"datetime\">Instant.</prop></defs><article><output class=\"date\">{format($date, 'date', { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-US')}</output><output class=\"clock\">{format($clock, 'time', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}</output><output class=\"instant\">{format($instant, 'dateTime', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-US')}</output></article></template>"
   + "<template component=\"x-formatted-message\"><defs><prop name=\"names\" type=\"list(string)\">Names.</prop><prop name=\"offset\" type=\"number\">Offset.</prop></defs><article><output class=\"names\">{format($names, {}, 'en-US')}</output><output class=\"relative\">{format($offset, 'relativeTime', { unit: 'day', numeric: 'auto' }, 'en-US')}</output></article></template>"
   + "<template component=\"x-formatted-name-plural\"><defs><prop name=\"region\" type=\"string\">Region.</prop><prop name=\"count\" type=\"number\">Count.</prop></defs><article><output class=\"region\">{format($region, 'displayName', { type: 'region' }, 'en-US')}</output><output class=\"plural\">{format($count, 'plural', { forms: { one: '# item', other: '# items' } }, 'en-US')}</output></article></template>"
-  + "<template component=\"x-formatted-duration\"><defs><prop name=\"elapsed\" type=\"duration\">Elapsed.</prop><prop name=\"seconds\" type=\"number\">Seconds.</prop></defs><article><output class=\"elapsed\">{format($elapsed, { style: \"digital\" }, \"en-US\")}</output><output class=\"record\">{format({ seconds: $seconds }, \"duration\", { style: \"digital\" }, \"en-US\")}</output></article></template>";
+  + "<template component=\"x-formatted-duration\"><defs><prop name=\"elapsed\" type=\"duration\">Elapsed.</prop><prop name=\"seconds\" type=\"number\">Seconds.</prop></defs><article><output class=\"elapsed\">{format($elapsed, { style: \"digital\" }, \"en-US\")}</output><output class=\"record\">{format({ seconds: $seconds }, \"duration\", { style: \"digital\" }, \"en-US\")}</output></article></template>"
+  + "<template component=\"x-native-styles\"><defs><prop name=\"count\" type=\"number\">Count.</prop><prop name=\"width\" type=\"length\">Width.</prop><prop name=\"whole\" type=\"string\">Whole style.</prop></defs><article style=\"margin: 1px 2px !important; --empty: \" style:margin-left=\"$width\" style:--count=\"$count\"><output>{$count}</output><b from:style=\"$whole\" style:--count=\"$count\">Whole</b></article></template>";
 const waitingSource = '<template component="x-wait"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><input value="Original"><b>{$rows.length}</b><output>{$draft.length}</output></article></template>'
   + '<template component="x-wait-shell"><defs><prop name="rows" type="list(string)">Rows.</prop></defs><main><x-wait from:rows="$rows"></x-wait></main></template>'
   + '<template component="x-wait-literal"><defs><state name="raw" value="wrong"></state></defs><main><x-wait rows="[&quot;Literal&quot;]" from:rows="$raw"></x-wait></main></template>';
@@ -65,7 +66,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -90,6 +91,33 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     const source = (preparedManifest as { server: { preparedModules: { tag: string; source: string }[] } }).server.preparedModules.find(item => item.tag === "x-prepared")!.source;
     return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
   }
+
+  it("adopts keyed styles and retains their roots and outputs during updates", async () => {
+    const { window } = new JSDOM(await render("x-native-styles", { count: 3, width: "4px", whole: "--base: 1" }), { runScripts: "dangerously" });
+    try {
+      const root = window.document.querySelector("article")!;
+      const output = root.querySelector("output")!;
+      const whole = root.querySelector("b")!;
+      assert.equal(root.style.getPropertyValue("--count"), "3");
+      assert.equal(root.style.marginLeft, "4px");
+      assert.equal(root.style.getPropertyPriority("margin-left"), "");
+      assert.equal(root.style.getPropertyPriority("margin-top"), "important");
+      assert.ok(Array.from(root.style).includes("--empty"));
+      window.eval(bundle);
+      const client = Reflect.get(window, "NativeClient");
+      client.hydrate();
+      assert.equal(window.document.querySelector("article"), root);
+      assert.equal(root.querySelector("output"), output);
+      assert.equal(root.style.getPropertyValue("--count"), "3");
+      client.componentRegistry.update(root, { count: 5, width: "6px", whole: "--base: 2" });
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.equal(output.textContent, "5");
+      assert.equal(root.style.marginLeft, "6px");
+      assert.equal(root.style.getPropertyValue("--count"), "5");
+      assert.equal(whole.style.getPropertyValue("--base"), "2");
+      assert.equal(whole.style.getPropertyValue("--count"), "5");
+    } finally { window.close(); }
+  });
 
   it("adopts typed and record durations while retaining their output nodes", async () => {
     const { window } = new JSDOM(await render("x-formatted-duration", { elapsed: "1250ms", seconds: 90 }), { runScripts: "dangerously" });
@@ -525,7 +553,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     });
 
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native records, ranges, shared roots and carried slots`, async () => {
-      const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main><main id="selected-default">${await render("x-selected-default", { mode: "text" })}</main><main id="formatted-date">${await render("x-formatted-date", { date: "2024-02-29", clock: "12:34", instant: "2024-02-29T12:34:56Z" })}</main><main id="formatted-message">${await render("x-formatted-message", { names: ["Alice", "Bob"], offset: -1 })}</main><main id="formatted-name-plural">${await render("x-formatted-name-plural", { region: "US", count: 1 })}</main><main id="formatted-duration">${await render("x-formatted-duration", { elapsed: "1250ms", seconds: 90 })}</main>`;
+      const html = `<main id="card">${await render("x-card", { title: null })}</main><main id="flow">${await render("x-flow")}</main><main id="shell">${await render("x-shell", { title: "Shared" })}</main><main id="project">${await render("x-project")}</main><main id="selected">${await render("x-selected", { mode: "number", value: 3 })}</main><main id="unselected">${await render("x-selected", { mode: null, value: 3 })}</main><main id="selected-default">${await render("x-selected-default", { mode: "text" })}</main><main id="formatted-date">${await render("x-formatted-date", { date: "2024-02-29", clock: "12:34", instant: "2024-02-29T12:34:56Z" })}</main><main id="formatted-message">${await render("x-formatted-message", { names: ["Alice", "Bob"], offset: -1 })}</main><main id="formatted-name-plural">${await render("x-formatted-name-plural", { region: "US", count: 1 })}</main><main id="formatted-duration">${await render("x-formatted-duration", { elapsed: "1250ms", seconds: 90 })}</main><main id="native-styles">${await render("x-native-styles", { count: 3, width: "4px", whole: "--base: 1" })}</main>`;
       const browser = await launchParityBrowser(engine);
       try {
         const page = await browser.newPage();
@@ -550,6 +578,10 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
         assert.deepEqual(await page.locator("#formatted-message output").allTextContents(), ["Alice and Bob", "yesterday"]);
         assert.deepEqual(await page.locator("#formatted-name-plural output").allTextContents(), ["United States", "1 item"]);
         assert.deepEqual(await page.locator("#formatted-duration output").allTextContents(), ["0:00:01.25", "0:00:90"]);
+        assert.deepEqual(await page.locator("#native-styles article").evaluate(element => {
+          const style = (element as HTMLElement).style;
+          return [style.getPropertyValue("--count"), style.marginLeft, style.getPropertyPriority("margin-left"), style.getPropertyPriority("margin-top"), Array.from(style).includes("--empty")];
+        }), ["3", "4px", "", "important", true]);
         assert.equal(await page.locator("#selected output").textContent(), "3:true");
         assert.equal(await page.locator("#unselected output").textContent(), ":false");
         assert.equal(await page.locator("#selected-default output").textContent(), ":");
@@ -567,6 +599,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
           registry.update(document.querySelector("#formatted-message article"), { names: ["Alice", "Bob", "Carol"], offset: 3 });
           registry.update(document.querySelector("#formatted-name-plural article"), { region: "CA", count: 2 });
           registry.update(document.querySelector("#formatted-duration article"), { elapsed: "-1.25s", seconds: 3 });
+          registry.update(document.querySelector("#native-styles article"), { count: 5, width: "6px", whole: "--base: 2" });
         });
         await page.waitForFunction(() => document.querySelector("#flow aside output")?.textContent === "2" && document.querySelector("#project section input") !== null);
         assert.equal(await page.locator("#card b").textContent(), "Client");
@@ -574,6 +607,12 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
         assert.deepEqual(await page.locator("#formatted-message output").allTextContents(), ["Alice, Bob, and Carol", "in 3 days"]);
         assert.deepEqual(await page.locator("#formatted-name-plural output").allTextContents(), ["Canada", "2 items"]);
         assert.deepEqual(await page.locator("#formatted-duration output").allTextContents(), ["-0:00:01.25", "0:00:03"]);
+        assert.equal(await page.locator("#native-styles output").textContent(), "5");
+        assert.deepEqual(await page.locator("#native-styles article").evaluate(element => {
+          const style = (element as HTMLElement).style;
+          return [style.getPropertyValue("--count"), style.marginLeft, style.getPropertyPriority("margin-left"), style.getPropertyPriority("margin-top")];
+        }), ["5", "6px", "", "important"]);
+        assert.deepEqual(await page.locator("#native-styles b").evaluate(element => [element.style.getPropertyValue("--base"), element.style.getPropertyValue("--count")]), ["2", "5"]);
         assert.equal(await page.locator("#card output").textContent(), "Default");
         assert.deepEqual(await page.locator("#flow li input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value)), ["Early 3", "Early 2", "Row"]);
         assert.equal(await page.locator("#shell b").textContent(), "Changed");
