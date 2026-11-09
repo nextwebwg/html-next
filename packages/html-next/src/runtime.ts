@@ -2502,11 +2502,13 @@ function bindElementAttributes(
           // A server-rendered root carries its serialized props; they replay when it is adopted.
           if (element.localName !== node.name) return;
         }
-        const target = valueTarget(element, invocation);
-        if (target === undefined) return;
         // A bound control's value is a property write, made each time; native form-control
         // properties carry the live value, so there is no duplicate attribute write.
-        if (attribute.twoWay === true && applyBoundControlValue(target, attribute.name, value)) return;
+        if (attribute.twoWay === true) {
+          const control = rootTarget(element, invocation);
+          if (control !== undefined && applyBoundControlValue(control, attribute.name, value)) return;
+        }
+        const target = valueTarget(element, invocation);
         // Attribute, class and style bindings write only a result that differs from their last.
         const output = attribute.target === "class" ? truthy(value)
           : attribute.target === "style" ? toText(value) : toAttribute(value, attribute.name);

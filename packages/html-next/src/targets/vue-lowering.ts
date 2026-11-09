@@ -840,13 +840,15 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
     source = this.value(node, scope),
   ): string {
     const type = typeOf(node, scope);
-    // An absent list, such as an omitted optional prop, iterates as nothing; anything but a list must too.
-    let code = type.type.kind === "list" ? source : `${this.use("list")}(${source})`;
-    if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
-    if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
-    if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
-    if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
-    return code;
+    return this.#serialized(node, scope, source, (value) => {
+      // Normalize absent inputs after retaining the invalid-result signal for the binding owner.
+      let code = type.type.kind === "list" ? value : `${this.use("list")}(${value})`;
+      if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
+      if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
+      if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
+      if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
+      return code;
+    });
   }
 
   /** Bind an already-shaped list and its item and index once for Vue's iteration. */

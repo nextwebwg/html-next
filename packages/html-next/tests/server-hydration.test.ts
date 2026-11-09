@@ -179,7 +179,16 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
               };
             }
             // Compiled rows are their element; live keeps item markers around each (owner decision 2a).
-            const markup = (box: Element): string => box.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "");
+            const markup = (box: Element): string => {
+              const template = document.createElement("template");
+              template.innerHTML = box.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "");
+              for (const element of template.content.querySelectorAll("*")) {
+                const attributes = Array.from(element.attributes).sort((left, right) => left.name.localeCompare(right.name));
+                for (const attribute of attributes) element.removeAttribute(attribute.name);
+                for (const attribute of attributes) element.setAttribute(attribute.name, attribute.value);
+              }
+              return template.innerHTML;
+            };
             const after = { server: inspect(server), client: inspect(client), html: [markup(server), markup(client)] };
             const namedHosts = root.getAttribute("component")?.split(" ").includes("ssr-delegate") ? {
               distinct: runtime.getComponentHost(root, "ssr-delegate") !== runtime.getComponentHost(root, "ssr-counter"),

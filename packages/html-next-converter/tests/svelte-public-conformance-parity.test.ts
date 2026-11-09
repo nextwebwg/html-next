@@ -29,7 +29,7 @@ const selected = new Set([
   "preserves SVG namespaces and camelCase attributes inside a native root",
   "keeps a single native root when $with scopes the root",
   "lowers to native root with prop :attr, passthrough attrs, and default slot",
-  "lets invocation attributes win over template literals and combines class and style",
+  "applies authored root attributes after default invocation forwarding",
   "serializes booleans on enumerated attributes as true and false",
   "styles by camel-case props and state with :state()",
   "applies a prop default when the invocation omits the prop",

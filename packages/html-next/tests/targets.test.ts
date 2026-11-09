@@ -677,6 +677,24 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.doesNotMatch(vue, /@nextwebwg|attachComponent|manageGeneratedProps/);
   });
 
+  it("retains delegated Vue style ownership in server markup after authored class forwarding", async () => {
+    const child = compileVue(generateVueComponent(parseComponent('<template component="x-leaf"><article class="authored">Leaf</article></template>')), "XLeaf.vue");
+    const parent = compileVue(generateVueComponent(parseComponent('<template component="x-wrap"><defs><state name="vComponentClasses" type="string" value="Caller"></state><state name="applyComponentClasses" type="string" value="Caller"></state></defs><x-leaf></x-leaf><style>:host { color: red; }</style></template>')), "XWrap.vue");
+    const bundle = await build({ stdin: { contents: parent, loader: "ts", resolveDir: packageRoot },
+      bundle: true, write: false, platform: "node", format: "cjs", packages: "external",
+      plugins: [vueHelpers, { name: "delegated-vue-child", setup(bundler) {
+        bundler.onResolve({ filter: /^\.\/XLeaf(?:\.vue)?$/ }, () => ({ path: "XLeaf", namespace: "delegated-vue-child" }));
+        bundler.onLoad({ filter: /.*/, namespace: "delegated-vue-child" }, () => ({ contents: child, loader: "ts", resolveDir: packageRoot }));
+      } }],
+    });
+    const module = { exports: {} as { default: Component } };
+    new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+    const html = await renderToString(createSSRApp(module.exports.default));
+    const root = new JSDOM(html).window.document.querySelector("article")!;
+    assert.equal(root.textContent, "Leaf");
+    assert.deepEqual([...root.classList].sort(), ["authored", "x-leaf", "x-wrap"]);
+  });
+
   it("maps each construct to Vue's own facility, as a Vue author writes it", () => {
     // The styles' ownership attributes are covered with the styles.
     const vue = generated(featureSource).get("vue/XFeature.vue")!.replace(/\s+data-hn(?:-[\w-]+)?(?=[\s>/])/g, "");
@@ -704,7 +722,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /@click="flip"/);
     assert.match(vue, /v-class-bindings="\{ base: 'panel', scope: 'x-feature', bindings: \[\['compact', checkedProps\.size === 'sm'\]\] \}"/);
     assert.match(vue, /:style="\{ '--gap': checkedProps\.size \}"/);
-    assert.match(vue, /<XBadge\s+class="x-badge"\s+:tone="checkedProps\.size"\s*><slot name="badge">none<\/slot><\/XBadge>/);
+    assert.match(vue, /<XBadge\s+:tone="checkedProps\.size"\s+v-component-classes="\['x-badge'\]"\s*><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small\s+v-if="checkedProps\.size === 'sm'"\s*>small<\/small>\s*<span v-else\s*>regular<\/span>/);
     assert.doesNotMatch(vue, /defineExpose|installMethods/);
     assert.match(vue, /useComponentHost\(\(\) => import\('\.\/x-feature\.js'\), \{\n  root,\n  dispatch,/);
@@ -1127,9 +1145,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /<section\s+[^>]*\sdata-hn\s+data-hn-x-feature\s/);
     assert.match(vue, /v-class-bindings="\{ base: 'panel', scope: 'x-feature', bindings: \[\['compact', checkedProps\.size === 'sm'\]\] \}"/);
     assert.match(vue, /<h2 data-hn-x-feature>/);
-    assert.match(vue, /<XBadge\s+class="x-badge"\s/);
+    assert.match(vue, /<XBadge\s+[^>]*v-component-classes="\['x-badge'\]"/);
     assert.doesNotMatch(vue, /<XBadge[^>]*data-hn/);
-    assert.doesNotMatch(vue, /component/);
+    assert.doesNotMatch(vue, /\scomponent[\s=>/]/);
     assert.match(vue, /:data-x-feature-state="hostState \|\| undefined"/);
 
     const vanilla = artifacts.get("vanilla/XFeature.js")!;

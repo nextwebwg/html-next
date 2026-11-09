@@ -9,6 +9,10 @@
 
 ### Changes
 
+- Connect React and Preact controller listeners when a previously detached subtree enters the document, before its first painted interaction.
+- Retain Vue iteration output after invalid expressions and preserve delegated style ownership independently of caller class forwarding, including server markup.
+- Keep native two-way control values separate from logical invocation attributes and authored reset defaults. Preserve those distinctions in Svelte mount, hydration and root switching.
+
 - Keep application tooling in the independent Threadlabs MarkupKit repository. Publish and verify the three HTML Next SDK packages together. Pin catalog qualification to the compatible Looma migration and its three-package test loader.
 
 - Compare text and keywords in lexical UTF-16 order across interpreted, compiled Vanilla and framework expressions, without numeric coercion. Preserve absence, quantity types and invalid-result retention.
