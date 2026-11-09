@@ -388,6 +388,21 @@ describe("Node component rendering", () => {
       }
     } finally { await renderer.close(); }
   });
+  it("preserves an initial textarea newline through the serialized HTML parser boundary", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const property of [false, true]) for (const value of ["\nLeading", "\r\nLeading"]) {
+        const definition = parseComponent(`<template component="x-area"><defs><prop name="value" type="string">Value.</prop></defs><textarea${property ? ' .value="$value"' : ""}>${property ? "Authored" : "{$value}"}</textarea></template>`);
+        const { html } = await renderer.render("<x-area></x-area>", { definitions: [definition], props: { "x-area": { value } } });
+        const dom = new JSDOM(html);
+        try {
+          const area = dom.window.document.querySelector("textarea")!;
+          assert.equal(area.value, "\nLeading");
+          if (property) assert.deepEqual(JSON.parse(area.getAttribute("data-html-next-form-defaults")!), { value: "Authored" });
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
   it("serializes initial value properties with their authored reset defaults", async () => {
     const renderer = createRenderer({ workers: 1 });
     try {

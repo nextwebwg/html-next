@@ -333,15 +333,15 @@ public static partial class HtmlNextCompiler
             else if (text.Length > 0) operations.Add(new Literal(text));
         }
 
-        private void Text(List<RenderOperation> operations, string text, Dictionary<string, (int Slot, ValueType Type)> scope)
+        private void Text(List<RenderOperation> operations, string text, Dictionary<string, (int Slot, ValueType Type)> scope, bool plain = false)
         {
             var start = 0;
             while (start < text.Length)
             {
                 var offset = text.AsSpan(start).IndexOfAny('{', '\\');
-                if (offset < 0) { Add(operations, HtmlOutput.Escape(text[start..], false)); return; }
+                if (offset < 0) { Add(operations, plain ? text[start..] : HtmlOutput.Escape(text[start..], false)); return; }
                 var open = start + offset;
-                Add(operations, HtmlOutput.Escape(text[start..open], false));
+                Add(operations, plain ? text[start..open] : HtmlOutput.Escape(text[start..open], false));
                 if (text[open] == '\\')
                 {
                     if (open + 1 < text.Length && text[open + 1] is '{' or '\\')
@@ -354,7 +354,8 @@ public static partial class HtmlNextCompiler
                 }
                 var close = ExpressionEnd(text, open);
                 if (close < 0) throw ValueType.Error(source, "Unclosed text expression.");
-                operations.Add(TextOperation(Scalar(text[(open + 1)..close], scope)));
+                var expression = Scalar(text[(open + 1)..close], scope);
+                operations.Add(plain ? new PlainExpressionText(expression) : TextOperation(expression));
                 start = close + 1;
             }
         }
@@ -530,15 +531,17 @@ public static partial class HtmlNextCompiler
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
             CheckedInputProperty? checkedProperty = null;
+            var textareaProperty = element is IHtmlTextAreaElement && element.GetAttribute(".value") is { } textareaExpression
+                ? new TextareaValueProperty(slots++, Expression(textareaExpression, scope), source) : null;
             if (element.GetAttribute(".checked") is { } checkedExpression)
             {
                 if (element is not IHtmlInputElement) Unsupported("native property '.checked' on <" + element.LocalName + ">");
                 checkedProperty = new(Expression(checkedExpression, scope));
             }
-            if (checkedProperty is not null || element is IHtmlInputElement && element.HasAttribute(".value") || element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
+            if (checkedProperty is not null || textareaProperty is not null || element is IHtmlInputElement && element.HasAttribute(".value") || element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
             {
                 if (element.HasAttribute("$attributes") && (fragment || element.GetAttribute("$attributes") != "")) throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
-                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes, checkedProperty));
+                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes, checkedProperty, textareaProperty));
             }
             else
             {
@@ -623,7 +626,9 @@ public static partial class HtmlNextCompiler
             if (element.GetAttribute("$value") is { } value)
             {
                 if (Children(element).Any(Significant)) Unsupported("$value with authored children");
-                contents.Add(fragment && projected ? new ProjectionNode([TextOperation(Scalar(value, childrenScope))]) : TextOperation(Scalar(value, childrenScope)));
+                var expression = Scalar(value, childrenScope);
+                contents.Add(textareaProperty is not null ? new PlainExpressionText(expression)
+                    : fragment && projected ? new ProjectionNode([TextOperation(expression)]) : TextOperation(expression));
             }
             else if (element.HasAttribute("$match")) Append(contents, Match(element, childrenScope, fragment && projected));
             else foreach (var child in Children(element))
@@ -631,13 +636,19 @@ public static partial class HtmlNextCompiler
                 if (child is IText text)
                 {
                     if (fragment && projected) contents.Add(ProjectedText(text.Data, childrenScope));
-                    else Text(contents, text.Data, childrenScope);
+                    else Text(contents, text.Data, childrenScope, plain: textareaProperty is not null);
                 }
                 else if (child is IElement nested) Append(contents, Element(nested, childrenScope, projected: fragment && projected));
                 else if (child is IComment comment) Add(contents, "<!--" + comment.Data + "-->");
                 else Unsupported("node");
             }
-            Append(operations, alias is { } binding ? [new ScopedValue(binding.Value, binding.Slot, contents.ToArray())] : contents.ToArray());
+            var contentOperations = alias is { } binding ? [new ScopedValue(binding.Value, binding.Slot, contents.ToArray())] : contents.ToArray();
+            if (textareaProperty is not null)
+            {
+                textareaProperty.SetContents(contentOperations);
+                operations.Add(new TextareaValueContent(textareaProperty));
+            }
+            else Append(operations, contentOperations);
             if (!fragment && (element.NamespaceUri != "http://www.w3.org/1999/xhtml" || !Void.Contains(element.LocalName)))
             {
                 var closing = "</" + element.LocalName + ">";
@@ -853,6 +864,7 @@ public static partial class HtmlNextCompiler
                 {
                     result.Add(new("value", null, Expression(attribute.Value, scope), source, "value-property")); continue;
                 }
+                if (name == ".value" && element is IHtmlTextAreaElement) continue;
                 if (name is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" or "$when" or "$else") continue;
                 if (name.StartsWith("class:", StringComparison.Ordinal))
                 {

@@ -34,6 +34,7 @@ const checkedSource = '<template component="x-native-checked"><defs><prop name="
 const valueTypes = ["text", "password", "search", "tel", "number", "range", "color", "date", "month", "week", "time", "datetime-local", "email", "url", "checkbox", "radio", "hidden", "button", "submit", "reset", "image", "file"];
 const valueSource = '<template component="x-native-value"><defs><prop name="value" type="string" default="17">Value.</prop></defs><form>'
   + valueTypes.map(type => `<input id="value-${type}" type="${type}" value="Authored" min="10" max="20" step="2" .value="${type === "file" ? "''" : "$value"}">`).join("") + '</form></template>';
+const textareaSource = '<template component="x-native-area"><defs><prop name="value" type="string">Value.</prop></defs><form><textarea .value="$value">Authored &amp; Default</textarea><textarea .value="$value"></textarea></form></template>';
 const waitingSource = '<template component="x-wait"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><input value="Original"><b>{$rows.length}</b><output>{$draft.length}</output></article></template>'
   + '<template component="x-wait-shell"><defs><prop name="rows" type="list(string)">Rows.</prop></defs><main><x-wait from:rows="$rows"></x-wait></main></template>'
   + '<template component="x-wait-literal"><defs><state name="raw" value="wrong"></state></defs><main><x-wait rows="[&quot;Literal&quot;]" from:rows="$raw"></x-wait></main></template>';
@@ -56,7 +57,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     directory = await mkdtemp(join(tmpdir(), "html-next-dotnet-hydration-"));
     await execute("dotnet", ["restore", host, "--locked-mode"], { timeout: 60_000 });
     await execute("dotnet", ["build", host, "-c", "Release", "--nologo", "--no-restore"], { timeout: 60_000 });
-    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource + checkedSource + valueSource);
+    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource + checkedSource + valueSource + textareaSource);
     await writeFile(join(directory, "prepared.html"), preparedSource);
     await writeFile(join(directory, "producer.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
       const instances = new WeakMap();
@@ -74,7 +75,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked", "x-native-value"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked", "x-native-value", "x-native-area"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -89,7 +90,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }, 60_000);
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
-  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource + checkedSource + valueSource): Promise<string> {
+  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource + checkedSource + valueSource + textareaSource): Promise<string> {
     return nativeRender({ source: definitions, tag, inputs, manifest: assets, prepared });
   }
 
@@ -100,7 +101,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }
 
   async function application(missing = false): Promise<string> {
-    return nativeRender({ source: source + acceptedSource + waitingSource + checkedSource + valueSource, manifest,
+    return nativeRender({ source: source + acceptedSource + waitingSource + checkedSource + valueSource + textareaSource, manifest,
       application: missing ? memberApplicationSource : applicationSource, inputs: missing ? { data: {} } : { title: "Application title" } });
   }
 
@@ -497,6 +498,30 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts initial textarea content without losing its first newline, early edits or reset defaults`, async () => {
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent(await render("x-native-area", { value: "\n<A>& Initial" }));
+        assert.deepEqual(await page.locator("textarea").evaluateAll(areas => areas.map(area => (area as HTMLTextAreaElement).value)), ["\n<A>& Initial", "\n<A>& Initial"]);
+        await page.evaluate(() => Reflect.set(window, "areaControls", [...document.querySelectorAll("textarea")]));
+        await page.locator("textarea").first().fill("Early textarea edit");
+        await page.addScriptTag({ content: bundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        assert.equal(await page.locator("textarea").first().inputValue(), "Early textarea edit");
+        assert.deepEqual(await page.locator("textarea").evaluateAll(areas => areas.map(area => (area as HTMLTextAreaElement).defaultValue)), ["Authored & Default", ""]);
+        await page.evaluate(() => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("form"), { value: "\nUpdated" }));
+        await page.waitForFunction(() => document.querySelector("textarea")?.value === "\nUpdated");
+        assert.deepEqual(await page.locator("textarea").evaluateAll(areas => areas.map(area => (area as HTMLTextAreaElement).value)), ["\nUpdated", "\nUpdated"]);
+        await page.evaluate(() => document.querySelector("form")!.reset());
+        assert.deepEqual(await page.locator("textarea").evaluateAll(areas => areas.map(area => (area as HTMLTextAreaElement).value)), ["Authored & Default", ""]);
+        assert.equal(await page.evaluate(() => [...document.querySelectorAll("textarea")].every((area, index) => area === Reflect.get(window, "areaControls")[index])), true);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} parses native initial input values and preserves edits and reset defaults during adoption`, async () => {
       const browser = await launchParityBrowser(engine);
       try {

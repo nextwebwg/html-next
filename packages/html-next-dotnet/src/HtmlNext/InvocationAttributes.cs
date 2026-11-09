@@ -157,9 +157,9 @@ internal sealed class InvocationAttributeState
     public void Leave(int previous) => count = previous;
 }
 
-internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes, RootStyle? Owner = null, CheckedInputProperty? Checked = null) : RenderOperation
+internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes, RootStyle? Owner = null, CheckedInputProperty? Checked = null, TextareaValueProperty? Textarea = null) : RenderOperation
 {
-    private readonly RenderOperation[]? direct = Checked is null ? Direct(Attributes, Owner) : null;
+    private readonly RenderOperation[]? direct = Checked is null && Textarea is null ? Direct(Attributes, Owner) : null;
     private readonly string? valueSource = Attributes.FirstOrDefault(attribute => attribute?.Target == "value-property")?.Source;
 
     private static RenderOperation[]? Direct(InvocationAttribute?[] attributes, RootStyle? owner)
@@ -203,6 +203,7 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
         valueProperty?.Apply(output, ref defaults);
         Checked?.Apply(output, values, ref defaults);
         if (defaults is not null) output["data-html-next-form-defaults"] = JsonSerializer.Serialize(defaults);
+        Textarea?.Attributes(output, values, cancellation);
         foreach (var (name, text) in output)
         {
             if (text is null) continue;
