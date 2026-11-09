@@ -9,7 +9,9 @@ import { build } from "esbuild";
 import { parseFragment } from "parse5";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
 
-import { generateVueComponent, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { GENERATOR_VERSION, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { attributeHelperArtifact } from "../src/targets/attribute-helper.js";
+import { asciiLowerCase } from "../src/names.js";
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 import { cases as conformanceCases } from "./conformance/cases.js";
@@ -1046,7 +1048,7 @@ function vueInvocation(invocation: string, definition: ComponentDefinition): str
     const attributes: Record<string, unknown> = {};
     for (const attribute of node.attrs ?? []) {
       const propName = component
-        ? Object.keys(definition.contract.props).find((name) => name.toLowerCase() === attribute.name)
+        ? Object.keys(definition.contract.props).find((name) => asciiLowerCase(name) === attribute.name)
         : undefined;
       const name = propName ?? attribute.name;
       const type = propName === undefined ? undefined : definition.contract.props[propName]?.type;
@@ -1165,6 +1167,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
         vueHtmlArtifact(),
         vueControlArtifact(),
         vuePropsArtifact(),
+        attributeHelperArtifact("vue", GENERATOR_VERSION),
       ].map(({ path, content }) => [path, content]));
       const imports: string[] = [];
       const scopeAssignments: string[] = [];
@@ -1228,6 +1231,8 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
       await writeFile(join(caseDirectory, vueHtmlArtifact().path), vueHtmlArtifact().content);
       await writeFile(join(caseDirectory, vuePropsArtifact().path), vuePropsArtifact().content);
       await writeFile(join(caseDirectory, vueControlArtifact().path), vueControlArtifact().content);
+      const attributes = attributeHelperArtifact("vue", GENERATOR_VERSION);
+      await writeFile(join(caseDirectory, attributes.path), attributes.content);
       const styles = parsed.descriptor.styles.map((style) => {
         const compiled = compileStyle({ source: style.content, filename: path, id: scopeId, scoped: style.scoped === true });
         assert.deepEqual(compiled.errors, []);
