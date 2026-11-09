@@ -521,10 +521,16 @@ public static partial class HtmlNextCompiler
             if (!fragment) Add(operations, "<" + element.LocalName);
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
-            if (element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
+            CheckedInputProperty? checkedProperty = null;
+            if (element.GetAttribute(".checked") is { } checkedExpression)
+            {
+                if (element is not IHtmlInputElement) Unsupported("native property '.checked' on <" + element.LocalName + ">");
+                checkedProperty = new(Expression(checkedExpression, scope));
+            }
+            if (checkedProperty is not null || element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
             {
                 if (element.HasAttribute("$attributes") && (fragment || element.GetAttribute("$attributes") != "")) throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
-                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes));
+                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes, checkedProperty));
             }
             else
             {
@@ -833,6 +839,7 @@ public static partial class HtmlNextCompiler
             {
                 var name = QualifiedAttributeName(attribute);
                 if (name == "$attributes") { result.Add(null); continue; }
+                if (name == ".checked") continue;
                 if (name is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" or "$when" or "$else") continue;
                 if (name.StartsWith("class:", StringComparison.Ordinal))
                 {
@@ -859,6 +866,7 @@ public static partial class HtmlNextCompiler
 
         private ComponentCall Invocation(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope, bool matchArm)
         {
+            if (element.HasAttribute(".checked")) Unsupported("native property '.checked' on a component invocation");
             if (!components.TryGetValue(element.LocalName, out var target)) throw ValueType.Error(source, $"Unknown component '{element.LocalName}'.");
             var projection = Projection(element, scope);
             var arguments = new ComponentArgument?[target.Props.Length];

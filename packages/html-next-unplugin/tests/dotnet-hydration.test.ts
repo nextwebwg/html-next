@@ -30,6 +30,7 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + "<template component=\"x-formatted-name-plural\"><defs><prop name=\"region\" type=\"string\">Region.</prop><prop name=\"count\" type=\"number\">Count.</prop></defs><article><output class=\"region\">{format($region, 'displayName', { type: 'region' }, 'en-US')}</output><output class=\"plural\">{format($count, 'plural', { forms: { one: '# item', other: '# items' } }, 'en-US')}</output></article></template>"
   + "<template component=\"x-formatted-duration\"><defs><prop name=\"elapsed\" type=\"duration\">Elapsed.</prop><prop name=\"seconds\" type=\"number\">Seconds.</prop></defs><article><output class=\"elapsed\">{format($elapsed, { style: \"digital\" }, \"en-US\")}</output><output class=\"record\">{format({ seconds: $seconds }, \"duration\", { style: \"digital\" }, \"en-US\")}</output></article></template>"
   + "<template component=\"x-native-styles\"><defs><prop name=\"count\" type=\"number\">Count.</prop><prop name=\"width\" type=\"length\">Width.</prop><prop name=\"whole\" type=\"string\">Whole style.</prop></defs><article style=\"margin: 1px 2px !important; --empty: \" style:margin-left=\"$width\" style:--count=\"$count\"><output>{$count}</output><b from:style=\"$whole\" style:--count=\"$count\">Whole</b></article></template>";
+const checkedSource = '<template component="x-native-checked"><defs><prop name="active" type="boolean" default="true">Active.</prop></defs><form><input id="plainChecked" type="checkbox" value="plain" .checked="$active"><input id="authoredChecked" type="checkbox" value="authored" checked .checked="not($active)"><input type="radio" name="status" value="active" .checked="$active"><input type="radio" name="status" value="inactive" .checked="not($active)"></form></template>';
 const waitingSource = '<template component="x-wait"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><input value="Original"><b>{$rows.length}</b><output>{$draft.length}</output></article></template>'
   + '<template component="x-wait-shell"><defs><prop name="rows" type="list(string)">Rows.</prop></defs><main><x-wait from:rows="$rows"></x-wait></main></template>'
   + '<template component="x-wait-literal"><defs><state name="raw" value="wrong"></state></defs><main><x-wait rows="[&quot;Literal&quot;]" from:rows="$raw"></x-wait></main></template>';
@@ -52,7 +53,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     directory = await mkdtemp(join(tmpdir(), "html-next-dotnet-hydration-"));
     await execute("dotnet", ["restore", host, "--locked-mode"], { timeout: 60_000 });
     await execute("dotnet", ["build", host, "-c", "Release", "--nologo", "--no-restore"], { timeout: 60_000 });
-    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource);
+    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource + checkedSource);
     await writeFile(join(directory, "prepared.html"), preparedSource);
     await writeFile(join(directory, "producer.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
       const instances = new WeakMap();
@@ -70,7 +71,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -85,7 +86,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }, 60_000);
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
-  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource): Promise<string> {
+  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource + checkedSource): Promise<string> {
     return nativeRender({ source: definitions, tag, inputs, manifest: assets, prepared });
   }
 
@@ -96,7 +97,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }
 
   async function application(missing = false): Promise<string> {
-    return nativeRender({ source: source + acceptedSource + waitingSource, manifest,
+    return nativeRender({ source: source + acceptedSource + waitingSource + checkedSource, manifest,
       application: missing ? memberApplicationSource : applicationSource, inputs: missing ? { data: {} } : { title: "Application title" } });
   }
 
@@ -104,6 +105,31 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     const source = (preparedManifest as { server: { preparedModules: { tag: string; source: string }[] } }).server.preparedModules.find(item => item.tag === "x-prepared")!.source;
     return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
   }
+
+  it("adopts native checked properties while preserving early edits and authored reset defaults", async () => {
+    const { window } = new JSDOM(await render("x-native-checked"), { runScripts: "dangerously" });
+    try {
+      const root = window.document.querySelector("form")!;
+      const controls = [...root.querySelectorAll("input")];
+      assert.deepEqual(controls.map(input => input.checked), [true, false, true, false]);
+      controls[0]!.checked = false;
+      controls[1]!.checked = true;
+      window.eval(bundle);
+      const client = Reflect.get(window, "NativeClient");
+      client.hydrate();
+      assert.equal(window.document.querySelector("form"), root);
+      assert.ok(controls.every((input, index) => root.querySelectorAll("input")[index] === input));
+      assert.deepEqual(controls.map(input => input.checked), [false, true, true, false]);
+      assert.deepEqual(controls.map(input => input.defaultChecked), [false, true, false, false]);
+      for (const active of [false, true]) {
+        client.componentRegistry.update(root, { active });
+        await new Promise(resolve => window.setTimeout(resolve, 0));
+        assert.deepEqual(controls.map(input => input.checked), [active, !active, active, !active]);
+      }
+      root.reset();
+      assert.deepEqual(controls.map(input => input.checked), [false, true, false, false]);
+    } finally { window.close(); }
+  });
 
   it.each(applicationInputs)("adopts library components rendered by a server-owned application carrier ($name)", async ({ missing, initial }) => {
     const { window } = new JSDOM(await application(missing), { runScripts: "dangerously" });
@@ -466,6 +492,32 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native checked properties and preserves form reset defaults`, async () => {
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent(await render("x-native-checked"));
+        assert.deepEqual(await page.locator("input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).checked)), [true, false, true, false]);
+        await page.evaluate(() => Reflect.set(window, "checkedControls", [document.querySelector("form"), ...document.querySelectorAll("input")]));
+        await page.locator("#plainChecked").uncheck();
+        await page.locator("#authoredChecked").check();
+        await page.addScriptTag({ content: bundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        assert.deepEqual(await page.locator("input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).checked)), [false, true, true, false]);
+        assert.deepEqual(await page.locator("input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).defaultChecked)), [false, true, false, false]);
+        for (const active of [false, true]) {
+          await page.evaluate(active => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("form"), { active }), active);
+          await page.waitForFunction(active => [...document.querySelectorAll("input")].every((input, index) => input.checked === (index % 2 === 0 ? active : !active)), active);
+        }
+        await page.evaluate(() => document.querySelector("form")!.reset());
+        assert.deepEqual(await page.locator("input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).checked)), [false, true, false, false]);
+        assert.equal(await page.evaluate(() => [document.querySelector("form"), ...document.querySelectorAll("input")].every((node, index) => node === Reflect.get(window, "checkedControls")[index])), true);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1").each(applicationInputs)(`${name} adopts components from a retained application library ($name)`, async ({ missing, initial }) => {
       const html = await application(missing);
       const browser = await launchParityBrowser(engine);

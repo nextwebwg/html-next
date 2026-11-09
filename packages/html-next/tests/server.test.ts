@@ -359,6 +359,28 @@ describe("Node component rendering", () => {
       }
     } finally { await renderer.close(); }
   });
+  it("serializes checked properties separately from authored form reset defaults", async () => {
+    const cases = [["true", false, true], ["false", false, false], ["true", true, true], ["false", true, false],
+      ["null", true, false], ["''", true, false], ["0", true, false], ["'false'", false, true],
+      ["[]", false, true], ["{}", false, true], ["1 / 0", true, true], ["1 / 0", false, false]] as const;
+    const definition = parseComponent(`<template component="x-checked-properties"><form>${cases.map(([expression, authored], index) =>
+      `<input id="case-${index}" type="checkbox" value="control"${authored ? ' checked="authored"' : ''} .checked="${expression}">`).join("")}</form></template>`);
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const { html } = await renderer.render('<x-checked-properties></x-checked-properties>', { definitions: [definition] });
+      const dom = new JSDOM(html);
+      try {
+        cases.forEach(([, authored, expected], index) => {
+          const input = dom.window.document.querySelector<HTMLInputElement>(`#case-${index}`)!;
+          assert.equal(input.hasAttribute(".checked"), false);
+          assert.equal(input.checked, expected);
+          const defaults = input.getAttribute("data-html-next-form-defaults");
+          if (authored !== expected) assert.equal(JSON.parse(defaults!).checked, authored);
+          else assert.equal(defaults, null);
+        });
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
+  });
   it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: '&lt;b&gt;Ada&lt;/b&gt;' }]"></state>

@@ -150,9 +150,9 @@ internal sealed class InvocationAttributeState
     public void Leave(int previous) => count = previous;
 }
 
-internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes, RootStyle? Owner = null) : RenderOperation
+internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes, RootStyle? Owner = null, CheckedInputProperty? Checked = null) : RenderOperation
 {
-    private readonly RenderOperation[]? direct = Direct(Attributes, Owner);
+    private readonly RenderOperation[]? direct = Checked is null ? Direct(Attributes, Owner) : null;
 
     private static RenderOperation[]? Direct(InvocationAttribute?[] attributes, RootStyle? owner)
     {
@@ -188,6 +188,7 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
                 InvocationAttributeFrame.Apply(output, attribute, text);
             }
         }
+        Checked?.Apply(output, values);
         foreach (var (name, text) in output)
         {
             if (text is null) continue;
@@ -201,5 +202,20 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
             }
             writer.Write(' '); writer.Write(name); writer.Write("=\""); HtmlOutput.Escape(ref writer, text.AsSpan(), true); writer.Write('"');
         }
+    }
+}
+
+internal sealed record CheckedInputProperty(ValueExpression Expression)
+{
+    public void Apply(Dictionary<string, string?> output, object?[] values)
+    {
+        var value = Expression.Evaluate(values);
+        if (value.IsInvalid) return;
+        // The native boolean property uses Web IDL conversion, including truthy empty containers.
+        var current = value.Type.Kind is "object" or "list" || value.Truthy;
+        var authored = output.GetValueOrDefault("checked") is not null;
+        if (current == authored) return;
+        output["checked"] = current ? "" : null;
+        output["data-html-next-form-defaults"] = authored ? "{\"checked\":true}" : "{\"checked\":false}";
     }
 }

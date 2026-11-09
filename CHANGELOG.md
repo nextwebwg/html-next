@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Serialize native input `.checked` bindings as initial checkedness and preserve authored reset defaults through the existing browser-adoption records. Keep invalid property writes inert and compose reset attributes with invocation forwarding.
+
 - Keep a receiving native prop's default available when a binding reads a missing member of an available object. Preserve waiting upstream inputs and seed dependent state before rendering and browser adoption.
 
 - Compile server-owned application carriers against a retained native component graph. Reuse typed component and slot contracts, compiled plans, matching assets and client selection across independent application compilations.
