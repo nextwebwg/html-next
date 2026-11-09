@@ -1,0 +1,2636 @@
+[
+  {
+    "name": "ceil 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "ceil"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.3"
+  },
+  {
+    "name": "ceil -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "ceil"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.2"
+  },
+  {
+    "name": "floor 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "floor"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.2"
+  },
+  {
+    "name": "floor -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "floor"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.3"
+  },
+  {
+    "name": "expand 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "expand"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.3"
+  },
+  {
+    "name": "expand -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "expand"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.3"
+  },
+  {
+    "name": "trunc 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "trunc"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.2"
+  },
+  {
+    "name": "trunc -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "trunc"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.2"
+  },
+  {
+    "name": "halfCeil 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfCeil"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.3"
+  },
+  {
+    "name": "halfCeil -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfCeil"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.2"
+  },
+  {
+    "name": "halfFloor 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfFloor"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.2"
+  },
+  {
+    "name": "halfFloor -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfFloor"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.3"
+  },
+  {
+    "name": "halfExpand 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfExpand"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.3"
+  },
+  {
+    "name": "halfExpand -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfExpand"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.3"
+  },
+  {
+    "name": "halfTrunc 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfTrunc"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.2"
+  },
+  {
+    "name": "halfTrunc -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfTrunc"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.2"
+  },
+  {
+    "name": "halfEven 1.25",
+    "value": 1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfEven"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.2"
+  },
+  {
+    "name": "halfEven -1.25",
+    "value": -1.25,
+    "options": {
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfEven"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "-1.2"
+  },
+  {
+    "name": "auto 0.012345",
+    "value": 0.012345,
+    "options": {
+      "minimumFractionDigits": 1,
+      "maximumFractionDigits": 2,
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3,
+      "roundingPriority": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "0.0123"
+  },
+  {
+    "name": "auto 12345",
+    "value": 12345,
+    "options": {
+      "minimumFractionDigits": 1,
+      "maximumFractionDigits": 2,
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3,
+      "roundingPriority": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,300"
+  },
+  {
+    "name": "morePrecision 0.012345",
+    "value": 0.012345,
+    "options": {
+      "minimumFractionDigits": 1,
+      "maximumFractionDigits": 2,
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3,
+      "roundingPriority": "morePrecision"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "0.0123"
+  },
+  {
+    "name": "morePrecision 12345",
+    "value": 12345,
+    "options": {
+      "minimumFractionDigits": 1,
+      "maximumFractionDigits": 2,
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3,
+      "roundingPriority": "morePrecision"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345.0"
+  },
+  {
+    "name": "lessPrecision 0.012345",
+    "value": 0.012345,
+    "options": {
+      "minimumFractionDigits": 1,
+      "maximumFractionDigits": 2,
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3,
+      "roundingPriority": "lessPrecision"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "0.01"
+  },
+  {
+    "name": "lessPrecision 12345",
+    "value": 12345,
+    "options": {
+      "minimumFractionDigits": 1,
+      "maximumFractionDigits": 2,
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3,
+      "roundingPriority": "lessPrecision"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,300"
+  },
+  {
+    "name": "increment 1",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 1
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.46"
+  },
+  {
+    "name": "increment 2",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 2
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.46"
+  },
+  {
+    "name": "increment 5",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 5
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.45"
+  },
+  {
+    "name": "increment 10",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 10
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.50"
+  },
+  {
+    "name": "increment 20",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 20
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.40"
+  },
+  {
+    "name": "increment 25",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 25
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.50"
+  },
+  {
+    "name": "increment 50",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 50
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.50"
+  },
+  {
+    "name": "increment 100",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 100
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "123.00"
+  },
+  {
+    "name": "increment 200",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 200
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "124.00"
+  },
+  {
+    "name": "increment 250",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 250
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "122.50"
+  },
+  {
+    "name": "increment 500",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 500
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "125.00"
+  },
+  {
+    "name": "increment 1000",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 1000
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "120.00"
+  },
+  {
+    "name": "increment 2000",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 2000
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "120.00"
+  },
+  {
+    "name": "increment 2500",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 2500
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "125.00"
+  },
+  {
+    "name": "increment 5000",
+    "value": 123.456,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 5000
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "100.00"
+  },
+  {
+    "name": "accounting auto 0",
+    "value": 0,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting auto -0",
+    "value": "-0",
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "($0.00)"
+  },
+  {
+    "name": "accounting auto -1",
+    "value": -1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "($1.00)"
+  },
+  {
+    "name": "accounting auto 1",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$1.00"
+  },
+  {
+    "name": "accounting never 0",
+    "value": 0,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "never"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting never -0",
+    "value": "-0",
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "never"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting never -1",
+    "value": -1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "never"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$1.00"
+  },
+  {
+    "name": "accounting never 1",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "never"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$1.00"
+  },
+  {
+    "name": "accounting always 0",
+    "value": 0,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "+$0.00"
+  },
+  {
+    "name": "accounting always -0",
+    "value": "-0",
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "($0.00)"
+  },
+  {
+    "name": "accounting always -1",
+    "value": -1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "($1.00)"
+  },
+  {
+    "name": "accounting always 1",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "+$1.00"
+  },
+  {
+    "name": "accounting exceptZero 0",
+    "value": 0,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "exceptZero"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting exceptZero -0",
+    "value": "-0",
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "exceptZero"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting exceptZero -1",
+    "value": -1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "exceptZero"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "($1.00)"
+  },
+  {
+    "name": "accounting exceptZero 1",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "exceptZero"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "+$1.00"
+  },
+  {
+    "name": "accounting negative 0",
+    "value": 0,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "negative"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting negative -0",
+    "value": "-0",
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "negative"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$0.00"
+  },
+  {
+    "name": "accounting negative -1",
+    "value": -1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "negative"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "($1.00)"
+  },
+  {
+    "name": "accounting negative 1",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting",
+      "signDisplay": "negative"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "$1.00"
+  },
+  {
+    "name": "standard grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": false
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12345"
+  },
+  {
+    "name": "standard grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345"
+  },
+  {
+    "name": "standard grouping auto",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345"
+  },
+  {
+    "name": "standard grouping always",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345"
+  },
+  {
+    "name": "standard grouping min2",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": "min2"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345"
+  },
+  {
+    "name": "standard grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": "false"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345"
+  },
+  {
+    "name": "standard grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "standard",
+      "useGrouping": "true"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12,345"
+  },
+  {
+    "name": "scientific grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": false
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "scientific grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "scientific grouping auto",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "scientific grouping always",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "scientific grouping min2",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": "min2"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "scientific grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": "false"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "scientific grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "scientific",
+      "useGrouping": "true"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1.235E4"
+  },
+  {
+    "name": "engineering grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": false
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "engineering grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "engineering grouping auto",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "engineering grouping always",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "engineering grouping min2",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": "min2"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "engineering grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": "false"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "engineering grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "engineering",
+      "useGrouping": "true"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.345E3"
+  },
+  {
+    "name": "compact grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": false
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "compact grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "compact grouping auto",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "compact grouping always",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "compact grouping min2",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": "min2"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "compact grouping false",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": "false"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "compact grouping true",
+    "value": 12345,
+    "options": {
+      "notation": "compact",
+      "useGrouping": "true"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12K"
+  },
+  {
+    "name": "{\"notation\":\"compact\"}",
+    "value": 12,
+    "options": {
+      "notation": "compact"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"notation\":\"compact\",\"compactDisplay\":\"long\"}",
+    "value": 12,
+    "options": {
+      "notation": "compact",
+      "compactDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumFractionDigits\":2,\"trailingZeroDisplay\":\"stripIfInteger\"}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": 2,
+      "trailingZeroDisplay": "stripIfInteger"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumFractionDigits\":2,\"maximumSignificantDigits\":4,\"roundingPriority\":\"morePrecision\",\"trailingZeroDisplay\":\"stripIfInteger\"}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": 2,
+      "maximumSignificantDigits": 4,
+      "roundingPriority": "morePrecision",
+      "trailingZeroDisplay": "stripIfInteger"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumSignificantDigits\":2,\"maximumSignificantDigits\":3}",
+    "value": 12,
+    "options": {
+      "minimumSignificantDigits": 2,
+      "maximumSignificantDigits": 3
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumSignificantDigits\":2,\"minimumFractionDigits\":101}",
+    "value": 12,
+    "options": {
+      "minimumSignificantDigits": 2,
+      "minimumFractionDigits": 101
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumSignificantDigits\":2,\"minimumFractionDigits\":5,\"maximumFractionDigits\":2}",
+    "value": 12,
+    "options": {
+      "minimumSignificantDigits": 2,
+      "minimumFractionDigits": 5,
+      "maximumFractionDigits": 2
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"roundingIncrement\":2,\"minimumFractionDigits\":2}",
+    "value": 12,
+    "options": {
+      "roundingIncrement": 2,
+      "minimumFractionDigits": 2
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"notation\":\"compact\",\"roundingIncrement\":2}",
+    "value": 12,
+    "options": {
+      "notation": "compact",
+      "roundingIncrement": 2
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"minimumFractionDigits\":\"2\"}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": "2"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.00"
+  },
+  {
+    "name": "{\"minimumFractionDigits\":[2]}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": [
+        2
+      ]
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.00"
+  },
+  {
+    "name": "{\"minimumFractionDigits\":[]}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": []
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumFractionDigits\":null}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": null
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"minimumFractionDigits\":true}",
+    "value": 12,
+    "options": {
+      "minimumFractionDigits": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.0"
+  },
+  {
+    "name": "{\"maximumFractionDigits\":100}",
+    "value": 12,
+    "options": {
+      "maximumFractionDigits": 100
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"maximumFractionDigits\":101}",
+    "value": 12,
+    "options": {
+      "maximumFractionDigits": 101
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"minimumIntegerDigits\":21}",
+    "value": 12,
+    "options": {
+      "minimumIntegerDigits": 21
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "000,000,000,000,000,000,012"
+  },
+  {
+    "name": "{\"minimumIntegerDigits\":22}",
+    "value": 12,
+    "options": {
+      "minimumIntegerDigits": 22
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"maximumSignificantDigits\":0}",
+    "value": 12,
+    "options": {
+      "maximumSignificantDigits": 0
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"roundingIncrement\":3}",
+    "value": 12,
+    "options": {
+      "roundingIncrement": 3
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"roundingMode\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "roundingMode": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"roundingPriority\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "roundingPriority": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"trailingZeroDisplay\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "trailingZeroDisplay": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"style\":\"decimal\",\"unit\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "style": "decimal",
+      "unit": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"style\":\"decimal\",\"currency\":\"bad!\"}",
+    "value": 12,
+    "options": {
+      "style": "decimal",
+      "currency": "bad!"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"currencyDisplay\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "currencyDisplay": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"currencySign\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "currencySign": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"unitDisplay\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "unitDisplay": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"notation\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "notation": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"compactDisplay\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "compactDisplay": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"signDisplay\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "signDisplay": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"useGrouping\":[]}",
+    "value": 12,
+    "options": {
+      "useGrouping": []
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"useGrouping\":{}}",
+    "value": 12,
+    "options": {
+      "useGrouping": {}
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"useGrouping\":[\"auto\"]}",
+    "value": 12,
+    "options": {
+      "useGrouping": [
+        "auto"
+      ]
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"useGrouping\":1}",
+    "value": 12,
+    "options": {
+      "useGrouping": 1
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"useGrouping\":0}",
+    "value": 12,
+    "options": {
+      "useGrouping": 0
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"useGrouping\":null}",
+    "value": 12,
+    "options": {
+      "useGrouping": null
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"useGrouping\":\"\"}",
+    "value": 12,
+    "options": {
+      "useGrouping": ""
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"localeMatcher\":\"invalid\"}",
+    "value": 12,
+    "options": {
+      "localeMatcher": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"numberingSystem\":\"arab\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "arab"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "١٢"
+  },
+  {
+    "name": "{\"numberingSystem\":\"notreal\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "notreal"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"numberingSystem\":\"bad!\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "bad!"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "{\"numberingSystem\":\"roman\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "roman"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"numberingSystem\":\"native\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "native"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"numberingSystem\":\"finance\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "finance"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"numberingSystem\":\"hans\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "hans"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"numberingSystem\":\"hanidec\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "hanidec"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "一二"
+  },
+  {
+    "name": "{\"numberingSystem\":\"ARAB\"}",
+    "value": 12,
+    "options": {
+      "numberingSystem": "ARAB"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "{\"style\":\"currency\",\"currency\":\"JPY\"}",
+    "value": 12,
+    "options": {
+      "style": "currency",
+      "currency": "JPY"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "¥12"
+  },
+  {
+    "name": "{\"style\":\"currency\",\"currency\":\"kwd\"}",
+    "value": 12,
+    "options": {
+      "style": "currency",
+      "currency": "kwd"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "KWD 12.000"
+  },
+  {
+    "name": "{\"style\":\"currency\",\"currency\":\"USD\",\"currencyDisplay\":\"code\"}",
+    "value": 12,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencyDisplay": "code"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "USD 12.00"
+  },
+  {
+    "name": "{\"style\":\"currency\",\"currency\":\"USD\",\"currencyDisplay\":\"name\"}",
+    "value": 12,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencyDisplay": "name"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12.00 US dollars"
+  },
+  {
+    "name": "{\"maximumfractiondigits\":0,\"unknownOption\":\"ignored\"}",
+    "value": 12,
+    "options": {
+      "maximumfractiondigits": 0,
+      "unknownOption": "ignored"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "locale de-DE",
+    "value": 1234.5,
+    "options": {},
+    "locale": "de-DE",
+    "operation": "format",
+    "expected": "1.234,5"
+  },
+  {
+    "name": "locale fr-CA",
+    "value": 1234.5,
+    "options": {},
+    "locale": "fr-CA",
+    "operation": "format",
+    "expected": "1 234,5"
+  },
+  {
+    "name": "locale hi-IN",
+    "value": 1234.5,
+    "options": {},
+    "locale": "hi-IN",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale ar-EG",
+    "value": 1234.5,
+    "options": {},
+    "locale": "ar-EG",
+    "operation": "format",
+    "expected": "١٬٢٣٤٫٥"
+  },
+  {
+    "name": "locale en-US-u-nu-arab",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-US-u-nu-arab",
+    "operation": "format",
+    "expected": "١٬٢٣٤٫٥"
+  },
+  {
+    "name": "locale en_US",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en_US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "locale en-a-foo-a-bar",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-a-foo-a-bar",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "locale en-abc",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-abc",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "locale en-x-foo",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-x-foo",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-u-nu-roman",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-nu-roman",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-u-nu-native",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-nu-native",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-u-nu-notreal",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-nu-notreal",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-u-a1",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-a1",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "locale en-u-1a",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-1a",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-u-abc-abc",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-abc-abc",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-u-ca-true-ca-false",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-u-ca-true-ca-false",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-Latn-Latn",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-Latn-Latn",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "locale en-1901-1901",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-1901-1901",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "locale en-t-abc",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-t-abc",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-t-en-US",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-t-en-US",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "locale en-US-u-nu-arab",
+    "value": 1234.5,
+    "options": {},
+    "locale": "en-US-u-nu-arab",
+    "operation": "format",
+    "expected": "١٬٢٣٤٫٥"
+  },
+  {
+    "name": "unsupported option overrides locale extension",
+    "value": 1234.5,
+    "options": {
+      "numberingSystem": "notreal"
+    },
+    "locale": "en-u-nu-arab",
+    "operation": "format",
+    "expected": "1,234.5"
+  },
+  {
+    "name": "unit acre",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "acre",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 acres"
+  },
+  {
+    "name": "unit bit",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "bit",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 bits"
+  },
+  {
+    "name": "unit byte",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "byte",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 bytes"
+  },
+  {
+    "name": "unit celsius",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "celsius",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 degrees Celsius"
+  },
+  {
+    "name": "unit centimeter",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "centimeter",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 centimeters"
+  },
+  {
+    "name": "unit day",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "day",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 days"
+  },
+  {
+    "name": "unit degree",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "degree",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 degrees"
+  },
+  {
+    "name": "unit fahrenheit",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "fahrenheit",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 degrees Fahrenheit"
+  },
+  {
+    "name": "unit fluid-ounce",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "fluid-ounce",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 fluid ounces"
+  },
+  {
+    "name": "unit foot",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "foot",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 feet"
+  },
+  {
+    "name": "unit gallon",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "gallon",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 gallons"
+  },
+  {
+    "name": "unit gigabit",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "gigabit",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 gigabits"
+  },
+  {
+    "name": "unit gigabyte",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "gigabyte",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 gigabytes"
+  },
+  {
+    "name": "unit gram",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "gram",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 grams"
+  },
+  {
+    "name": "unit hectare",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "hectare",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 hectares"
+  },
+  {
+    "name": "unit hour",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "hour",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 hours"
+  },
+  {
+    "name": "unit inch",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "inch",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 inches"
+  },
+  {
+    "name": "unit kilobit",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "kilobit",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 kilobits"
+  },
+  {
+    "name": "unit kilobyte",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "kilobyte",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 kilobytes"
+  },
+  {
+    "name": "unit kilogram",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "kilogram",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 kilograms"
+  },
+  {
+    "name": "unit kilometer",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "kilometer",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 kilometers"
+  },
+  {
+    "name": "unit liter",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "liter",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 liters"
+  },
+  {
+    "name": "unit megabit",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "megabit",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 megabits"
+  },
+  {
+    "name": "unit megabyte",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "megabyte",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 megabytes"
+  },
+  {
+    "name": "unit meter",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "meter",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 meters"
+  },
+  {
+    "name": "unit microsecond",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "microsecond",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 microseconds"
+  },
+  {
+    "name": "unit mile",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "mile",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 miles"
+  },
+  {
+    "name": "unit mile-scandinavian",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "mile-scandinavian",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 miles-scandinavian"
+  },
+  {
+    "name": "unit milliliter",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "milliliter",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 milliliters"
+  },
+  {
+    "name": "unit millimeter",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "millimeter",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 millimeters"
+  },
+  {
+    "name": "unit millisecond",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "millisecond",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 milliseconds"
+  },
+  {
+    "name": "unit minute",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "minute",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 minutes"
+  },
+  {
+    "name": "unit month",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "month",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 months"
+  },
+  {
+    "name": "unit nanosecond",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "nanosecond",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 nanoseconds"
+  },
+  {
+    "name": "unit ounce",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "ounce",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 ounces"
+  },
+  {
+    "name": "unit percent",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "percent",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 percent"
+  },
+  {
+    "name": "unit petabyte",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "petabyte",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 petabytes"
+  },
+  {
+    "name": "unit pound",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "pound",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 pounds"
+  },
+  {
+    "name": "unit second",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "second",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 seconds"
+  },
+  {
+    "name": "unit stone",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "stone",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 stones"
+  },
+  {
+    "name": "unit terabit",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "terabit",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 terabits"
+  },
+  {
+    "name": "unit terabyte",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "terabyte",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 terabytes"
+  },
+  {
+    "name": "unit week",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "week",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 weeks"
+  },
+  {
+    "name": "unit yard",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "yard",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 yards"
+  },
+  {
+    "name": "unit year",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "year",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 years"
+  },
+  {
+    "name": "unit mile-per-hour",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "mile-per-hour",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 miles per hour"
+  },
+  {
+    "name": "unit percent-per-second",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "percent-per-second",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 percent per second"
+  },
+  {
+    "name": "unit meter-per-meter",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "meter-per-meter",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 meters per meter"
+  },
+  {
+    "name": "unit meter-per-hour-per-second",
+    "value": 2.5,
+    "options": {
+      "style": "unit",
+      "unit": "meter-per-hour-per-second",
+      "unitDisplay": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "parts {}",
+    "value": -1234.5,
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "minusSign",
+        "value": "-"
+      },
+      {
+        "type": "integer",
+        "value": "1"
+      },
+      {
+        "type": "group",
+        "value": ","
+      },
+      {
+        "type": "integer",
+        "value": "234"
+      },
+      {
+        "type": "decimal",
+        "value": "."
+      },
+      {
+        "type": "fraction",
+        "value": "5"
+      }
+    ]
+  },
+  {
+    "name": "parts {\"style\":\"currency\",\"currency\":\"USD\"}",
+    "value": -1234.5,
+    "options": {
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "minusSign",
+        "value": "-"
+      },
+      {
+        "type": "currency",
+        "value": "$"
+      },
+      {
+        "type": "integer",
+        "value": "1"
+      },
+      {
+        "type": "group",
+        "value": ","
+      },
+      {
+        "type": "integer",
+        "value": "234"
+      },
+      {
+        "type": "decimal",
+        "value": "."
+      },
+      {
+        "type": "fraction",
+        "value": "50"
+      }
+    ]
+  },
+  {
+    "name": "parts {\"notation\":\"scientific\"}",
+    "value": -1234.5,
+    "options": {
+      "notation": "scientific"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "minusSign",
+        "value": "-"
+      },
+      {
+        "type": "integer",
+        "value": "1"
+      },
+      {
+        "type": "decimal",
+        "value": "."
+      },
+      {
+        "type": "fraction",
+        "value": "235"
+      },
+      {
+        "type": "exponentSeparator",
+        "value": "E"
+      },
+      {
+        "type": "exponentInteger",
+        "value": "3"
+      }
+    ]
+  },
+  {
+    "name": "parts {\"notation\":\"compact\"}",
+    "value": -1234.5,
+    "options": {
+      "notation": "compact"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "minusSign",
+        "value": "-"
+      },
+      {
+        "type": "integer",
+        "value": "1"
+      },
+      {
+        "type": "decimal",
+        "value": "."
+      },
+      {
+        "type": "fraction",
+        "value": "2"
+      },
+      {
+        "type": "compact",
+        "value": "K"
+      }
+    ]
+  },
+  {
+    "name": "parts {\"style\":\"unit\",\"unit\":\"percent\"}",
+    "value": -1234.5,
+    "options": {
+      "style": "unit",
+      "unit": "percent"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "minusSign",
+        "value": "-"
+      },
+      {
+        "type": "integer",
+        "value": "1"
+      },
+      {
+        "type": "group",
+        "value": ","
+      },
+      {
+        "type": "integer",
+        "value": "234"
+      },
+      {
+        "type": "decimal",
+        "value": "."
+      },
+      {
+        "type": "fraction",
+        "value": "5"
+      },
+      {
+        "type": "unit",
+        "value": "%"
+      }
+    ]
+  },
+  {
+    "name": "parts {\"style\":\"currency\",\"currency\":\"USD\",\"currencySign\":\"accounting\"}",
+    "value": -1234.5,
+    "options": {
+      "style": "currency",
+      "currency": "USD",
+      "currencySign": "accounting"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "("
+      },
+      {
+        "type": "currency",
+        "value": "$"
+      },
+      {
+        "type": "integer",
+        "value": "1"
+      },
+      {
+        "type": "group",
+        "value": ","
+      },
+      {
+        "type": "integer",
+        "value": "234"
+      },
+      {
+        "type": "decimal",
+        "value": "."
+      },
+      {
+        "type": "fraction",
+        "value": "50"
+      },
+      {
+        "type": "literal",
+        "value": ")"
+      }
+    ]
+  },
+  {
+    "name": "range 1 3",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 3,
+    "expected": "$1.00 – $3.00"
+  },
+  {
+    "name": "range 1 1",
+    "value": 1,
+    "options": {
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 1,
+    "expected": "~$1.00"
+  },
+  {
+    "name": "range 1.001 1.002",
+    "value": 1.001,
+    "options": {
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 1.002,
+    "expected": "~$1.00"
+  },
+  {
+    "name": "range 3 1",
+    "value": 3,
+    "options": {
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 1,
+    "expected": "$3.00 – $1.00"
+  },
+  {
+    "name": "range -1 1",
+    "value": -1,
+    "options": {
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 1,
+    "expected": "-$1.00 – $1.00"
+  }
+]

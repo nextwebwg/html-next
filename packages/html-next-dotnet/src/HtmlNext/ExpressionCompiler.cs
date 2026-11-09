@@ -300,6 +300,7 @@ internal sealed class ExpressionCompiler(string text, string source, IReadOnlyDi
     private ValueExpression Call(string name, ValueExpression[] arguments)
     {
         LiteralOnly = false;
+        if (name is "format" or "formatParts" or "formatRange") return new FormattingExpression(name, arguments);
         var count = arguments.Length;
         var valid = name switch { "default" or "join" => count == 2, "abs" => count == 1, "round" => count is 1 or 2,
             "clamp" => count == 3, "concat" or "min" or "max" => count > 0, _ => false };

@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Render native numeric `format`, `formatParts` and `formatRange` expressions through ICU, including currency, percentages, units, precision, signs and notation. Use the current request culture when the locale is omitted, and require selected types to agree before inferring a formatter.
+
 - Read native declaration groups before or after the markup root, and compare string and keyword values in ordinal UTF-16 order without numeric coercion.
 - Compile native select options, projected fallbacks and structural content into retained render plans. Use AngleSharp's token callbacks to preserve select children during source parsing, including comments, raw text, authored placeholder names and foreign namespaces.
 - Keep native state seeds waiting for omitted or refused props, carry readiness through component bindings, and preserve that ownership through browser adoption.

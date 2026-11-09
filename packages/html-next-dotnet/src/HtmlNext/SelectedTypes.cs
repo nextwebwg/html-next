@@ -12,6 +12,12 @@ internal sealed class SelectedType(string from, bool state, SelectedTypeOption[]
     private BoundPath selector = null!;
     public bool FromState { get; } = state;
     public ValueType? DefaultType { get; } = defaultType;
+    internal string? FormattingKind { get; } = CommonFormattingKind(options);
+    private static string? CommonFormattingKind(SelectedTypeOption[] options)
+    {
+        var kind = options.Length == 0 ? null : FormattingExpression.InputKind(options[0].Type);
+        return options.All(option => FormattingExpression.InputKind(option.Type) == kind) ? kind : null;
+    }
     public int PreparationSlot { get; private set; } = -1;
     public void Link(IReadOnlyDictionary<string, (int Slot, ValueType Type)> bindings, LocalDeclaration? declaration, int preparationSlot)
     {
