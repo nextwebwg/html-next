@@ -350,9 +350,9 @@ Waits on: PR 1 for merge order; analysis work can start independently from its n
 
 Goal: establish one owner for R8/R9 before adding a C# consumer. Dependencies: none on the .NET rendering slice.
 
-Files: proposed `packages/html-next/src/client-plan.ts` and `packages/html-next/tests/client-plan.test.ts`; existing `packages/html-next/src/generate.ts`, `packages/html-next/src/targets/vanilla-blocks.ts`, `packages/html-next-unplugin/src/index.ts`, `packages/html-next-unplugin/tests/unplugin.test.ts`, `packages/htmlkit/src/browser.ts`, and package-local browser tests.
+Files: proposed `packages/html-next/src/client-plan.ts` and `packages/html-next/tests/client-plan.test.ts`; existing `packages/html-next/src/generate.ts`, `packages/html-next/src/targets/vanilla-blocks.ts`, `packages/html-next-unplugin/src/index.ts`, `packages/html-next-unplugin/tests/unplugin.test.ts`, [MarkupKit client delivery](https://github.com/threadlabs-studio/markupkit/blob/main/src/browser.ts), and owner-local browser tests.
 
-Approach: implement KTD2/KTD5, feeding analysis into existing generated feature imports and adoption entry points. Reuse current compiled hydration and provider protocols. Keep application navigation and explicit creation/update roots represented in reachability so static pruning does not break HTMLKit navigation.
+Approach: implement KTD2/KTD5, feeding analysis into existing generated feature imports and adoption entry points. Reuse current compiled hydration and provider protocols. Keep application navigation and explicit creation/update roots represented in reachability so static pruning does not break MarkupKit navigation.
 
 Test scenarios:
 
@@ -362,7 +362,7 @@ Test scenarios:
 4. Browser bundles exclude unused features and the universal live parser; Node delivery consumes the same manifest decisions.
 5. An unknown registry update or host lookup keeps the observable component behavior intact rather than treating it as server-only.
 
-Verification: retained-feature reasons and actual bundle imports agree; existing generated/runtime and HTMLKit browser regressions pass. This seam proves generated client reachability, not native .NET rendering.
+Verification: retained-feature reasons and actual bundle imports agree; existing generated/runtime and MarkupKit browser regressions pass. This seam proves generated client reachability, not native .NET rendering.
 
 ### PR 3: Complete native evaluation and rendered-form interoperability
 
@@ -455,7 +455,7 @@ Public API documentation describes actual behavior, compatibility identities, so
 
 ## Sources and Existing Behavior
 
-Observed at checkout `cdaaa1ec`, 2026-11-05. Greptile had no reachable knowledge base for this repository; local source supplied implementation evidence.
+SDK source baseline: `cdaaa1ec`, 2026-11-05. Application ownership: Threadlabs MarkupKit `dcc6d63`; the SDK release contains three JavaScript packages. Greptile had no reachable knowledge base for this repository; local source supplied implementation evidence.
 
 | Owner | Relevant evidence |
 | --- | --- |
@@ -466,9 +466,9 @@ Observed at checkout `cdaaa1ec`, 2026-11-05. Greptile had no reachable knowledge
 | Rendered form | `packages/html-next/src/rendered-form.ts`, `hydration-value.ts`, and `runtime.ts` |
 | Styles and safe HTML | `packages/html-next/src/component-styles-build.ts`, `stylesheet-resources.ts`, `sanitize-server.ts`, and `sanitizer-default.ts` |
 | Existing feature imports | `packages/html-next/src/targets/vanilla-blocks.ts`: emitted-helper selection; `packages/html-next-unplugin/src/index.ts`: support routing and graph build |
-| Node-hosted client delivery | `packages/htmlkit/src/browser.ts`: generates a factory for each component in the page graph and imports feature helpers |
+| Node-hosted client delivery | [MarkupKit `src/browser.ts`](https://github.com/threadlabs-studio/markupkit/blob/main/src/browser.ts): application-owned browser factories and feature imports |
 | Existing regression patterns | `packages/html-next/tests/server-hydration.test.ts`, `hydration-fixtures.ts`, `hydration-value.test.ts`, `format.test.ts`, and `packages/html-next-unplugin/tests/unplugin.test.ts` |
-| CI selection | `scripts/ci-plan.ts`: currently enumerates four JavaScript package manifests explicitly |
+| CI selection | `scripts/ci-plan.ts`: enumerates the three JavaScript SDK package manifests explicitly |
 | Liquid baseline | [Fluid](https://github.com/sebastienros/fluid): cached reusable parsed templates; use the released version selected for the actual benchmark |
 
-Current generated clients already select feature helpers, and their tests assert exclusion of the general runtime and parser. That does not establish that all server-only bindings or whole static SSR components are currently omitted: HTMLKit still generates and registers each page component's factory. U2 adds and verifies the shared client-liveness layer rather than claiming it already exists.
+Current generated clients already select feature helpers, and their tests assert exclusion of the general runtime and parser. That does not establish that all server-only bindings or whole static SSR components are currently omitted: The independent MarkupKit host must consume the shared plan when registering page component factories. U2 adds and verifies the shared client-liveness layer rather than claiming it already exists.
