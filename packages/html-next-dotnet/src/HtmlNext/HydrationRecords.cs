@@ -5,7 +5,7 @@ namespace HtmlNext;
 
 public sealed record HtmlNextRenderOptions
 {
-    /// <summary>Emit instance records for components selected by the matching compiler-owned client plan.</summary>
+    /// <summary>Emit SDK prop metadata and compiler-selected instance records for browser adoption.</summary>
     public bool Interactive { get; init; }
     /// <summary>Supplies settled module data, preserving initialized state and completing waiting seeds.</summary>
     public HtmlNextPrepareModule? PrepareModule { get; init; }
@@ -106,9 +106,9 @@ internal sealed class InstanceInputs
     public List<string> Explicit { get; } = [];
     public Dictionary<string, object?> Values { get; } = new(StringComparer.Ordinal);
     public string? SerializedRoot { get; set; }
-    public void Add(string name, object? value, bool present, bool provided, string source = "value", bool producer = false)
+    public void Add(string name, object? value, bool present, bool provided, string source = "value", bool producer = false, bool explicitInput = true)
     {
-        if (present && value is not null && !ReferenceEquals(value, ExpressionValue.AbsentStorage)
+        if (explicitInput && present && value is not null && !ReferenceEquals(value, ExpressionValue.AbsentStorage)
             && (value is not ExpressionValue expression || !expression.IsNull && !expression.IsAbsent)) Explicit.Add(name);
         Values.Add(name, new Dictionary<string, object?> { ["value"] = value, ["source"] = source, ["present"] = present, ["provided"] = provided, ["producer"] = producer });
     }

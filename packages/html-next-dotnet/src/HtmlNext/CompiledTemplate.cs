@@ -26,10 +26,11 @@ public sealed partial class CompiledTemplate
     private readonly int declarationContextSlot;
     private readonly LocalDeclaration[] declarations;
     private readonly InstanceRecordPlan? instance;
+    private readonly PropReflectionPlan? reflection;
     private readonly int[]? bindingOrder;
     private readonly int preparationSlot;
 
-    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null, HtmlNextServerAssets? assets = null, InstanceRecordPlan? instance = null)
+    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null, HtmlNextServerAssets? assets = null, InstanceRecordPlan? instance = null, PropReflectionPlan? reflection = null)
     {
         Tag = tag;
         Stylesheets = stylesheets ?? Array.Empty<string>();
@@ -46,6 +47,7 @@ public sealed partial class CompiledTemplate
         this.declarations = declarations ?? [];
         Assets = assets;
         this.instance = instance;
+        this.reflection = reflection;
         bindingOrder = props.Any(prop => prop.Selection is not null)
             ? Enumerable.Range(0, props.Length).OrderBy(index => props[index].Selection is not null).ToArray() : null;
         preparationSlot = props.Select(prop => prop.Selection?.PreparationSlot ?? -1).FirstOrDefault(slot => slot >= 0, -1);
@@ -149,6 +151,7 @@ public sealed partial class CompiledTemplate
         cancellationToken.ThrowIfCancellationRequested();
         var values = validation is null || preparationSlot >= 0 ? CreateValues(interactive) : new object?[props.Length];
         var record = interactive ? instance?.Inputs(values) : null;
+        var metadata = interactive ? reflection : null;
         var caller = context?.PrepareModule is not null && Module is not null ? new bool[props.Length] : null;
         var inputReady = validation is null || preparationSlot >= 0 ? PrepareInputReadiness(values, cancellationToken, onDiagnostic) : null;
         BindingSnapshot? snapshot = null;
@@ -164,6 +167,7 @@ public sealed partial class CompiledTemplate
             try
             {
                 supplied = ModelAccess.TryRead(inputs, prop.Name, out input);
+                metadata?.Capture(values, index, input, supplied);
                 if (caller is not null) caller[index] = supplied;
                 if (inputReady is not null) inputReady[index] = supplied || prop.HasDefault;
                 if (record is not null)
@@ -227,6 +231,7 @@ public sealed partial class CompiledTemplate
     {
         var values = CreateValues(context?.Interactive == true);
         var record = context?.Interactive == true ? instance?.Inputs(values) : null;
+        var metadata = context?.Interactive == true ? reflection : null;
         var caller = context?.PrepareModule is not null && Module is not null ? new bool[props.Length] : null;
         var inputReady = PrepareInputReadiness(values, cancellation, onDiagnostic);
         var marker = -1;
@@ -262,15 +267,17 @@ public sealed partial class CompiledTemplate
             var inputSource = "html";
             var present = forwarded || argument?.Written is not null;
             var producer = argument?.Expression is not null;
+            var available = true;
             values[index] = prop.Default;
             if (argument?.Expression is not null)
             {
-                var input = argument.Read(parent, out var available);
+                var input = argument.Read(parent, out available);
                 if (input.IsInvalid)
                 {
                     values[index] = LiteralFallback(prop, argument, type, cancellation, onDiagnostic, ref failed);
                     if (inputReady is not null) inputReady[index] = argument.Written is not null && !failed || prop.HasDefault;
                     record?.Add(prop.Name, raw, present, present && !failed, inputSource);
+                    metadata?.Capture(values, index, raw, present);
                     continue;
                 }
                 raw = input;
@@ -317,7 +324,9 @@ public sealed partial class CompiledTemplate
             }
             if (caller is null && !failed && values[index] is null && prop.Required)
                 onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
-            record?.Add(prop.Name, raw, present, present && !failed && !producer, inputSource, producer);
+            var reflects = !producer || !failed && available;
+            metadata?.Capture(values, index, raw, present && reflects);
+            record?.Add(prop.Name, raw, present, present && !failed && !producer, inputSource, producer, reflects);
         }
         if (inputReady is not null) ((DeclarationEvaluation)values[declarationContextSlot]!).RefreshWaiting(declarations);
         if (caller is not null)

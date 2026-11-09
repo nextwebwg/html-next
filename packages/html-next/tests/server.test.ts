@@ -359,6 +359,35 @@ describe("Node component rendering", () => {
       }
     } finally { await renderer.close(); }
   });
+  it("records explicit prop metadata without turning omitted or null defaults into inputs", async () => {
+    const definitions = [parseComponent(`<template component="x-reflect"><defs>
+      <prop name="count" type="integer" default="5">Count.</prop><prop name="pageSize" type="integer" default="10">Size.</prop>
+      <prop name="enabled" type="boolean" default="true">Enabled.</prop><prop name="rows" type="list(string)" default="[]">Rows.</prop>
+      </defs><article><output>{$count}:{$pageSize}:{$enabled}:{$rows.length}</output></article></template>`),
+    parseComponent('<template component="x-wrap"><defs><prop name="count" type="integer" default="5">Count.</prop></defs><x-reflect from:count="$count"></x-reflect></template>')];
+    const cases: Array<[string, Record<string, unknown>, Record<string, string>]> = [
+      ["x-reflect", {}, {}], ["x-reflect", { count: null }, {}],
+      ["x-reflect", { count: 7, pageSize: 12 }, { "data-x-reflect-prop-count": "7", "data-x-reflect-prop-page-size": "12" }],
+      ["x-reflect", { enabled: false }, { "data-x-reflect-prop-enabled": "false" }],
+      ["x-reflect", { rows: [] }, { "data-x-reflect-prop-rows": "[]" }],
+      ["x-reflect", { rows: ["A", "B"] }, { "data-x-reflect-prop-rows": '["A","B"]' }],
+      ["x-reflect", { count: "wrong" }, { "data-x-reflect-prop-count": "5" }],
+      ["x-wrap", {}, { "data-x-reflect-prop-count": "5" }],
+      ["x-wrap", { count: 9 }, { "data-x-wrap-prop-count": "9", "data-x-reflect-prop-count": "9" }],
+      ["x-wrap", { count: null }, { "data-x-reflect-prop-count": "5" }],
+    ];
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [tag, inputs, expected] of cases) {
+        const { html } = await renderer.render(`<${tag}></${tag}>`, { definitions, props: { [tag]: inputs } });
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("article")!;
+          assert.deepEqual(Object.fromEntries([...root.attributes].filter(attribute => attribute.name.includes("-prop-")).map(attribute => [attribute.name, attribute.value])), expected);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
   it("serializes checked properties separately from authored form reset defaults", async () => {
     const cases = [["true", false, true], ["false", false, false], ["true", true, true], ["false", true, false],
       ["null", true, false], ["''", true, false], ["0", true, false], ["'false'", false, true],

@@ -194,10 +194,10 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
             if (text is null) continue;
             if (Owner is not null)
             {
-                if (name == "component" || Owner.Manages(name)) continue;
+                if (name == "component" || Owner.Manages(name, values, writer.Context)) continue;
                 var managed = false;
                 if (writer.Context is { } context) foreach (var parent in context.RootStyles())
-                    if (parent.Style.Manages(name)) { managed = true; break; }
+                    if (parent.Style.Manages(name, parent.Values, context)) { managed = true; break; }
                 if (managed) continue;
             }
             writer.Write(' '); writer.Write(name); writer.Write("=\""); HtmlOutput.Escape(ref writer, text.AsSpan(), true); writer.Write('"');

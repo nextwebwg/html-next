@@ -122,31 +122,7 @@ internal static class BindingValueCodec
             }
         }
 
-        void String(string value)
-        {
-            text.Append('"');
-            for (var index = 0; index < value.Length; index++)
-            {
-                var character = value[index];
-                switch (character)
-                {
-                    case '"': text.Append("\\\""); break;
-                    case '\\': text.Append("\\\\"); break;
-                    case '\b': text.Append("\\b"); break;
-                    case '\t': text.Append("\\t"); break;
-                    case '\n': text.Append("\\n"); break;
-                    case '\f': text.Append("\\f"); break;
-                    case '\r': text.Append("\\r"); break;
-                    default:
-                        if (char.IsHighSurrogate(character) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
-                            text.Append(character).Append(value[++index]);
-                        else if (character < 32 || char.IsSurrogate(character)) text.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
-                        else text.Append(character);
-                        break;
-                }
-            }
-            text.Append('"');
-        }
+        void String(string value) => AppendJsonString(text, value);
 
         HtmlNextException Error() => new("HNCS008", "Prepared inputs require finite serializable data without cycles or opaque values.", source);
     }
@@ -158,7 +134,33 @@ internal static class BindingValueCodec
             ? Convert.ToDouble(item, CultureInfo.InvariantCulture) : item;
     }
 
-    private static IEnumerable<int> Indices(ExpressionValue aggregate)
+    internal static void AppendJsonString(StringBuilder text, string value)
+    {
+        text.Append('"');
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            switch (character)
+            {
+                case '"': text.Append("\\\""); break;
+                case '\\': text.Append("\\\\"); break;
+                case '\b': text.Append("\\b"); break;
+                case '\t': text.Append("\\t"); break;
+                case '\n': text.Append("\\n"); break;
+                case '\f': text.Append("\\f"); break;
+                case '\r': text.Append("\\r"); break;
+                default:
+                    if (char.IsHighSurrogate(character) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
+                        text.Append(character).Append(value[++index]);
+                    else if (character < 32 || char.IsSurrogate(character)) text.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+                    else text.Append(character);
+                    break;
+            }
+        }
+        text.Append('"');
+    }
+
+    internal static IEnumerable<int> Indices(ExpressionValue aggregate)
     {
         var indices = Enumerable.Range(0, aggregate.Count);
         return aggregate.Type.Kind == "list" ? indices : indices.OrderBy(index =>

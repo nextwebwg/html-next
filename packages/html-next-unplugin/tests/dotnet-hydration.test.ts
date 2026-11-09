@@ -492,6 +492,28 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} preserves explicit prop metadata through adoption, updates and reset to default`, async () => {
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent(await render("x-card", { title: "Server title" }));
+        const root = page.locator("article");
+        assert.equal(await root.getAttribute("data-x-card-prop-title"), "Server title");
+        await page.addScriptTag({ content: bundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        assert.equal(await root.getAttribute("data-x-card-prop-title"), "Server title");
+        for (const title of ["Client title", null]) {
+          await page.evaluate(title => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("article"), { title }), title);
+          await page.waitForFunction(title => document.querySelector("article")?.getAttribute("data-x-card-prop-title") === title, title);
+          assert.equal(await root.locator("b").textContent(), title ?? "Default");
+          assert.equal(await root.locator("output").textContent(), "Server title");
+        }
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts native checked properties and preserves form reset defaults`, async () => {
       const browser = await launchParityBrowser(engine);
       try {

@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Record explicit accepted native props in the existing SDK metadata attributes, including components pruned from client adoption. Preserve omitted defaults, null inputs, delegated ownership and structured JSON values.
+
 - Serialize native input `.checked` bindings as initial checkedness and preserve authored reset defaults through the existing browser-adoption records. Keep invalid property writes inert and compose reset attributes with invocation forwarding.
 
 - Keep a receiving native prop's default available when a binding reads a missing member of an available object. Preserve waiting upstream inputs and seed dependent state before rendering and browser adoption.

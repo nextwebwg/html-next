@@ -40,6 +40,7 @@ public static partial class HtmlNextCompiler
         private readonly List<AcceptedChildListBinding> childLists = [];
         private readonly List<(string Name, int Slot, ValueType Type)> states = [];
         private InstanceRecordPlan? instance;
+        private PropReflectionPlan? reflection;
         private readonly Dictionary<int, IterationIndexBinding> indexLocals = [];
         public IReadOnlyDictionary<string, ScopedSlotContract> Slots => slotContracts;
         private IReadOnlyList<string> styleNames = [];
@@ -213,14 +214,17 @@ public static partial class HtmlNextCompiler
             ReadReferences(root, new(StringComparer.Ordinal));
             foreach (var name in derived.Keys) CompileDerived(name);
             var propDefinitions = props.ToArray();
+            if (assets?.Hydrate == true && props.Count > 0)
+                reflection = new(slots++, Tag, propDefinitions, root.Attributes.Where(attribute => attribute.Name.StartsWith("from:data-", StringComparison.Ordinal))
+                    .Select(attribute => attribute.Name[5..]).ToArray(), source);
             if (assets?.Hydrate == true && assets.Client?.Adopts(Tag) == true)
                 instance = new(Tag, slots++, propDefinitions, states.Select(state => new HydrationState(state.Name, state.Slot, state.Type,
                     derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes, declarationContextSlot);
             if (assets is not null) rootStyle = new(Tag, styleNames.Select(name => new RootStyleState(name,
-                bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance);
+                bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance, Reflection: reflection);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
-            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance);
+            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance, reflection);
         }
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)
@@ -580,7 +584,7 @@ public static partial class HtmlNextCompiler
                     var fallback = initial is null ? null : " " + name + "=\"" + HtmlOutput.Escape(initial.Value, true) + "\"";
                     RenderOperation operation = path is PathExpression { Type.Reference: false } bound ? new AttributeValue(name, bound.Path, kind, source, fallback)
                         : new ExpressionAttribute(name, path, kind, source, fallback);
-                    bindingsByName.Add(name, rootAttributes is not null && IsStateAttribute(name) ? new RootAuthoredAttribute(name, operation, rootAttributes) : operation);
+                    bindingsByName.Add(name, rootAttributes is not null && IsManagedRootAttribute(name) ? new RootAuthoredAttribute(name, operation, rootAttributes) : operation);
                     bindingOrder.Add((name, position));
                 }
                 else
@@ -594,7 +598,7 @@ public static partial class HtmlNextCompiler
                     if (rootAttributes is not null && authoredName == "component") continue;
                     var text = " " + authoredName + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
                     RenderOperation literal = new Literal(text);
-                    literalOrder.Add((authoredName, rootAttributes is not null && IsStateAttribute(authoredName)
+                    literalOrder.Add((authoredName, rootAttributes is not null && IsManagedRootAttribute(authoredName)
                         ? new RootAuthoredAttribute(authoredName, literal, rootAttributes) : literal));
                 }
             }
@@ -789,7 +793,8 @@ public static partial class HtmlNextCompiler
             return contract.Props.Length == 0 ? null : new(contract, arguments, source);
         }
 
-        private static bool IsStateAttribute(string name) => name.StartsWith("data-", StringComparison.Ordinal) && name.EndsWith("-state", StringComparison.Ordinal);
+        private static bool IsManagedRootAttribute(string name) => name.StartsWith("data-", StringComparison.Ordinal)
+            && (name.EndsWith("-state", StringComparison.Ordinal) || name.Contains("-prop-", StringComparison.Ordinal));
 
         private string StyleProperty(string name)
         {
