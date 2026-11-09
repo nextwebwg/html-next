@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Serialize native input `.value` bindings into initial HTML and preserve authored reset defaults in the existing client records. Compose ordered attributes, invocation forwarding and `.checked` records; let browser parsing normalize control values.
+
 - Let native module preparation read accepted props, seeded state, computed values and availability lazily, and exchange completed values and input identities with JavaScript SDK services. Expose the input-port adapter through the public inputs entry point.
 
 - Record explicit accepted native props in the existing SDK metadata attributes, including components pruned from client adoption. Preserve omitted defaults, null inputs, delegated ownership and structured JSON values.

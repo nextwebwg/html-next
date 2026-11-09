@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace HtmlNext;
 
 internal sealed record InvocationAttribute(string Name, string? Literal, ValueExpression? Expression, string Source, string? Target = null, DeferredPropAttribute? Prop = null) : RenderOperation
@@ -16,6 +18,11 @@ internal sealed record InvocationAttribute(string Name, string? Literal, ValueEx
         text = Literal;
         if (Expression is null && Prop is null) return true;
         var value = Prop?.Read(values) ?? Expression!.Evaluate(values);
+        if (Target == "value-property")
+        {
+            if (value.IsInvalid) return false;
+            text = InputValueProperty.Text(value, Source); return true;
+        }
         if (Target == "class") { if (value.IsInvalid) return false; text = value.Truthy ? "true" : "false"; return true; }
         if (Target == "style")
         {
@@ -153,6 +160,7 @@ internal sealed class InvocationAttributeState
 internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attributes, RootStyle? Owner = null, CheckedInputProperty? Checked = null) : RenderOperation
 {
     private readonly RenderOperation[]? direct = Checked is null ? Direct(Attributes, Owner) : null;
+    private readonly string? valueSource = Attributes.FirstOrDefault(attribute => attribute?.Target == "value-property")?.Source;
 
     private static RenderOperation[]? Direct(InvocationAttribute?[] attributes, RootStyle? owner)
     {
@@ -175,20 +183,26 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
             return;
         }
         var output = writer.Context?.AttributeOutput() ?? new Dictionary<string, string?>(StringComparer.Ordinal);
+        var valueProperty = valueSource is null ? null : new InputValueProperty(valueSource);
         foreach (var attribute in Attributes)
         {
             if (attribute is null && writer.Context?.InvocationAttributesFor(values) is { } inputs)
             {
                 var forwarded = writer.Context.ForwardedAttributeOutput();
                 inputs.Apply(forwarded);
-                foreach (var (name, text) in forwarded) if (text is not null) output[name] = text;
+                foreach (var (name, text) in forwarded) if (text is not null) { output[name] = text; valueProperty?.Attribute(name, text); }
             }
             else if (attribute is not null && attribute.TryRead(values, out var text))
             {
                 InvocationAttributeFrame.Apply(output, attribute, text);
+                if (attribute.Target == "value-property") valueProperty!.Property(text!);
+                else if (attribute.Target is null) valueProperty?.Attribute(attribute.Name, output.GetValueOrDefault(attribute.Name));
             }
         }
-        Checked?.Apply(output, values);
+        Dictionary<string, object?>? defaults = null;
+        valueProperty?.Apply(output, ref defaults);
+        Checked?.Apply(output, values, ref defaults);
+        if (defaults is not null) output["data-html-next-form-defaults"] = JsonSerializer.Serialize(defaults);
         foreach (var (name, text) in output)
         {
             if (text is null) continue;
@@ -207,7 +221,7 @@ internal sealed record ForwardedElementAttributes(InvocationAttribute?[] Attribu
 
 internal sealed record CheckedInputProperty(ValueExpression Expression)
 {
-    public void Apply(Dictionary<string, string?> output, object?[] values)
+    public void Apply(Dictionary<string, string?> output, object?[] values, ref Dictionary<string, object?>? defaults)
     {
         var value = Expression.Evaluate(values);
         if (value.IsInvalid) return;
@@ -216,6 +230,7 @@ internal sealed record CheckedInputProperty(ValueExpression Expression)
         var authored = output.GetValueOrDefault("checked") is not null;
         if (current == authored) return;
         output["checked"] = current ? "" : null;
-        output["data-html-next-form-defaults"] = authored ? "{\"checked\":true}" : "{\"checked\":false}";
+        defaults ??= new(StringComparer.Ordinal);
+        defaults["checked"] = authored;
     }
 }

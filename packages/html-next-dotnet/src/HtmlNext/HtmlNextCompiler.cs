@@ -535,7 +535,7 @@ public static partial class HtmlNextCompiler
                 if (element is not IHtmlInputElement) Unsupported("native property '.checked' on <" + element.LocalName + ">");
                 checkedProperty = new(Expression(checkedExpression, scope));
             }
-            if (checkedProperty is not null || element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
+            if (checkedProperty is not null || element is IHtmlInputElement && element.HasAttribute(".value") || element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
             {
                 if (element.HasAttribute("$attributes") && (fragment || element.GetAttribute("$attributes") != "")) throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
                 operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes, checkedProperty));
@@ -849,6 +849,10 @@ public static partial class HtmlNextCompiler
                 var name = QualifiedAttributeName(attribute);
                 if (name == "$attributes") { result.Add(null); continue; }
                 if (name == ".checked") continue;
+                if (name == ".value" && element is IHtmlInputElement)
+                {
+                    result.Add(new("value", null, Expression(attribute.Value, scope), source, "value-property")); continue;
+                }
                 if (name is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" or "$when" or "$else") continue;
                 if (name.StartsWith("class:", StringComparison.Ordinal))
                 {

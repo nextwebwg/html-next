@@ -388,6 +388,21 @@ describe("Node component rendering", () => {
       }
     } finally { await renderer.close(); }
   });
+  it("serializes initial value properties with their authored reset defaults", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [expression, expected] of [["'Live'", "Live"], ["null", ""], ["false", "false"], ["17", "17"], ["[]", ""], ["[1, 2]", "1,2"], ["{}", "[object Object]"]]) {
+        const definition = parseComponent(`<template component="x-field"><input value="Base" .value="${expression}"></template>`);
+        const { html } = await renderer.render("<x-field></x-field>", { definitions: [definition] });
+        const dom = new JSDOM(html);
+        try {
+          const input = dom.window.document.querySelector("input")!;
+          assert.equal(input.value, expected);
+          assert.deepEqual(JSON.parse(input.getAttribute("data-html-next-form-defaults")!), { value: "Base", valuePresent: true });
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
   it("serializes checked properties separately from authored form reset defaults", async () => {
     const cases = [["true", false, true], ["false", false, false], ["true", true, true], ["false", true, false],
       ["null", true, false], ["''", true, false], ["0", true, false], ["'false'", false, true],

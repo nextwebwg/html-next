@@ -31,6 +31,9 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + "<template component=\"x-formatted-duration\"><defs><prop name=\"elapsed\" type=\"duration\">Elapsed.</prop><prop name=\"seconds\" type=\"number\">Seconds.</prop></defs><article><output class=\"elapsed\">{format($elapsed, { style: \"digital\" }, \"en-US\")}</output><output class=\"record\">{format({ seconds: $seconds }, \"duration\", { style: \"digital\" }, \"en-US\")}</output></article></template>"
   + "<template component=\"x-native-styles\"><defs><prop name=\"count\" type=\"number\">Count.</prop><prop name=\"width\" type=\"length\">Width.</prop><prop name=\"whole\" type=\"string\">Whole style.</prop></defs><article style=\"margin: 1px 2px !important; --empty: \" style:margin-left=\"$width\" style:--count=\"$count\"><output>{$count}</output><b from:style=\"$whole\" style:--count=\"$count\">Whole</b></article></template>";
 const checkedSource = '<template component="x-native-checked"><defs><prop name="active" type="boolean" default="true">Active.</prop></defs><form><input id="plainChecked" type="checkbox" value="plain" .checked="$active"><input id="authoredChecked" type="checkbox" value="authored" checked .checked="not($active)"><input type="radio" name="status" value="active" .checked="$active"><input type="radio" name="status" value="inactive" .checked="not($active)"></form></template>';
+const valueTypes = ["text", "password", "search", "tel", "number", "range", "color", "date", "month", "week", "time", "datetime-local", "email", "url", "checkbox", "radio", "hidden", "button", "submit", "reset", "image", "file"];
+const valueSource = '<template component="x-native-value"><defs><prop name="value" type="string" default="17">Value.</prop></defs><form>'
+  + valueTypes.map(type => `<input id="value-${type}" type="${type}" value="Authored" min="10" max="20" step="2" .value="${type === "file" ? "''" : "$value"}">`).join("") + '</form></template>';
 const waitingSource = '<template component="x-wait"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><input value="Original"><b>{$rows.length}</b><output>{$draft.length}</output></article></template>'
   + '<template component="x-wait-shell"><defs><prop name="rows" type="list(string)">Rows.</prop></defs><main><x-wait from:rows="$rows"></x-wait></main></template>'
   + '<template component="x-wait-literal"><defs><state name="raw" value="wrong"></state></defs><main><x-wait rows="[&quot;Literal&quot;]" from:rows="$raw"></x-wait></main></template>';
@@ -53,7 +56,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
     directory = await mkdtemp(join(tmpdir(), "html-next-dotnet-hydration-"));
     await execute("dotnet", ["restore", host, "--locked-mode"], { timeout: 60_000 });
     await execute("dotnet", ["build", host, "-c", "Release", "--nologo", "--no-restore"], { timeout: 60_000 });
-    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource + checkedSource);
+    await writeFile(join(directory, "card.html"), source + acceptedSource + waitingSource + checkedSource + valueSource);
     await writeFile(join(directory, "prepared.html"), preparedSource);
     await writeFile(join(directory, "producer.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
       const instances = new WeakMap();
@@ -71,7 +74,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked", "x-native-value"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -86,7 +89,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }, 60_000);
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
-  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource + checkedSource): Promise<string> {
+  async function render(tag: string, inputs: object = {}, prepared?: object, assets = manifest, definitions = source + acceptedSource + waitingSource + checkedSource + valueSource): Promise<string> {
     return nativeRender({ source: definitions, tag, inputs, manifest: assets, prepared });
   }
 
@@ -97,7 +100,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   }
 
   async function application(missing = false): Promise<string> {
-    return nativeRender({ source: source + acceptedSource + waitingSource + checkedSource, manifest,
+    return nativeRender({ source: source + acceptedSource + waitingSource + checkedSource + valueSource, manifest,
       application: missing ? memberApplicationSource : applicationSource, inputs: missing ? { data: {} } : { title: "Application title" } });
   }
 
@@ -494,6 +497,40 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} parses native initial input values and preserves edits and reset defaults during adoption`, async () => {
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        const expected = await page.evaluate(types => types.map(type => {
+          const input = document.createElement("input"); input.type = type;
+          for (const [name, text] of Object.entries({ value: "Authored", min: "10", max: "20", step: "2" })) input.setAttribute(name, text);
+          input.value = type === "file" ? "" : "17";
+          return { value: input.value, reset: input.defaultValue };
+        }), valueTypes);
+        await page.setContent(await render("x-native-value"));
+        assert.deepEqual(await page.locator("input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value)), expected.map(input => input.value));
+        await page.evaluate(() => Reflect.set(window, "valueControls", [...document.querySelectorAll("input")]));
+        await page.locator("#value-text").fill("Early value");
+        await page.locator("#value-number").fill("12");
+        await page.addScriptTag({ content: bundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        assert.equal(await page.locator("#value-text").inputValue(), "Early value");
+        assert.equal(await page.locator("#value-number").inputValue(), "12");
+        assert.deepEqual(await page.locator("input").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).defaultValue)), expected.map(input => input.reset));
+        await page.evaluate(() => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("form"), { value: "23" }));
+        await page.waitForFunction(() => document.querySelector<HTMLInputElement>("#value-text")?.value === "23");
+        assert.equal(await page.locator("#value-range").inputValue(), "20");
+        await page.evaluate(() => document.querySelector("form")!.reset());
+        assert.equal(await page.locator("#value-text").inputValue(), "Authored");
+        assert.equal(await page.locator("#value-number").inputValue(), "");
+        assert.equal(await page.locator("#value-checkbox").inputValue(), "23");
+        assert.equal(await page.evaluate(() => [...document.querySelectorAll("input")].every((input, index) => input === Reflect.get(window, "valueControls")[index])), true);
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} preserves explicit prop metadata through adoption, updates and reset to default`, async () => {
       const browser = await launchParityBrowser(engine);
       try {
