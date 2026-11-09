@@ -3,6 +3,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="../fixtures/name-plural-formatting.json" Link="fixtures/name-plural-formatting.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/message-formatting.json" Link="fixtures/message-formatting.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/date-formatting.json" Link="fixtures/date-formatting.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/number-formatting.json" Link="fixtures/number-formatting.json" CopyToOutputDirectory="PreserveNewest" />

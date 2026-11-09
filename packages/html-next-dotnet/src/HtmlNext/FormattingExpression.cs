@@ -37,10 +37,12 @@ internal sealed record FormattingExpression(string Operation, ValueExpression[] 
             if (!language.IsText) return ExpressionValue.Invalid;
             locale = language.ScalarText();
         }
-        if (offset < arguments.Length || format is not ("number" or "currency" or "percent" or "unit" or "date" or "time" or "dateTime" or "list" or "relativeTime") || options.Type.Kind != "object") return ExpressionValue.Invalid;
+        if (offset < arguments.Length || format is not ("number" or "currency" or "percent" or "unit" or "date" or "time" or "dateTime" or "list" or "relativeTime" or "displayName" or "plural") || options.Type.Kind != "object") return ExpressionValue.Invalid;
         var icu = IcuFormatters.Available;
         locale ??= CultureInfo.CurrentCulture.Name is { Length: > 0 } culture ? culture : null;
         if (icu is null || locale is not null && !icu.Locale(locale, out locale, !options.Member("numberingSystem").IsAbsent)) return ExpressionValue.Invalid;
+        if (format is "displayName" or "plural")
+            return range || Operation == "formatParts" ? ExpressionValue.Invalid : NamePluralFormatting.Evaluate(icu, arguments[0], format, options, locale);
         if (format is "list" or "relativeTime")
             return range ? ExpressionValue.Invalid : MessageFormatting.Evaluate(icu, Operation, arguments[0], format, options, locale);
         if (format is "date" or "time" or "dateTime")
