@@ -11,7 +11,7 @@ import { compileComponentStylesForSvelte, componentStateNames, VUE_ROOT_ATTRIBUT
 import { asciiLowerCase, kebabCase, componentName, propAttribute } from "../names.js";
 import { invocationValue } from "../prop-values.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, repeatedSlotNames } from "../template.js";
+import { orderedAttributeWrites, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, repeatedSlotNames } from "../template.js";
 import { parseDuration } from "../duration.js";
 import { getDomInterface } from "../platform.js";
 import { templateForwardsAttributes } from "../template.js";
@@ -1412,7 +1412,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.style == null || rest.style === false ? undefined : ${quote("")})` : "undefined";
         attributes.push(`style={(typeof document === 'undefined' ? styleText(${forwards ? quote("") : base}, ${rules}) : ${base}) || ${empty}}`);
       }
-      attributes.push(`{@attach decorate(${rules}, { ${forwards ? "ordered: true, " : ""}scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
+      attributes.push(`{@attach decorate(${rules}, { ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}scope: ${quote(scopeClasses.join(" "))}, hashed: ${context.styleOwner !== undefined} })}`);
     }
   }
   attributes.push(...(forwards ? bindings.slice(capturedBindings) : bindings));

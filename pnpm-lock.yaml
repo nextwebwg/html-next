@@ -322,6 +322,9 @@ importers:
       '@vue/compiler-sfc':
         specifier: 'catalog:'
         version: 3.5.43
+      '@vue/server-renderer':
+        specifier: 'catalog:'
+        version: 3.5.43
       css-tree:
         specifier: 'catalog:'
         version: 3.2.1

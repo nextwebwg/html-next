@@ -16,7 +16,7 @@ import type { CompiledExpression } from "../expression.js";
 import { componentStateNames, compileComponentGraphStylesForConversion, VUE_ROOT_ATTRIBUTE } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import type { ComponentDefinition, ElementNode, HandlerDeclaration, LiteralAttribute, TemplateNode } from "../template.js";
-import { repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames } from "../template.js";
+import { orderedAttributeWrites, repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames } from "../template.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, typeScriptType, type TypeNode } from "../type-system.js";
 import { headEntriesSource, headScriptsSource, headHelperArtifact } from "./head-target.js";
 import { targetComponent, type TargetRequest } from "./backend.js";
@@ -333,7 +333,7 @@ export function generateAngularConversion(definition: ComponentDefinition, versi
     if (classRules.length > 0) {
       helper("attributes");
       const initial = forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined";
-      const input = `{ ${forwards ? "ordered: true, " : ""}base: ${initial}, bindings: [${classRules.map(rule => `[${rule.name}, ${rule.read}]`).join(", ")}] }`;
+      const input = `{ ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}base: ${initial}, bindings: [${classRules.map(rule => `[${rule.name}, ${rule.read}]`).join(", ")}] }`;
       if (child !== undefined) {
         helper("class-input");
         const classInput = `classBindingText(${input})`;

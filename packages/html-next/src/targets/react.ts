@@ -14,7 +14,7 @@ import { parseDuration } from "../duration.js";
 import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
+import { orderedAttributeWrites, repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact, jsxAttributeRecord } from "./vue-format.js";
@@ -165,6 +165,7 @@ interface EventAttachment {
   readonly forward: boolean;
   readonly ref?: string;
   readonly orderedClasses?: boolean;
+  readonly style?: string;
   readonly properties: readonly { readonly name: string; readonly value: string; readonly accepts?: string; readonly namespace?: string; readonly url?: boolean; readonly target?: "class" | "attribute" }[];
   readonly importantStyles: readonly { readonly name: string; readonly value: string }[];
   readonly genericWrites: readonly { readonly state: string; readonly path: string; readonly dynamic: boolean }[];
@@ -657,7 +658,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const componentStyle = component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.target === "style");
   const htmlInputs = component && (forwards || componentStyle) && Object.keys(componentContracts ?? {}).length > 0 ? invocationSchema(componentContracts!, reactAttribute) : undefined;
   if (htmlInputs !== undefined) state.usesHtmlInputs = true;
-  const orderedClasses = forwards && node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class"));
+  const orderedClasses = orderedAttributeWrites(node.attributes) && node.attributes.some(attribute => attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class"));
   const boundStyle = !component && node.attributes.some(attribute => attribute.kind === "attribute" && attribute.name === "style" && attribute.target === undefined && !attribute.twoWay);
   const orderedStyles = !component && forwards;
   if (componentStyle || boundStyle || forwards && !component) state.usesStyle = true;
@@ -677,7 +678,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       if (orderedStyles) orderedStyleValue = `(Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : ${orderedStyleValue})`;
       if (orderedClasses) {
         const read = "Object.hasOwn(forwardedAttributes(nativeAttrs), 'className') ? nativeAttrs.className : Symbol.for('html-next.no-attribute')";
-        properties.push({ name: "class", value: read, target: "attribute" });
+        if (!component) properties.push({ name: "class", value: read, target: "attribute" });
         classRules.push(`{ kind: "attribute", name: "class", read: () => ${read} }`);
       }
       const forwarded = `forwardedAttributes(${state.preact && !svg ? "nativeAttributes" : "nativeAttrs"}${component ? "" : ", [\"style\"]"})`;
@@ -715,7 +716,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       }
       else if (component && attribute.name === "style") literals.push(`style={${quote(attribute.value)} as any}`);
       else if (attribute.name === "class" && orderedClasses) {
-        properties.push({ name: "class", value: quote(attribute.value), target: "attribute" });
+        if (!component) properties.push({ name: "class", value: quote(attribute.value), target: "attribute" });
         classRules.push(`{ kind: "attribute", name: "class", read: () => ${quote(attribute.value)} }`);
       }
       else if (attribute.name === "class" && forwards) literals.push(`className=${quote(attribute.value)}`);
@@ -1046,25 +1047,26 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     ...literalStyles,
     ...reactiveStyles,
   ].join(", ")} } as unknown as React.CSSProperties}`);
-  const classOnly = !component && rootTag === undefined && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0 && importantStyles.length === 0 && node.ref === undefined
+  const styleValue = boundStyle || orderedStyles ? orderedStyles ? orderedStyleValue : bindings.find(binding => binding.startsWith("style={"))?.slice(7, -1) ?? "{}" : undefined;
+  const classOnly = styleValue === undefined && !component && rootTag === undefined && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0 && importantStyles.length === 0 && node.ref === undefined
     && properties.length > 0 && properties.every(property => property.target !== undefined);
   if (classOnly) {
     const owner = state.allocate("__htmlNextClassOwner");
     state.classOwners.push(owner);
     const values = properties.map(property => `[${property.target === "class" ? quote(property.name) : "null"}, ${property.accepts === undefined ? property.value : `(${property.accepts}) ? ${property.value} : Symbol.for("html-next.invalid-result")`}]`);
     bindings.push(`ref={element => applyClassBindingRef(element, ${owner}, { ${orderedClasses ? "ordered: true, " : ""}bindings: [${values.join(", ")}] })}`);
-  } else if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || node.ref !== undefined) {
+  } else if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || styleValue !== undefined || node.ref !== undefined) {
     for (const event of node.events ?? []) if (!handlers.has(event.handler)) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
     const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
       ? `() => ${write.path} as unknown as readonly (string | number)[]` : "undefined");
     // A path that depends on the render goes through ScopedAttachment, whose ref stays the same between renders.
-    const scoped = scope.local === true && (control !== undefined || properties.length > 0) || dynamicPaths.some((path) => path !== "undefined");
+    const scoped = scope.local === true && (control !== undefined || properties.length > 0 || styleValue !== undefined) || styleValue !== undefined && retainedBindings.length > 0 || dynamicPaths.some((path) => path !== "undefined");
     const listensOnly = (node.events?.length ?? 0) > 0 && rootTag === undefined && control === undefined && genericWrites.length === 0
-      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined;
+      && properties.length === 0 && importantStyles.length === 0 && styleValue === undefined && node.ref === undefined;
     const forwardsOnly = rootTag !== undefined && !component && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0
-      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined && rootArms(state.definition.template) === undefined;
+      && properties.length === 0 && importantStyles.length === 0 && styleValue === undefined && node.ref === undefined && rootArms(state.definition.template) === undefined;
     const name = forwardsOnly ? "ownedRootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
-    const attachment: EventAttachment = { ...(orderedClasses ? { orderedClasses: true } : {}), name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
+    const attachment: EventAttachment = { ...(orderedClasses ? { orderedClasses: true } : {}), ...(styleValue === undefined ? {} : { style: styleValue }), name, listensOnly, forwardsOnly, remembersParent: !component && (rootTag !== undefined || node.ref !== undefined), scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
       ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
     attachments.push(attachment);
     if (scoped) {
@@ -1095,14 +1097,6 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       ...(rootTag.hostState ? [`${stateAttribute(rootTag.tag)}={hostState}`] : []),
       `{...{ component: [renderedIdentity, ${quote(rootTag.tag)}].filter(Boolean).join(" ") }}`,
     ])];
-  if (boundStyle || orderedStyles) {
-    const style = orderedStyles ? orderedStyleValue : bindings.find(binding => binding.startsWith("style={"))?.slice(7, -1) ?? "{}";
-    const ref = attributes.findIndex(attribute => attribute.startsWith("ref={"));
-    const previous = ref < 0 ? undefined : attributes.splice(ref, 1)[0]!.slice(5, -1);
-    const styleAttribute = attributes.findIndex(attribute => attribute.startsWith("style={"));
-    if (styleAttribute >= 0) attributes.splice(styleAttribute, 1);
-    attributes.push(`{...styleBinding((${style}) as React.CSSProperties${previous === undefined ? "" : `, ${previous}`})}`);
-  }
   const finalAttributes = htmlInputs === undefined ? attributes : [`{...(invocationProps(${jsxAttributeRecord(attributes)}, ${htmlInputs}) as any)}`];
   const renderedAttributes = !state.preact && (tag === "HtmlNextInput" || tag === "HtmlNextValueInput")
     ? [`htmlNextAttributes={${jsxAttributeRecord(finalAttributes)}}`] : finalAttributes;
@@ -1110,7 +1104,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const markup = component && children === "" || !component && isVoidElement(node.name)
     ? `${opening} />` : `${opening}>${children}</${tag}>`;
   const selectorNames = new Set(Object.values(componentContracts ?? {}).flatMap((contract) => contract.select === undefined ? [] : [contract.select.from]));
-  const scopedMarkup = scopedAttachment === undefined ? markup : `<ScopedAttachment attach={${scopedAttachment.attachment.name}}${!scopedAttachment.paths.some(path => path !== "undefined") ? "" : ` paths={[${scopedAttachment.paths.join(", ")}]}`} properties={[${scopedAttachment.attachment.properties.map((property) =>
+  const scopedMarkup = scopedAttachment === undefined ? markup : `<ScopedAttachment attach={${scopedAttachment.attachment.name}}${!scopedAttachment.paths.some(path => path !== "undefined") ? "" : ` paths={[${scopedAttachment.paths.join(", ")}]}`}${scopedAttachment.attachment.style === undefined ? "" : ` style={${scopedAttachment.attachment.style}}`}${scopedAttachment.attachment.orderedClasses ? " orderedClasses" : ""} properties={[${scopedAttachment.attachment.properties.map((property) =>
     `{ name: ${quote(property.name)}, value: ${property.value}, accepted: ${property.accepts ?? "true"}${property.target === undefined ? "" : `, target: ${quote(property.target)}`}${property.namespace === undefined ? "" : `, namespace: ${quote(property.namespace)}, localName: ${quote(property.name.slice(property.name.indexOf(":") + 1))}, url: ${property.url === true}`} }`).join(", ")}]}${scopedAttachment.attachment.control === undefined ? "" :
     ` control={{ name: ${quote(scopedAttachment.attachment.control.name)}, value: ${scopedAttachment.attachment.control.value}, defaults: ${scopedAttachment.attachment.control.defaults}, nativeProperty: ${scopedAttachment.attachment.control.nativeProperty}, accepted: ${scopedAttachment.attachment.control.accepts ?? "true"} }}`} render={(${scopedAttachment.ref}) => ${markup}} />`;
   return retainedBindings.toSorted((a, b) => Number(selectorNames.has(b.propName ?? "")) - Number(selectorNames.has(a.propName ?? ""))).reduceRight((result, retained) =>
@@ -1476,6 +1470,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const usesScopedAttachments = attachments.some((attachment) => attachment.scoped);
   const usesScopedPaths = attachments.some(attachment => attachment.scoped && (attachment.control?.write?.dynamic === true || attachment.genericWrites.some(write => write.dynamic)));
   const usesScopedControls = attachments.some(attachment => attachment.scoped && attachment.control !== undefined);
+  const usesScopedStyles = attachments.some(attachment => attachment.scoped && attachment.style !== undefined);
   const usesGenericBindings = attachments.some((attachment) => attachment.genericWrites.length > 0);
   const usesNestedControlWrites = attachments.some((attachment) =>
     attachment.control?.write?.path !== undefined && attachment.control.write.path !== "[]" ||
@@ -1875,6 +1870,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `  controlValue${attachment.name}.current = ${attachment.control.value};`,
       `  React.useLayoutEffect(() => { syncBoundControl(controlRef${attachment.name}.current, ${quote(attachment.control.name)}, ${attachment.control.value}, ${attachment.control.defaults}, ${attachment.control.nativeProperty}, ${attachment.control.accepts ?? "true"}); });`,
     ]),
+    ...attachments.flatMap(attachment => attachment.style === undefined || attachment.scoped ? [] : [
+      `  const styleRef${attachment.name} = React.useRef<Element | null>(null);`,
+      `  React.useLayoutEffect(() => { applyStylePriority(styleRef${attachment.name}.current, ${attachment.style}); });`,
+    ]),
     ...attachments.flatMap((attachment) => attachment.properties.length === 0 || attachment.scoped ? [] : [
       `  const propertyRef${attachment.name} = React.useRef<Element | null>(null);`,
       `  const previousPropertyElement${attachment.name} = React.useRef<Element | null>(null);`,
@@ -1927,7 +1926,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
             : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, ${written}), path); }`;
           return `const genericCleanup${index} = attachGenericBinding(element, ${source});`;
         });
-        const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.ref === undefined ? attach : [
+        const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.style === undefined && attachment.ref === undefined ? attach : [
           "{",
           ...(attachment.remembersParent ? ["const restoreParent = rememberParent(element);"] : []),
           ...(attachment.forward ? [`rootRef.current = element as ${publicRootType} | null;`] : []),
@@ -1939,12 +1938,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           ]),
           ...(control === undefined || attachment.scoped ? [] : [`controlRef${attachment.name}.current = element;`]),
           ...(attachment.properties.length === 0 || attachment.scoped ? [] : [`propertyRef${attachment.name}.current = element;`]),
+          ...(attachment.style === undefined || attachment.scoped ? [] : [`styleRef${attachment.name}.current = element;`]),
           ...attachment.importantStyles.map((style) =>
             `if (element !== null && ((element as HTMLElement).style.getPropertyValue(${quote(style.name)}) !== ${quote(style.value)} || (element as HTMLElement).style.getPropertyPriority(${quote(style.name)}) !== "important")) (element as HTMLElement).style.setProperty(${quote(style.name)}, ${quote(style.value)}, "important");`),
           ...(bindings.length === 0 ? [] : [`const nativeCleanup = ${attach};`]),
           ...(control === undefined ? [] : [`const controlCleanup = attachBoundControl(element, ${quote(control.name)}, ${attachment.scoped ? "scoped?.control" : `controlValue${attachment.name}.current`}, ${control.defaults}, ${update}, ${control.nativeProperty}, ${attachment.scoped ? "scoped?.controlAccepted ?? true" : control.accepts ?? "true"});`]),
           ...genericUpdates,
-          `return () => { ${attachment.remembersParent ? "restoreParent(); " : ""}${attachment.forward && preservesRootFocus ? "rootFocusPending.current = element?.ownerDocument.activeElement === element; " : ""}${attachment.forward ? "rootRef.current = null; " : ""}${attachment.ref === undefined ? "" : `refElements.current.get(${quote(attachment.ref)})?.delete(element!); `}${control === undefined ? "" : `${attachment.scoped ? "" : `controlRef${attachment.name}.current = null; `}controlCleanup?.(); `}${attachment.genericWrites.map((_write, index) => `genericCleanup${index}?.();`).join(" ")} ${attachment.properties.length === 0 || attachment.scoped ? "" : `propertyRef${attachment.name}.current = null; `}${bindings.length === 0 ? "" : "nativeCleanup?.();"} };`,
+          `return () => { ${attachment.remembersParent ? "restoreParent(); " : ""}${attachment.forward && preservesRootFocus ? "rootFocusPending.current = element?.ownerDocument.activeElement === element; " : ""}${attachment.forward ? "rootRef.current = null; " : ""}${attachment.ref === undefined ? "" : `refElements.current.get(${quote(attachment.ref)})?.delete(element!); `}${control === undefined ? "" : `${attachment.scoped ? "" : `controlRef${attachment.name}.current = null; `}controlCleanup?.(); `}${attachment.genericWrites.map((_write, index) => `genericCleanup${index}?.();`).join(" ")} ${attachment.properties.length === 0 || attachment.scoped ? "" : `propertyRef${attachment.name}.current = null; `}${attachment.style === undefined || attachment.scoped ? "" : `styleRef${attachment.name}.current = null; `}${bindings.length === 0 ? "" : "nativeCleanup?.();"} };`,
           "}",
         ].join(" ");
         return `  const ${attachment.name} = React.useCallback((element: Element | null, paths?: readonly (((() => readonly (string | number)[]) | undefined))[]${attachment.scoped ? ", scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }" : ""}) => ${callback}, []);`;
@@ -2017,9 +2017,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "type ScopedPath = (() => readonly (string | number)[]) | undefined;",
       "type ScopedProperty = { readonly name: string; readonly value: unknown; readonly accepted: boolean; readonly namespace?: string; readonly localName?: string; readonly url?: boolean; readonly target?: 'class' | 'attribute' };",
       "type ScopedControl = { readonly name: 'value' | 'checked'; readonly value: unknown; readonly defaults: { readonly value?: string; readonly checked?: boolean; readonly options?: readonly boolean[] }; readonly nativeProperty: boolean; readonly accepted: boolean };",
-      "function ScopedAttachment({ attach, paths, properties, control, render }: {",
+      `function ScopedAttachment({ attach, paths, properties, control, ${usesScopedStyles ? "style, " : ""}orderedClasses, render }: {`,
       "  readonly attach: (element: Element | null, paths?: readonly ScopedPath[], scoped?: { readonly control?: unknown; readonly controlAccepted?: boolean }) => void | (() => void);",
       "  readonly paths?: readonly ScopedPath[]; readonly properties: readonly ScopedProperty[]; readonly control?: ScopedControl;",
+      "  readonly orderedClasses?: boolean;",
+      ...(usesScopedStyles ? ["  readonly style?: React.CSSProperties;"] : []),
       "  readonly render: (ref: (element: Element | null) => void) => ReactNode;",
       "}): ReactNode {",
       "  const element = React.useRef<Element | null>(null);",
@@ -2043,8 +2045,11 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         "    if (control !== undefined) syncBoundControl(node, control.name, control.value, control.defaults, control.nativeProperty, control.accepted);",
       ] : []),
       "    const previous = previousValues.current ?? [];",
+      ...(attachments.some(attachment => attachment.scoped && attachment.orderedClasses) ? [
+        "    if (orderedClasses) applyClassBindingRef(node, previousElement, { ordered: true, bindings: properties.flatMap(property => property.target === undefined ? [] : [[property.target === 'class' ? property.name : null, property.accepted ? property.value : Symbol.for('html-next.invalid-result')] as const]) });",
+      ] : []),
       "    for (const [index, property] of properties.entries()) {",
-      "      if (property.accepted && (property.target === undefined || property.value !== Symbol.for('html-next.invalid-result')) && (!['scrollTop', 'scrollLeft'].includes(property.name) || previousValues.current !== undefined) &&",
+      "      if (!(orderedClasses && property.target !== undefined) && property.accepted && (property.target === undefined || property.value !== Symbol.for('html-next.invalid-result')) && (!['scrollTop', 'scrollLeft'].includes(property.name) || previousValues.current !== undefined) &&",
       "        (node !== previousElement.current || !Object.is(property.value, previous[index])))",
       "        {",
       "          if (property.target === 'class') node.classList.toggle(property.name, Boolean(property.value));",
@@ -2057,6 +2062,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "        }",
       "      if (property.accepted && (property.target === undefined || property.value !== Symbol.for('html-next.invalid-result'))) previous[index] = property.value;",
       "    }",
+      ...(usesScopedStyles ? ["    applyStylePriority(node, style);"] : []),
       "    previousElement.current = node; previousValues.current = previous;",
       "  });",
       "  return render(ref);",
@@ -2074,7 +2080,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   // and the rendering components and functions its markup and handlers name.
   const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
   const styledBody = !renderState.usesStyle ? body : body.replace(STYLE_IMPORT,
-    `import { ${["styleObject", "styleBinding", "styleText"].filter(helper => new RegExp(`\\b${helper}\\b`).test(body)).join(", ")} } from ${quote(options.styleSpecifier ?? "./style/style.js")};`);
+    `import { ${["styleObject", "applyStylePriority", "styleText"].filter(helper => new RegExp(`\\b${helper}\\b`).test(body)).join(", ")} } from ${quote(options.styleSpecifier ?? "./style/style.js")};`);
   const component = formatReact(styledBody.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
     : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`) + "\n" + lowering.referenceDeclarations().join("\n"), `${name}.tsx`);
   return {

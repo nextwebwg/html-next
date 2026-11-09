@@ -9,6 +9,12 @@
 
 ### Changes
 
+- Preserve child-authored root classes through React and Preact delegation. Keep committed plain-slot claims when outlets reopen, release removed outlets through public hooks, and discard claims from abandoned renders.
+
+- Keep native once listeners attached through React and Preact style-priority updates, and preserve authored order for mixed whole-class and keyed class writes. Resolve Vue accepted-child order from current template roots and keep Firefox component styles inside empty-class boundaries.
+
+- Reject ready producer results that do not satisfy a prop's declared type, while preserving explicit null clears and the last accepted value.
+
 - Preserve native and controller-owned control attributes across unrelated framework updates while retaining ordered forwarding precedence.
 
 - Preserve authored empty `class` attributes in Svelte roots and compile guarded iteration filters with strict framework type checking. Restore visible document order when Angular slot destinations reconnect. Keep the photo morph guide's grid visible when no photo is selected.

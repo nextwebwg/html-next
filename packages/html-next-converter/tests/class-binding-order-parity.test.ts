@@ -118,7 +118,7 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of modes) {
-      it(`${engine} ${mode} preserves authored order and writes only changed results`, async () => {
+      it(`${engine} ${mode} preserves authored order and unrelated native edits`, async () => {
         const browser = await launchParityBrowser(browserType);
         const errors: string[] = [];
         try {
@@ -146,23 +146,24 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             document.getElementById("page")!.classList.add("external");
           });
           await page.click("#next"); await settle();
-          assert.deepEqual(await classes(), ["second","second","base active","second","raw active manual"]);
+          assert.deepEqual(await classes(), ["second","second active","base active","second","raw active manual"]);
           assert.deepEqual(await rows(), [["b", " row  row "], ["a", "row selected manual"]]);
           assert.equal(await rootClass(), "root running external");
           await page.click("#off"); await settle();
           assert.deepEqual(await classes(), ["second","second","base active","second","raw manual"]);
           assert.deepEqual(await rows(), [["b", " row  row "], ["a", "row manual"]]);
-          assert.equal(await rootClass(), "root external");
+          // The root replays its authored whole class before its changed keyed write.
+          assert.equal(await rootClass(), "root root");
           await page.click("#on"); await settle();
-          assert.deepEqual(await classes(), ["second active","second active","base active","second","raw manual active"]);
+          assert.deepEqual(await classes(), ["second","second active","base active","second","raw manual active"]);
           assert.deepEqual(await rows(), [["b", " row  row "], ["a", "row manual selected"]]);
-          assert.equal(await rootClass(), "root external running");
+          assert.equal(await rootClass(), "root running");
           await page.click("#invalid"); await settle();
-          assert.deepEqual(await classes(), ["second active","second active","base active","second","raw manual active"]);
+          assert.deepEqual(await classes(), ["second","second active","base active","second","raw manual active"]);
           await page.click("#recover"); await settle();
-          assert.deepEqual(await classes(), ["third","third","base active","third","raw manual active"]);
+          assert.deepEqual(await classes(), ["third","third active","base active","third","raw manual active"]);
           assert.deepEqual(await rows(), [["b", " row  row "], ["a", "row manual selected"]]);
-          assert.equal(await rootClass(), "root external running");
+          assert.equal(await rootClass(), "root running");
           assert.deepEqual(errors, []);
         } finally { await browser.close(); }
       });

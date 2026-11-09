@@ -172,6 +172,9 @@ export function initializeClassBindings(element: Element, input: ClassBindingInp
 }
 
 export function applyClassBindings(element: Element, input: ClassBindingInput, previous: unknown[]): void {
+  if (input.ordered && input.bindings.every(([, value], index) =>
+    value !== Symbol.for('html-next.invalid-result') && (value === Symbol.for('html-next.no-attribute')
+      ? !(index in previous) : index in previous && Object.is(value, previous[index])))) return;
   if (input.ordered) for (const [index, [token, value]] of input.bindings.entries()) {
     if (token === null && value === Symbol.for('html-next.no-attribute') && index in previous) { element.removeAttribute('class'); delete previous[index]; }
   }

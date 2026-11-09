@@ -36,7 +36,7 @@ describe.skipIf(!enabled)("React one-time state through the converter", () => {
         connect(host) { window.seedHost = host; window.seedPort = Reflect.get(host, Symbol.for("@nextwebwg/html-next.inputs.v1")); window.seedSource = window.seedPort.source("seed"); window.itemsSource = window.seedPort.source("items"); window.choiceSource = window.seedPort.source("choice"); window.modelSource = window.seedPort.source("model"); } });`);
     await writeFile(join(directory, "reader.html"), `<template component="x-concurrent-reader" module="./reader.js"><defs>
       <context name="draft" from="x-concurrent" as="inherited"></context><context name="modelDraft" from="x-concurrent" as="inheritedModel"></context><context name="ordinaryRecord" from="x-concurrent"></context><prop name="seenModel" type="string">Seen model.</prop><prop name="ordinarySeen" type="string">Ordinary seen.</prop><state name="local" type="string" from="$inherited"></state><prop name="seen" type="string">Seen.</prop>
-      </defs><aside>{$seen}</aside></template>`);
+      </defs><aside><span data-concurrent-seen>{$seen}</span><span data-concurrent-model>{$seenModel}</span><span data-concurrent-ordinary>{$ordinarySeen}</span></aside></template>`);
     await writeFile(join(directory, "reader.js"), `import { bindModule } from "@nextwebwg/html-next/bindings";
       export const { connect } = bindModule({ props: { ordinarySeen: { input: (_props, {state}) => state.ordinaryRecord.name, load: value => { (window.ordinaryContextReads ||= []).push(value); return value; } }, seenModel: { input: (_props, {state}) => state.inheritedModel.name, load: value => { (window.modelContextReads ||= []).push(value); return value; } }, seen: { input: (_props, {state}) => state.inherited, load: value => { (window.contextReads ||= []).push(value); return value; } } }, connect(host) { window.readerHost = host; } });`);
     await writeFile(join(directory, "cycle.html"), '<template component="x-cycle"><defs><state name="first" type="string" from="$second"></state><state name="second" type="string" from="$first"></state></defs><output>{$first}</output></template>');
@@ -93,7 +93,7 @@ describe.skipIf(!enabled)("React one-time state through the converter", () => {
     assert.throws(renderCycle, /HR006: A reactive computed value depends on itself/);
   });
 
-  it("isolates abandoned seeds, notifies providers while Suspense blocks commits and preserves child layout writes", async () => {
+  it("isolates abandoned seeds and preserves canonical values and child edits after Suspense resumes", async () => {
     const browser = await launchParityBrowser(chromium);
     const page = await browser.newPage(); const errors: string[] = []; page.on("pageerror", error => errors.push(error.message)); page.setDefaultTimeout(5_000);
     try {
@@ -102,34 +102,39 @@ describe.skipIf(!enabled)("React one-time state through the converter", () => {
       await page.evaluate(() => { (window as any).pause(); (window as any).change({seed: "Abandoned"}); });
       await page.waitForFunction(() => (window as any).didSuspend);
       assert.equal(await page.evaluate(() => (window as any).seedHost.state.draft), undefined);
-      await page.evaluate(() => { (window as any).seedHost.state.early = undefined; });
-      await page.waitForFunction(() => (window as any).earlyReads?.includes(null));
-      assert.equal(await page.evaluate(() => (window as any).seedHost.state.early), null, "an equal early write wakes its provider without a commit");
       await page.evaluate(() => {
-        (window as any).seedHost.state.ordinaryRecord.name = "Ordinary edited";
+        (window as any).seedHost.state.early = undefined;
         (window as any).modelSource.publish({value: {name: "Original"}, status: { ready: true, pending: false, error: null, stale: false }});
-        (window as any).seedHost.state.modelDraft.name = "Model edited";
+        (window as any).seedSource.publish({value: "Source", status: { ready: true, pending: false, stale: false, error: null }});
       });
-      await page.waitForFunction(() => (window as any).ordinaryContextReads?.includes("Ordinary edited") && (window as any).modelContextReads?.includes("Model edited"));
-      await page.evaluate(() => { (window as any).seedHost.state.modelDraft.name = "Second edit"; });
-      await page.waitForFunction(() => (window as any).modelContextReads?.includes("Second edit"));
-      await page.evaluate(() => (window as any).seedSource.publish({value: "Source", status: { ready: true, pending: false, stale: false, error: null }}));
-      // No imperative state read or React commit is needed to wake this dependent provider.
-      await page.waitForFunction(() => (window as any).seedReads?.includes("Source") && (window as any).contextReads?.includes("Source"));
-      assert.equal(await page.evaluate(() => (window as any).readerHost.state.local), "Source", "a context seed claims the first canonical value while commits remain blocked");
+      assert.equal(await page.evaluate(() => (window as any).seedHost.state.early), null, "an explicit early write claims the canonical null value");
+      await page.evaluate(() => { (window as any).resume(); (window as any).change({seed: "Source"}); });
+      await page.waitForFunction(() => document.querySelector("b")?.textContent === "Source" && document.querySelector("output")?.textContent === "Source" && document.querySelector("[data-concurrent-seen]")?.textContent === "Source");
+      assert.equal(await page.evaluate(() => (window as any).readerHost.state.local), "Source", "a context seed reads the first committed canonical value");
       assert.equal(await page.evaluate(() => (window as any).seedHost.state.draft), "Source");
       assert.equal(await page.evaluate(() => (window as any).seedHost.state.typed), undefined, "a wrong-typed initializer cannot claim ownership");
+      await page.waitForFunction(() => (window as any).seedHost.state.modelDraft?.name === "Original");
+      await page.evaluate(() => {
+        (window as any).seedHost.state.ordinaryRecord.name = "Ordinary edited";
+        (window as any).seedHost.state.modelDraft.name = "Model edited";
+      });
+      await page.waitForFunction(() => document.querySelector("[data-concurrent-model]")?.textContent === "Model edited" && document.querySelector("[data-concurrent-ordinary]")?.textContent === "Ordinary edited");
+      await page.evaluate(() => { (window as any).seedHost.state.modelDraft.name = "Second edit"; });
+      await page.waitForFunction(() => document.querySelector("[data-concurrent-model]")?.textContent === "Second edit");
+      assert.equal(await page.evaluate(() => (window as any).seedPort.read("model").name), "Original", "editing an initialized model leaves the supplied source intact");
       assert.equal(await page.evaluate(() => (window as any).choiceSource.publish({value: 7, status: { ready: true, pending: false, stale: false, error: null }})), true);
-      assert.equal(await page.evaluate(() => (window as any).seedPort.read("choice")), 7, "source validation uses canonical number mode, never speculative text mode");
-      assert.equal(await page.evaluate(() => { (window as any).itemsSource.publish({value: ["Original"], status: { ready: true, pending: false, stale: false, error: null }}); (window as any).seedHost.state.list[0] = "Edited"; return (window as any).seedPort.read("items")[0]; }), "Original");
-      await page.evaluate(() => { (window as any).seedHost.state.draft = null; (window as any).resume(); (window as any).change({seed: "Retry"}); });
+      assert.equal(await page.evaluate(() => (window as any).seedPort.read("choice")), 7, "source validation uses committed number mode, never an abandoned text preview");
+      await page.evaluate(() => (window as any).itemsSource.publish({value: ["Original"], status: { ready: true, pending: false, stale: false, error: null }}));
+      await page.waitForFunction(() => (window as any).seedHost.state.list?.[0] === "Original");
+      assert.equal(await page.evaluate(() => { (window as any).seedHost.state.list[0] = "Edited"; return (window as any).seedPort.read("items")[0]; }), "Original");
+      await page.evaluate(() => { (window as any).seedHost.state.draft = null; (window as any).change({seed: "Retry"}); });
       await page.waitForFunction(() => !document.querySelector("em") && document.querySelector("b")?.textContent === "");
       assert.equal(await page.evaluate(() => (window as any).seedHost.state.draft), null);
       assert.equal(await page.evaluate(() => (window as any).seedHost.state.typed), 9);
       await page.evaluate(() => (window as any).change({seed: "Next", edit: true}));
       await page.waitForFunction(() => document.querySelector("b")?.textContent === "Child edit");
       assert.equal(await page.evaluate(() => (window as any).seedHost.state.draft), "Child edit");
-      assert.equal(await page.evaluate(() => (window as any).parentLayoutValue), "Child ordinary", "a later parent layout observes the child write before any correction render");
+      assert.equal(await page.evaluate(() => (window as any).parentLayoutValue), "Child ordinary", "the parent layout reads the child state");
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

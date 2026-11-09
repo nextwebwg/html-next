@@ -253,9 +253,9 @@ describe("framework prop input bookkeeping", () => {
     inputs.value("amount", undefined);
     assert.equal(inputs.supplied("amount"), false, "omission releases even a required input");
     assert.equal(inputs.publish("amount", { value: 3, status: READY_INPUT }), true);
+    assert.equal(inputs.publish("amount", { value: undefined, status: READY_INPUT }), false, "a ready producer must publish a value of the declared type");
+    assert.equal(inputs.read("amount"), 3, "a refused result preserves the accepted value");
     assert.equal(inputs.publish("amount", { value: null, status: READY_INPUT }), true);
-    assert.equal(inputs.read("amount"), null);
-    assert.equal(inputs.publish("amount", { value: undefined, status: READY_INPUT }), true);
     assert.equal(inputs.read("amount"), null);
     inputs.value("amount", undefined, { amount: () => ({ value: 4, status: READY_INPUT }) });
     assert.equal(inputs.read("amount"), 4);

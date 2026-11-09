@@ -1,6 +1,6 @@
 import { entryTags } from "../entry-origin.js";
 import { literalValueSource } from "./shared.js";
-import { repeatedSlotNames, templateForwardsAttributes } from "../template.js";
+import { orderedAttributeWrites, repeatedSlotNames, templateForwardsAttributes } from "../template.js";
 import { invocationSchema } from "./invocation-attributes.js";
 import { isStyleWrite, styleWriteRules } from "./style-writes.js";
 import { ITERATION_INDEX } from "../expression.js";
@@ -884,7 +884,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   if (classes.length > 0) {
     if (component) attributes.push(`:class=${bound(`${lowering.use("classText")}(${literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, [${classes.join(", ")}])`)}`);
     else {
-      attributes.push(`v-class-bindings=${bound(`{ ${forwards ? "ordered: true, " : ""}base: ${forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
+      attributes.push(`v-class-bindings=${bound(`{ ${orderedAttributeWrites(node.attributes) ? "ordered: true, " : ""}base: ${forwards ? "undefined" : literalClass?.kind === "literal" ? quote(literalClass.value) : "undefined"}, scope: ${isRoot && context.hostClass ? quote(context.definition.contract.tag) : "undefined"}, bindings: [${classes.join(", ")}] }`)}`);
     }
   }
   if (orderedStyles) attributes.push(`:style=${bound(orderedStyleValue)}`);
@@ -1239,7 +1239,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const controlled = (definition.module ?? definition.controller) !== undefined;
   const dispatches = events.length > 0 || controlled;
   const headed = declaresHead(definition);
-  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed;
+  const needsRoot = dispatches || arms !== undefined || definition.lifecycle !== undefined || headed || accepted;
   const availability = new Map([...seeded.map(state => [state.name, `declarationStatus(${quote(state.name)})`] as const),
     ...contexts.map(context => [context.as ?? context.name, `declarationStatus(${quote(context.as ?? context.name)})`] as const)]);
   const context: Context = {
@@ -1437,7 +1437,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   };
 
   const childEntrySource = `useChildEntry({ ${states.filter(state => options.publishedStates?.has(state.name) ?? true)
-    .map(state => `${quote(`html-next:${contract.tag}:${state.name}`)}: ${stateNames.get(state)!}`).join(", ")} })`;
+    .map(state => `${quote(`html-next:${contract.tag}:${state.name}`)}: ${stateNames.get(state)!}`).join(", ")} }, root)`;
   const body: string[] = [];
   body.push(
     ...(nestedDepthName === undefined ? [] : [

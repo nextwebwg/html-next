@@ -142,4 +142,15 @@ const hostState = computed(() =>
     color: Canvas;
   }
 }
+@supports (-moz-appearance: none) {
+  :global(:where([data-hn], [data-slotted])) {
+    --html-next-scope-owner: boundary;
+  }
+  :global(:where([data-slotted]:not([data-hn]))) {
+    --html-next-scope-owner: projected !important;
+  }
+  :global(.x-button) {
+    --html-next-scope-owner: "x-button" !important;
+  }
+}
 </style>
