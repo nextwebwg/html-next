@@ -37,7 +37,7 @@ const waitingSource = '<template component="x-wait"><defs><prop name="rows" type
 const acceptedSource = '<template component="x-column"><defs><prop name="header" type="string">Header.</prop><slot name="cell"></slot></defs><aside><b>{$header}</b></aside></template>'
  + '<template component="x-list"><defs><prop name="open" type="boolean" default="true">Open.</prop><slot accepts="x-column" as="columns"></slot></defs><section><ul><li $each="column of $columns" $key="$column"><h3>{$column.header}</h3><template $if="$open"><slot of="$column" name="cell"></slot></template></li></ul><div hidden><slot></slot></div></section></template>'
  + '<template component="x-page"><defs><prop name="headers" type="list(string)" default="[\'One\', \'Two\']">Headers.</prop></defs><main><x-list><x-column $each="header of $headers" $key="$header" from:header="$header"><input slot="cell" value="Original"></x-column></x-list></main></template>';
-const preparedSource = '<template component="x-prepared" module="./producer.js"><defs><prop name="count" type="integer" default="2">Count.</prop><prop name="filters" type="list(string)" default="[]">Filters.</prop><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><section><ul><li $each="row of $rows" $key="$row"><input value="Original"><b>{$row}</b></li></ul><output>{$draft.length}</output></section></template>';
+const preparedSource = '<template component="x-prepared" module="./producer.js"><defs><prop name="count" type="integer" default="2">Count.</prop><prop name="filters" type="list(string)" default="[]">Filters.</prop><prop name="rows" type="list(string)">Rows.</prop><state name="seed" type="integer" from="$count"></state><state name="draft" type="list(string)" from="$rows"></state></defs><section><ul><li $each="row of $rows" $key="$row"><input value="Original"><b>{$row}</b></li></ul><output>{$draft.length}</output></section></template>';
 const applicationSource = '<template component="x-application"><defs><prop name="title" type="string">Title.</prop></defs><main id="application"><x-card from:title="$title"></x-card></main></template>';
 const memberApplicationSource = '<template component="x-application"><defs><prop name="data" type="object" open>Data.</prop></defs><main id="application"><x-card from:title="$data.title"></x-card></main></template>';
 const applicationInputs = [{ name: "provided input", missing: false, initial: "Application title" },
@@ -60,7 +60,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       function binding(host, source) {
         let value = instances.get(host.props);
         if (!value) {
-          value = bindModule({ props: { rows: { input: props => ({ count: props.count, filters: props.filters }),
+          value = bindModule({ props: { rows: { input: (props, { state }) => ({ count: props.count, filters: props.filters, seed: state.seed }),
             load({ count, filters }) { window.preparedReads = (window.preparedReads ?? 0) + 1; return Array.from({length: count}, (_, index) => count + ":" + index + ":" + filters.length); }
           } }, connect(host) { host.root.setAttribute("data-connected", "true"); } }, { browser: { source } });
           instances.set(host.props, value);
@@ -103,7 +103,9 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
 
   async function prepared(): Promise<string> {
     const source = (preparedManifest as { server: { preparedModules: { tag: string; source: string }[] } }).server.preparedModules.find(item => item.tag === "x-prepared")!.source;
-    return render("x-prepared", {}, { "x-prepared": { source, reads: { rows: { input: { count: 2, filters: [] }, value: ["2:0:0", "2:1:0"] } } } }, preparedManifest, preparedSource);
+    return nativeRender({ source: preparedSource, tag: "x-prepared", manifest: preparedManifest,
+      preparationReads: { seed: JSON.stringify(encodeHydrationValue(2)) },
+      prepared: { "x-prepared": { source, reads: { rows: { inputKey: JSON.stringify(encodeHydrationValue({ count: 2, filters: [], seed: 2 })), value: JSON.stringify(encodeHydrationValue(["2:0:0", "2:1:0"])) } } } } });
   }
 
   it("adopts native checked properties while preserving early edits and authored reset defaults", async () => {
@@ -335,7 +337,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       assert.deepEqual(rows.map(row => row.textContent), ["2:0:0", "2:1:0"]);
       const frame = JSON.parse(root.getAttribute("data-html-next-bindings")!)["x-prepared"];
       const transfer = decodeHydrationValue(frame[2]) as { snapshot: { source: string; reads: Record<string, unknown> }; inputs: Record<string, unknown> };
-      const key = JSON.stringify(encodeHydrationValue({ count: 2, filters: [] }));
+      const key = JSON.stringify(encodeHydrationValue({ count: 2, filters: [], seed: 2 }));
       assert.equal(transfer.snapshot.source, frame[1]);
       assert.deepEqual(transfer.snapshot.reads.rows, { input: key, value: key, revision: 0 });
       assert.deepEqual(transfer.inputs.rows, { value: ["2:0:0", "2:1:0"], status: { ready: true, pending: false, error: null, stale: false } });

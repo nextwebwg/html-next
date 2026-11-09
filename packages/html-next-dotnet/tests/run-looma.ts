@@ -21,6 +21,8 @@ let host: ReturnType<typeof spawn> | undefined;
 let lines: ReturnType<typeof createInterface> | undefined;
 try {
   const prepared = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
+  const { buildPreparationService } = await import(new URL("./looma-preparation-build.ts", import.meta.url).href);
+  process.env.LOOMA_DOTNET_PREPARATION_SERVICE = await buildPreparationService(directory, prepared, looma);
   const request = path.join(directory, "native-catalog.json");
   await writeFile(request, JSON.stringify({
     sources: JSON.parse(await readFile(prepared.nativeSources, "utf8")),
@@ -37,7 +39,8 @@ try {
   process.env.LOOMA_DOTNET_ENDPOINT = ready;
   process.env.LOOMA_PREPARED_LIBRARY = directory;
   let rendered = 0;
-  lines.on("line", line => { if (JSON.parse(line).rendered) rendered++; });
+  let preparations = 0;
+  lines.on("line", line => { const value = JSON.parse(line); if (value.rendered) rendered++; if (value.prepared) preparations++; });
   console.log(`Native catalog ready: ${endpoint.components} retained components.`);
   const require = createRequire(path.join(looma, "package.json"));
   const vitest = path.join(path.dirname(require.resolve("vitest/package.json")), "vitest.mjs");
@@ -45,6 +48,7 @@ try {
   const [code] = await once(test, "exit");
   if (!rendered) throw new Error("No shared Looma scenes exercised the native catalog host.");
   console.log(`Rendered ${rendered} shared Looma scenes through C#.`);
+  console.log(`Prepared ${preparations} authored module instances through the application service.`);
   process.exitCode = code ?? 1;
 } finally {
   lines?.close();

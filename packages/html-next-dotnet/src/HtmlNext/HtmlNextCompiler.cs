@@ -213,6 +213,10 @@ public static partial class HtmlNextCompiler
         {
             ReadReferences(root, new(StringComparer.Ordinal));
             foreach (var name in derived.Keys) CompileDerived(name);
+            if (module is not null && declarationContextSlot < 0) declarationContextSlot = slots++;
+            var preparationScope = new DeclarationScope(this);
+            var preparationBindings = module is null ? [] : bindings.Select(binding => new PreparationBinding(binding.Key,
+                preparationScope.Read(binding.Key, binding.Value.Slot, binding.Value.Type))).ToArray();
             var propDefinitions = props.ToArray();
             if (assets?.Hydrate == true && props.Count > 0)
                 reflection = new(slots++, Tag, propDefinitions, root.Attributes.Where(attribute => attribute.Name.StartsWith("from:data-", StringComparison.Ordinal))
@@ -224,7 +228,7 @@ public static partial class HtmlNextCompiler
                 bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance, Reflection: reflection);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
-            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance, reflection);
+            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance, reflection, preparationBindings);
         }
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)

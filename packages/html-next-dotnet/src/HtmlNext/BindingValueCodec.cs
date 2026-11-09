@@ -1,11 +1,107 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 
 namespace HtmlNext;
 
 internal static class BindingValueCodec
 {
     internal static readonly object Undefined = new ExpressionValue(new("undefined"));
+
+    public static object? Decode(string encoded, string source, CancellationToken cancellation = default)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        var references = new List<object>();
+        try { using var document = JsonDocument.Parse(encoded, new() { MaxDepth = int.MaxValue }); return Read(document.RootElement); }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException or OverflowException)
+        { throw Error(error); }
+
+        object? Read(JsonElement item)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            ExecutionStack.Check(source);
+            if (item.ValueKind != JsonValueKind.Array) throw Error();
+            var length = item.GetArrayLength();
+            if (length is < 1 or > 2 || item[0].ValueKind != JsonValueKind.String) throw Error();
+            var kind = item[0].GetString();
+            if (length == 1) return kind switch
+            {
+                "undefined" => Undefined, "absent" => ExpressionValue.AbsentStorage,
+                "nonconforming" => ExpressionValue.InvalidStorage, "negative-zero" => -0d, _ => throw Error()
+            };
+            var value = item[1];
+            if (kind == "reference" && value.TryGetInt32(out var index) && (uint)index < (uint)references.Count) return references[index];
+            if (kind == "value" && value.ValueKind is JsonValueKind.Null or JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False) return Plain(value);
+            if (kind == "json" && value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                var result = Plain(value)!; references.Add(result); return result;
+            }
+            if (kind == "array" && value.ValueKind == JsonValueKind.Array)
+            {
+                var result = new object?[value.GetArrayLength()]; references.Add(result);
+                for (var i = 0; i < result.Length; i++) result[i] = Read(value[i]);
+                return result;
+            }
+            if (kind == "object" && value.ValueKind == JsonValueKind.Array)
+            {
+                var result = new Dictionary<string, object?>(StringComparer.Ordinal); references.Add(result);
+                foreach (var entry in value.EnumerateArray())
+                {
+                    if (entry.ValueKind != JsonValueKind.Array || entry.GetArrayLength() != 2 || entry[0].ValueKind != JsonValueKind.String) throw Error();
+                    if (!result.TryAdd(String(entry[0]), Read(entry[1]))) throw Error();
+                }
+                return result;
+            }
+            throw Error();
+        }
+
+        object? Plain(JsonElement value)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            ExecutionStack.Check(source);
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Null: return null;
+                case JsonValueKind.String: return String(value);
+                case JsonValueKind.True: return true;
+                case JsonValueKind.False: return false;
+                case JsonValueKind.Number:
+                    var number = value.GetDouble(); return double.IsFinite(number) ? number : throw Error();
+                case JsonValueKind.Array: return value.EnumerateArray().Select(Plain).ToArray();
+                case JsonValueKind.Object:
+                    var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    var bytes = Encoding.UTF8.GetBytes(value.GetRawText());
+                    var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { MaxDepth = int.MaxValue });
+                    reader.Read();
+                    while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+                    {
+                        var name = Unescape("\"" + Encoding.UTF8.GetString(reader.ValueSpan) + "\"");
+                        reader.Read();
+                        using var field = JsonDocument.ParseValue(ref reader);
+                        result[name] = Plain(field.RootElement);
+                    }
+                    return result;
+                default: throw Error();
+            }
+        }
+
+        // JsonElement.GetString rejects lone UTF-16 surrogates that the JavaScript codec preserves.
+        string String(JsonElement value) => Unescape(value.GetRawText());
+        string Unescape(string raw)
+        {
+            var text = new StringBuilder();
+            for (var i = 1; i < raw.Length - 1; i++)
+            {
+                var c = raw[i];
+                if (c != '\\') { text.Append(c); continue; }
+                c = raw[++i];
+                if (c == 'u') { text.Append((char)ushort.Parse(raw.AsSpan(i + 1, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture)); i += 4; }
+                else text.Append(c switch { 'b' => '\b', 'f' => '\f', 'n' => '\n', 'r' => '\r', 't' => '\t', _ => c });
+            }
+            return text.ToString();
+        }
+        HtmlNextException Error(Exception? inner = null) => new("HNCS008", "Malformed JavaScript SDK prepared value.", source, inner);
+    }
 
     public static string Encode(object? input, string source, CancellationToken cancellation = default)
     {

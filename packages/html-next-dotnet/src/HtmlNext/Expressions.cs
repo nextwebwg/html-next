@@ -25,7 +25,7 @@ internal readonly struct ExpressionValue(ValueType type, object? data = null, do
     public static ExpressionValue Boolean(bool value) => new(BooleanType, number: value ? 1 : 0);
     public static ExpressionValue Text(string value) => new(StringType, value);
     public bool IsInvalid => Type.Kind == "invalid";
-    public bool IsAbsent => Type.Kind == "absent";
+    public bool IsAbsent => Type.Kind is "absent" or "undefined";
     public bool IsNull => Type.Kind == "null";
     public bool IsDimension => Type.Kind is "length" or "percentage" or "duration";
     public bool IsNumeric => Type.Kind is "number" or "integer";

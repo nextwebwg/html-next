@@ -180,6 +180,10 @@ The native client-integration tests exercise actual generated-client adoption in
 
 Prepare request data with application services, then supply it through `HtmlNextRenderOptions.PrepareModule`. The callback receives each logical module instance's reference, accepted prop snapshot, caller ownership and cancellation token. Nested invocations use the same request callback. Buffered rendering reuses the prepared instance between its counting and writing passes.
 
+During the callback, `context.ReadNames` lists the readable bindings and `context.Read(name)` returns a value with its independent `Ready` status. Reads use the template's existing evaluation plans for props, seeded state and computed declarations; unused declarations remain unevaluated. Binding reads end when the callback returns. Structured snapshots remain read-only and preserve shared references.
+
+For a JavaScript application service, `input.EncodeValue()` produces the existing SDK transfer format, decoded by `decodeHydrationValue` from `@nextwebwg/html-next/bindings`. Return a completed read with `HtmlNextPreparedRead.FromTransfer(inputKey, encodedValue)`, using the input identity from the module preparation snapshot and a value encoded with `encodeHydrationValue`. The native renderer still accepts produced values through the component's declared types. This settled-read interface does not yet carry pending, error or stale results or retain a preparation session across input changes.
+
 For an `x-results` component declaring `count`, `filters` and `rows`, whose JavaScript provider selects `{ count, filters }` for `rows`:
 
 ```csharp
@@ -202,7 +206,7 @@ var options = new HtmlNextRenderOptions
 var html = graph.Template("x-results").Render(options: options);
 ```
 
-`HtmlNextPreparedModule.Source` identifies the deployed module revision. Interactive output checks it against the matching manifest; a missing or different revision raises `HNCS006`. Inert output can use an application-owned revision without a manifest. `Reads` maps declared prop names to completed reads. Each read's `Input` is the selected input used by the browser provider, and `Value` is its produced value. The renderer encodes input identities with the existing JavaScript codec's representation, so browser adoption can reuse a matching read. Later input changes follow the browser provider's normal lifecycle.
+`HtmlNextPreparedModule.Source` identifies the deployed module revision. Interactive output checks it against the matching manifest; a missing or different revision raises `HNCS006`. Inert output can use an application-owned revision without a manifest. `Reads` maps declared prop names to completed reads. Construct a read with its selected `Input` and produced `Value`, or use `FromTransfer` to supply the SDK's opaque `InputKey` and encoded value. The renderer encodes an `Input` or carries its `InputKey` unchanged so browser adoption can reuse a matching read. Later input changes follow the browser provider's normal lifecycle.
 
 Use `HtmlNextPreparedRead.UndefinedInput` when the JavaScript selector returns `undefined`, including inside a selected record or list. A null input has its own identity.
 

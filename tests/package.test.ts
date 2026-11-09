@@ -166,6 +166,16 @@ export async function prepare({ document, host, flush, signal, data }) {
 const { renderComponents, createRenderer } = await import("@nextwebwg/html-next/server");
 const { parseComponent, add, subtract, multiply, divide } = await import("@nextwebwg/html-next");
 const compiled = await import("@nextwebwg/html-next/generated-runtime");
+const { createInputPort, INPUT_PORT, componentInputs } = await import("@nextwebwg/html-next/inputs");
+let packedValue = 1;
+const inputPort = createInputPort({ names: ["value"], read: () => packedValue,
+  status: () => ({ ready: true, pending: false, error: null, stale: false }), supplied: () => false,
+  publish(_name, input) { if (typeof input.value !== "number") return false; packedValue = input.value; return true; },
+  untracked: run => run(), watch: run => { const cleanup = run(); return () => cleanup?.(); } });
+const inputSource = componentInputs({ props: {}, [INPUT_PORT]: inputPort }).source("value");
+if (!inputSource.publish({ value: 2, status: inputPort.status("value") }) || inputPort.read("value") !== 2) throw new Error("Packaged input-port adapter failed");
+inputSource.dispose();
+if (inputSource.publish({ value: 3, status: inputPort.status("value") })) throw new Error("Disposed packaged input source still writes");
 if (add(1.1, 0.1) !== 1.2 || subtract(0.3, 0.1) !== 0.2 || multiply(0.1, 0.2) !== 0.02 || divide(1, 4) !== 0.25 || compiled.add !== add || compiled.remainder(0.3, 0.1) !== 0) throw new Error("Packaged decimal arithmetic failed");
 const rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });
 if (!rendered.html.includes('component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");
@@ -201,7 +211,9 @@ process.stdout.write("ok");
       'export const renderOptions: ServerRenderOptions = { definitions: [], signal: new AbortController().signal, prepare: { module: "file:///prepare.mjs", data: { value: 1 } } };\n' +
       'export function closeRenderer(renderer: ServerRenderer) { renderer.setWorkers(1); return renderer.close(); }\n' +
       'import { bindModule, type BindingAdoption } from "@nextwebwg/html-next/bindings";\n' +
-      'export function adoptBindings(host: { props: object }, adoption: BindingAdoption) { bindModule({}).adopt(host, adoption); }\n',
+      'export function adoptBindings(host: { props: object }, adoption: BindingAdoption) { bindModule({}).adopt(host, adoption); }\n' +
+      'import { createInputPort, INPUT_PORT, type InputPortAdapter } from "@nextwebwg/html-next/inputs";\n' +
+      'export function inputHost(adapter: InputPortAdapter) { return { props: {}, [INPUT_PORT]: createInputPort(adapter) }; }\n',
     );
     execFileSync(
       "corepack",

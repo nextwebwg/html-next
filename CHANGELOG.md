@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Let native module preparation read accepted props, seeded state, computed values and availability lazily, and exchange completed values and input identities with JavaScript SDK services. Expose the input-port adapter through the public inputs entry point.
+
 - Record explicit accepted native props in the existing SDK metadata attributes, including components pruned from client adoption. Preserve omitted defaults, null inputs, delegated ownership and structured JSON values.
 
 - Serialize native input `.checked` bindings as initial checkedness and preserve authored reset defaults through the existing browser-adoption records. Keep invalid property writes inert and compose reset attributes with invocation forwarding.

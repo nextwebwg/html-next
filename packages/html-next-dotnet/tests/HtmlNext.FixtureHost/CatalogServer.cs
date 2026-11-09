@@ -47,9 +47,40 @@ internal static class CatalogServer
                 var template = graph.CompileApplication(root.GetProperty("source").GetString()!, "looma-browser-scene.html");
                 var inputs = root.TryGetProperty("inputs", out var supplied) ? (object)supplied : null;
                 var diagnostics = new List<HtmlNextDiagnostic>();
-                var html = template.Render(inputs, onDiagnostic: diagnostics.Add, options: new() { Interactive = true });
+                var html = template.Render(inputs, onDiagnostic: diagnostics.Add, options: new() { Interactive = true, PrepareModule = Prepare });
                 await writer.WriteLineAsync(JsonSerializer.Serialize(new { renderer = "dotnet", html, diagnostics }));
                 Console.WriteLine(JsonSerializer.Serialize(new { rendered = template.Tag }));
+
+                HtmlNextPreparedModule? Prepare(HtmlNextPreparationContext context)
+                {
+                    if (context.Source is null) return null;
+                    var names = context.Props.Keys.ToArray();
+                    object Read(string name)
+                    {
+                        var input = context.Read(name);
+                        return new { value = input.EncodeValue(), ready = input.Ready };
+                    }
+                    writer.WriteLine(JsonSerializer.Serialize(new { kind = "prepare", tag = context.Module.Component, source = context.Source,
+                        readNames = context.ReadNames, supplied = names.Where(context.Supplied), values = names.ToDictionary(name => name, Read) }));
+                    while (true)
+                    {
+                        using var reply = JsonDocument.Parse(reader.ReadLine() ?? throw new InvalidOperationException("Preparation service disconnected."));
+                        var response = reply.RootElement;
+                        switch (response.GetProperty("kind").GetString())
+                        {
+                            case "read":
+                                var requested = response.GetProperty("names").EnumerateArray().Select(name => name.GetString()!).ToArray();
+                                writer.WriteLine(JsonSerializer.Serialize(new { kind = "inputs", values = requested.ToDictionary(name => name, Read) }));
+                                break;
+                            case "prepared":
+                                Console.WriteLine(JsonSerializer.Serialize(new { prepared = context.Module.Component }));
+                                return new(response.GetProperty("source").GetString()!, response.GetProperty("reads").EnumerateObject().ToDictionary(item => item.Name,
+                                    item => HtmlNextPreparedRead.FromTransfer(item.Value.GetProperty("input").GetString()!, item.Value.GetProperty("value").GetString()!, context.CancellationToken)));
+                            case "error": throw new InvalidOperationException(response.GetProperty("error").GetString());
+                            default: throw new InvalidOperationException("Unknown preparation service response.");
+                        }
+                    }
+                }
             }
             catch (Exception error)
             {

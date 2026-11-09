@@ -36,8 +36,12 @@ var inputs = root.TryGetProperty("inputs", out var supplied) ? (object)supplied 
 HtmlNextPreparedModule? Prepare(HtmlNextPreparationContext context)
 {
     if (!root.TryGetProperty("prepared", out var modules) || !modules.TryGetProperty(context.Module.Component, out var module)) return null;
+    if (root.TryGetProperty("preparationReads", out var expected)) foreach (var item in expected.EnumerateObject())
+        if (context.Read(item.Name).EncodeValue() != item.Value.GetString()) throw new InvalidOperationException($"Unexpected native preparation read: {item.Name}.");
     return new(module.GetProperty("source").GetString()!, module.GetProperty("reads").EnumerateObject().ToDictionary(item => item.Name,
-        item => new HtmlNextPreparedRead(item.Value.GetProperty("input"), item.Value.GetProperty("value"))));
+        item => item.Value.TryGetProperty("inputKey", out var key)
+            ? HtmlNextPreparedRead.FromTransfer(key.GetString()!, item.Value.GetProperty("value").GetString()!, context.CancellationToken)
+            : new HtmlNextPreparedRead(item.Value.GetProperty("input"), item.Value.GetProperty("value"))));
 }
 var template = root.TryGetProperty("application", out var application)
     ? graph.CompileApplication(application.GetString()!) : graph.Template(root.GetProperty("tag").GetString()!);

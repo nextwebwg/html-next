@@ -27,10 +27,12 @@ public sealed partial class CompiledTemplate
     private readonly LocalDeclaration[] declarations;
     private readonly InstanceRecordPlan? instance;
     private readonly PropReflectionPlan? reflection;
+    private readonly PreparationBinding[] preparationBindings;
+    private readonly IReadOnlyList<string> preparationReadNames;
     private readonly int[]? bindingOrder;
     private readonly int preparationSlot;
 
-    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null, HtmlNextServerAssets? assets = null, InstanceRecordPlan? instance = null, PropReflectionPlan? reflection = null)
+    internal CompiledTemplate(string tag, Prop[] props, RenderOperation[] operations, int slots, string source, ExpressionStorage? expressionStorage = null, bool hasComponents = false, LocalInitializer[]? initializers = null, HtmlNextModuleReference? module = null, int declarationContextSlot = -1, LocalDeclaration[]? declarations = null, IReadOnlyList<string>? stylesheets = null, AcceptedChildListBinding[]? childLists = null, HtmlNextServerAssets? assets = null, InstanceRecordPlan? instance = null, PropReflectionPlan? reflection = null, PreparationBinding[]? preparationBindings = null)
     {
         Tag = tag;
         Stylesheets = stylesheets ?? Array.Empty<string>();
@@ -48,6 +50,8 @@ public sealed partial class CompiledTemplate
         Assets = assets;
         this.instance = instance;
         this.reflection = reflection;
+        this.preparationBindings = preparationBindings ?? [];
+        preparationReadNames = Array.AsReadOnly(this.preparationBindings.Select(binding => binding.Name).ToArray());
         bindingOrder = props.Any(prop => prop.Selection is not null)
             ? Enumerable.Range(0, props.Length).OrderBy(index => props[index].Selection is not null).ToArray() : null;
         preparationSlot = props.Select(prop => prop.Selection?.PreparationSlot ?? -1).FirstOrDefault(slot => slot >= 0, -1);

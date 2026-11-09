@@ -75,5 +75,5 @@ internal sealed class PropReflectionPlan(int slot, string tag, Prop[] props, str
         }
     }
 
-    private static bool Unavailable(ExpressionValue value) => value.IsAbsent || value.IsInvalid || value.Type.Kind == "undefined";
+    private static bool Unavailable(ExpressionValue value) => value.IsAbsent || value.IsInvalid;
 }
