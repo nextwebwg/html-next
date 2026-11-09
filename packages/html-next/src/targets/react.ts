@@ -14,7 +14,7 @@ import { parseDuration } from "../duration.js";
 import { asciiLowerCase, componentName, kebabCase, propAttribute } from "../names.js";
 import { isPreformattedElement } from "../language.js";
 import { getDomInterface } from "../platform.js";
-import { retainedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
+import { repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type SlotNode, type TemplateNode } from "../template.js";
 import { REACT_EVENTS_EXPORTS } from "./react-events.js";
 import { REACT_RENDER_EXPORTS, REACT_RENDER_SPECIFIER } from "./react-render.js";
 import { formatReact, jsxAttributeRecord } from "./vue-format.js";
@@ -58,7 +58,7 @@ const REACT_RESERVED = new Set([
   "selectedPropNode", "acceptsControllerWrite",
   "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
   "useComponentHost", "useLifecycle", "componentContext", "NestedDepthContext", "ScopedAttachment",
-  "htmlNextChildSlots", "htmlNextOutletProps", "htmlNextLists", "htmlNextPlain", "htmlNextContent", "_htmlNextAs", "_htmlNextEntry",
+  "htmlNextChildSlots", "htmlNextOutletProps", "htmlNextLists", "htmlNextContent", "htmlNextSlots", "_htmlNextAs", "_htmlNextEntry",
   ...REACT_RENDER_EXPORTS, ...REACT_EVENTS_EXPORTS,
 ]);
 
@@ -103,7 +103,7 @@ const STYLE_IMPORT = "\u0000style-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
 const REACT_RENDER_COMPONENTS = ["useLiveState", "useReflectedProp", "HtmlNextInput", "HtmlNextTextarea", "HtmlNextValueInput", "HtmlNextValueTextarea", "HtmlNextValueSelect", "HtmlNextSelect", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
   "rootMetadata", "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "rememberParent", "useOwnedRootRef", "useRootHandle",
-  "identityKey", "useChildLists", "useChildEntry", "ChildSlot", "ChildEntries", "usePlainSlots", "PlainSlot", "PlainSlots", "PlainChildren"] as const;
+  "identityKey", "useChildLists", "useChildEntry", "ChildSlot", "ChildEntries", "useSlotClaims"] as const;
 
 export interface ReactConversionOptions {
   readonly modulePreparation?: { readonly source: string };
@@ -189,7 +189,9 @@ interface RenderState {
   readonly componentGraph: ReadonlyMap<string, ComponentDefinition> | undefined;
   /** Columns as markup: the component declares an `as` list, whose entries key by identity. */
   readonly lists: boolean;
-  readonly sharedPlain: boolean;
+  readonly claimSlots: boolean;
+  /** Row indexes distinguish repeated outlets; the source site makes rerenders idempotent. */
+  readonly slotPath: string[];
   /** Each accepted child the consumer gives an entry, by its attributes: its entry's key segments (`entryKeySource`). */
   readonly entrySites: Map<readonly unknown[], readonly KeySegment[]>;
   /** The key of the row each `$each` is rendering, by that `$each`'s attributes, as source. */
@@ -445,7 +447,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const key = state.lists && flow.keyPlan !== undefined && typeOf(flow.keyPlan.ast, scoped).type.kind === "object" ? `identityKey(${keyed})` : keyed;
       // An accepted child in these rows keys its entry by the row's key.
       if (node.kind === "element") state.rowKeys.set(node.attributes, key);
+      state.slotPath.push(index);
       const child = renderNode(body, scoped, lowering, imports, handlers, attachments, state, undefined, projected, inSvg);
+      state.slotPath.pop();
       const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}) => ${key}`);
       const rows = lowering.eachRows(checked);
       const renderRows = `${rows}.map(({ item: ${item}, index: ${index} }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
@@ -555,7 +559,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       return retained.length === 0 ? `{${content}}` : content;
     }
     state.usesPlainSlots = true;
-    return state.sharedPlain ? `{htmlNextPlain.frames.has(${name}) ? <PlainSlot frame={htmlNextPlain.frames.get(${name})} content={${supplied} as ReactNode} fallback={<>${fallback}</>} /> : renderPlainSlot(${supplied}, <>${fallback}</>)}` : `{renderPlainSlot(${supplied}, <>${fallback}</>)}`;
+    if (!state.claimSlots) return `{renderPlainSlot(${supplied}, <>${fallback}</>)}`;
+    const outlet = [quote(String(state.nextSlotAlias++)), ...state.slotPath].join(' + ":" + ');
+    return `{htmlNextSlots(${name}, ${supplied}, <>${fallback}</>, ${outlet})}`;
   }
   if (node.name === "template") {
     const html = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "html");
@@ -1001,7 +1007,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     }).join(", ")} }}`;
     if (slots.size > 0) bindings.push(`slots={${slotsSource(node.name, slots, scope)}}`);
     if (lists !== undefined) bindings.push(lists);
-    // An accepted child finds its logical projection and context providers through its entry key.
+    // An accepted child that provides contexts gives them to its entry, found by the entry's key.
     const site = state.entrySites.get(node.attributes);
     if (site !== undefined) bindings.push(`htmlNextEntry={${entryKeySource(site, state.rowKeys)}}`);
   }
@@ -1342,12 +1348,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const acceptedBy = [...options.componentGraph?.values() ?? []].some(other =>
     Object.values(other.contract.slots ?? {}).some(slot => slot.as !== undefined && slot.accepts?.includes(definition.contract.tag)));
   // A hand-written consumer's accepting parent finds this component among its children by its tag, and a preset by its root's.
+  const claimSlots = acceptedBy || repeatedSlotNames(definition).size > 0;
   const childTags = [definition.contract.tag];
   for (let root = definition.root; root?.kind === "component" && !childTags.includes(root.tag); root = options.componentGraph?.get(root.tag)?.root) childTags.push(root.tag);
-  const retainedPlain = new Set(retainedSlotNames(definition));
-  for (const name of retainedPlain) if (Object.keys(definition.contract.slots?.[name]?.props ?? {}).length > 0 ||
-    definition.slots?.some(slot => (slot.name ?? "") === name && (slot.props?.length ?? 0) > 0)) retainedPlain.delete(name);
-  const sharedPlain = acceptedBy || retainedPlain.size > 0;
   const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
   const invalidateSetterName = invalidateStateName !== "" && options.target === "preact" ? allocate("rerenderTick") : "";
   // The paths handler and bound-control writes changed, which the controller host reads after each commit.
@@ -1460,7 +1463,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const renderState: RenderState = { preact: options.target === "preact", definition, status: declarationStatus, observe: source => inputScope(source, (name, read) => read !== scope.code.get(name) ? undefined
     : Object.hasOwn(definition.contract.props, name) ? `propInputs.status(${quote(name)})`
       : computedByName.has(name) ? read.replace(/\.get\(\)$/, ".status()") : declarationStatus(name, read)), slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
-    componentGraph: options.componentGraph, lists: lists.length > 0, sharedPlain, entrySites: new Map(), rowKeys: new Map(), outletProps: [],
+    componentGraph: options.componentGraph, lists: lists.length > 0, claimSlots, slotPath: [], entrySites: new Map(), rowKeys: new Map(), outletProps: [],
     classOwners: [], nextSlotAlias: 0, nextRetainedAlias: 0, preformatted: false, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
     usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
@@ -1514,8 +1517,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
   const provide = (inner: string): string => states.filter((state) => providedContexts.has(state.name)).reduceRight((content, state) =>
     `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${code.get(state.name)!}, ${state.initializer === undefined ? `subscribe: ${stateSubscriptions.get(state.name)!}, ` : `status: ${stateOwners.get(state.name)!}.status(), readStatus: ${stateOwners.get(state.name)!}.readStatus, subscribe: ${stateOwners.get(state.name)!}.subscribe, `}read: ${stateGetters.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, inner);
-  const projectedMarkup = retainedPlain.size > 0 ? `<>${rootMarkup}<PlainSlots frames={htmlNextPlain.own} /></>` : rootMarkup;
-  const contextMarkup = provide(lists.length === 0 ? projectedMarkup : `<ChildEntries value={htmlNextLists.entries}>${projectedMarkup}<PlainChildren entries={htmlNextLists.plainEntries} /></ChildEntries>`);
+  const contextMarkup = provide(lists.length === 0 ? rootMarkup : `<ChildEntries value={htmlNextLists.entries}>${rootMarkup}</ChildEntries>`);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
   const HEAD_IMPORTS = "/* html-next head imports */";
   const written = [
@@ -2004,7 +2006,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       // A handler that reads $event gets a connection event, as a controller's host.on callback does.
       return handler === undefined ? "undefined" : `() => ${handlerNames.get(name!)!}(${handlerTakesEvent.has(handler) ? `new Event(${quote(type)})` : ""})`;
     }).join(", ")});`]),
-    ...(!sharedPlain ? [] : [`  const htmlNextPlain = usePlainSlots(${!acceptedBy ? "undefined" : `useChildEntry(_htmlNextEntry, ${name}.htmlNextChild, props${providedContexts.size === 0 ? "" : `, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")}`})`}, props, ${JSON.stringify([...retainedPlain])}${lists.length === 0 ? "" : ", htmlNextLists"});`]),
+    ...(!claimSlots ? [] : [`  const htmlNextSlots = useSlotClaims(${!acceptedBy ? "" : `useChildEntry(_htmlNextEntry, ${name}.htmlNextChild, props${providedContexts.size === 0 ? "" : `, (htmlNextContent: ReactNode) => ${provide("<>{htmlNextContent}</>")}`})`});`]),
     // Server rendering reads how many head-declaring components enclose each one from this context.
     `  return (${definition.head !== undefined ? `<HeadDepth value={headDepth}>${componentMarkup}</HeadDepth>` : componentMarkup});`,
     "}",

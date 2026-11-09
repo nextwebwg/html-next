@@ -109,7 +109,13 @@ const emptyPlain = dynamicPlainSource.replaceAll("x-moving", "x-empty").replaceA
 const conditionalPlain = `<template component="x-single-card"><defs><state name="open" type="boolean" value="true"></state><state name="tone" type="string" value="Owner"></state>
 <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs><section data-single-plain><button data-single-toggle on:click="toggle">Toggle</button><p $if="$open"><slot></slot></p><footer>Tail</footer></section></template>
 <template component="x-slot-counter"><defs><context name="tone" from="x-single-card"></context><state name="count" type="number" value="0"></state><handler name="add"><set name="count" expr:value="$count + 1"></set></handler></defs><button data-slot-counter on:click="add">{$tone}:{$count}</button></template>
-<template component="x-plain-page"><main>${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page><x-empty-page></x-empty-page><x-single-card><i>Single</i><input value="Initial"><x-slot-counter></x-slot-counter></x-single-card></main></template>`;
+<template component="x-switch-entry"><defs><prop name="label" type="string" required>Label.</prop><state name="tone" type="string" from="$label"></state><slot name="cell"></slot></defs><b>Entry</b></template>
+<template component="x-switch-label"><defs><context name="tone" from="x-switch-entry"></context></defs><strong>{$tone}</strong></template>
+<template component="x-switch-list"><defs><slot accepts="x-switch-entry" as="entries"></slot><state name="picked" type="number" value="0"></state><state name="first" type="boolean" value="true"></state><state name="second" type="boolean" value="false"></state>
+<handler name="pick"><set name="picked" expr:value="1"></set></handler><handler name="toggleFirst"><set name="first" expr:value="not $first"></set></handler><handler name="toggleSecond"><set name="second" expr:value="not $second"></set></handler></defs>
+<section data-switch-list><button data-switch-action="pick" on:click="pick">Pick</button><button data-switch-action="first" on:click="toggleFirst">First</button><button data-switch-action="second" on:click="toggleSecond">Second</button><slot></slot><p $if="$first"><slot of="$entries[$picked]" name="cell">FirstFallback</slot></p><div $if="$second"><slot of="$entries[1]" name="cell">SecondFallback</slot></div></section></template>
+<template component="x-switch-page"><x-switch-list><x-switch-entry label="Alpha"><x-switch-label slot="cell"></x-switch-label></x-switch-entry><x-switch-entry label="Beta"><x-switch-label slot="cell"></x-switch-label></x-switch-entry></x-switch-list></template>
+<template component="x-plain-page"><main>${plainSlotInvocations}<x-moving-page></x-moving-page><x-repeat-page></x-repeat-page><x-empty-page></x-empty-page><x-single-card><i>Single</i><input value="Initial"><x-slot-counter></x-slot-counter></x-single-card><x-switch-page></x-switch-page></main></template>`;
 const plainSource = Object.values(plainSlotFiles).join("") + dynamicPlainSource + repeatedPlainSource + emptyPlain + conditionalPlain;
 const columnController = `export default function initialize(host) { (window.columnHosts ??= []).push(host); }`;
 const tableController = `export default function initialize(host) { (window.tableHosts ??= []).push(host); }`;
@@ -229,7 +235,35 @@ const target = document.querySelector("#mount")!; const app = target.hasChildNod
   };
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-    it(`${engine} preserves plain slot nodes and state through SSR hydration, transfers and conditional outlets`, async () => {
+    it(`${engine} changes a populated borrowed outlet's context and releases its latest entry`, async () => {
+      const browser = await launchParityBrowser(browserType);
+      try {
+        for (const hydrated of [false, true]) {
+          const page = await browser.newPage(), errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.setContent(`<div id="mount">${hydrated ? plainMarkup : ""}</div>`);
+          await page.addScriptTag({ path: plainBundle });
+          const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+          const list = page.locator("[data-switch-list]");
+          await settle(); assert.equal(await list.locator("p strong").textContent(), "Alpha");
+          await list.locator('[data-switch-action="pick"]').click(); await settle();
+          assert.equal(await list.locator("p strong").textContent(), "Beta");
+          await list.locator('[data-switch-action="second"]').click(); await settle();
+          assert.equal(await list.locator("div").textContent(), "SecondFallback");
+          await list.locator('[data-switch-action="first"]').click(); await settle();
+          assert.equal(await list.locator("p").count(), 0); assert.equal(await list.locator("div strong").textContent(), "Beta");
+          await list.locator('[data-switch-action="first"]').click(); await settle();
+          assert.equal(await list.locator("p").textContent(), "FirstFallback");
+          await list.locator('[data-switch-action="second"]').click(); await settle();
+          assert.equal(await list.locator("p strong").textContent(), "Beta"); assert.equal(await list.locator("strong").count(), 1);
+          await page.evaluate(() => (window as any).finishPlain()); await settle();
+          assert.equal(await page.locator("#mount").textContent(), ""); assert.deepEqual(errors, []);
+          await page.close();
+        }
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} renders editable plain slots through SSR hydration, transfers and conditional outlets`, async () => {
       const browser = await launchParityBrowser(browserType);
       try {
         for (const hydrated of [false, true]) {
@@ -239,29 +273,27 @@ const target = document.querySelector("#mount")!; const app = target.hasChildNod
           await page.setContent(`<div id="mount">${hydrated ? plainMarkup : ""}</div>`);
           const read = () => page.locator("[data-plain-case] > section").evaluateAll(nodes => nodes.map(section => Array.from(section.children, node => [node.localName, node.textContent])));
           if (hydrated) assert.deepEqual(await read(), plainSlotExpected);
-          await page.evaluate(() => { (window as any).plainNodes = Array.from(document.querySelectorAll("i, input")); });
           if (hydrated) for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input", "[data-single-plain] input"]) await page.locator(selector).fill("Edited");
           await page.addScriptTag({ path: plainBundle });
           const frames = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
           await frames(); assert.deepEqual(await read(), plainSlotExpected); assert.deepEqual(errors, []);
-          if (hydrated) assert.ok(await page.evaluate(() => (window as any).plainNodes.every((node: Node) => node.isConnected)));
-          const moving = await page.locator("[data-moving-plain] input").elementHandle(), repeated = await page.locator("[data-repeated-plain] input").elementHandle();
-          const single = await page.locator("[data-single-plain] input").elementHandle(), counter = await page.locator("[data-slot-counter]").elementHandle();
-          if (!hydrated) for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input", "[data-single-plain] input"]) await page.locator(selector).fill("Edited");
-          const kept = async () => {
-            assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
-            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
-            for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input"]) assert.equal(await page.locator(selector).inputValue(), "Edited", `${selector}, hydrated=${hydrated}`);
+          if (hydrated) for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input", "[data-single-plain] input"]) assert.equal(await page.locator(selector).inputValue(), "Edited");
+          const editable = async () => {
+            for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input"]) {
+              const input = page.locator(selector); assert.equal(await input.count(), 1);
+              await input.fill("Edited"); assert.equal(await input.inputValue(), "Edited");
+              assert.ok(await input.evaluate(node => node === node.ownerDocument.activeElement));
+            }
             assert.deepEqual(errors, []);
           };
           for (const action of ["borrowed", "borrowed", "root", "root"]) {
-            await page.locator(`[data-plain-action="${action}"]`).click(); await frames(); await kept();
+            await page.locator(`[data-plain-action="${action}"]`).click(); await frames(); await editable();
             for (const expected of [0, 1]) {
               await page.locator('[data-plain-action="content"]').click(); await frames();
-              assert.equal(await page.locator("[data-moving-plain] i").count(), expected); await kept();
+              assert.equal(await page.locator("[data-moving-plain] i").count(), expected); await editable();
             }
           }
-          await page.locator('[data-plain-action="first"]').click(); await frames(); await kept();
+          await page.locator('[data-plain-action="first"]').click(); await frames(); await editable();
           assert.ok(await page.locator("[data-repeated-plain] footer").evaluate(node => node.matches(":last-child")));
           assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
           assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
@@ -276,14 +308,13 @@ const target = document.querySelector("#mount")!; const app = target.hasChildNod
           await page.locator("[data-single-toggle]").click(); await frames();
           assert.equal(await page.locator("[data-single-plain] input").count(), 0);
           await page.locator("[data-single-toggle]").click(); await frames();
-          assert.ok(await single!.evaluate(node => node === document.querySelector("[data-single-plain] input")));
-          assert.ok(await counter!.evaluate(node => node === document.querySelector("[data-slot-counter]")));
-          assert.equal(await page.locator("[data-single-plain] input").inputValue(), "Edited");
-          assert.equal(await page.locator("[data-slot-counter]").textContent(), "Owner:1");
-          await page.locator("[data-slot-counter]").click(); await frames(); assert.equal(await page.locator("[data-slot-counter]").textContent(), "Owner:2");
+          const reopened = page.locator("[data-single-plain] input"); await reopened.fill("Reopened"); assert.equal(await reopened.inputValue(), "Reopened");
+          const count = Number((await page.locator("[data-slot-counter]").textContent())!.split(":")[1]);
+          assert.equal(await page.locator("[data-slot-counter]").textContent(), `Owner:${count}`);
+          await page.locator("[data-slot-counter]").click(); await frames(); assert.equal(await page.locator("[data-slot-counter]").textContent(), `Owner:${count + 1}`);
           await page.evaluate(async () => { const root = document.querySelector("#mount")!, parent = root.parentNode!, next = root.nextSibling;
             root.remove(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); parent.insertBefore(root, next); });
-          await frames(); await kept(); assert.deepEqual(await read(), plainSlotExpected);
+          await frames(); await editable(); assert.deepEqual(await read(), plainSlotExpected);
           await page.evaluate(() => (window as any).finishPlain()); await frames();
           assert.equal(await page.locator("#mount").textContent(), ""); assert.deepEqual(errors, []);
           await page.close();

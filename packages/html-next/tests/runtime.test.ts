@@ -121,7 +121,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           state.choose = true; state.draft.name = "A"; state.draft["odd.key"] = "Quoted"; state.rows[0].name = "Row";
         });
         await page.waitForFunction(() => document.getElementById("computed-key")?.textContent === "A");
-        const accepted = { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row", "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" };
+        const accepted = { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row", "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" };
         assert.deepEqual(await read(), accepted);
         await page.evaluate(() => {
           const { state } = (window as any).checkedHost;
@@ -3979,7 +3979,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         });
         await page.waitForFunction(() => document.getElementById("computed-key")?.textContent === "A");
         assert.deepEqual(await read(), { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row",
-          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" });
+          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" });
         await page.evaluate(() => {
           const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("subject"));
           host.state.draft.name = 17;
@@ -3987,7 +3987,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         });
         await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)));
         assert.deepEqual(await read(), { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row",
-          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" });
+          "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" });
         const getters = await page.evaluate(async () => {
           const host = (window as any).HtmlRuntime.getComponentHost(document.getElementById("once"));
           let names = 0; let keys = 0;

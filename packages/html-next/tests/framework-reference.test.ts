@@ -41,6 +41,32 @@ describe("shared framework actual-reference lowering", () => {
       assert.equal((await compile(source, local))({ draft: {} }), expected);
     });
   }
+  it("orders literal and declared text without numeric coercion", async () => {
+    const string = parseTypeExpression("string");
+    const local: Scope = { code: new Map([["left", "data.left"], ["right", "data.right"]]),
+      types: new Map([["left", { type: string, nullable: false }], ["right", { type: string, nullable: false }]]) };
+    for (const [source, expected] of [["$left < $right", true], ["$left <= $left", true], ["$right > $left", true],
+      ["$right >= $right", true], ["$left > $right", false], ["'10' < '2'", true], ["'Z' < 'a'", true],
+      ["'😀' < '�'", true], ["alpha < beta", true], ["'' < 'a'", true], ["8px < 9px", undefined]] as const) {
+      assert.equal((await compile(source, local))({ left: "2026-02", right: "2026-11" }), expected, source);
+    }
+  });
+
+  it("reads unknown ordered operands once and preserves missing, invalid and incompatible values", async () => {
+    const unknown = parseTypeExpression("unknown");
+    const local: Scope = { code: new Map([["raw", "data.raw"]]), types: new Map([["raw", { type: unknown, nullable: true }]]) };
+    const run = await compile("$raw.left < $raw.right", local);
+    for (const [left, right, expected] of [["10", "2", true], [2, 3, true], [undefined, "a", undefined],
+      [null, null, undefined], ["2", 2, undefined], [false, true, undefined], [Infinity, 3, undefined]] as const) {
+      const reads: string[] = [];
+      assert.equal(run({ raw: { get left() { reads.push("left"); return left; }, get right() { reads.push("right"); return right; } } }), expected);
+      assert.deepEqual(reads, ["left", "right"]);
+    }
+    let reads = 0;
+    assert.equal((await compile("(1 / 0) < $raw.right", local))({ raw: { get right() { reads++; return "a"; } } }), invalid);
+    assert.equal(reads, 1);
+  });
+
   it("preserves null and present numeric equality", async () => {
     const run = await compile("$draft.count = null");
     assert.equal(run({ draft: { count: null } }), true);

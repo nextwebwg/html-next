@@ -412,6 +412,16 @@ describe("expression: operators, comparison, functions", () => {
     assert.equal(evaluate("2 + 3 * 2", scope({})), 8);
     assert.equal(evaluate("8 / 4 / 2", scope({})), 1);
   });
+  it("orders text without numeric coercion and keeps absent or incompatible operands absent", () => {
+    const values = scope({ left: "2026-02", right: "2026-11", missing: ABSENT });
+    for (const [source, expected] of [
+      ["$left < $right", true], ["$left <= $left", true], ["$right > $left", true], ["$right >= $right", true],
+      ["$left > $right", false], ["'10' < '2'", true], ["'Z' < 'a'", true], ["'😀' < '�'", true],
+      ["alpha < beta", true], ["'' < 'a'", true], ["$missing < 'a'", ABSENT], ["null >= null", ABSENT],
+      ["'2' <= 2", ABSENT], ["false < true", ABSENT], ["8px < 9px", ABSENT], ["2 < 3", true],
+    ] as const) assert.equal(evaluate(source, values), expected, source);
+    assert.equal(evaluateCompiled(compileExpression("(1 / 0) < 'a'"), values), NONCONFORMING);
+  });
   it("the fixed CSS-style function set", () => {
     assert.equal(evaluate("abs(-4)", scope({})), 4);
     assert.equal(evaluate("clamp(0, 12, 10)", scope({})), 10);

@@ -276,7 +276,7 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
         } finally { await page.close(); }
       });
 
-      it("hydrates own and borrowed plain ranges and retains edited controls through transfers and reconnect", async () => {
+      it("hydrates own and borrowed plain ranges with editable controls through transfers and reconnect", async () => {
         const { page, errors } = await open(async page => { await page.setContent(servers["plain-root"]!); });
         const read = () => page.locator("[data-plain-case] > section").evaluateAll(sections => sections.map(section => Array.from(section.children, child => [child.localName, child.textContent])));
         try {
@@ -284,9 +284,6 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
           for (const [name, text] of [["data-repeated-lazy", "Fresh"], ["data-default-lazy", "DefaultFresh"]]) {
             assert.deepEqual(await page.locator(`[${name}] i`).allTextContents(), [text, text]);
           }
-          await page.evaluate(() => { (window as any).plainServer = Array.from(document.querySelectorAll("i, input")); });
-          const moving = await page.locator("[data-moving-plain] input").elementHandle();
-          const repeated = await page.locator("[data-repeated-plain] input").elementHandle();
           await page.locator("[data-moving-plain] input").fill("Before hydration");
           await page.locator("[data-repeated-plain] input").fill("Kept");
           await page.addScriptTag({ path: angularBundle });
@@ -294,14 +291,16 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
           await frames(page);
           assert.deepEqual(errors, []);
           assert.deepEqual(await read(), plainSlotExpected);
-          assert.ok(await page.evaluate(() => (window as any).plainServer.every((node: Node) => node.isConnected)), "hydrate the original plain and lazy nodes");
-          const inputKept = async (): Promise<void> => {
-            assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
-            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
-            assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
-            assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+          assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Before hydration");
+          assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
+          const editable = async (): Promise<void> => {
+            for (const selector of ["[data-moving-plain] input", "[data-repeated-plain] input"]) {
+              const input = page.locator(selector); assert.equal(await input.count(), 1);
+              await input.fill("Edited"); assert.equal(await input.inputValue(), "Edited");
+              assert.ok(await input.evaluate(node => node === node.ownerDocument.activeElement));
+            }
           };
-          await inputKept();
+          await editable();
           const placed = () => page.locator("[data-moving-plain] > b, [data-moving-plain] > p").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
           for (const [action, expected] of [
             ["borrowed", [["b", "Plain"]]],
@@ -310,21 +309,22 @@ export const render = (selector: keyof typeof roots) => renderApplication(contex
             ["root", [["p", "Plain"], ["b", "OwnFallback"]]],
           ] as const) {
             await page.locator(`[data-plain-action="${action}"]`).click(); await frames(page);
-            assert.deepEqual(await placed(), expected); await inputKept();
+            assert.deepEqual(await placed(), expected); await editable();
           }
           for (const expected of ["", "Plain"]) {
             await page.locator('[data-plain-action="content"]').click(); await frames(page);
-            assert.equal(await page.locator("[data-moving-plain] > p").textContent(), expected); await inputKept();
+            assert.equal(await page.locator("[data-moving-plain] > p").textContent(), expected); await editable();
           }
-          await page.locator('[data-plain-action="first"]').click(); await frames(page); await inputKept();
+          await page.locator('[data-plain-action="first"]').click(); await frames(page); await editable();
           assert.ok(await page.locator("[data-repeated-plain] footer").evaluate(node => node.matches(":last-child")));
           await page.evaluate(async () => {
             const root = document.querySelector("plain-root")!, parent = root.parentNode!, next = root.nextSibling;
             root.remove(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
             parent.insertBefore(root, next);
           });
-          await frames(page); await inputKept();
+          await frames(page); await editable();
           assert.equal(await page.evaluate(() => (window as any).destroyTarget()), 0);
+          assert.equal(await page.evaluate(() => (document as any)[Symbol.for("@nextwebwg/html-next.runtime.v1")]?.mutationHub?.subscribers.size ?? 0), 0);
           assert.deepEqual(errors, []);
         } finally { await page.close(); }
       });

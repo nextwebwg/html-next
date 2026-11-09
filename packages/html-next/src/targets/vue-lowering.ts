@@ -928,6 +928,18 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       if (strings && !typeOf(node.right, scope).nullable) return `${left}${typeOf(node.left, scope).nullable ? "?." : "."}${method}(${right})`;
       return once((left, right) => `(typeof ${left} === "string" && typeof ${right} === "string" ? ${left}.${method}(${right}) : undefined)`);
     }
+    if (["<", "<=", ">", ">="].includes(op)) {
+      const leftType = typeOf(node.left, scope), rightType = typeOf(node.right, scope);
+      if ([leftType.type, rightType.type].some(type => type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name))) return "undefined";
+      const leftCategory = category(leftType.type), rightCategory = category(rightType.type);
+      if (leftCategory === "string" && rightCategory === "string" && !leftType.nullable && !rightType.nullable &&
+        !mayBeAbsent(node.left, scope) && !mayBeAbsent(node.right, scope)) return `${left} ${op} ${right}`;
+      if (leftCategory !== "number" && rightCategory !== "number") {
+        const textOnly = leftCategory === "string" || rightCategory === "string";
+        const number = textOnly ? undefined : this.use("number");
+        return once((left, right) => `(typeof ${left} === "string" && typeof ${right} === "string"${number === undefined ? "" : ` || ${number}(${left}) !== undefined && ${number}(${right}) !== undefined`} ? ${left} ${op} ${right} : undefined)`);
+      }
+    }
     if (["+", "-", "*", "/"].includes(op)) {
       const leftType = typeOf(node.left, scope).type;
       const rightType = typeOf(node.right, scope).type;

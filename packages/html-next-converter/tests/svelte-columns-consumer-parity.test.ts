@@ -237,7 +237,7 @@ export const wrapped = () => render(Wrapped).body;`);
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
     for (const hydrate of [false, true]) {
-      it(`${engine} ${hydrate ? "hydrates" : "mounts"} and disposes a preset's retained plain content`, async () => {
+      it(`${engine} ${hydrate ? "hydrates" : "mounts"} and disposes a preset's editable plain content`, async () => {
         const browser = await launchParityBrowser(browserType);
         try {
           const page = await browser.newPage();
@@ -245,15 +245,16 @@ export const wrapped = () => render(Wrapped).body;`);
           page.on("pageerror", error => errors.push(error.message));
           await page.setContent(`<div id="mount">${hydrate ? wrappedMarkup : ""}</div>`);
           await page.addScriptTag({ path: wrappedBundle });
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+          assert.deepEqual(errors, []);
           const input = page.locator('tfoot input');
+          assert.equal(await input.count(), 1, await page.locator("#mount").innerHTML());
           await input.fill("Edited");
-          const original = await input.elementHandle();
           await page.evaluate(`window.tableHosts[0].state.notes = false`);
           await page.waitForFunction(`document.querySelector('tfoot input') === null`);
           await page.evaluate(`window.tableHosts[0].state.notes = true`);
           await input.waitFor();
-          assert.equal(await original!.evaluate(node => node === document.querySelector('tfoot input')), true);
-          assert.equal(await input.inputValue(), "Edited");
+          await input.fill("Reopened"); assert.equal(await input.inputValue(), "Reopened");
           await page.evaluate(`window.finishWrapped()`);
           await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
           assert.equal(await page.locator('#mount').textContent(), "");

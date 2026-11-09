@@ -9,25 +9,25 @@
 
 ### Changes
 
+- Keep application tooling in the independent Threadlabs MarkupKit repository. Publish and verify the three HTML Next SDK packages together.
+
+- Compare text and keywords in lexical UTF-16 order across interpreted, compiled Vanilla and framework expressions, without numeric coercion. Preserve absence, quantity types and invalid-result retention.
+
+- Release unreachable component callbacks held by shared script entries while keeping retained disconnected instances synchronized with shared script status.
+
 - Compile React and Preact components when a keyed style precedes a trailing `$attributes` destination, preserving the authored style order.
 
 - Bind native named and inline conditional prop types after their prop or initialized state selectors, preserving selected structured types, literal fallbacks, defaults and request isolation. Refuse non-null dependent inputs under null selectors in both shared JavaScript runtimes, and resolve selected dimensions from the current values in Node and live scopes.
 
 - Consume the compiler-owned client plan in native .NET rendering and emit interoperable instance records on request. Preserve caller input ownership, state seeds, shared references, forwarded attributes, shared roots, structural ranges and keyed rows through generated-client adoption. Verify early control edits, hidden projection and subsequent prop updates in Chromium, Firefox and WebKit; keep native application preparation and full catalog qualification in progress.
 
-- Use shared slot lifetime analysis in React and Preact to retain ordinary content across conditional outlets. Preserve accepted roots, child-list context and borrowed content through receiving-outlet transfers, including nested receivers and StrictMode cleanup. Keep scoped templates fresh and ordinary static outlets on native paths.
-
 - Preserve the live and Vanilla plain-slot owner through whole-mount disconnect and reconnect. Keep paused claims distinct from permanently stopped effects, and release stopped claims through their existing ownership registration.
 
-- Hydrate retained React and Preact slot content in place, then transfer its existing framework subtree to a persistent portal without replacing controls or remounting state. Preserve native context, IDs, events and source updates through outlet changes and temporary absence. Keep retention owners out of ordinary named and default slot bundles.
+- Use normal framework reconciliation and hydration in React, Preact, Vue, Svelte and Angular. Remove private tree rewrites, custom portal event relays, internal renderer hooks and detached view retention used for exact lifecycle matching. Keep ordinary slot content at one destination and render lazy templates afresh through supported framework APIs.
+- Preserve generated Svelte slot and accepted-entry props during ordered attribute forwarding, including delegated component roots and presets.
+- Refresh borrowed Svelte slot contexts when a populated outlet switches entries, and release the latest entry when that outlet closes.
 
-- Retain Svelte plain slot content across own, borrowed, repeated and conditional outlets with server hydration, edited controls, state, context and reconnect. Keep destination identity stable through child-list updates, show fallbacks when conditional source content disappears, and keep lazy templates fresh. Filter rejected native elements and text through structural projection, preserve literal input defaults during hydration, and prune retention helpers from ordinary button bundles.
-
-- Preserve ordinary Vue slot content when a single conditional outlet closes and reopens. Place accepted roots once across repeated receiving outlets, retaining child state, injected context and edited controls through transfers and temporary absence. Select retention from shared template lifetime analysis while keeping permanent single outlets and scoped slots on native paths.
-
-- Retain Vue child-slot content through destination changes, server hydration, caller updates and reconnect, including stateful Vue children and injected context. Preserve native control edits and focus during updates, forward literal control values as attributes, and keep scoped-only slots on Vue's native outlet path. Filter rejected projected text and elements through structural fragments, and remove unused projection helpers from ordinary bundles.
-
-- Share plain slot content between own, borrowed and repeated outlets in Node, compiled Vanilla and Angular. Retain original nodes and control edits through transfers, hydration and reconnect, and instantiate authored lazy templates at each outlet. Keep Angular views registered for server serialization and preserve native DOM order around structural anchors.
+- Share plain slot content between own, borrowed and repeated outlets in Node and compiled Vanilla. Retain native nodes and control edits through transfers, hydration and reconnect, and instantiate authored lazy templates at each outlet. Angular uses ordinary template view creation and destruction for those destinations.
 
 - Preserve accepted-child entry identity through indexed, computed and structural aliases, conditional selection across lists, and null fallbacks in Node, native C# and generated targets. Select slot-prop conversion from every possible accepted tag. Keep Angular computed references intact, Vue slot props clear of generated helpers, and compiled Vanilla slot routing independent of root attributes.
 

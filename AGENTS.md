@@ -15,7 +15,7 @@
 
 ## Workspace structure
 
-- Keep proposal implementations in separate packages under `packages/`. The four HTML Next packages share one release version and publish together.
+- Keep proposal implementations in separate packages under `packages/`. The three HTML Next packages share one release version and publish together.
 - Record each change in `CHANGELOG.md` under the version its pull request targets. Merging a new shared version publishes it, so there is no Unreleased section: a change merged without a version bump belongs to the next version.
 - Put shared tooling at the repository root; keep proposal-specific source, tests, and build configuration with its package.
 - Use pnpm through Corepack and preserve strict ESM TypeScript package boundaries.
@@ -27,7 +27,7 @@
 - Native-first is a design method, not a requirement to delegate every operation at runtime. Measure bundle size and representative runtime cost together. Reject a change that makes a hot path more than 25% slower while saving less than both 1 KB gzip and 5% of its bundle; any greater than 2x hot-path regression requires a unique correctness or interoperability benefit and explicit owner review.
 - For generalized validation, probe detached native controls configured with the proposed type and constraints, then preserve the observed behavior with cross-browser conformance tests. Native controls use `ValidityState` directly; ordinary elements may use a faster equivalent implementation when runtime delegation has a disproportionate cost.
 - Keep the live parser/interpreter separate from generated component output. Generated components import only the helpers required by their authored features.
-- When an application consumer exposes a platform defect, fix it in the owning HTMLKit or HTML Next package with independent regression coverage. Remove consumer workarounds before delivery.
+- When an application consumer exposes a platform defect, fix it in the owning MarkupKit or HTML Next package with independent regression coverage. Remove consumer workarounds before delivery.
 
 ## Safe work
 
@@ -39,6 +39,13 @@
 - Do not add Tailwind. Use project-owned CSS, CSS Modules, or an explicitly selected non-Tailwind styling approach.
 
 ## Verification
+
+- Converter conformance is based on identical user experience, not exact component lifecycle,
+  framework instance identity, or DOM node identity. Use each framework's supported reconciliation
+  and hydration behavior, including normal node or component recreation. Do not patch framework
+  internals or retain custom event/view machinery solely to match lifecycle mechanics with no
+  user-visible effect. Preserve coverage for rendered content, placement, interactions, focus,
+  form edits, and accessibility. The public proposal's target-equivalence section owns this contract.
 
 - Use the real Looma catalog as a required converter pressure test. Every supported target must convert the complete catalog, compile with its framework toolchain, and pass Looma's shared browser tests for rendering and behavior. Keep those assertions independent of the renderer; fix compiler or adapter defects rather than weakening assertions or skipping failing components. Small converter fixtures supplement this gate.
 

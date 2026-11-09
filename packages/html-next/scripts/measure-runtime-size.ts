@@ -170,7 +170,8 @@ const staticGenerated = await generatedFixture("static-card", 8_580);
 // Closed event validation is shared with minified framework compilers. Its one-time factory
 // costs +1/+17/+4/+8 B gzip on static/reactive/prop/computed fixtures; limits record
 // those measured totals, with no extra allowance. The cached brand-check hot path is unchanged.
-const reactiveGenerated = await generatedFixture("reactive-counter", 8_334);
+// Typed text ordering adds33B gzip to this arithmetic helper bundle.
+const reactiveGenerated = await generatedFixture("reactive-counter", 8_367);
 // +1.0–1.1 KB on prop fixtures: the typed input SDK, accepted caller ownership, and status-only
 // publication use compiled prop checks and the existing scheduler. Components without props
 // do not import the SDK. The dedicated await fixture protects actual status/error lowering.
@@ -205,7 +206,8 @@ const seededGenerated = await generatedFixture("state-seed", 16_486);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
 // +5 B gzip: finite arithmetic checks and invalid-result retention in the computed counter.
-const computedGenerated = await generatedFixture("computed-counter", 9_029);
+// The same comparison correction adds37B gzip here; these are exact measured baselines.
+const computedGenerated = await generatedFixture("computed-counter", 9_066);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 // Removing loop metadata leaves this fixture at 20,798 B; minifier allocation shifts gzip by 2 B on Node 24.
 const keyedGenerated = await generatedFixture("keyed-list", 8_764);
@@ -231,9 +233,12 @@ const headNoneGenerated = await generatedFixture("head-none", 12_957);
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
 // Recursive-factory helper exports change minified identifier allocation by 2 B gzip.
 // These acyclic fixtures contain none of the nesting helpers.
-const headStaticGenerated = await generatedFixture("head-static", 15_022);
+// Weak script ownership changes minified names beside static head output (-1 B gzip).
+const headStaticGenerated = await generatedFixture("head-static", 15_021);
 const headJsonGenerated = await generatedFixture("head-json", 15_161);
-const headGenerated = await generatedFixture("head-script", 17_101);
+// +106 B gzip for native weak subscriber ownership and collection cleanup. Other fixtures
+// contain none of that code; retained disconnected handles keep their normal status callbacks.
+const headGenerated = await generatedFixture("head-script", 17_207);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component

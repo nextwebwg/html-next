@@ -252,8 +252,9 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
   }
   const left = evalNode(node.left, scope, checks);
   const right = evalNode(node.right, scope, checks);
-  // Dimensions are looked up only where `binaryValue` reads them: arithmetic on a non-number.
-  const dimensional = (op === "+" || op === "-" || op === "*" || op === "/") &&
+  // Preserve quantity identity in arithmetic and exclude it from text ordering.
+  const dimensional = (op === "+" || op === "-" || op === "*" || op === "/" ||
+    op === "<" || op === "<=" || op === ">" || op === ">=") &&
     (typeof left !== "number" || typeof right !== "number");
   return binaryValue(op, left, right,
     dimensional ? dimensionType(node.left, scope, true) : undefined, dimensional ? dimensionType(node.right, scope, true) : undefined,
@@ -280,7 +281,7 @@ export function negate(operand: Value, dimension: Dimension | undefined): Value 
 
 /**
  * A binary operator other than `and`/`or` over evaluated operands. The dimensions are the operands'
- * declared dimension types; they matter only for arithmetic on an operand that is not a number.
+ * declared dimension types; arithmetic uses them and ordered comparison excludes them.
  * `operate` is the arithmetic operator's number operation (`add` for `+`, from `./decimal.js`); a
  * compiled component passes only the ones it uses, and none where both operands are integers, which
  * JavaScript's own operators already calculate exactly.
@@ -327,14 +328,17 @@ export function binaryValue(op: string, left: Value, right: Value, leftDimension
     }
   }
 
+  if (op === "<" || op === "<=" || op === ">" || op === ">=") {
+    if (leftDimension !== undefined || rightDimension !== undefined) return ABSENT;
+    if (!(typeof left === "string" && typeof right === "string" ||
+      typeof left === "number" && Number.isFinite(left) && typeof right === "number" && Number.isFinite(right))) return ABSENT;
+    return op === "<" ? left < right : op === "<=" ? left <= right : op === ">" ? left > right : left >= right;
+  }
+
   const a = asNumber(left);
   const b = asNumber(right);
   if (a === ABSENT || b === ABSENT) return ABSENT;
   switch (op) {
-    case "<": return a < b;
-    case "<=": return a <= b;
-    case ">": return a > b;
-    case ">=": return a >= b;
     case "+": case "-": case "*": case "/": case "%": {
       const result = calculate(op, a, b, operate);
       return Number.isFinite(result) ? result : NONCONFORMING;

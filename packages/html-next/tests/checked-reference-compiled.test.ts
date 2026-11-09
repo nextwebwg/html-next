@@ -40,7 +40,7 @@ describe("compiled actual-reference checks", () => {
     (host.state.draft as Record<string, unknown>)["odd.key"] = "Quoted";
     (host.state.rows as Record<string, unknown>[])[0]!.name = "Row";
     await tick();
-    const accepted = { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row", "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row" };
+    const accepted = { ...checkedReferenceInitial, "computed-key": "A", "computed-index": "Row", "bad-fallback": "A", "quoted-key": "Quoted", label: "A", "alias-key": "Row", "ordered-name": "true", "ordered-row": "true" };
     assert.deepEqual(read(), accepted);
     (host.state.draft as Record<string, unknown>).name = 17;
     (host.state.rows as Record<string, unknown>[])[0]!.name = 17;

@@ -18,7 +18,8 @@ import { JSDOM } from "jsdom";
 import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateSvelteOutput } from "../src/targets/svelte.js";
-import { generateComponent, generateReactComponent, generateVueComponent, reactPropsArtifact, reactRenderArtifact, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { angularArtifacts } from "../src/targets/angular.js";
+import { generateComponent, generateReactComponent, generateVueComponent, reactPropsArtifact, reactRenderArtifact, svelteRenderArtifact, vueControlArtifact, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
 import { attributeHelperArtifact } from "../src/targets/attribute-helper.js";
@@ -596,13 +597,23 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /<li>\s*<RetainedInlineText[\s\S]*?referenceMember\(row, 'name'\)/);
   });
 
-  it("retains removable ordinary Vue slots while leaving permanent and scoped slots native", () => {
+  it("uses framework rendering APIs without private retention or event-dispatch patches", () => {
+    assert.doesNotMatch(reactRenderArtifact().content, /_reactInternals|PlainPortal|\.addEventListener\s*=/);
+    assert.doesNotMatch(vueHostArtifact().content, /PlainPortal|internals\.(?:pc|mc|um)|\.provides\s*=/);
+    assert.doesNotMatch(svelteRenderArtifact().content, /svelte\/internal|nativePlain/);
+    const angular = angularArtifacts("test").find(artifact => artifact.path === "angular/children.ts")!.content;
+    assert.doesNotMatch(angular, /plainNodes|declarations\.get|frame\.view/);
+    assert.match(angular, /container\.createEmbeddedView/);
+  });
+
+  it("uses placement arbitration only for competing ordinary Vue outlets", () => {
     for (const [outlet, retained] of [
       ["<slot></slot>", false],
       ['<template $with="1 as item"><slot></slot></template>', false],
-      ['<slot $if="$open"></slot>', true],
-      ['<p $if="$open"><slot></slot></p>', true],
-      ['<template $match><p $when="$open"><slot></slot></p><i $else>Closed</i></template>', true],
+      ['<slot $if="$open"></slot>', false],
+      ['<p $if="$open"><slot></slot></p>', false],
+      ['<template $match><p $when="$open"><slot></slot></p><i $else>Closed</i></template>', false],
+      ["<slot></slot><slot>Fallback</slot>", true],
     ] as const) {
       for (const scoped of [false, true]) {
         const definition = parseComponent(`<template component="x-conditional-slot"><defs><state name="open" type="boolean" value="true"></state>` +

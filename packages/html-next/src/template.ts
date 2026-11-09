@@ -391,37 +391,25 @@ export function templateForwardsAttributes(node: TemplateNode): boolean {
     : node.kind === "slot" && (node.fallback?.some(templateForwardsAttributes) ?? false);
 }
 
-const slotLifetimes = new WeakMap<ComponentDefinition, { repeated: ReadonlySet<string>; retained: ReadonlySet<string> }>();
-function slotLifetime(definition: ComponentDefinition): { repeated: ReadonlySet<string>; retained: ReadonlySet<string> } {
-  const cached = slotLifetimes.get(definition);
+const repeatedSlots = new WeakMap<ComponentDefinition, ReadonlySet<string>>();
+/** Slot names whose ordinary content can compete for more than one destination. */
+export function repeatedSlotNames(definition: ComponentDefinition): ReadonlySet<string> {
+  const cached = repeatedSlots.get(definition);
   if (cached !== undefined) return cached;
-  const names = new Set<string>(), repeated = new Set<string>(), retained = new Set<string>();
-  const visit = (node: TemplateNode, loop = false, removable = false): void => {
+  const names = new Set<string>(), repeated = new Set<string>();
+  const visit = (node: TemplateNode, loop = false): void => {
     if (node.kind === "text") return;
     loop ||= node.flow?.kind === "each";
-    removable ||= node.flow !== undefined && node.flow.kind !== "with";
     if (node.kind === "slot") {
       if (node.of === undefined) {
         const name = node.name ?? "";
         if (loop || names.has(name)) repeated.add(name);
-        if (removable) retained.add(name);
         names.add(name);
       }
-      for (const child of node.fallback ?? []) visit(child, loop, true);
-    } else for (const child of node.children) visit(child, loop, removable);
+      for (const child of node.fallback ?? []) visit(child, loop);
+    } else for (const child of node.children) visit(child, loop);
   };
   visit(definition.template);
-  for (const name of repeated) retained.add(name);
-  const lifetime = { repeated, retained };
-  slotLifetimes.set(definition, lifetime);
-  return lifetime;
-}
-
-export function repeatedSlotNames(definition: ComponentDefinition): ReadonlySet<string> {
-  return slotLifetime(definition).repeated;
-}
-
-/** Ordinary source content outlives destinations that can disappear or compete for it. */
-export function retainedSlotNames(definition: ComponentDefinition): ReadonlySet<string> {
-  return slotLifetime(definition).retained;
+  repeatedSlots.set(definition, repeated);
+  return repeated;
 }

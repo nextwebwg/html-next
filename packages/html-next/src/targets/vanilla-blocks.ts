@@ -680,8 +680,9 @@ function lowerUnchecked(node: ExpressionNode, scope: Scope): Lowered {
           : `equalValue(${left.source}, ${right.source}${node.op === "!=" ? ", true" : ""})`), ...merge(left, right), boolean: direct };
       }
       const arithmetic = ARITHMETIC.has(node.op);
-      const leftDimension = arithmetic ? dimensionType(node.left, scope.types) : undefined;
-      const rightDimension = arithmetic ? dimensionType(node.right, scope.types) : undefined;
+      const dimensional = arithmetic || ["<", "<=", ">", ">="].includes(node.op);
+      const leftDimension = dimensional ? dimensionType(node.left, scope.types) : undefined;
+      const rightDimension = dimensional ? dimensionType(node.right, scope.types) : undefined;
       const whole = (operand: ExpressionNode): boolean =>
         wholeNumber(operand, (read) => declaredExpressionType({ ast: read }, scope.types));
       const decimal = DECIMAL[node.op] !== undefined && !(whole(node.left) && whole(node.right)) ? DECIMAL[node.op] : undefined;
