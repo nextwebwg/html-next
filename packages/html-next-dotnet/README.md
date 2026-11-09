@@ -57,6 +57,8 @@ var html = page.Render(new { title = "Quarterly report" });
 
 Compilation deduplicates canonical resources, handles cyclic dependency links, rejects duplicate component tags, and checks component calls even in initially hidden branches. Each source's identity, revision, UTF-8 SHA-256, and resolved dependency identities are available through `graph.Sources`. Conflicting content or revisions under one canonical identity fail compilation. Retain the graph or its templates; rendering uses the compiled plans without consulting the resolver. Failed or cancelled compilations leave no shared failed-cache entry.
 
+Use `graph.CompileApplication(source, sourceName)` to compile one server-owned application carrier against the retained library. Declare its inputs and composition in that carrier, then retain the returned template for request rendering. Referenced components reuse their typed prop and slot contracts, compiled plans, matching stylesheets, preparation revisions and client selection. Independent application compilations keep separate compiler metadata. The application carrier's own bindings render on the server; build it with the unplugin when it also needs a generated browser factory or stylesheet.
+
 Basic component calls lower to the callee's native output. Written props convert during compilation; `from:` props bind from the caller's scope. Child props keep their own defaults and types, including structured field layouts. Buffered rendering retains each child input snapshot between its counting and writing passes, so binding diagnostics occur once. Writer rendering makes one pass. Child snapshots and scopes belong to the request, including recursive and repeated instances. Deep expansion reports an execution-stack resource exception before exhausting the host's CLR stack.
 
 Named and inline `<type from="selector">` declarations select a prop's type from a finite prop or state value. Ordinary props bind before dependent props, and state selectors initialize before their dependent values bind. Written dependent inputs convert through the selected type during binding. A null selector accepts only a null dependent value. A dependent default requires a prop selector with a default and must satisfy that option's type. Structured values retain their selected field and element types.
@@ -218,6 +220,14 @@ corepack pnpm measure:dotnet --filter '*'
 corepack pnpm measure:dotnet:node
 corepack pnpm measure:dotnet --allocations
 ```
+
+The native catalog bridge runs Looma's unchanged shared SSR scenarios against one retained C# library. It requires a Looma checkout with the native server-module fixture hook and its emitted source/asset metadata:
+
+```sh
+node packages/html-next-dotnet/tests/run-looma.ts /path/to/looma ssr.test.ts
+```
+
+The runner builds the SDK and fixture host, prepares the real catalog once, and checks that the complete catalog reached C#. It preserves the calling process's locale for each request and removes its temporary library and native host afterward. Full shared native catalog qualification remains unfinished.
 
 The .NET benchmark uses BenchmarkDotNet with allocation diagnostics. It compares cached HTML Next plans and cached Fluid templates, with fresh per-render input binding and complete string output on both sides. Each case validates full output against an independently constructed expectation before timing and prints template, model, and output hashes. The benchmark warms POCO accessors before measurement.
 

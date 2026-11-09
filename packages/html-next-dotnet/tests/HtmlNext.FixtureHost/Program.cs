@@ -1,6 +1,12 @@
 using System.Text.Json;
 using HtmlNext;
 
+if (args[0] == "--catalog-server")
+{
+    await CatalogServer.Run(args[1]);
+    return;
+}
+
 using var request = JsonDocument.Parse(await File.ReadAllTextAsync(args[0]));
 var root = request.RootElement;
 var assets = HtmlNextServerAssets.FromManifest(root.GetProperty("manifest").GetRawText());
@@ -33,7 +39,9 @@ HtmlNextPreparedModule? Prepare(HtmlNextPreparationContext context)
     return new(module.GetProperty("source").GetString()!, module.GetProperty("reads").EnumerateObject().ToDictionary(item => item.Name,
         item => new HtmlNextPreparedRead(item.Value.GetProperty("input"), item.Value.GetProperty("value"))));
 }
-Console.Write(graph.Template(root.GetProperty("tag").GetString()!).Render(inputs, options: new()
+var template = root.TryGetProperty("application", out var application)
+    ? graph.CompileApplication(application.GetString()!) : graph.Template(root.GetProperty("tag").GetString()!);
+Console.Write(template.Render(inputs, options: new()
 {
     Interactive = true, PrepareModule = root.TryGetProperty("prepared", out _) ? Prepare : null
 }));

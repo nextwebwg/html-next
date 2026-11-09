@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Compile server-owned application carriers against a retained native component graph. Reuse typed component and slot contracts, compiled plans, matching assets and client selection across independent application compilations.
+
 - Render keyed native styles in authored order with whole-style writes, invocation forwarding and consumed style props. Preserve shorthand priorities, empty custom properties and invalid-write retention; update Node's DOM implementation to preserve those values during server rendering and adoption.
 
 - Format native duration records and CSS durations with ICU unit labels, digital groups and structured parts. Preserve fractional precision, single-sign output and native bidirectional isolation during browser adoption.

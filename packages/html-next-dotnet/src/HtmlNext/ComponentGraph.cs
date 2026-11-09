@@ -20,13 +20,18 @@ public sealed record CompiledSource(string Id, string? Revision, string Sha256, 
 /// <summary>An immutable compiled source graph. Retain its templates across requests.</summary>
 public sealed class CompiledComponentGraph
 {
-    internal CompiledComponentGraph(Dictionary<string, CompiledTemplate> templates, CompiledSource[] sources, HtmlNextServerAssets? assets)
+    private readonly FrozenDictionary<string, ComponentReference> contracts;
+    internal HtmlNextServerAssets? Assets { get; }
+
+    internal CompiledComponentGraph(Dictionary<string, ComponentReference> references, CompiledSource[] sources, HtmlNextServerAssets? assets)
     {
-        Templates = templates.ToFrozenDictionary(StringComparer.Ordinal);
+        contracts = references.ToFrozenDictionary(pair => pair.Key, pair => pair.Value.Copy(), StringComparer.Ordinal);
+        Templates = references.ToFrozenDictionary(pair => pair.Key, pair => pair.Value.Template, StringComparer.Ordinal);
+        Assets = assets;
         Sources = Array.AsReadOnly(sources);
         Stylesheets = assets?.Stylesheets ?? Array.Empty<string>();
         Client = assets?.Client;
-        Modules = Array.AsReadOnly(templates.Values.Select(template => template.Module).OfType<HtmlNextModuleReference>().OrderBy(module => module.Component, StringComparer.Ordinal).ToArray());
+        Modules = Array.AsReadOnly(Templates.Values.Select(template => template.Module).OfType<HtmlNextModuleReference>().OrderBy(module => module.Component, StringComparer.Ordinal).ToArray());
     }
 
     public IReadOnlyDictionary<string, CompiledTemplate> Templates { get; }
@@ -36,6 +41,10 @@ public sealed class CompiledComponentGraph
     public IReadOnlyList<HtmlNextModuleReference> Modules { get; }
     public CompiledTemplate Template(string tag) => Templates.TryGetValue(tag, out var template) ? template
         : throw new KeyNotFoundException($"No component '{tag}' is defined in this graph.");
+
+    /// <summary>Compiles one server-owned application carrier against this retained library.</summary>
+    public CompiledTemplate CompileApplication(string source, string sourceName = "<application>") =>
+        HtmlNextCompiler.CompileApplication(source, sourceName, this, contracts.ToDictionary(pair => pair.Key, pair => pair.Value.Copy(), StringComparer.Ordinal));
 }
 
 internal sealed class ComponentReference
@@ -47,10 +56,31 @@ internal sealed class ComponentReference
     public string? DelegatedTag { get; init; }
     public bool ForwardsAttributes { get; init; }
     public CompiledTemplate Template { get; set; } = null!;
+    public ComponentReference Copy() => new()
+    {
+        Slots = Slots, Props = Props, EntryType = EntryType, DelegatedTag = DelegatedTag,
+        ForwardsAttributes = ForwardsAttributes, Template = Template
+    };
 }
 
 public static partial class HtmlNextCompiler
 {
+    internal static CompiledTemplate CompileApplication(string source, string sourceName, CompiledComponentGraph library, Dictionary<string, ComponentReference> references)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        using var resource = ReadResource(new(sourceName, source));
+        if (resource.References.Length != 0) throw ValueType.Error(sourceName, "Application components use the retained library's resolved dependencies.");
+        if (resource.Carriers.Length != 1) throw ValueType.Error(sourceName, "An application requires one component carrier.");
+        var compiler = new Compiler(resource.Carriers[0], sourceName, references, null, "", library.Assets);
+        compiler.ReadContract();
+        var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots, DelegatedTag = compiler.DelegatedTag, ForwardsAttributes = compiler.ForwardsAttributes };
+        if (!references.TryAdd(compiler.Tag, reference)) throw ValueType.Error(sourceName, $"Duplicate component '{compiler.Tag}'.");
+        compiler.BindChildListTypes();
+        reference.Template = compiler.Compile();
+        foreach (var item in references.Values) { item.Props = []; item.Slots = ComponentReference.EmptySlots; }
+        return reference.Template;
+    }
+
     /// <summary>Compiles all carriers in one resource without resolving external dependencies.</summary>
     public static CompiledComponentGraph CompileResource(string source, string sourceName = "<source>", HtmlNextServerAssets? assets = null)
     {
@@ -136,8 +166,9 @@ public static partial class HtmlNextCompiler
             cancellation.ThrowIfCancellationRequested();
             reference.Template = compiler.Compile();
         }
+        var graph = new CompiledComponentGraph(references, sources.ToArray(), assets);
         foreach (var reference in references.Values) { reference.Props = []; reference.Slots = ComponentReference.EmptySlots; }
-        return new(references.ToDictionary(pair => pair.Key, pair => pair.Value.Template, StringComparer.Ordinal), sources.ToArray(), assets);
+        return graph;
     }
 
     private sealed class SourceResource(HtmlNextSource source, IDocument document, IHtmlTemplateElement[] carriers, string[] references) : IDisposable

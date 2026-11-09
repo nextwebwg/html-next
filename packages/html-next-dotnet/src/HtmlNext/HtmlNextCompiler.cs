@@ -23,7 +23,7 @@ public static partial class HtmlNextCompiler
     [GeneratedRegex(@"\A[A-Za-z_$][A-Za-z0-9_$-]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex ReferenceNamePattern();
 
-    private sealed class Compiler(IHtmlTemplateElement carrier, string source, IReadOnlyDictionary<string, ComponentReference> components, HtmlNextServerAssets? assets, string sourceHash)
+    private sealed class Compiler(IHtmlTemplateElement carrier, string source, IReadOnlyDictionary<string, ComponentReference> components, HtmlNextServerAssets? assets, string sourceHash, HtmlNextServerAssets? applicationAssets = null)
     {
         private readonly List<Prop> props = [];
         private readonly List<LocalInitializer> initializers = [];
@@ -220,7 +220,7 @@ public static partial class HtmlNextCompiler
                 bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
-            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), assets?.Stylesheets, childLists.ToArray(), assets, instance);
+            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance);
         }
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)
