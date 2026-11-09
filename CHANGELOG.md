@@ -9,7 +9,7 @@
 
 ### Changes
 
-- Keep application tooling in the independent Threadlabs MarkupKit repository. Publish and verify the three HTML Next SDK packages together.
+- Keep application tooling in the independent Threadlabs MarkupKit repository. Publish and verify the three HTML Next SDK packages together. Pin catalog qualification to the compatible Looma migration and its three-package test loader.
 
 - Compare text and keywords in lexical UTF-16 order across interpreted, compiled Vanilla and framework expressions, without numeric coercion. Preserve absence, quantity types and invalid-result retention.
 
