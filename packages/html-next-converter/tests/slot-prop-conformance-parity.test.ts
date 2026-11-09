@@ -180,6 +180,14 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
             assert.deepEqual(await plainSlots(), plainSlotExpected);
             assert.equal(await page.locator("[data-plain-case] i").count(), 4);
             const moving = await page.locator("[data-moving-plain] input").elementHandle();
+            const coreRuntime = target === "live" || target === "vanilla";
+            const editControl = async (selector: string, value: string): Promise<void> => {
+              const input = page.locator(selector);
+              assert.equal(await input.count(), 1);
+              await input.fill(value);
+              assert.equal(await input.inputValue(), value);
+              assert.ok(await input.evaluate(node => node === node.ownerDocument.activeElement));
+            };
             await page.locator("[data-moving-plain] input").fill("Edited");
             const placed = () => page.locator("[data-moving-plain] > b, [data-moving-plain] > p").evaluateAll(nodes => nodes.map(node => [node.localName, node.textContent]));
             assert.deepEqual(await placed(), [["p", "Plain"], ["b", "OwnFallback"]]);
@@ -188,7 +196,12 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
                 await page.locator('[data-plain-action="content"]').click();
                 await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
                 assert.equal(await page.locator(`[data-moving-plain] > ${owner}`).textContent(), text);
-                assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
+                const value = await page.locator("[data-moving-plain] input").inputValue();
+                const diagnostic = value === "Edited" ? undefined : await moving!.evaluate(node => {
+                  const current = document.querySelector<HTMLInputElement>("[data-moving-plain] input")!;
+                  return { same: node === current, previousConnected: node.isConnected, value: current.value, attribute: current.getAttribute("value"), defaultValue: current.defaultValue };
+                });
+                assert.equal(value, "Edited", JSON.stringify(diagnostic));
               }
             };
             await toggleContent("p");
@@ -201,17 +214,21 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
               await page.locator(`[data-plain-action="${action}"]`).click();
               await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
               assert.deepEqual(await placed(), expected);
+              // Frameworks may remount an outlet. Its current control must accept edits and focus;
+              // ordinary content updates below must preserve those edits in place.
+              if (!coreRuntime) await editControl("[data-moving-plain] input", "Edited");
               await toggleContent(expected.some(([tag, text]) => tag === "b" && text === "Plain") ? "b" : "p");
               assert.equal(await page.locator("[data-moving-plain] input").inputValue(), "Edited");
-              assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+              if (coreRuntime) assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
             }
             const repeated = await page.locator("[data-repeated-plain] input").elementHandle();
             await page.locator("[data-repeated-plain] input").fill("Kept");
             await page.locator('[data-plain-action="first"]').click();
             await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
             assert.equal(await page.locator("[data-repeated-plain] footer").textContent(), "Tail");
+            if (!coreRuntime) await editControl("[data-repeated-plain] input", "Kept");
             assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
-            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            if (coreRuntime) assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
             assert.deepEqual(await page.locator("[data-repeated-lazy] i").allTextContents(), ["Fresh", "Fresh"]);
             assert.equal(await page.locator("[data-repeated-lazy] input").count(), 2);
             assert.deepEqual(await page.locator("[data-default-lazy] i").allTextContents(), ["DefaultFresh", "DefaultFresh"]);
@@ -223,9 +240,15 @@ mount(Form, { target: document.querySelector("#mount")! });\n`);
               await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
             });
             assert.deepEqual(await placed(), [["p", "Plain"], ["b", "OwnFallback"]]);
+            if (!coreRuntime) {
+              await editControl("[data-moving-plain] input", "Edited");
+              await editControl("[data-repeated-plain] input", "Kept");
+            }
             await toggleContent("p");
-            assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
-            assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            if (coreRuntime) {
+              assert.ok(await moving!.evaluate(node => node === document.querySelector("[data-moving-plain] input")));
+              assert.ok(await repeated!.evaluate(node => node === document.querySelector("[data-repeated-plain] input")));
+            }
             assert.equal(await page.locator("[data-repeated-plain] input").inputValue(), "Kept");
             assert.deepEqual(await plainSlots(), plainSlotExpected);
             const iteration = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-iteration] p'), row => [row.textContent, row.matches(':first-child'), row.matches(':last-child')]));

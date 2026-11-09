@@ -1,4 +1,5 @@
 export const componentDecorationsSource = `<template component="x-empty-class" status="early" summary="Empty native class."><i class="">Empty root</i></template>
+<template component="x-styled-empty-class-after" noforward><i class="" $attributes>Caller class</i></template>
 <template component="x-styled-leaf" status="early" summary="Leaf decorations." controller="./leaf.js"><defs>
   <state name="active" type="boolean" value="true"></state>
   <state name="color" type="string" value="green"></state>
@@ -13,7 +14,7 @@ export const componentDecorationsSource = `<template component="x-empty-class" s
   <state name="color" type="string" value="red"></state>
   <state name="padding" type="string" value="10px"></state>
 </defs><section><x-styled-middle class="consumer" style="background-color: rgb(240, 240, 240); width: 200px; width:; --blank:; padding: 4px !important" class:active="$active" style:color="$color" style:padding-left="$padding"></x-styled-middle><i class:ghost="false" style:color="'not-a-color'">Marker</i>
-<i class="" class:ghost="false">Empty literal</i><i class="active" class:active="false">Cleared token</i><x-empty-class></x-empty-class>
+<i class="" class:ghost="false">Empty literal</i><i class="active" class:active="false">Cleared token</i><x-empty-class></x-empty-class><x-styled-empty-class-after class="caller"></x-styled-empty-class-after>
 <svg width="0" height="0"><g class="" class:ghost="false"></g><g class="active" class:active="false"></g><g class:ghost="false"></g></svg></section>
 <style>:host { display: block; width: 220px; padding: 4px; font: 16px/24px Arial, sans-serif; } button { font: inherit; } i[class], i[style] { font-style: normal; background: pink; }</style></template>`;
 

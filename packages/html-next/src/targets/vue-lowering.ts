@@ -844,7 +844,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
       // Normalize absent inputs after retaining the invalid-result signal for the binding owner.
       let code = type.type.kind === "list" ? value : `${this.use("list")}(${value})`;
       if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
-      if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
+      if (options.where !== undefined) code = `${code}.filter((${item}${mayProduceInvalidResult(node, scope) ? ": any" : ""}) => ${this.condition(options.where, options.itemScope)})`;
       if (options.sort.length > 0) code = `${this.use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
       if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
       return code;

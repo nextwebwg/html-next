@@ -9,6 +9,8 @@
 
 ### Changes
 
+- Preserve authored empty `class` attributes in Svelte roots and compile guarded iteration filters with strict framework type checking. Restore visible document order when Angular slot destinations reconnect. Keep the photo morph guide's grid visible when no photo is selected.
+
 - Connect React and Preact controller listeners when a previously detached subtree enters the document, before its first painted interaction.
 - Retain Vue iteration output after invalid expressions and preserve delegated style ownership independently of caller class forwarding, including server markup.
 - Keep native two-way control values separate from logical invocation attributes and authored reset defaults. Preserve those distinctions in Svelte mount, hydration and root switching.

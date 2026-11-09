@@ -84,7 +84,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.changes.outputs.browser_image }}
-      options: --ipc=host --init
+      options: --user 1001 --ipc=host --init
+    env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

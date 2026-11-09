@@ -1274,7 +1274,11 @@ export class HtmlNextChildSlot {
   private disposed = false;
   private stop: (() => void) | undefined;
   private initializing = true;
-  constructor() { queueMicrotask(() => { this.initializing = false; }); }
+  constructor() { this.beginPlacement(); }
+  private beginPlacement(): void {
+    this.initializing = true;
+    queueMicrotask(() => { this.initializing = false; });
+  }
   ngOnChanges(): void { this.render(); }
   ngDoCheck(): void { this.render(); }
   private render(): void {
@@ -1286,7 +1290,7 @@ export class HtmlNextChildSlot {
       let connected = this.anchor.isConnected;
       this.stop = observeConnection(this.anchor.parentElement ?? this.anchor.ownerDocument!.documentElement, () => {
         const next = this.anchor.isConnected;
-        if (connected !== next) { connected = next; this.render(); this.changes.markForCheck(); }
+        if (connected !== next) { connected = next; if (next) this.beginPlacement(); this.render(); this.changes.markForCheck(); }
       });
     }
     if (this.claimed !== key) this.release();

@@ -3108,6 +3108,8 @@ describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
     await writeFile(join(directory, host.path), host.content);
     const props = vuePropsArtifact();
     await writeFile(join(directory, props.path), props.content);
+    const attributes = attributeHelperArtifact("vue", GENERATOR_VERSION);
+    await writeFile(join(directory, attributes.path), attributes.content);
     const parsed = parseVue(await readFile(join(directory, "vue/XAction.vue"), "utf8"), { filename: "XAction.vue" });
     assert.deepEqual(parsed.errors, []);
     await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);

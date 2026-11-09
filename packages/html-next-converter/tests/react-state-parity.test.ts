@@ -24,7 +24,7 @@ describe.skipIf(!enabled)("React one-time state through the converter", () => {
   let renderCycle: () => string;
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-react-state-"));
-    const nodeModules = fileURLToPath(new URL("../../html-next/node_modules", import.meta.url));
+    const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
     await symlink(nodeModules, join(directory, "node_modules"), "dir");
     for (const [name, content] of Object.entries(files)) await writeFile(join(directory, name), content);
     await writeFile(join(directory, "concurrent.html"), `<link rel="component" href="./reader.html"><template component="x-concurrent" module="./concurrent.js"><defs>

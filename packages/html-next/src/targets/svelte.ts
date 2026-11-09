@@ -884,7 +884,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const htmlInputs = component && (forwards || componentStyle) && Object.keys(childProps ?? {}).length > 0 ? invocationSchema(childProps!) : undefined;
   if (htmlInputs !== undefined) context.usesHtmlInputs = true;
   const authoredDecorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style" || !component && entry.target === undefined && (entry.name === "class" || entry.name === "style" && (forwards || node.attributes.some(write => write.kind === "attribute" && write.target === "style"))) && !entry.twoWay));
-  const ownsClasses = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined && entry.name === "class"));
+  const ownsClasses = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === undefined && entry.name === "class")) || !component && forwards && node.attributes.some(entry => entry.kind === "literal" && entry.name === "class" && entry.value === "");
   const ownsStyles = authoredDecorations.some((entry) => entry.kind === "attribute" && (entry.target === "style" || entry.target === undefined && entry.name === "style"));
   const decoratesClasses = ownsClasses;
   const decoratesStyles = ownsStyles && !componentStyle;
