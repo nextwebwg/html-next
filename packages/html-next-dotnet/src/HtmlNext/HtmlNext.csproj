@@ -9,10 +9,12 @@
     <RepositoryUrl>https://github.com/nextwebwg/html-next</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageTags>html;templates;ssr;components</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="../../../../assets/brand/html-next-mark-128.png" Pack="true" PackagePath="icon.png" />
     <PackageReference Include="AngleSharp" Version="1.10.0" />
     <PackageReference Include="AngleSharp.Css" Version="1.4.1" />
   </ItemGroup>

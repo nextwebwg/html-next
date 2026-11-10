@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.94
+
+- Give the .NET NuGet package the HTML Next gallery icon and a branded README using the shared project assets.
+
 ## 1.0.0-alpha.93
 
 - Package the native .NET renderer as `NextWebWG.HtmlNext` `1.0.0-alpha.1`, with NuGet metadata and an installed-package consumer check.
