@@ -15,7 +15,7 @@
           "AngleSharp": "[1.10.0, 2.0.0)"
         }
       },
-      "htmlnext": {
+      "NextWebWG.HtmlNext": {
         "type": "Project",
         "dependencies": {
           "AngleSharp": "[1.10.0, )",

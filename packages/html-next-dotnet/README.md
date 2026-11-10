@@ -8,13 +8,13 @@ The component language is defined by the [public proposal](https://nextwebwg.org
 
 ## Use a retained template
 
-Requires .NET 10. Add a local project reference from your application, substituting your checkout path:
+Requires .NET 10. Install the first prerelease:
 
 ```sh
-dotnet add reference /path/to/html-next/packages/html-next-dotnet/src/HtmlNext/HtmlNext.csproj
+dotnet add package NextWebWG.HtmlNext --version 1.0.0-alpha.1
 ```
 
-The project is not packable; this workflow uses source through a project reference.
+For development against a checkout, use `dotnet add reference /path/to/html-next/packages/html-next-dotnet/src/HtmlNext/HtmlNext.csproj` instead.
 
 ```csharp
 using HtmlNext;
@@ -168,7 +168,7 @@ Standalone CSS compilation and native validation of imported stylesheet-source f
 
 Build matching client assets with the native unplugin's `hydrate: true` option. The application's browser entry imports `hydrate` from `virtual:html-next/hydrate` and calls it after the server markup is present. Keep that browser bundle, its stylesheets and `html-next.manifest.json` together when deploying. The application owns their URLs and document assembly.
 
-For a minimal Vite build, save the `<template component="x-card">...</template>` source from the retained-template example above as `card.html`, then add these two files beside it. Install Vite and matching `@nextwebwg/html-next` and `@nextwebwg/html-next-unplugin` versions from the SDK build you are using.
+For a minimal Vite build, save the `<template component="x-card">...</template>` source from the retained-template example above as `card.html`, then add these two files beside it. Use `@nextwebwg/html-next` and `@nextwebwg/html-next-unplugin` version `1.0.0-alpha.93` for this native release, alongside Vite.
 
 ```js
 // vite.config.js
@@ -289,7 +289,15 @@ Use an otherwise quiet machine and run the timing harnesses sequentially. Compar
 
 The computed-cart fixture multiplies half-integer prices by quantities of one or three, keeping its numeric text in the common serialization behavior of both engines. Fluid can retain a trailing `.0` for other multiplication inputs, so that fixture does not establish general number serialization equivalence. Early computed-cart timings were slower than Fluid despite lower allocations; the speed target remains unproven for expression-heavy rendering.
 
-The [low-memory measurements](benchmarks/results/2026-11-05-low-memory.md) include two Fluid comparison runs and binding/output allocation attribution. The [initial experiment](benchmarks/results/2026-11-05-native-slice.md) retains the original baseline, Node adapter results, and platform probes.
+The [low-memory measurements](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/benchmarks/results/2026-11-05-low-memory.md) include two Fluid comparison runs and binding/output allocation attribution. The [initial experiment](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/benchmarks/results/2026-11-05-native-slice.md) retains the original baseline, Node adapter results, and platform probes.
+
+## Release the NuGet package
+
+The library project owns its NuGet ID and version independently of the three lockstep JavaScript packages. Keep the matching SDK versions documented in the browser-adoption instructions.
+
+The `NuGet release` GitHub workflow verifies the checked-out `main` commit, packs the library and publishes that exact artifact through the `nuget` environment. The environment restricts deployment to `main`. Configure its `NUGET_USER` variable with the NuGet profile name and configure a NuGet trusted publisher for owner `nextwebwg`, repository `html-next`, workflow `nuget.yml`, environment `nuget`, restricted to `NextWebWG.HtmlNext`. The workflow uses short-lived OIDC credentials. Run it manually after the release commit reaches `main`.
+
+`node scripts/test-dotnet-package.ts` packs the current source and restores it into an isolated consumer. The check verifies initial binding, escaped HTML, writer output and prop validation without referencing a source project. It runs in the native CI job and `pnpm verify:pr`.
 
 ## Ownership
 

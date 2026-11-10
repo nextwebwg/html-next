@@ -100,7 +100,7 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "htmlnext": {
+      "NextWebWG.HtmlNext": {
         "type": "Project",
         "dependencies": {
           "AngleSharp": "[1.10.0, )",

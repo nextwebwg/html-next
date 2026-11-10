@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Package the native .NET renderer as `NextWebWG.HtmlNext` `1.0.0-alpha.1`, with NuGet metadata and an installed-package consumer check.
+
 - Document the local .NET consumer and matching Vite hydration build, and align initial-rendering coverage and remaining limitations with the native tests.
 
 - Preserve leading newlines in native authored and interpolated textarea content through HTML parsing, using the same initial-text serializer as `.value` bindings.
