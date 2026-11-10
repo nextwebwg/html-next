@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup-dark.svg">
+  <img src="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup.svg" alt="HTML Next" width="280">
+</picture>
+
 # `@nextwebwg/html-next-unplugin`
 
 Vite can convert imported Declarative Components sources into Vue, React, Preact, Svelte, or Angular components. Libraries

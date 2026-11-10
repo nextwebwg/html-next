@@ -1,0 +1,232 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:ns2="http://creativecommons.org/ns#" xmlns:ns4="http://www.w3.org/1999/xlink" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" width="720pt" height="460.8pt" viewBox="0 0 720 460.8" version="1.1" role="img" aria-labelledby="chart-title chart-description">
+ <metadata>
+  <rdf:RDF>
+   <ns2:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <ns2:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </ns2:Agent>
+    </dc:creator>
+   </ns2:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 460.8  L 720 460.8  L 720 0  L 0 0  z " style="fill: #ffffff" />
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 208.8 336.384  L 655.2 336.384  L 655.2 129.024  L 208.8 129.024  z " style="fill: #ffffff" />
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 208.8 336.384  L 208.8 129.024  " clip-path="url(#pe2f147d1a3)" style="fill: none; stroke: #eef1f0; stroke-width: 0.8; stroke-linecap: square" />
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="m9c76ae727c" d="M 0 0  L 0 3.5  " style="stroke: #245c4f; stroke-width: 0.8" />
+      </defs>
+      <g>
+       <use ns4:href="#m9c76ae727c" x="208.8" y="336.384" style="fill: #245c4f; stroke: #245c4f; stroke-width: 0.8" />
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #245c4f" x="208.8" y="351.741422" transform="rotate(-0 208.8 351.741422)">0.0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 288.514286 336.384  L 288.514286 129.024  " clip-path="url(#pe2f147d1a3)" style="fill: none; stroke: #eef1f0; stroke-width: 0.8; stroke-linecap: square" />
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use ns4:href="#m9c76ae727c" x="288.514286" y="336.384" style="fill: #245c4f; stroke: #245c4f; stroke-width: 0.8" />
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #245c4f" x="288.514286" y="351.741422" transform="rotate(-0 288.514286 351.741422)">0.2</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 368.228571 336.384  L 368.228571 129.024  " clip-path="url(#pe2f147d1a3)" style="fill: none; stroke: #eef1f0; stroke-width: 0.8; stroke-linecap: square" />
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use ns4:href="#m9c76ae727c" x="368.228571" y="336.384" style="fill: #245c4f; stroke: #245c4f; stroke-width: 0.8" />
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #245c4f" x="368.228571" y="351.741422" transform="rotate(-0 368.228571 351.741422)">0.4</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 447.942857 336.384  L 447.942857 129.024  " clip-path="url(#pe2f147d1a3)" style="fill: none; stroke: #eef1f0; stroke-width: 0.8; stroke-linecap: square" />
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use ns4:href="#m9c76ae727c" x="447.942857" y="336.384" style="fill: #245c4f; stroke: #245c4f; stroke-width: 0.8" />
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #245c4f" x="447.942857" y="351.741422" transform="rotate(-0 447.942857 351.741422)">0.6</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_9">
+      <path d="M 527.657143 336.384  L 527.657143 129.024  " clip-path="url(#pe2f147d1a3)" style="fill: none; stroke: #eef1f0; stroke-width: 0.8; stroke-linecap: square" />
+     </g>
+     <g id="line2d_10">
+      <g>
+       <use ns4:href="#m9c76ae727c" x="527.657143" y="336.384" style="fill: #245c4f; stroke: #245c4f; stroke-width: 0.8" />
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #245c4f" x="527.657143" y="351.741422" transform="rotate(-0 527.657143 351.741422)">0.8</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_11">
+      <path d="M 607.371429 336.384  L 607.371429 129.024  " clip-path="url(#pe2f147d1a3)" style="fill: none; stroke: #eef1f0; stroke-width: 0.8; stroke-linecap: square" />
+     </g>
+     <g id="line2d_12">
+      <g>
+       <use ns4:href="#m9c76ae727c" x="607.371429" y="336.384" style="fill: #245c4f; stroke: #245c4f; stroke-width: 0.8" />
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #245c4f" x="607.371429" y="351.741422" transform="rotate(-0 607.371429 351.741422)">1.0</text>
+     </g>
+    </g>
+    <g id="text_7">
+     <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #14181f" x="432" y="374.742281" transform="rotate(-0 432 374.742281)">Rendering time relative to Fluid (the .NET Liquid engine)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_13" />
+     <g id="text_8">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end" x="205.3" y="154.56476" transform="rotate(-0 205.3 154.56476)">Escaped card</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_14" />
+     <g id="text_9">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end" x="205.3" y="195.72395" transform="rotate(-0 205.3 195.72395)">Computed cart · 100 rows</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_15" />
+     <g id="text_10">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end" x="205.3" y="236.883141" transform="rotate(-0 205.3 236.883141)">Product list · 10 rows</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_16" />
+     <g id="text_11">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end" x="205.3" y="278.042331" transform="rotate(-0 205.3 278.042331)">Product list · 100 rows</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_17" />
+     <g id="text_12">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end" x="205.3" y="319.201521" transform="rotate(-0 205.3 319.201521)">Product list · 1,000 rows</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 208.8 138.449455  L 607.371429 138.449455  L 607.371429 162.321785  L 208.8 162.321785  z " clip-path="url(#pe2f147d1a3)" style="fill: #dce3e1" />
+   </g>
+   <g id="patch_4">
+    <path d="M 208.8 179.608645  L 607.371429 179.608645  L 607.371429 203.480975  L 208.8 203.480975  z " clip-path="url(#pe2f147d1a3)" style="fill: #dce3e1" />
+   </g>
+   <g id="patch_5">
+    <path d="M 208.8 220.767835  L 607.371429 220.767835  L 607.371429 244.640165  L 208.8 244.640165  z " clip-path="url(#pe2f147d1a3)" style="fill: #dce3e1" />
+   </g>
+   <g id="patch_6">
+    <path d="M 208.8 261.927025  L 607.371429 261.927025  L 607.371429 285.799355  L 208.8 285.799355  z " clip-path="url(#pe2f147d1a3)" style="fill: #dce3e1" />
+   </g>
+   <g id="patch_7">
+    <path d="M 208.8 303.086215  L 607.371429 303.086215  L 607.371429 326.958545  L 208.8 326.958545  z " clip-path="url(#pe2f147d1a3)" style="fill: #dce3e1" />
+   </g>
+   <g id="patch_8">
+    <path d="M 208.8 143.388557  L 500.413726 143.388557  L 500.413726 157.382682  L 208.8 157.382682  z " clip-path="url(#pe2f147d1a3)" style="fill: #e8501f" />
+   </g>
+   <g id="patch_9">
+    <path d="M 208.8 184.547748  L 516.32989 184.547748  L 516.32989 198.541872  L 208.8 198.541872  z " clip-path="url(#pe2f147d1a3)" style="fill: #e8501f" />
+   </g>
+   <g id="patch_10">
+    <path d="M 208.8 225.706938  L 459.375343 225.706938  L 459.375343 239.701062  L 208.8 239.701062  z " clip-path="url(#pe2f147d1a3)" style="fill: #e8501f" />
+   </g>
+   <g id="patch_11">
+    <path d="M 208.8 266.866128  L 473.572679 266.866128  L 473.572679 280.860252  L 208.8 280.860252  z " clip-path="url(#pe2f147d1a3)" style="fill: #e8501f" />
+   </g>
+   <g id="patch_12">
+    <path d="M 208.8 308.025318  L 482.956016 308.025318  L 482.956016 322.019443  L 208.8 322.019443  z " clip-path="url(#pe2f147d1a3)" style="fill: #e8501f" />
+   </g>
+   <g id="patch_13">
+    <path d="M 208.8 336.384  L 655.2 336.384  " style="fill: none; stroke: #dce3e1; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square" />
+   </g>
+   <g id="text_13">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="617.335714" y="152.983667" transform="rotate(-0 617.335714 152.983667)">27% less</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="617.335714" y="194.142857" transform="rotate(-0 617.335714 194.142857)">23% less</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="617.335714" y="235.302047" transform="rotate(-0 617.335714 235.302047)">37% less</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="617.335714" y="276.461237" transform="rotate(-0 617.335714 276.461237)">34% less</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="617.335714" y="317.620427" transform="rotate(-0 617.335714 317.620427)">31% less</text>
+   </g>
+  </g>
+  <g id="text_18">
+   <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="61.2" y="34.56" transform="rotate(-0 61.2 34.56)">HTML Next for C#</text>
+  </g>
+  <g id="text_19">
+   <text style="font-weight: 700; font-size: 21px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="39.6" y="73.728" transform="rotate(-0 39.6 73.728)">23–37% less rendering time than Fluid</text>
+  </g>
+  <g id="text_20">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #245c4f" x="39.6" y="96.768" transform="rotate(-0 39.6 96.768)">Five warm template workloads · lower is better</text>
+  </g>
+  <g id="text_21">
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="39.6" y="407.808" transform="rotate(-0 39.6 407.808)">November 10, 2026 · Apple M4 Pro · .NET 10.0.5 · BenchmarkDotNet 0.15.8</text>
+  </g>
+  <g id="text_22">
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="39.6" y="423.936" transform="rotate(-0 39.6 423.936)">Median of three independent within-run ratios. Complete equivalent outputs checked before timing.</text>
+  </g>
+  <g id="text_23">
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="39.6" y="440.064" transform="rotate(-0 39.6 440.064)">Compile/parse once; warm inert Render only. HTTP, cold requests and interactive graphs are not measured.</text>
+  </g>
+  <g id="legend_1">
+   <g id="patch_14">
+    <path d="M 44 392.918281  L 66 392.918281  L 66 385.218281  L 44 385.218281  z " style="fill: #dce3e1" />
+   </g>
+   <g id="text_24">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="74.8" y="392.918281" transform="rotate(-0 74.8 392.918281)">Fluid 2.41.1 = 1.00</text>
+   </g>
+   <g id="patch_15">
+    <path d="M 202.377656 392.918281  L 224.377656 392.918281  L 224.377656 385.218281  L 202.377656 385.218281  z " style="fill: #e8501f" />
+   </g>
+   <g id="text_25">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14181f" x="233.177656" y="392.918281" transform="rotate(-0 233.177656 392.918281)">HTML Next alpha.2</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pe2f147d1a3">
+   <rect x="208.8" y="129.024" width="446.4" height="207.36" />
+  </clipPath>
+ </defs>
+<title id="chart-title">HTML Next C# rendering compared with Fluid</title><desc id="chart-description">Escaped card: 0.732 times Fluid rendering time; Computed cart · 100 rows: 0.772 times Fluid rendering time; Product list · 10 rows: 0.629 times Fluid rendering time; Product list · 100 rows: 0.664 times Fluid rendering time; Product list · 1,000 rows: 0.688 times Fluid rendering time. Three independent warm-rendering runs on one Apple M4 Pro. See the linked benchmark receipt and limitations.</desc><svg width="29" height="29" viewBox="327.42753623188406 289.6142028985508 597.1449275362319 597.1449275362319" role="img" aria-label="HTML Next" x="24" y="18"><path fill="#E8501F" fill-rule="evenodd" d="M403.5 313.5H848.5Q868.5 313.5 868.5 333.5V754.34Q868.5 772.34 851.6350 778.6360L632.558 860.4253Q626 862.8733333333333 619.442 860.4253L400.365 778.6360Q383.5 772.34 383.5 754.34V333.5Q383.5 313.5 403.5 313.5Z M477 401.5C473.5 401.5 471.5 403.5 471.5 408V688Q471.5 693 475.5 695.73L546 743.77C548 745.13 548.8 746.5 550 746.5C553.5 746.5 555.5 743 555.5 738.5V579.5Q555.5 565.3 567 573.4L770.3 716.4C772.3 717.8 774.5 718.5 777 718.5C779 718.5 780.5 716 780.5 711V460Q780.5 455 776.5 452.36L706 404.14C703.9 402.7 703 401.5 701 401.5C697 401.5 694.5 404 694.5 408V539Q694.5 558.6 678 546.8L483 406.27C480 404.1 479 401.5 477 401.5Z" /></svg></svg>

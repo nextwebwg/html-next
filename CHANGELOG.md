@@ -2,6 +2,9 @@
 
 ## 1.0.0-alpha.94
 
+- Add runnable full-stack Node and ASP.NET examples with identical HTML component dataflow, initial request rendering and JavaScript hydration. Publish installation and deployment guides for the NuGet renderer.
+- Use the official HTML Next logo across the npm packages and publish versioned rendering evidence for the native .NET renderer.
+
 - Render simple inert .NET templates in one output pass. In the five repeated retained-template cases, native total rendering time fell 30.4%, and the computed cart changed from slower than Fluid to using about 23% less time. Publish this change in `NextWebWG.HtmlNext` `1.0.0-alpha.2`.
 
 - Give the .NET NuGet package the HTML Next gallery icon and a branded README using the shared project assets.

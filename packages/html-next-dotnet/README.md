@@ -37,8 +37,6 @@ Requires .NET 10. Install the prerelease:
 dotnet add package NextWebWG.HtmlNext --version 1.0.0-alpha.2
 ```
 
-For development against a checkout, use `dotnet add reference /path/to/html-next/packages/html-next-dotnet/src/HtmlNext/HtmlNext.csproj` instead.
-
 ```csharp
 using HtmlNext;
 

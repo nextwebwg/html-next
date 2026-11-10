@@ -78,6 +78,12 @@ npm install @nextwebwg/html-next
 | **Component libraries** · Share your HTML sources | [Publish a library](https://nextwebwg.org/html-next/ship) |
 | **Framework source** · Generate components ahead of time | [Converter](https://nextwebwg.org/html-next/convert) |
 
+## Speed and size
+
+[![HTML Next browser rendering speed and gzip JavaScript size compared with vanilla JavaScript, Solid, Svelte, Vue and React Hooks](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/performance/frameworks-speed-size-2026-11-10.svg)](https://nextwebwg.org/html-next/performance)
+
+The site uses this same SVG. It comes from one full standard js-framework-benchmark sweep of SDK `1.0.0-alpha.94`: all seven entries, all nine keyed workloads, and the standard sample counts. Size includes the benchmark application and its used runtime. [Exact versions, raw data, method and limits](https://nextwebwg.org/html-next/performance) explain both panels. Individual workloads and other applications can rank differently.
+
 ## Package entry points
 
 | Import | Purpose |
