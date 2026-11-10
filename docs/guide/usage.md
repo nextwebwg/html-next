@@ -1,12 +1,12 @@
 ---
-title: Usage
+title: Vite and browser
 order: 1
-navGroup: guide
 blurb: HTML Next · Vue · React · Preact · Svelte · Angular
 eyebrow: HTML Next · Usage
+navGroup: vite
 ---
 
-# Use HTML Next components
+# Use components with Vite or the browser runtime
 
 Choose a framework in any section. Every selector on this page follows your choice, so the setup and examples stay together.
 

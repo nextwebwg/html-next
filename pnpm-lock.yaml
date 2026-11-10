@@ -283,7 +283,7 @@ importers:
   packages/html-next-converter:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.93
+        specifier: workspace:>=1.0.0-alpha.94
         version: link:../html-next
       typescript:
         specifier: 5.9.3
@@ -371,10 +371,10 @@ importers:
   packages/html-next-unplugin:
     dependencies:
       '@nextwebwg/html-next':
-        specifier: workspace:>=1.0.0-alpha.93
+        specifier: workspace:>=1.0.0-alpha.94
         version: link:../html-next
       '@nextwebwg/html-next-converter':
-        specifier: workspace:>=1.0.0-alpha.93
+        specifier: workspace:>=1.0.0-alpha.94
         version: link:../html-next-converter
       css-tree:
         specifier: 'catalog:'
@@ -2403,10 +2403,6 @@ packages:
     resolution: {integrity: sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw==}
     engines: {node: '>=20'}
 
-  whatwg-url@17.2.0:
-    resolution: {integrity: sha512-IhLIHNcBrzIixC5XXsbr4DxdjajyA5vQ5RwGZMtrUp+GbtE5Nrsge9QKau7jXrC0aTXLYGV0xiW7Tb4YS2aomw==}
-    engines: {node: ^22.14.0 || >=24.0.0}
-
   whatwg-url@17.3.0:
     resolution: {integrity: sha512-KwOAJrpf+GTgBvcBQJcP38sMF0DsQKdwtG+TxM2pW44P6E5k0hDbWrDmyuJDIF0Uef0aQq0ZoJs+5oI+k8ddhg==}
     engines: {node: ^22.14.0 || >=24.0.0}
@@ -3391,7 +3387,7 @@ snapshots:
   data-urls@8.0.0:
     dependencies:
       whatwg-mimetype: 5.0.0
-      whatwg-url: 17.2.0
+      whatwg-url: 17.3.0
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -4055,14 +4051,6 @@ snapshots:
   webpack-virtual-modules@0.6.2: {}
 
   whatwg-mimetype@5.0.0: {}
-
-  whatwg-url@17.2.0:
-    dependencies:
-      '@exodus/bytes': 1.16.0
-      tr46: 7.0.0
-      webidl-conversions: 8.0.1
-    transitivePeerDependencies:
-      - '@noble/hashes'
 
   whatwg-url@17.3.0:
     dependencies:

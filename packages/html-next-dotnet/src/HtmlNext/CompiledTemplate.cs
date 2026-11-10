@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -71,6 +72,17 @@ public sealed partial class CompiledTemplate
         var context = hasComponents || interactive || options?.PrepareModule is not null ? new RenderContext(true, onDiagnostic, interactive, options?.PrepareModule) : null;
         var values = Bind(inputs, cancellationToken, onDiagnostic, interactive: interactive, context: context);
         Initialize(values, cancellationToken, onDiagnostic);
+        if (context is null)
+        {
+            Span<char> initialBuffer = stackalloc char[256];
+            var writer = new HtmlWriter(initialBuffer, grow: true);
+            try
+            {
+                WritePlan(ref writer, values, cancellationToken);
+                return new string(writer.Written);
+            }
+            finally { writer.Dispose(); }
+        }
         var counter = HtmlWriter.Counter(context);
         WritePlan(ref counter, values, cancellationToken);
         context?.Replay();
@@ -739,35 +751,66 @@ internal sealed record Each(BoundPath Path, int Slot, RenderOperation[] Body, Va
 internal ref struct HtmlWriter
 {
     private readonly TextWriter? output;
-    private readonly Span<char> destination;
+    private Span<char> destination;
     private readonly bool counting;
+    private readonly bool grow;
+    private char[]? rented;
     public int Length { get; private set; }
     public RenderContext? Context { get; }
+    public ReadOnlySpan<char> Written => destination[..Length];
 
-    private HtmlWriter(bool counting, RenderContext? context) { this.counting = counting; output = null; destination = default; Length = 0; Context = context; }
-    public HtmlWriter(TextWriter output, RenderContext? context = null) { this.output = output; destination = default; counting = false; Length = 0; Context = context; }
-    public HtmlWriter(Span<char> destination, RenderContext? context = null) { this.destination = destination; output = null; counting = false; Length = 0; Context = context; }
+    private HtmlWriter(bool counting, RenderContext? context) { this.counting = counting; output = null; destination = default; Length = 0; Context = context; grow = false; rented = null; }
+    public HtmlWriter(TextWriter output, RenderContext? context = null) { this.output = output; destination = default; counting = false; Length = 0; Context = context; grow = false; rented = null; }
+    public HtmlWriter(Span<char> destination, RenderContext? context = null, bool grow = false) { this.destination = destination; output = null; counting = false; Length = 0; Context = context; this.grow = grow; rented = null; }
     public static HtmlWriter Counter(RenderContext? context = null) => new(true, context);
 
     public void Write(string? text) => Write(text.AsSpan());
     public void Write(char character)
     {
+        var length = checked(Length + 1);
         if (!counting)
         {
             if (output is not null) output.Write(character);
-            else destination[Length] = character;
+            else
+            {
+                if (grow && length > destination.Length) Grow(length);
+                destination[Length] = character;
+            }
         }
-        Length = checked(Length + 1);
+        Length = length;
     }
 
     public void Write(scoped ReadOnlySpan<char> text)
     {
+        var length = checked(Length + text.Length);
         if (!counting)
         {
             if (output is not null) output.Write(text);
-            else text.CopyTo(destination.Slice(Length, text.Length));
+            else
+            {
+                if (grow && length > destination.Length) Grow(length);
+                text.CopyTo(destination.Slice(Length, text.Length));
+            }
         }
-        Length = checked(Length + text.Length);
+        Length = length;
+    }
+
+    private void Grow(int required)
+    {
+        var capacity = (int)Math.Max(required, Math.Min((long)destination.Length * 2, int.MaxValue));
+        var buffer = ArrayPool<char>.Shared.Rent(capacity);
+        destination[..Length].CopyTo(buffer);
+        var previous = rented;
+        rented = buffer;
+        destination = buffer;
+        if (previous is not null) ArrayPool<char>.Shared.Return(previous, clearArray: true);
+    }
+
+    public void Dispose()
+    {
+        if (rented is not null) ArrayPool<char>.Shared.Return(rented, clearArray: true);
+        rented = null;
+        destination = default;
     }
 }
 

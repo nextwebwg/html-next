@@ -2,9 +2,9 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>NextWebWG.HtmlNext</PackageId>
-    <Version>1.0.0-alpha.1</Version>
+    <Version>1.0.0-alpha.2</Version>
     <Authors>Next Web Working Group</Authors>
-    <Description>Compile HTML Next component templates once and render initial HTML from .NET application data, with metadata for matching browser-module hydration.</Description>
+    <Description>Render HTML Next components from .NET request data, then hydrate the same markup with generated JavaScript for interactive pages. Compile templates once and reuse them across requests.</Description>
     <PackageProjectUrl>https://github.com/nextwebwg/html-next/tree/main/packages/html-next-dotnet</PackageProjectUrl>
     <RepositoryUrl>https://github.com/nextwebwg/html-next</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

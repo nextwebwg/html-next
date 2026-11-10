@@ -1,0 +1,15 @@
+{
+  "name": "html-next-full-stack-node-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server.js"
+  },
+  "devDependencies": {
+    "@nextwebwg/html-next": ">=1.0.0-alpha.94",
+    "@nextwebwg/html-next-unplugin": ">=1.0.0-alpha.94",
+    "vite": "^8.3.4"
+  },
+  "license": "MIT"
+}

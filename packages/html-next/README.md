@@ -1,6 +1,11 @@
 <div align="center">
 
-# HTML Next
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup-dark.svg">
+    <img src="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup.svg" alt="HTML Next" width="280">
+  </picture>
+</h1>
 
 ### Universal components. Built with HTML.
 
@@ -18,6 +23,8 @@ Author once. Use native DOM, Vue, React, or Svelte.
 ## Write HTML. Keep your options.
 
 HTML Next brings markup, state, events, slots, and scoped styles together in one component file. Build native DOM with Vite, load components directly in a browser, or generate Vue, React, and Svelte components.
+
+For full-stack applications, [render with Node or C# and hydrate with JavaScript](https://nextwebwg.org/html-next/full-stack). Both runnable examples use identical component definitions: the server renders request data, then browser interaction continues the declared state and computed dependencies. The [C# implementation](https://www.nuget.org/packages/NextWebWG.HtmlNext) is published on NuGet.
 
 ```html
 <template component="x-counter">
@@ -70,6 +77,12 @@ npm install @nextwebwg/html-next
 | **Vue, React, or Svelte** · Import the same HTML component | [Vue](https://nextwebwg.org/html-next/usage/vue) · [React](https://nextwebwg.org/html-next/usage/react) · [Svelte](https://nextwebwg.org/html-next/usage/svelte) |
 | **Component libraries** · Share your HTML sources | [Publish a library](https://nextwebwg.org/html-next/ship) |
 | **Framework source** · Generate components ahead of time | [Converter](https://nextwebwg.org/html-next/convert) |
+
+## Speed and size
+
+[![HTML Next browser rendering speed and gzip JavaScript size compared with vanilla JavaScript, Solid, Svelte, Vue and React Hooks](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/performance/frameworks-speed-size-2026-11-10.svg)](https://nextwebwg.org/html-next/performance)
+
+The site uses this same SVG. It comes from one full standard js-framework-benchmark sweep of SDK `1.0.0-alpha.94`: all seven entries, all nine keyed workloads, and the standard sample counts. Size includes the benchmark application and its used runtime. [Exact versions, raw data, method and limits](https://nextwebwg.org/html-next/performance) explain both panels. Individual workloads and other applications can rank differently.
 
 ## Package entry points
 

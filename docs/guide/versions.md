@@ -3,6 +3,7 @@ title: Versions and stability
 order: 7
 blurb: alpha today · what 1.0 promises · declaring what your library supports
 eyebrow: HTML Next · Versions
+navGroup: reference
 ---
 
 # Versions and stability

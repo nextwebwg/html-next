@@ -1,68 +1,72 @@
 ---
 title: Performance
 order: 6
-navGroup: guide
-blurb: rendering speed · bundle size · measured results
+blurb: browser speed · JavaScript size · C# rendering
 eyebrow: HTML Next · Performance
+navGroup: reference
 ---
 
-# Beats Solid, Svelte, Vue, and React in js-framework-benchmark.
+# Measured rendering speed and JavaScript size
 
-A default HTML Next Vite build takes less time overall than all four frameworks across the nine keyed rendering workloads.
+Compare HTML Next's browser rendering with other frameworks, and its C# template rendering with Fluid, the .NET Liquid engine. These measurements cover separate execution phases. The [Node and C# examples](/html-next/full-stack) demonstrate the complete server-rendering and browser-hydration workflow.
 
-## Rendering speed
+## Browser rendering and size
 
-| Framework | HTML Next / framework | Less time overall |
+[![HTML Next and six comparison entries: weighted browser rendering duration and benchmark application gzip JavaScript size](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/performance/frameworks-speed-size-2026-11-10.svg)](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/benchmarks/framework-results/20261110T180342Z-366e0fe.json)
+
+The chart uses one full standard sweep of the pinned js-framework-benchmark fork, with all seven entries and nine keyed workloads. Lower values are better in both panels.
+
+| Production benchmark application | Duration score | gzip JavaScript bytes |
 | --- | ---: | ---: |
-| Solid 1.9.3 | 0.936 | **6.4%** |
-| Svelte 5.42.1 | 0.920 | **8.0%** |
-| Vue 3.5.39 | 0.861 | **13.9%** |
-| React Hooks 19.2.0 | 0.711 | **28.9%** |
+| HTML Next · Vite 1.0.0-alpha.94 | 1.101 | 10,206 |
+| HTML Next · live 1.0.0-alpha.94 | 1.474 | 97,314 |
+| Vanilla JavaScript | 1.003 | 2,529 |
+| Solid 1.9.3 | 1.110 | 4,812 |
+| Svelte 5.42.1 | 1.119 | 10,722 |
+| Vue 3.5.39 | 1.324 | 25,963 |
+| React Hooks 19.2.0 | 1.478 | 61,343 |
 
-A ratio below 1 means HTML Next takes less time. The score is the weighted geometric mean of median total durations across all nine keyed workloads: create, replace, update, select, swap, remove, create 10,000 rows, append, and clear.
+The duration score is the weighted geometric mean of median total durations, normalized to the fastest entry in each workload. Workloads are create, replace, update every tenth row, select, swap, remove, create 10,000 rows, append and clear.
 
-These are overall scores. HTML Next is not faster in every workload: against Solid it takes longer to remove one row (10%), create 1,000 rows (4%) and append 1,000 rows (2%), and less time in the other six. The raw results show each workload.
+HTML Next's compiled Vite build compared with each framework control:
 
-## Bundle size
+| Control | HTML Next / control | Overall rendering time |
+| --- | ---: | ---: |
+| Solid | 0.992 | 0.8% less time |
+| Svelte | 0.984 | 1.6% less time |
+| Vue | 0.832 | 16.8% less time |
+| React Hooks | 0.745 | 25.5% less time |
 
-| Production benchmark app | gzip bytes |
-| --- | ---: |
-| Solid | 4,812 |
-| **HTML Next** | **8,862** |
-| Svelte | 10,722 |
-| Vue | 25,963 |
-| React Hooks | 61,343 |
+These are aggregate comparisons from this sweep. The 0.8% gap against Solid and 1.6% gap against Svelte are close results; one sweep does not establish a stable advantage at that scale. The results do not establish that one entry is faster in every workload or application. The raw receipt contains every workload's median.
 
-Each measurement is the application with its tree-shaken runtime, compressed at gzip level 6: the code this benchmark needs, not an isolated runtime package. HTML Next's build-free browser runtime is a separate delivery option; its benchmark bundle measures 57,249 gzip bytes.
+Size is the production benchmark application's JavaScript plus its used runtime, compressed per file at gzip level 6. It is not the npm tarball size. The compiled Vite entry imports the helpers used by its component; the build-free live entry includes its component parser and interpreter. Both are shown separately.
 
-## Build the same way
+## Reproduce the browser comparison
 
-The benchmark app is built with the standard Vite setup from the [usage guide](/html-next/usage):
+Measured November 10, 2026 on Apple M4 Pro running macOS 27.2, Chrome for Testing 156.0.8078.4 and Node v24.20.0. The serial sweep used the standard counts: 15 CPU samples per workload and 25 for selection. No local builds or test runners overlapped the timed sweep.
 
-```ts title="vite.config.ts"
-import { defineConfig } from "vite";
-import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+The harness pins [js-framework-benchmark](https://github.com/krausest/js-framework-benchmark) through the [Next Web WG fork at `1ff9927`](https://github.com/nextwebwg/js-framework-benchmark/tree/1ff9927d4cb4dcc2a3e37c1adf8d993f64f4e92a). Control versions and lockfiles are fixed at that pin. The generated HTML Next candidate removes the obsolete `nullable` attribute from the fork's selected-row declaration; its initial null value, controller and workloads are unchanged.
 
-export default defineConfig({
-  plugins: [htmlNext({ entries: ["src/app.html"] })],
-});
-```
+- [Current raw measurement receipt](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/benchmarks/framework-results/20261110T180342Z-366e0fe.json)
+- [Harness, scoring and reproduction commands](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/docs/framework-benchmark.md)
+- [Chart sources and generation](https://github.com/nextwebwg/html-next/tree/main/assets/performance)
 
-It compiles each component to JavaScript that clones the component's markup and updates only the parts of the page its state changes. The framework entries use their production builds.
+The measured HTML Next Vite artifact has SHA-256 `a5bccfc79cff7a31f67dcb135583a4ca37950b61c1373980b36b99467364e1b7`, built from commit [`366e0fea`](https://github.com/nextwebwg/html-next/commit/366e0fea693dd04d418a429b2ee0f7dbd52c6f73), SDK `1.0.0-alpha.94`. This is one standard sweep on one shared host, not an independent repeated-run optimization comparison. It measures browser rendering, not server rendering, hydration, startup or network delivery.
 
-[Set up a native application →](/html-next/usage)
+## C# rendering {#csharp-rendering}
 
-## Measurements and reproduction
+[![C# HTML Next uses about 23% to 37% less rendering time than Fluid across five measured warm-template cases](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/performance/native-fluid-2026-11-10.svg)](https://github.com/nextwebwg/html-next/blob/main/docs/optimize/native-fluid-report.md)
 
-Measured October 8, 2026 on an Apple M4 Pro running macOS 26.5.2, Chrome for Testing 153.0.8010.12 and Node 24, in one full run with the standard sample counts: 15 CPU samples, and 25 for selection. The machine was idle apart from the benchmark.
+The native `NextWebWG.HtmlNext` `1.0.0-alpha.2` renderer used **23% to 37% less rendering time than Fluid 2.41.1** across five fixed warm-template cases: an escaped card, a computed 100-row cart, and product lists of 10, 100 and 1,000 rows. Each engine's complete output matched an independently constructed expected string before timing. Templates were compiled or parsed once outside timing.
 
-The harness pins [js-framework-benchmark](https://github.com/krausest/js-framework-benchmark) through the [Next Web WG fork at revision `1ff9927`](https://github.com/nextwebwg/js-framework-benchmark/tree/1ff9927d4cb4dcc2a3e37c1adf8d993f64f4e92a). It runs HTML Next, its browser runtime, vanilla JavaScript, and all four framework controls across all nine workloads.
+Three independent BenchmarkDotNet ShortRun sweeps per revision ran serially on an Apple M4 Pro with .NET 10.0.5. The single-pass inert-rendering change reduced the median sum of native times from 261.104 to 181.788 microseconds, or 30.4%, compared with the original renderer. It preserved the measured warm per-render allocations. The native renderer allocated fewer bytes than Fluid in all five cases.
 
-- [Raw results](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/benchmarks/framework-results/20261008T013021Z-5851b6e.json)
-- [Harness and reproduction commands](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/docs/framework-benchmark.md)
-- [Implementation and measurement history](https://github.com/nextwebwg/html-next/blob/main/packages/html-next/docs/rendering-performance-status.md)
+These are warmed inert-template results from one host. Selection and reporting use the same cases; no held-out workload was configured. Cold requests, HTTP throughput, complex interactive component graphs and sustained server concurrency were not measured. The browser chart above measures a different phase and cannot be used to compare C# rendering with React or other JavaScript frameworks.
 
-The measured HTML Next artifact has SHA-256 `ab245c7054ada544fa4cf237b8a77f9cf5bf15ec7e6116e1206f1c6c18b0d1cb`, built from commit [`5851b6e`](https://github.com/nextwebwg/html-next/commit/5851b6e29e2e493a70e00d1085ef90fec8bc4f46), which is release 1.0.0-alpha.34.
+- [Native data, output hashes and samples](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/benchmarks/results/2026-11-10-single-pass.json)
+- [Native implementation, method, allocation results and limits](https://github.com/nextwebwg/html-next/blob/main/docs/optimize/native-fluid-report.md)
+- [Install the NuGet package and render a response](/html-next/dotnet)
+- [Run full-stack Node and C# examples](/html-next/full-stack)
 
 ## How builds compile components {#compiled-output}
 

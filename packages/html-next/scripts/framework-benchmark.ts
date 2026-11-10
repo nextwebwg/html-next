@@ -253,6 +253,12 @@ async function buildEntry(name: string, mode: Mode, tree = root): Promise<Bundle
   for (const file of ["benchmark-app.html", "controller.js", "package-lock.json", ...(mode === "live" ? ["index.html", "bootstrap.js"] : [])]) {
     copyFileSync(join(authored, file), join(destination, file));
   }
+  // The pinned example predates nullable-by-default declarations. Keep its initial null
+  // selection and every workload unchanged while using the current declaration syntax.
+  const componentPath = join(destination, "benchmark-app.html");
+  writeFileSync(componentPath, readFileSync(componentPath, "utf8").replace(
+    '<state name="selected" type="number" nullable>', '<state name="selected" type="number">',
+  ));
   if (mode === "live") {
     await build({
       bundle: true, format: "esm", platform: "browser", target: ["es2022"], legalComments: "none", minify: true,

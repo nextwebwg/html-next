@@ -4,6 +4,8 @@ The `@nextwebwg/html-next/server` entry renders validated component definitions 
 Node.js. It uses the same general renderer as live browser delivery, rather than a second component
 interpreter. This entry is separate from browser imports.
 
+The [full-stack Node example](../examples/full-stack-node) renders a count and computed double from request data, then hydrates the component and updates both on click. It uses the same component and browser-module files as the [C# example](../../html-next-dotnet/examples/counter). Follow the [full-stack guide](https://nextwebwg.org/html-next/full-stack) to run both applications.
+
 Text paths and formatting expressions follow the public [template](https://nextwebwg.org/html-next/templating/)
 and [expression](https://nextwebwg.org/html-next/expressions/#formatting-intl-expressions) proposals.
 Pass an explicit locale, and a time zone for instants, when server text must match the browser.
@@ -163,7 +165,7 @@ DOM. Browser rendering already owns component interpretation, DOM creation, form
 slot adoption and reactive scheduling. Reimplementing that interpretation against a string builder
 would create a second semantic engine. The server entry therefore supplies a parse5-backed jsdom
 document in a dedicated worker. Browser constructors exist only in that worker; concurrent requests
-and the caller cannot share them. Worker startup is currently paid per render. CSS uses the existing
+and the caller cannot share them. A pool reuses workers across renders. CSS uses the existing
 PostCSS build compiler because server DOM CSSOM support does not match modern browser CSS.
 
 Native DOM connection (`isConnected`) also holds in a server DOM; it does not mean an instance has
