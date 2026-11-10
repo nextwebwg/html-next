@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Preserve leading newlines in native authored and interpolated textarea content through HTML parsing, using the same initial-text serializer as `.value` bindings.
+
 - Remove stale server content when a borrowed scoped-slot callback creates a fresh rendering during adoption, preventing duplicate cell content.
 
 - Match native rendered trees to generated browser prototypes by omitting authored comments and non-rendering table/SVG whitespace. Preserve early edits and table rows during adoption.

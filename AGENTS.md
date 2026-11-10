@@ -29,6 +29,13 @@
 - Keep the live parser/interpreter separate from generated component output. Generated components import only the helpers required by their authored features.
 - When an application consumer exposes a platform defect, fix it in the owning MarkupKit or HTML Next package with independent regression coverage. Remove consumer workarounds before delivery.
 
+## .NET renderer scope
+
+- The .NET renderer replaces Liquid-style templates: evaluate component templates, bind initial application data and emit HTML.
+- Interactive output carries the existing SDK records and matching assets needed by the JavaScript module package to hydrate.
+- Applications obtain initial request data. Browser modules own ongoing bindings, refreshes, retries, subscriptions and live state.
+- Keep C# completion criteria focused on initial rendering and that hydration handoff; browser-runtime parity is outside this renderer's scope.
+
 ## Safe work
 
 - Preserve unrelated changes and never rewrite shared Git history without explicit approval.

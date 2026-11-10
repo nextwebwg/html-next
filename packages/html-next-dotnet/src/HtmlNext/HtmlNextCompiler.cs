@@ -547,8 +547,8 @@ public static partial class HtmlNextCompiler
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
             CheckedInputProperty? checkedProperty = null;
-            var textareaProperty = element is IHtmlTextAreaElement && element.GetAttribute(".value") is { } textareaExpression
-                ? new TextareaValueProperty(slots++, Expression(textareaExpression, scope), source) : null;
+            var textareaProperty = element is IHtmlTextAreaElement
+                ? new TextareaValueProperty(slots++, element.GetAttribute(".value") is { } textareaExpression ? Expression(textareaExpression, scope) : null, source) : null;
             if (element.GetAttribute(".checked") is { } checkedExpression)
             {
                 if (element is not IHtmlInputElement) Unsupported("native property '.checked' on <" + element.LocalName + ">");

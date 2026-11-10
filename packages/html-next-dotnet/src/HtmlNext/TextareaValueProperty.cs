@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace HtmlNext;
 
-internal sealed class TextareaValueProperty(int slot, ValueExpression expression, string source)
+internal sealed class TextareaValueProperty(int slot, ValueExpression? expression, string source)
 {
     private RenderOperation[] contents = [];
     public void SetContents(RenderOperation[] value) => contents = value;
@@ -13,8 +13,8 @@ internal sealed class TextareaValueProperty(int slot, ValueExpression expression
         var writer = new HtmlWriter(text);
         foreach (var operation in contents) operation.Write(ref writer, values, cancellation);
         var reset = text.ToString();
-        var value = expression.Evaluate(values);
-        var current = value.IsInvalid ? reset : InputValueProperty.Text(value, source);
+        var value = expression?.Evaluate(values);
+        var current = value is null || value.Value.IsInvalid ? reset : InputValueProperty.Text(value.Value, source);
         values[slot] = current;
         if (current != reset) output["data-html-next-form-defaults"] = JsonSerializer.Serialize(new { value = reset });
     }

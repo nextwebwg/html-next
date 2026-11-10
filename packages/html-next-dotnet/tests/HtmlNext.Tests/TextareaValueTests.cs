@@ -9,6 +9,31 @@ namespace HtmlNext.Tests;
 public sealed class TextareaValueTests
 {
     [Theory]
+    [InlineData("{$value}", "\nLeading", "\nLeading")]
+    [InlineData("{$value}", "\r\nLeading", "\nLeading")]
+    [InlineData("{$value}", "<A>& Text", "<A>& Text")]
+    [InlineData("{$value}\nTail", "", "\nTail")]
+    [InlineData("\n\nAuthored", "", "\nAuthored")]
+    public void PreservesInitialTextAcrossTheHtmlParserBoundary(string content, string value, string expected)
+    {
+        var template = HtmlNextCompiler.Compile("<template component=\"x-area\"><defs><prop name=\"value\" type=\"string\">Value.</prop></defs><textarea>" + content + "</textarea></template>");
+        var html = Render(template, new { value });
+        var area = (IHtmlTextAreaElement)new HtmlParser().ParseDocument(html).QuerySelector("textarea")!;
+        Assert.Equal(expected, area.Value);
+        Assert.Equal(expected, area.DefaultValue);
+        Assert.Null(area.GetAttribute("data-html-next-form-defaults"));
+    }
+
+    [Fact]
+    public void PreservesInitialNewlineFromValueContent()
+    {
+        var template = HtmlNextCompiler.Compile("<template component=\"x-area\"><defs><prop name=\"value\" type=\"string\">Value.</prop></defs><textarea $value=\"$value\"></textarea></template>");
+        var html = Render(template, new { value = "\nLeading" });
+        var area = (IHtmlTextAreaElement)new HtmlParser().ParseDocument(html).QuerySelector("textarea")!;
+        Assert.Equal("\nLeading", area.Value);
+    }
+
+    [Theory]
     [InlineData("Live")]
     [InlineData("")]
     [InlineData(null)]

@@ -2,7 +2,9 @@
 
 Native .NET rendering under development. Compile a component once, keep the returned template, and render it repeatedly with request data. Render inert HTML, or supply matching built assets and select interactive output for adoption by generated browser factories.
 
-The component language is defined by the [public proposal](https://nextwebwg.org/declarative-components/). Complete language coverage, native application preparation and full Looma qualification remain unfinished.
+The .NET renderer evaluates component templates and binds application-supplied data to initial HTML, as a replacement for Liquid templates. Interactive output includes the records and matching assets consumed by the JavaScript module package during hydration. Applications prepare request data; browser modules own subsequent bindings, interactions and source updates.
+
+The component language is defined by the [public proposal](https://nextwebwg.org/declarative-components/).
 
 ## Use a retained template
 
@@ -120,7 +122,7 @@ Native input `.checked` bindings serialize initial checkedness with Web IDL bool
 
 Input `.value` bindings serialize initial values with DOM string conversion. Native HTML parsing performs control-specific normalization. The browser bundle owns rehydration and ongoing form behavior. The existing form-default record retains the authored value and attribute presence for that bundle to restore during adoption. Reflected value modes, including checkbox and hidden inputs, compose with ordered attribute writes. File inputs accept only an empty property value. Invalid expressions keep the authored value.
 
-Textarea `.value` bindings serialize their initial value as escaped text content, preserving a leading newline through HTML parsing. The existing form-default record carries authored text separately when it differs from that value. Browser adoption restores the default while retaining edits made before JavaScript loads. Select property serialization, other control properties and complete cross-control form behavior remain under development.
+Textarea content serializes as escaped text and preserves a leading newline through HTML parsing, including authored text, interpolation and `$value`. A `.value` binding selects a separate initial value; the existing form-default record carries authored text when it differs from that value. Browser adoption restores the default while retaining edits made before JavaScript loads. Select property serialization, other control properties and complete cross-control form behavior remain under development.
 
 Keyed `class:token` bindings toggle individual tokens on native elements, including roots, repeated content and deferred carriers. They compose with the literal `class` and execute in authored order around `from:class`. A no-op preserves the original whitespace and duplicate tokens; a change writes the ordered, unique token set, matching `DOMTokenList`. Constant bindings fold during compilation. Dynamic bindings reuse request-local expression storage across rows. On component invocations, class modifiers update the input consumed by a declared class prop or forwarded at an authored destination.
 
@@ -134,7 +136,7 @@ AngleSharp supplies HTML parsing, table structure, and foreign-element namespace
 
 Native select parsing retains options, option groups, slot fallbacks and structural content. AngleSharp's token and element callbacks preserve select children that its tree builder otherwise discards, with source offsets, foreign namespaces and namespaced attributes intact. Strings, comments, raw text and authored `s-lect` component names keep their original contents.
 
-Full prop/type validation (including remaining structured prop interoperability, nested validity paths and additional scalar formats), state availability across preparation and hydration, additional declarations and loop modifiers, remaining invocation forwarding, accepted-child rendered-form records, CSS compilation, Intl-compatible formatting and preparation snapshots remain implementation work. Trimming and Native AOT are not qualified. `graph.Modules` and `template.Module` retain declared module specifiers and canonical source IDs for client builds. Structured state seeds retain their actual field layout. Typed references check each read, so one wrong-typed field stays inert while conforming siblings remain readable; nested constraints do not refuse the whole seed. Direct prop normalization and structured child-prop interoperability still need complete qualification. The current simple benchmark fixtures do not characterize nested-component or state-initialization allocations.
+Verification focuses on initial HTML, typed input binding and the browser-module handoff. Trimming and Native AOT are not qualified. `graph.Modules` and `template.Module` retain declared module specifiers and canonical source IDs for client builds. Structured state seeds retain their actual field layout. Typed references check each read, so one wrong-typed field stays inert while conforming siblings remain readable; nested constraints do not refuse the whole seed. Direct prop normalization and structured child-prop interoperability still need complete qualification. The current simple benchmark fixtures do not characterize nested-component or state-initialization allocations.
 
 ## Use built style assets
 
@@ -182,7 +184,7 @@ Interactive rendering requires a compatible client plan and assets built with `h
 
 Native output carries accepted props, input source and caller ownership, state, unready prop availability and claimed one-time initializers in the existing version 1 instance format. Omitted or refused props keep dependent seeds waiting, including through component bindings; explicit nulls and available defaults claim their seeds. Explicit null inputs retain caller ownership while the accepted prop takes its declared default. Shared roots hold a record for each owner. Explicit `$attributes` owners record only the invocation attributes not consumed by props. Tagged values preserve negative zero and shared references; cyclic or non-finite values raise `HNCS008` during interactive serialization. Request-local getter snapshots and records are reused between the buffered renderer's counting and writing passes.
 
-The native client-integration tests exercise actual generated-client adoption in Chromium, Firefox and WebKit: root and control identity, early edits, prop updates, retained state seeds, keyed and fragment rows, aliases, shared roots, nested components, scoped templates, initially carried plain content, state that waits for its first later input, completed module reads, and plain accepted-child borrowed controls that reopen and reorder. Complete hydration qualification still requires broader accepted-child and prepared-child records, pending/error/stale preparation snapshots, the remaining native language features and the full Looma catalog.
+The native client-integration tests exercise actual generated-client adoption in Chromium, Firefox and WebKit: root and control identity, early edits, prop updates, retained state seeds, keyed and fragment rows, aliases, shared roots, nested components, scoped templates, initially carried plain content, state that waits for its first later input, completed module reads, and plain accepted-child borrowed controls that reopen and reorder. These checks cover the initial-renderer handoff to the browser module package.
 
 ## Supply prepared module values
 
@@ -190,7 +192,7 @@ Prepare request data with application services, then supply it through `HtmlNext
 
 During the callback, `context.ReadNames` lists the readable bindings and `context.Read(name)` returns a value with its independent `Ready` status. Reads use the template's existing evaluation plans for props, seeded state and computed declarations; unused declarations remain unevaluated. Binding reads end when the callback returns. Structured snapshots remain read-only and preserve shared references.
 
-For a JavaScript application service, `input.EncodeValue()` produces the existing SDK transfer format, decoded by `decodeHydrationValue` from `@nextwebwg/html-next/bindings`. Return a completed read with `HtmlNextPreparedRead.FromTransfer(inputKey, encodedValue)`, using the input identity from the module preparation snapshot and a value encoded with `encodeHydrationValue`. The native renderer still accepts produced values through the component's declared types. This settled-read interface does not yet carry pending, error or stale results or retain a preparation session across input changes.
+For a JavaScript application service, `input.EncodeValue()` produces the existing SDK transfer format, decoded by `decodeHydrationValue` from `@nextwebwg/html-next/bindings`. Return a completed read with `HtmlNextPreparedRead.FromTransfer(inputKey, encodedValue)`, using the input identity from the module preparation snapshot and a value encoded with `encodeHydrationValue`. The native renderer still accepts produced values through the component's declared types. The application service supplies completed data for this render and owns how it obtains that data.
 
 For an `x-results` component declaring `count`, `filters` and `rows`, whose JavaScript provider selects `{ count, filters }` for `rows`:
 
@@ -222,7 +224,7 @@ Caller-supplied props retain control, including explicit null. Produced values p
 
 State seeded from an available default keeps that draft. A seed waiting on an unavailable input can initialize after preparation supplies it. Each request owns its prepared props, drafts and transfer records. The callback observes the render cancellation token, and cancellation is checked before and after it runs.
 
-This API handles completed successful reads. Pending, failed and stale read snapshots, renderer-owned asynchronous preparation, and complete prepared accepted-child adoption remain implementation work. Application services retain their request resource lifetimes.
+This API supplies completed values for the current render and records matching initial results for browser adoption. Applications own request resource lifetimes; browser modules own later source work.
 
 ## Verify and measure
 
