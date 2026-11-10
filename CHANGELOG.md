@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.93
 
+- Document the local .NET consumer and matching Vite hydration build, and align initial-rendering coverage and remaining limitations with the native tests.
+
 - Preserve leading newlines in native authored and interpolated textarea content through HTML parsing, using the same initial-text serializer as `.value` bindings.
 
 - Remove stale server content when a borrowed scoped-slot callback creates a fresh rendering during adoption, preventing duplicate cell content.

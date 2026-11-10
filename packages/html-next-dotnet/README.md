@@ -1,6 +1,6 @@
 # HTML Next for .NET
 
-Native .NET rendering under development. Compile a component once, keep the returned template, and render it repeatedly with request data. Render inert HTML, or supply matching built assets and select interactive output for adoption by generated browser factories.
+Compile a component once, keep the returned .NET template, and render it repeatedly with request data. Render inert HTML, or supply matching built assets and select interactive output for adoption by generated browser factories.
 
 The .NET renderer evaluates component templates and binds application-supplied data to initial HTML, as a replacement for Liquid templates. Interactive output includes the records and matching assets consumed by the JavaScript module package during hydration. Applications prepare request data; browser modules own subsequent bindings, interactions and source updates.
 
@@ -8,7 +8,13 @@ The component language is defined by the [public proposal](https://nextwebwg.org
 
 ## Use a retained template
 
-Requires .NET 10. Reference `src/HtmlNext/HtmlNext.csproj` from a local consumer. Package publication is disabled.
+Requires .NET 10. Add a local project reference from your application, substituting your checkout path:
+
+```sh
+dotnet add reference /path/to/html-next/packages/html-next-dotnet/src/HtmlNext/HtmlNext.csproj
+```
+
+The project is not packable; this workflow uses source through a project reference.
 
 ```csharp
 using HtmlNext;
@@ -84,7 +90,7 @@ An explicit `as` declaration collects accepted-child props before initializing t
 
 References through accepted entries use each child's active selected prop types, including aliases and lists that accept multiple component types. Copying an entry into state creates an ordinary data snapshot; an untyped copy constrains none of its fields.
 
-`<slot of>` places an entry's content in its caller's scope, preserving captured row and index aliases. Indexed entries, computed and structural aliases, and conditional selection across own lists retain their ownership. Null and missing entries render the fallback. Copied records and entries from another component are rejected. Ordinary child outlets and borrowed outlets share plain-content claims, while consumer templates render afresh at each outlet. Borrowed preset content retains its authored scope, including invocation attributes forwarded explicitly through `$attributes`. Repeated ordinary outlets follow the same plain-content and template behavior. Native rendered-form records and browser adoption for these lists remain unfinished. See the [proposal's accepted-child contract](https://nextwebwg.org/declarative-components/components#slot-accepts-as).
+`<slot of>` places an entry's content in its caller's scope, preserving captured row and index aliases. Indexed entries, computed and structural aliases, and conditional selection across own lists retain their ownership. Null and missing entries render the fallback. Copied records and entries from another component are rejected. Ordinary child outlets and borrowed outlets share plain-content claims, while consumer templates render afresh at each outlet. Borrowed preset content retains its authored scope, including invocation attributes forwarded explicitly through `$attributes`. Repeated ordinary outlets follow the same plain-content and template behavior. Borrowed outlets emit the existing SDK entry-position markers. The client-integration tests cover adoption, reopening and reordering of plain borrowed controls while preserving early edits. See the [proposal's accepted-child contract](https://nextwebwg.org/declarative-components/components#slot-accepts-as).
 
 Compilation validates each component's `$ref` names, including hidden and unused content. Authored duplicate names fail compilation; alternative native roots in a root `$match` may reuse a name. Rendered nodes omit the consumed directive, while original inert template bodies retain it for client adoption. Reference validation adds no request-local values or HTML records. Browser module references stay available through `graph.Modules` and `template.Module` for client builds.
 
@@ -98,7 +104,7 @@ Ordered comparisons between strings or keywords use ordinal UTF-16 order. They d
 
 Expression compilation supports literals, paths and computed indices, arithmetic, dimensions, typed comparisons, boolean operators, conditional values, and the implemented `abs`, `round`, `min`, `max`, `clamp`, `default`, `concat`, and `join` functions. The current native types include `string`, `keyword`, `number`, `integer`, `boolean`, `length`, `percentage`, `duration`, and compact or expanded nested list/object declarations. Optional fields and open objects preserve their actual field presence. Unknown values in state or open fields keep shared references within a render and snapshot application getters once; declared prop types require an HTML attribute form, matching the JavaScript compiler. Props require descriptions. Inputs may be POCOs, dictionaries, structs, or `JsonElement` values. POCO getters are cached as delegates; rendering does not invoke property getters through reflection on each row.
 
-Numeric `format`, `formatParts` and `formatRange` expressions use the host ICU C library. They support inferred numbers and percentages, the explicit `number`, `currency`, `percent` and `unit` presets, native numeric options, and structured number parts. An omitted locale reads the current request’s `CultureInfo.CurrentCulture`; an explicit locale selects that language directly. macOS and Linux have regression coverage against the supported Node host. Windows loading and the remaining formatter families are under development. Regenerate the numeric comparison cases with `node packages/html-next-dotnet/tests/generate-number-formatting.mjs` when reviewing a Node or ICU update.
+Numeric `format`, `formatParts` and `formatRange` expressions use the host ICU C library. They support inferred numbers and percentages, the explicit `number`, `currency`, `percent` and `unit` presets, native numeric options, and structured number parts. An omitted locale reads the current request’s `CultureInfo.CurrentCulture`; an explicit locale selects that language directly. macOS and Linux have regression coverage against the supported Node host. Windows ICU loading is not qualified. The formatter families covered below have macOS and Linux regression coverage. Regenerate the numeric comparison cases with `node packages/html-next-dotnet/tests/generate-number-formatting.mjs` when reviewing a Node or ICU update.
 
 Date, time and date-time formatting uses the same host ICU library. Native `date`, `time`, `datetime-local` and `datetime` props keep their authored strings through browser adoption. Civil values use UTC for formatting and reject authored time zones; instants accept native time-zone options. Date formatting covers styles, fields, hour cycles, calendars, parts and ranges, including extended HTML years. Locale data follows the host ICU version, with exact regression expectations for the verified macOS system ICU differences. Regenerate the date comparison cases with `node packages/html-next-dotnet/tests/generate-date-formatting.mjs` when reviewing a host update.
 
@@ -122,21 +128,21 @@ Native input `.checked` bindings serialize initial checkedness with Web IDL bool
 
 Input `.value` bindings serialize initial values with DOM string conversion. Native HTML parsing performs control-specific normalization. The browser bundle owns rehydration and ongoing form behavior. The existing form-default record retains the authored value and attribute presence for that bundle to restore during adoption. Reflected value modes, including checkbox and hidden inputs, compose with ordered attribute writes. File inputs accept only an empty property value. Invalid expressions keep the authored value.
 
-Textarea content serializes as escaped text and preserves a leading newline through HTML parsing, including authored text, interpolation and `$value`. A `.value` binding selects a separate initial value; the existing form-default record carries authored text when it differs from that value. Browser adoption restores the default while retaining edits made before JavaScript loads. Select property serialization, other control properties and complete cross-control form behavior remain under development.
+Textarea content serializes as escaped text and preserves a leading newline through HTML parsing, including authored text, interpolation and `$value`. A `.value` binding selects a separate initial value; the existing form-default record carries authored text when it differs from that value. Browser adoption restores the default while retaining edits made before JavaScript loads. Native selects render authored and bound option attributes and preserve early selection during browser adoption. Select `.value` and `.selectedIndex` property serialization and other control properties are not implemented; express initial selection with option `selected` attributes.
 
 Keyed `class:token` bindings toggle individual tokens on native elements, including roots, repeated content and deferred carriers. They compose with the literal `class` and execute in authored order around `from:class`. A no-op preserves the original whitespace and duplicate tokens; a change writes the ordered, unique token set, matching `DOMTokenList`. Constant bindings fold during compilation. Dynamic bindings reuse request-local expression storage across rows. On component invocations, class modifiers update the input consumed by a declared class prop or forwarded at an authored destination.
 
 Keyed `style:property` bindings compose with literal styles and `from:style` in authored order. AngleSharp's CSSOM validates ordinary properties and expands shorthands; the adapter preserves custom-value token boundaries and shorthand priorities. Null removes a property, an invalid expression or CSS value retains the previous value, and a successful write clears that property's earlier `!important` priority. Invocation modifiers fold before a receiving style prop initializes state and travel through delegated roots. Native style spelling can differ from browser serialization; rendering and browser adoption check property values and priorities.
 
-Unconsumed invocation attributes apply first on the rendered root by default. The defining template's boolean `noforward` attribute disables this automatic placement; authored [`$attributes` destinations](https://nextwebwg.org/declarative-components/components#attribute-forwarding) then select a native root, an inner element, or another component invocation. Declared props consume their attribute inputs, including unused props. Attribute writes follow source order, with later writes winning. Whole class/style attributes replace earlier values, and keyed bindings apply in order. Literal and `from:` attributes retain caller scope, escaping, URL filtering and invalid-result fallbacks. Forwarded inputs that become declared props use the receiving prop's HTML conversion. Compilation identifies reachable forwarding so unrelated templates retain their existing rendering path. Forwarding inside deferred carriers still needs complete qualification.
+Unconsumed invocation attributes apply first on the rendered root by default. The defining template's boolean `noforward` attribute disables this automatic placement; authored [`$attributes` destinations](https://nextwebwg.org/declarative-components/components#attribute-forwarding) then select a native root, an inner element, or another component invocation. Declared props consume their attribute inputs, including unused props. Attribute writes follow source order, with later writes winning. Whole class/style attributes replace earlier values, and keyed bindings apply in order. Literal and `from:` attributes retain caller scope, escaping, URL filtering and invalid-result fallbacks. Forwarded inputs that become declared props use the receiving prop's HTML conversion. Compilation identifies reachable forwarding so unrelated templates retain their existing rendering path. Deferred carriers retain caller-owned forwarding destinations; deferred-component and accepted-child tests cover the initial carrier output.
 
-The native attribute tables are generated from the JavaScript owners in `expression.ts` and `sanitize.ts`. Run `corepack pnpm exec tsx packages/html-next/scripts/generate-attribute-rules.ts` after changing those tables; `check:generated` verifies both languages. Shared attribute fixtures check full .NET `Render`/`Write` output and Node's authored attributes. Separate client-integration tests cover native instance records and browser adoption. Component-owned validity remains implementation work.
+The native attribute tables are generated from the JavaScript owners in `expression.ts` and `sanitize.ts`. Run `corepack pnpm exec tsx packages/html-next/scripts/generate-attribute-rules.ts` after changing those tables; `check:generated` verifies both languages. Shared attribute fixtures check full .NET `Render`/`Write` output and Node's authored attributes. Separate client-integration tests cover native instance records and browser adoption. Use `template.Validate(inputs)` for root prop constraints. Browser modules own live component validity; native rendering does not aggregate descendant validity into a browser component instance.
 
 AngleSharp supplies HTML parsing, table structure, and foreign-element namespaces; a handwritten expression/type frontend checks and lowers values into reusable plans. HTML parse errors and unimplemented features produce source-associated errors. The application supplies source resolution during compilation. Rendering uses retained in-memory plans; component JavaScript execution remains separate.
 
 Native select parsing retains options, option groups, slot fallbacks and structural content. AngleSharp's token and element callbacks preserve select children that its tree builder otherwise discards, with source offsets, foreign namespaces and namespaced attributes intact. Strings, comments, raw text and authored `s-lect` component names keep their original contents.
 
-Verification focuses on initial HTML, typed input binding and the browser-module handoff. Trimming and Native AOT are not qualified. `graph.Modules` and `template.Module` retain declared module specifiers and canonical source IDs for client builds. Structured state seeds retain their actual field layout. Typed references check each read, so one wrong-typed field stays inert while conforming siblings remain readable; nested constraints do not refuse the whole seed. Direct prop normalization and structured child-prop interoperability still need complete qualification. The current simple benchmark fixtures do not characterize nested-component or state-initialization allocations.
+Verification focuses on initial HTML, typed input binding and the browser-module handoff. Trimming and Native AOT are not qualified. `graph.Modules` and `template.Module` retain declared module specifiers and canonical source IDs for client builds. Structured state seeds retain their actual field layout. Typed references check each read, so one wrong-typed field stays inert while conforming siblings remain readable; nested constraints do not refuse the whole seed. Direct prop metadata tests cover defaults, rejected inputs, selected types, structured JSON and delegated owners. Component-call tests cover structured child props and field checks; these checks do not establish universal interoperability for arbitrary application object types. The current simple benchmark fixtures do not characterize nested-component or state-initialization allocations.
 
 ## Use built style assets
 
@@ -162,15 +168,43 @@ Standalone CSS compilation and native validation of imported stylesheet-source f
 
 Build matching client assets with the native unplugin's `hydrate: true` option. The application's browser entry imports `hydrate` from `virtual:html-next/hydrate` and calls it after the server markup is present. Keep that browser bundle, its stylesheets and `html-next.manifest.json` together when deploying. The application owns their URLs and document assembly.
 
-Load the manifest before compiling the native graph, then select interactive output for a request:
+For a minimal Vite build, save the `<template component="x-card">...</template>` source from the retained-template example above as `card.html`, then add these two files beside it. Install Vite and matching `@nextwebwg/html-next` and `@nextwebwg/html-next-unplugin` versions from the SDK build you are using.
+
+```js
+// vite.config.js
+import { defineConfig } from "vite";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+export default defineConfig({
+  plugins: [htmlNext({ entries: ["card.html"], hydrate: true,
+    client: { publicRoots: ["x-card"] } })],
+  build: { lib: { entry: "main.js", formats: ["es"], fileName: () => "app.js" } },
+});
+```
+
+```js
+// main.js
+import { hydrate } from "virtual:html-next/hydrate";
+hydrate();
+```
+
+Run `corepack pnpm exec vite build`. Deploy the emitted `dist` files together. `publicRoots` keeps the card available for updates through public browser APIs; other builds can let the compiler prune static components normally.
+
+At application startup, read the same `card.html` and the emitted manifest. Retain the compiled template, then render each request:
 
 ```csharp
 var assets = HtmlNextServerAssets.FromManifest(
     await File.ReadAllTextAsync("wwwroot/html-next.manifest.json"));
-var graph = HtmlNextCompiler.CompileResource(source, assets: assets);
-var html = graph.Template("x-page").Render(model,
+var source = await File.ReadAllTextAsync("card.html");
+var graph = HtmlNextCompiler.CompileResource(source, "card.html", assets: assets);
+var card = graph.Template("x-card");
+
+// Per request:
+var html = card.Render(new { title = "Quarterly report" },
     options: new HtmlNextRenderOptions { Interactive = true });
 ```
+
+Insert `html` into the document body, include `graph.Stylesheets` beneath the deployed asset base, and load `app.js` with `<script type="module" src="/assets/app.js"></script>` after the markup. Here `/assets/` is the application's chosen URL for the build output. The source fingerprints must match the manifest; rebuild and deploy the source and assets together after changing a template.
 
 `graph.Client`, `template.Client` and `assets.Client` expose the same immutable compiler-owned plan: server entries, adopted components, creation factories, dependencies and retained-feature reasons. Native rendering consumes that selection. Components pruned from adoption carry no instance records. Configure `client.publicRoots` in the build when application code will update otherwise static roots through public browser APIs.
 
