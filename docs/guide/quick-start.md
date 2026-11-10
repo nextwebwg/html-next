@@ -90,35 +90,66 @@ import { styleObject, applyStylePriority } from "./style/style.js";
 import { forwardedAttributes } from "./attributes";
 import { useNativeEvents } from "./events";
 import { decimalAdd, rememberParent, rootMetadata, text, useLiveState, useRootHandle } from "./render";
+
 export type XCounterProps = Omit<React.ComponentPropsWithoutRef<"div">, "style" | "children"> & {
-    style?: React.CSSProperties | (React.CSSProperties & {
-        [name: `--${string}`]: string | number | undefined;
-    });
-    children?: ReactNode | (() => ReactNode);
-    slots?: Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>;
-    ref?: React.Ref<HTMLDivElement>;
-    [name: string]: unknown;
+  style?: React.CSSProperties | (React.CSSProperties & {
+    [name: `--${string}`]: string | number | undefined;
+  });
+  children?: ReactNode | (() => ReactNode);
+  slots?: Readonly<Record<string, ReactNode | ((props: Record<string, any>) => ReactNode)>>;
+  ref?: React.Ref<HTMLDivElement>;
+  [name: string]: unknown;
 };
+
 export default function XCounter(props: XCounterProps) {
-    const { children: _children, slots: _slots, ...nativeAttrs } = props;
-    const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];
-    delete nativeAttrs["component"];
-    delete nativeAttrs["data-component"];
-    const [count, setCount, getCount] = useLiveState<number>(0);
-    const rootRef = React.useRef<HTMLDivElement | null>(null);
-    useRootHandle(rootRef, props.ref);
-    function increment(): void {
-        setCount((count) => decimalAdd(count, 1));
-    }
-    function reset(): void {
-        setCount(0);
-    }
-    const styleRefattachEvents0 = React.useRef<Element | null>(null);
-    React.useLayoutEffect(() => { applyStylePriority(styleRefattachEvents0.current, (Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : undefined)); });
-    const attachEvents0 = React.useCallback((element: Element | null, paths?: readonly (((() => readonly (string | number)[]) | undefined))[]) => { const restoreParent = rememberParent(element); rootRef.current = element as HTMLDivElement | null; styleRefattachEvents0.current = element; return () => { restoreParent(); rootRef.current = null; styleRefattachEvents0.current = null; }; }, []);
-    const incrementEvents = useNativeEvents([{ type: "click", modifiers: [], handler: increment }]);
-    const resetEvents = useNativeEvents([{ type: "click", modifiers: [], handler: reset }]);
-    return (<div {...rootMetadata(nativeAttrs)} {...forwardedAttributes(nativeAttrs, ["style"])} style={((Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : undefined)) as React.CSSProperties} ref={attachEvents0} data-html-next-renderer="react" {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}><button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>{" "}<button type="button" ref={resetEvents}>Reset</button></div>);
+  const { children: _children, slots: _slots, ...nativeAttrs } = props;
+  const renderedIdentity = nativeAttrs["component"] ?? nativeAttrs["data-component"];
+  delete nativeAttrs["component"];
+  delete nativeAttrs["data-component"];
+  const [count, setCount, getCount] = useLiveState<number>(0);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  useRootHandle(rootRef, props.ref);
+
+  function increment(): void {
+    setCount((count) => decimalAdd(count, 1));
+  }
+
+  function reset(): void {
+    setCount(0);
+  }
+
+  const styleRefattachEvents0 = React.useRef<Element | null>(null);
+  React.useLayoutEffect(() => {
+    applyStylePriority(styleRefattachEvents0.current, (Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : undefined));
+  });
+  const attachEvents0 = React.useCallback((element: Element | null, paths?: readonly (((() => readonly (string | number)[]) | undefined))[]) => {
+    const restoreParent = rememberParent(element);
+    rootRef.current = element as HTMLDivElement | null;
+    styleRefattachEvents0.current = element;
+
+    return () => {
+      restoreParent();
+      rootRef.current = null;
+      styleRefattachEvents0.current = null;
+    };
+  }, []);
+  const incrementEvents = useNativeEvents([{ type: "click", modifiers: [], handler: increment }]);
+  const resetEvents = useNativeEvents([{ type: "click", modifiers: [], handler: reset }]);
+
+  return (
+    <div
+      {...rootMetadata(nativeAttrs)}
+      {...forwardedAttributes(nativeAttrs, ["style"])}
+      style={((Object.hasOwn(forwardedAttributes(nativeAttrs), "style") ? styleObject(nativeAttrs.style) : undefined)) as React.CSSProperties}
+      ref={attachEvents0}
+      data-html-next-renderer="react"
+      {...{ component: [renderedIdentity, "x-counter"].filter(Boolean).join(" ") }}
+    >
+      <button type="button" ref={incrementEvents}>{`Count: ${text(count)}`}</button>
+      {" "}
+      <button type="button" ref={resetEvents}>Reset</button>
+    </div>
+  );
 }
 ```
 
@@ -146,32 +177,37 @@ The Svelte adapter generates this component when your app builds. [Set up Svelte
 ```svelte title="XCounter.svelte"
 <!-- Generated by HTML Next 1.0.0-alpha.94 for Svelte 5. Do not edit. -->
 <script lang="ts">
-	import type { Snippet } from 'svelte';
-	import type { HTMLAttributes } from 'svelte/elements';
-	import { forwardedAttributes } from './attributes';
-	import { decimalAdd, nativeAttributes, rootAttributes } from './render.svelte';
-	type Props = Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'slots'> & {
-		children?: Snippet;
-		slots?: Record<string, Snippet<[Record<string, any>]> | null>;
-		[key: string]: unknown;
-	};
-	let { children, slots, ...restProps }: Props = $props();
-	const rest = restProps as Record<string, unknown>;
-	const rootAttrs = rootAttributes(() => rest, { metadataOnly: true });
-	let count = $state<number>(0);
-	function increment(): void {
-		count = decimalAdd(count, 1);
-	}
-	function reset(): void {
-		count = 0;
-	}
+  import type { Snippet } from 'svelte';
+  import type { HTMLAttributes } from 'svelte/elements';
+  import { forwardedAttributes } from './attributes';
+  import { decimalAdd, nativeAttributes, rootAttributes } from './render.svelte';
+
+  type Props = Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'slots'> & {
+    children?: Snippet;
+    slots?: Record<string, Snippet<[Record<string, any>]> | null>;
+    [key: string]: unknown;
+  };
+
+  let { children, slots, ...restProps }: Props = $props();
+  const rest = restProps as Record<string, unknown>;
+  const rootAttrs = rootAttributes(() => rest, { metadataOnly: true });
+  let count = $state<number>(0);
+
+  function increment(): void {
+    count = decimalAdd(count, 1);
+  }
+
+  function reset(): void {
+    count = 0;
+  }
 </script>
 
 <div
-	{...nativeAttributes({ ...forwardedAttributes(rest), "data-hn": "", ...rootAttrs() })}
-	><button type="button" onclick={increment}>Count: {count}</button>
-	<button type="button" onclick={reset}>Reset</button
-></div>
+  {...nativeAttributes({ ...forwardedAttributes(rest), "data-hn": "", ...rootAttrs() })}
+>
+  <button type="button" onclick={increment}>Count: {count}</button>
+  <button type="button" onclick={reset}>Reset</button>
+</div>
 ```
 
 :::

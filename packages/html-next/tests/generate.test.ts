@@ -87,6 +87,8 @@ describe("generateComponent", () => {
     assert.match(vue, /<pre><b>1<\/b>\n<b>2<\/b><\/pre>/);
     // Check rendered whitespace so formatting changes cannot alter inline or preformatted content.
     const react = generateReactComponent(definition);
+    assert.match(react, /export default function[^\n]+\n  const /);
+    assert.doesNotMatch(react, /\t/);
     const helperCode = await transform(reactRenderArtifact("test").content, { loader: "tsx", format: "cjs" });
     const helpers = { exports: {} };
     new Function("require", "module", "exports", helperCode.code)((name: string) => {

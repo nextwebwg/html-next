@@ -144,7 +144,7 @@ describe("official target compilers", () => {
       </defs><ul><li $each="row of $rows" $key="$row.id" class="row" class:active="$row.active">{$row.id}</li></ul></template>`);
     const source = generateReactComponent(definition);
     assert.doesNotMatch(source, /ScopedAttachment|RetainedValue/);
-    assert.match(source, /<li[\s\S]*?ref=\{element => applyClassBindingRef\(/);
+    assert.match(source, /<li[\s\S]*?ref=\{element =>\s*applyClassBindingRef\(/);
   });
   it("serializes mixed class bindings in Vue and React with the shared native expectations", async () => {
     const fixtures = JSON.parse(await readFile(new URL("../../html-next-dotnet/tests/fixtures/class-bindings.json", import.meta.url), "utf8")) as { name: string; source: string; expected: string }[];

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.95
+
+- Format generated React, Preact and Svelte components with two-space indentation and blank lines between code sections. Lay out JSX and Svelte markup across readable lines while preserving rendered whitespace.
+
 ## 1.0.0-alpha.94
 
 - Organize the tools guide into Vite/browser, converter and C# paths. Keep the NuGet README focused on a runnable C# quick start, with separate hydration documentation and an API reference.

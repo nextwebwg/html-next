@@ -26,7 +26,7 @@ describe("Svelte controller event contract", () => {
     compile(output.component, { filename: "EventHost.svelte", generate: "client" });
 
     // Execute the emitted handler, including its actual argument forwarding.
-    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n\t\}/)![0];
+    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n  \}/)![0];
     const { code } = await transform(`let rootElement = null; const dispatchDeclared = (_root: unknown, _name: string, detail: unknown) => detail;\n${handler.replace(/dispatchDeclared\(\s*rootElement/, "captured = dispatchDeclared(rootElement")}\nlet captured: unknown; export { forward }; export const payload = () => captured;`, { loader: "ts", format: "esm" });
     const emitted = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
     const event = new CustomEvent("click", { detail: 42 });
@@ -67,7 +67,7 @@ describe("Svelte controller event contract", () => {
     const nested = source.replace('<dispatch event="activate" expr:value="$$event"></dispatch>',
       () => '<dispatch event="activate" expr:value="$$event"></dispatch><dispatch event="activate" expr:value="$$event"></dispatch>');
     const output = generateSvelteOutput(parseComponent(nested), "test");
-    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n\t\}/)![0];
+    const handler = output.component.match(/function forward\(event: Event\): void \{[\s\S]*?\n  \}/)![0];
     const { code } = await transform(`let rootElement = null;
       export const seen: Event[] = []; export const inner = new Event("inner");
       const dispatchDeclared = (_root: unknown, _name: string, detail: Event) => { seen.push(detail); if (seen.length === 1) forward(inner); };
