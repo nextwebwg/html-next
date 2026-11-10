@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.95
 
+- Show consistent import and render examples in the quick start, with full generated components available in expandable sections.
+
 - Format generated React, Preact and Svelte components with two-space indentation and blank lines between code sections. Lay out JSX and Svelte markup across readable lines while preserving rendered whitespace.
 
 ## 1.0.0-alpha.94

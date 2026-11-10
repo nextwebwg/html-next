@@ -32,7 +32,10 @@ for (const { framework, fence, code } of outputs) {
   const section = updated.slice(start, end);
   const block = `\`\`\`${fence}\n${code.trimEnd()}\n\`\`\``;
   const existing = section.indexOf(`\`\`\`${fence}\n`);
-  const replaced = existing < 0 ? `${section.trimEnd()}\n\n${block}\n` : `${section.slice(0, existing)}${block}\n`;
+  const closing = existing < 0 ? -1 : section.indexOf("\n```", existing + fence.length + 4);
+  if (existing >= 0 && closing < 0) throw new Error(`docs/guide/quick-start.md has an unclosed ${framework} output block.`);
+  const replaced = existing < 0 ? `${section.trimEnd()}\n\n${block}\n`
+    : `${section.slice(0, existing)}${block}${section.slice(closing + 4)}`;
   updated = `${updated.slice(0, start)}${replaced}${updated.slice(end)}`;
 }
 
